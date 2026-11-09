@@ -125,17 +125,37 @@ class LoopbackQMPFixture:
         self.listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.listener.bind(("127.0.0.1", 0))
         self.listener.listen(1)
+        self.listener.settimeout(0.1)
         self.port = self.listener.getsockname()[1]
         self.requests: list[dict[str, Any]] = []
+        self.stopping = threading.Event()
+        self.accepted = threading.Event()
+        self.ready = threading.Event()
         self.finished = threading.Event()
+        self._connection_lock = threading.Lock()
+        self.accepted_socket: socket.socket | None = None
         self.thread = threading.Thread(target=self._serve, name="font15r2r1-qmp-stub")
         self.thread.start()
 
     def _serve(self) -> None:
         connection: socket.socket | None = None
         try:
-            connection, _ = self.listener.accept()
+            while not self.stopping.is_set():
+                try:
+                    connection, _ = self.listener.accept()
+                    break
+                except socket.timeout:
+                    continue
+            if connection is None:
+                return
+            with self._connection_lock:
+                if self.stopping.is_set():
+                    connection.close()
+                    return
+                self.accepted_socket = connection
+            self.accepted.set()
             connection.sendall(b'{"QMP":{"version":{},"capabilities":[]}}\r\n')
+            self.ready.set()
             with connection.makefile("rb") as stream:
                 while True:
                     line = stream.readline()
@@ -155,11 +175,41 @@ class LoopbackQMPFixture:
             self.finished.set()
 
     def close(self) -> None:
+        self.stopping.set()
         try:
             self.listener.close()
         except OSError:
             pass
+        with self._connection_lock:
+            connection = self.accepted_socket
+        if connection is not None:
+            try:
+                connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                connection.close()
+            except OSError:
+                pass
         self.thread.join(timeout=2)
+
+
+def tcp_owner_row(
+    local: tuple[str, int],
+    remote: tuple[str, int],
+    owning_pid: int,
+    *,
+    state: int | None = None,
+) -> Any:
+    verifier = qmp_module.WindowsEndpointVerifier
+    row = verifier._TcpRowOwnerPid()
+    row.state = verifier.MIB_TCP_STATE_ESTABLISHED if state is None else state
+    row.local_address = int.from_bytes(socket.inet_aton(local[0]), "little")
+    row.local_port = socket.htons(local[1])
+    row.remote_address = int.from_bytes(socket.inet_aton(remote[0]), "little")
+    row.remote_port = socket.htons(remote[1])
+    row.owning_pid = owning_pid
+    return row
 
 
 class QMPDragSafetyTests(unittest.TestCase):
@@ -493,16 +543,43 @@ class QMPDragSafetyTests(unittest.TestCase):
         fixture = LoopbackQMPFixture()
         client = socket.create_connection(("127.0.0.1", fixture.port), timeout=1)
         try:
-            client.recv(1024)
+            greeting = client.recv(1024)
+            self.assertTrue(greeting.startswith(b"{"))
+            self.assertTrue(fixture.accepted.wait(1))
+            self.assertTrue(fixture.ready.wait(1))
+            self.assertTrue(fixture.thread.is_alive())
+            accepted_socket = fixture.accepted_socket
+            self.assertIsNotNone(accepted_socket)
+            self.assertEqual(accepted_socket.getsockname(), ("127.0.0.1", fixture.port))
+            self.assertEqual(accepted_socket.getpeername(), client.getsockname())
             verifier = qmp_module.WindowsEndpointVerifier()
             with self.assertRaisesRegex(
                 qmp_module.EndpointIdentityError, "is not qemu-system-x86_64.exe"
             ):
                 verifier.verify_listener(fixture.port, os.getpid(), timeout=5)
             connection_deadline = time.monotonic() + 1.0
+            connection_started = time.monotonic()
             client_port = int(client.getsockname()[1])
+            query_count = 0
+            last_matching_rows: list[dict[str, Any]] = []
             while True:
-                rows = verifier._tcp_rows(verifier.TCP_TABLE_OWNER_PID_ALL)
+                rows = verifier._tcp_rows(verifier.TCP_TABLE_OWNER_PID_CONNECTIONS)
+                query_count += 1
+                last_matching_rows = []
+                for row in rows:
+                    local_address = verifier._row_address(row.local_address)
+                    local_port = verifier._row_port(row.local_port)
+                    remote_address = verifier._row_address(row.remote_address)
+                    remote_port = verifier._row_port(row.remote_port)
+                    if local_port == fixture.port and remote_port == client_port:
+                        last_matching_rows.append(
+                            {
+                                "state": int(row.state),
+                                "local": (local_address, local_port),
+                                "remote": (remote_address, remote_port),
+                                "owning_pid": int(row.owning_pid),
+                            }
+                        )
                 accepted_row_visible = any(
                     row.state == verifier.MIB_TCP_STATE_ESTABLISHED
                     and verifier._row_address(row.local_address) == "127.0.0.1"
@@ -515,8 +592,15 @@ class QMPDragSafetyTests(unittest.TestCase):
                 if accepted_row_visible:
                     break
                 if time.monotonic() >= connection_deadline:
-                    self.fail("Windows TCP table did not expose the localhost accepted socket")
-                time.sleep(0.01)
+                    self.fail(
+                        "Windows TCP connection table did not expose an ESTABLISHED accepted-socket row; "
+                        f"listener=('127.0.0.1', {fixture.port}), client={client.getsockname()}, "
+                        f"pid={os.getpid()}, fixture_thread_alive={fixture.thread.is_alive()}, "
+                        f"accepted_socket_open={accepted_socket.fileno() >= 0}, "
+                        f"queries={query_count}, elapsed={time.monotonic() - connection_started:.6f}s, "
+                        f"last_matching_rows={last_matching_rows!r}"
+                    )
+                time.sleep(min(0.01, max(0.0, connection_deadline - time.monotonic())))
             with self.assertRaisesRegex(
                 qmp_module.EndpointIdentityError, "is not qemu-system-x86_64.exe"
             ):
@@ -531,6 +615,102 @@ class QMPDragSafetyTests(unittest.TestCase):
             client.close()
             fixture.close()
         self.assertFalse(fixture.thread.is_alive())
+        self.assertIsNotNone(fixture.accepted_socket)
+        self.assertEqual(fixture.accepted_socket.fileno(), -1)
+
+    def test_windows_connection_verifier_rejects_foreign_and_ambiguous_owner_sets(self) -> None:
+        expected_pid = 4242
+        port = 63800
+        client_port = 50123
+
+        class InjectedRowsVerifier(qmp_module.WindowsEndpointVerifier):
+            rows: list[Any] = []
+
+            @classmethod
+            def _tcp_rows(cls, table_class: int) -> list[Any]:
+                if table_class != cls.TCP_TABLE_OWNER_PID_CONNECTIONS:
+                    raise AssertionError(f"unexpected TCP table class {table_class}")
+                return cls.rows
+
+            @classmethod
+            def _process_identity(cls, pid: int) -> qmp_module.ProcessIdentity:
+                return qmp_module.ProcessIdentity(
+                    pid, "C:\\QEMU\\qemu-system-x86_64.exe", "fixture-process"
+                )
+
+        sock = FakeSocket(self.clock, lambda request, socket_: qmp_response(request))
+        sock.peer = ("127.0.0.1", port)
+        sock.local = ("127.0.0.1", client_port)
+        identity = qmp_module.ProcessIdentity(
+            expected_pid, "C:\\QEMU\\qemu-system-x86_64.exe", "fixture-process"
+        )
+        for owner_pids in ([9001], [expected_pid, 9001]):
+            with self.subTest(owner_pids=owner_pids):
+                InjectedRowsVerifier.rows = [
+                    tcp_owner_row(
+                        ("127.0.0.1", port),
+                        ("127.0.0.1", client_port),
+                        pid,
+                    )
+                    for pid in owner_pids
+                ]
+                with self.assertRaises(qmp_module.ConnectionOwnershipError) as raised:
+                    InjectedRowsVerifier().verify_connection(
+                        port, expected_pid, identity, sock, timeout=1.0
+                    )
+                self.assertEqual(raised.exception.owner_pids, sorted(owner_pids))
+
+    def test_windows_connection_verifier_rejects_invalid_endpoint_tuple_before_table_query(self) -> None:
+        class NoTableVerifier(qmp_module.WindowsEndpointVerifier):
+            @classmethod
+            def _tcp_rows(cls, table_class: int) -> list[Any]:
+                raise AssertionError("TCP ownership table must not be queried for an invalid tuple")
+
+        sock = FakeSocket(self.clock, lambda request, socket_: qmp_response(request))
+        sock.peer = ("127.0.0.2", 63800)
+        with self.assertRaisesRegex(qmp_module.EndpointIdentityError, "do not match loopback port"):
+            NoTableVerifier().verify_connection(
+                63800,
+                4242,
+                qmp_module.ProcessIdentity(4242, "C:\\QEMU\\qemu-system-x86_64.exe", "fixture"),
+                sock,
+                timeout=1.0,
+            )
+
+    def test_windows_connection_verifier_fails_closed_when_socket_closes_during_lookup(self) -> None:
+        class ClosingSocket:
+            closed = False
+
+            def getpeername(self) -> tuple[str, int]:
+                return ("127.0.0.1", 63800)
+
+            def getsockname(self) -> tuple[str, int]:
+                return ("127.0.0.1", 50123)
+
+            def close(self) -> None:
+                self.closed = True
+
+        class EmptyRowsAfterCloseVerifier(qmp_module.WindowsEndpointVerifier):
+            socket_to_close: ClosingSocket | None = None
+
+            @classmethod
+            def _tcp_rows(cls, table_class: int) -> list[Any]:
+                assert cls.socket_to_close is not None
+                cls.socket_to_close.close()
+                return []
+
+        sock = ClosingSocket()
+        EmptyRowsAfterCloseVerifier.socket_to_close = sock
+        with self.assertRaises(qmp_module.ConnectionOwnershipError) as raised:
+            EmptyRowsAfterCloseVerifier().verify_connection(
+                63800,
+                4242,
+                qmp_module.ProcessIdentity(4242, "C:\\QEMU\\qemu-system-x86_64.exe", "fixture"),
+                sock,
+                timeout=1.0,
+            )
+        self.assertTrue(sock.closed)
+        self.assertEqual(raised.exception.owner_pids, [])
 
     def test_endpoint_identity_loss_blocks_release_and_all_later_input(self) -> None:
         self.verifier = FakeVerifier(reject_after_checks=3)
@@ -583,6 +763,30 @@ class QMPDragSafetyTests(unittest.TestCase):
             fixture.close()
         self.assertTrue(fixture.finished.wait(1))
         self.assertFalse(fixture.thread.is_alive())
+
+    def test_loopback_fixture_repeated_initialization_and_teardown(self) -> None:
+        for _ in range(3):
+            fixture = LoopbackQMPFixture()
+            client: socket.socket | None = None
+            try:
+                client = socket.create_connection(("127.0.0.1", fixture.port), timeout=1.0)
+                self.assertTrue(client.recv(1024).startswith(b"{"))
+                self.assertTrue(fixture.accepted.wait(1.0))
+                self.assertTrue(fixture.ready.wait(1.0))
+                self.assertIsNotNone(fixture.accepted_socket)
+                self.assertGreaterEqual(fixture.accepted_socket.fileno(), 0)
+            finally:
+                if client is not None:
+                    client.close()
+                fixture.close()
+            self.assertTrue(fixture.finished.wait(1.0))
+            self.assertFalse(fixture.thread.is_alive())
+            self.assertEqual(fixture.accepted_socket.fileno(), -1)
+
+        unopened_fixture = LoopbackQMPFixture()
+        unopened_fixture.close()
+        self.assertTrue(unopened_fixture.finished.wait(1.0))
+        self.assertFalse(unopened_fixture.thread.is_alive())
 
     def test_loopback_silent_capabilities_timeout_closes_transport(self) -> None:
         fixture = LoopbackQMPFixture(withhold_capabilities=True)
@@ -1083,16 +1287,20 @@ class QMPDragSafetyTests(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == "win32", "Windows TCP ownership query")
     def test_windows_tcp_owner_recheck_recovers_on_localhost_fixture(self) -> None:
+        fixture = LoopbackQMPFixture()
+
         class EmptyFirstSnapshotVerifier(qmp_module.WindowsEndpointVerifier):
             empty_snapshots = 0
+            fixture_ready_at_empty_snapshot = False
 
             @classmethod
             def _tcp_rows(cls, table_class: int) -> list[Any]:
                 if (
-                    table_class == cls.TCP_TABLE_OWNER_PID_ALL
+                    table_class == cls.TCP_TABLE_OWNER_PID_CONNECTIONS
                     and cls.empty_snapshots == 0
                 ):
                     cls.empty_snapshots += 1
+                    cls.fixture_ready_at_empty_snapshot = fixture.ready.is_set()
                     return []
                 return super()._tcp_rows(table_class)
 
@@ -1103,7 +1311,13 @@ class QMPDragSafetyTests(unittest.TestCase):
                     pid, "C:\\QEMU\\qemu-system-x86_64.exe", "fixture-process"
                 )
 
-        fixture = LoopbackQMPFixture()
+        def ready_connector(address: tuple[str, int], timeout: float) -> socket.socket:
+            client = socket.create_connection(address, timeout=timeout)
+            if not fixture.ready.wait(timeout):
+                client.close()
+                raise TimeoutError("localhost QMP fixture did not accept and greet the client")
+            return client
+
         qmp: qmp_module.QMP | None = None
         try:
             qmp = qmp_module.QMP(
@@ -1111,9 +1325,11 @@ class QMPDragSafetyTests(unittest.TestCase):
                 self.trace,
                 os.getpid(),
                 verifier=EmptyFirstSnapshotVerifier(),
+                connector=ready_connector,
                 command_timeout=1.0,
             )
             self.assertEqual(EmptyFirstSnapshotVerifier.empty_snapshots, 1)
+            self.assertTrue(EmptyFirstSnapshotVerifier.fixture_ready_at_empty_snapshot)
             self.assertEqual([request["execute"] for request in fixture.requests], ["qmp_capabilities"])
             records = self.read_trace()
             self.assertTrue(

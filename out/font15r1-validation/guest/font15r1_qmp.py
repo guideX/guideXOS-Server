@@ -96,6 +96,7 @@ class WindowsEndpointVerifier:
 
     AF_INET = 2
     TCP_TABLE_OWNER_PID_LISTENER = 3
+    TCP_TABLE_OWNER_PID_CONNECTIONS = 4
     TCP_TABLE_OWNER_PID_ALL = 5
     MIB_TCP_STATE_LISTEN = 2
     MIB_TCP_STATE_ESTABLISHED = 5
@@ -284,7 +285,7 @@ class WindowsEndpointVerifier:
                 f"QMP socket endpoints {local!r}->{peer!r} do not match loopback port {port}"
             )
         client_port = int(local[1])
-        rows = self._tcp_rows(self.TCP_TABLE_OWNER_PID_ALL)
+        rows = self._tcp_rows(self.TCP_TABLE_OWNER_PID_CONNECTIONS)
         connection_pids = sorted(
             {
                 int(row.owning_pid)
