@@ -94,8 +94,18 @@ phase3_vectors:
     .space 124
     b       .Lfatal_vector
     .space 124
-    // Lower EL, AArch64 and AArch32.
-    .rept 2
+    // Lower EL, AArch64.  The EL0 qualification path uses the synchronous
+    // slot for SVC/abort dispatch and treats an unexpected IRQ as a child
+    // terminal event. FIQ/SError and all AArch32 entries remain fatal.
+    b       .Lsync_el0
+    .space 124
+    b       .Lirq_el0
+    .space 124
+    b       .Lfatal_vector
+    .space 124
+    b       .Lfatal_vector
+    .space 124
+    .rept 1
     b       .Lfatal_vector
     .space 124
     b       .Lfatal_vector
@@ -115,6 +125,8 @@ phase3_vectors:
 .Lirq_spx:   b .Lexception_entry_irq
 .Lsync_sp0:  b .Lexception_entry_sync_sp0
 .Lirq_sp0:   b .Lexception_entry_irq_sp0
+.Lsync_el0:  b .Lexception_entry_el0_sync
+.Lirq_el0:   b .Lexception_entry_el0_irq
 .Lfatal_vector: b .Lexception_entry_fatal
 
 .Lexception_entry_sync:
@@ -139,6 +151,18 @@ phase3_vectors:
     sub     sp, sp, #16
     str     x16, [sp]
     mov     x16, #3
+    sub     sp, sp, #256
+    b       .Lsave_common
+.Lexception_entry_el0_sync:
+    sub     sp, sp, #16
+    str     x16, [sp]
+    mov     x16, #5
+    sub     sp, sp, #256
+    b       .Lsave_common
+.Lexception_entry_el0_irq:
+    sub     sp, sp, #16
+    str     x16, [sp]
+    mov     x16, #6
     sub     sp, sp, #256
     b       .Lsave_common
 .Lexception_entry_fatal:
@@ -176,7 +200,33 @@ phase3_vectors:
     ldr     x1, [sp, #248]
     bl      phase3_exception_dispatch
     cbz     x0, .Lrestore_current
+    ldr     x1, [sp, #248]
+    cmp     x1, #5
+    b.eq    .Lrestore_el0_kernel
+    cmp     x1, #6
+    b.eq    .Lrestore_el0_kernel
     b       phase3_restore_irq_context
+
+.Lrestore_el0_kernel:
+    // EL0 exit/fault returns a validated context pointer. Its TTBR0 has
+    // already been switched to the kernel root by the exception dispatcher.
+    // x0 remains the real child exit value through restoration of the saved
+    // EL1 callee-saved registers and call frame.
+    mov     x30, x0
+    ldr     x9, [x30, #344]
+    ldr     x10, [x30, #296]
+    mov     sp, x9
+    msr     sp_el0, xzr
+    ldr     x18, [sp, #96]
+    ldp     x19, x20, [sp, #0]
+    ldp     x21, x22, [sp, #16]
+    ldp     x23, x24, [sp, #32]
+    ldp     x25, x26, [sp, #48]
+    ldp     x27, x28, [sp, #64]
+    ldp     x29, x30, [sp, #80]
+    add     sp, sp, #112
+    mov     x0, x10
+    ret
 
 .Lrestore_current:
     ldr     x0, [sp, #0]
@@ -199,6 +249,54 @@ phase3_vectors:
     add     sp, sp, #256
     add     sp, sp, #16
     eret
+
+.global phase3_el0_enter
+.type phase3_el0_enter, %function
+phase3_el0_enter:
+    // x0 = gxos_aarch64_el0_context*. Save the EL1 continuation on its
+    // current stack, then install a validated EL0 SP/PC/PSTATE and GPR set.
+    // EL0 uses a high, child-private VA window; the child root retains every
+    // EL1 mapping needed by this entry and by VBAR_EL1.
+    sub     sp, sp, #112
+    stp     x19, x20, [sp, #0]
+    stp     x21, x22, [sp, #16]
+    stp     x23, x24, [sp, #32]
+    stp     x25, x26, [sp, #48]
+    stp     x27, x28, [sp, #64]
+    stp     x29, x30, [sp, #80]
+    str     x18, [sp, #96]
+    mov     x19, x0
+    mov     x9, sp
+    str     x9, [x19, #344]
+    msr     sp_el0, xzr
+    ldr     x9, [x19, #248]
+    msr     sp_el0, x9
+    ldr     x9, [x19, #256]
+    msr     elr_el1, x9
+    ldr     x9, [x19, #264]
+    msr     spsr_el1, x9
+    isb
+
+    // x30 is the context base until the final architectural register load.
+    mov     x30, x19
+    ldp     x0, x1, [x30, #0]
+    ldp     x2, x3, [x30, #16]
+    ldp     x4, x5, [x30, #32]
+    ldp     x6, x7, [x30, #48]
+    ldp     x8, x9, [x30, #64]
+    ldp     x10, x11, [x30, #80]
+    ldp     x12, x13, [x30, #96]
+    ldp     x14, x15, [x30, #112]
+    ldp     x16, x17, [x30, #128]
+    ldp     x18, x19, [x30, #144]
+    ldp     x20, x21, [x30, #160]
+    ldp     x22, x23, [x30, #176]
+    ldp     x24, x25, [x30, #192]
+    ldp     x26, x27, [x30, #208]
+    ldp     x28, x29, [x30, #224]
+    ldr     x30, [x30, #240]
+    eret
+.size phase3_el0_enter, . - phase3_el0_enter
 
 .global phase3_restore_irq_context
 .type phase3_restore_irq_context, %function

@@ -385,6 +385,29 @@ uint64_t phase2_mmu_tables_start() { return (uint64_t)(uintptr_t)__translation_t
 uint64_t phase2_mmu_tables_end() { return (uint64_t)(uintptr_t)__translation_tables_end; }
 uint64_t phase2_mmu_root() { return gRoot; }
 
+uint64_t phase2_mmu_current_root()
+{
+    return phase2_mmu_read_ttbr0() & UINT64_C(0x000000fffffff000);
+}
+
+uint8_t phase2_mmu_activate_root(uint64_t root)
+{
+    const uint64_t physicalLimit = UINT64_C(1) << GXOS_AARCH64_PHASE2_MMU_PA_BITS;
+    if ((root & kPageMask) != 0 || root == 0 || root >= physicalLimit) return 0;
+    // No ASIDs are used in this first implementation.  A full EL1/EL0 stage-1
+    // invalidation on every root switch prevents translations from a previous
+    // child from surviving even when the same user VA is reused.
+    __asm__ volatile(
+        "dsb ishst\n"
+        "msr ttbr0_el1, %0\n"
+        "isb\n"
+        "tlbi vmalle1\n"
+        "dsb ish\n"
+        "isb\n"
+        : : "r"(root) : "memory");
+    return 1;
+}
+
 uint64_t phase2_mmu_read_mair() { uint64_t v; __asm__ volatile("mrs %0, mair_el1" : "=r"(v)); return v; }
 uint64_t phase2_mmu_read_tcr() { uint64_t v; __asm__ volatile("mrs %0, tcr_el1" : "=r"(v)); return v; }
 uint64_t phase2_mmu_read_ttbr0() { uint64_t v; __asm__ volatile("mrs %0, ttbr0_el1" : "=r"(v)); return v; }

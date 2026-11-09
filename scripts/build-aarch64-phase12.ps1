@@ -5,7 +5,9 @@ param(
     [string]$DeveloperStudioRoot = 'D:\dev\guideXOS_Developer_Studio',
     [string]$V05ServerRoot = '',
     [switch]$ProductionStudio,
-    [switch]$R2B1Workspaces
+    [switch]$R2B1Workspaces,
+    [switch]$El0Qualification,
+    [switch]$El0NegativeQualification
 )
 
 $ErrorActionPreference = 'Stop'
@@ -21,12 +23,13 @@ if ([string]::IsNullOrWhiteSpace($V05ServerRoot)) {
 $V05ServerRoot = [IO.Path]::GetFullPath($V05ServerRoot)
 $preflightRoot = $OutputDirectory.TrimEnd('\') + '-preflight'
 $adapterTestRoot = $OutputDirectory.TrimEnd('\') + '-adapter-tests'
+$el0HostTestRoot = $OutputDirectory.TrimEnd('\') + '-el0-host-tests'
 $studioBuildRoot = Join-Path $OutputDirectory 'studio-v05-build'
 $studioBuildServerRoot = Join-Path $studioBuildRoot 'server-root'
 $alignmentLock = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'phase12-sdk-alignment.json') | ConvertFrom-Json
 
 if (Test-Path -LiteralPath $OutputDirectory) { throw "Refusing to overwrite existing Phase 12 output: $OutputDirectory" }
-foreach ($reserved in @($preflightRoot, $adapterTestRoot)) {
+foreach ($reserved in @($preflightRoot, $adapterTestRoot, $el0HostTestRoot)) {
     if (Test-Path -LiteralPath $reserved) { throw "Refusing to overwrite existing Phase 12 preflight output: $reserved" }
 }
 
@@ -97,6 +100,8 @@ if ($arm64Entry.Count -ne 1 -or $arm64Entry[0].abi -ne 'guidexos-c-abi-v1-studio
     -DeveloperStudioRoot $DeveloperStudioRoot -V05ServerRoot $V05ServerRoot -OutputDirectory $adapterTestRoot
 & (Join-Path $PSScriptRoot 'test-aarch64-studio-run-gate.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Production Studio Run gate controls failed' }
+& (Join-Path $PSScriptRoot 'test-aarch64-el0-host.ps1') -OutputDirectory $el0HostTestRoot
+if ($LASTEXITCODE -ne 0) { throw 'EL0 hosted structural and source-contract controls failed' }
 
 $v05SdkInclude = Join-Path $V05ServerRoot ($alignmentLock.intendedV05Sdk.includeRoot.Replace('/', '\'))
 $kernelBuildParameters = @{
@@ -106,6 +111,11 @@ $kernelBuildParameters = @{
     StudioV05SdkInclude = $v05SdkInclude
 }
 if ($ProductionStudio) { $kernelBuildParameters.StudioGuestQualification = $true }
+if ($El0Qualification) { $kernelBuildParameters.El0Qualification = $true }
+if ($El0NegativeQualification) {
+    if (!$El0Qualification) { throw 'El0NegativeQualification requires El0Qualification.' }
+    $kernelBuildParameters.El0NegativeQualification = $true
+}
 & (Join-Path $PSScriptRoot 'build-aarch64-phase10.ps1') @kernelBuildParameters
 
 $clang = Join-Path $LlvmRoot 'clang++.exe'
@@ -274,13 +284,13 @@ $serverHead = (& git -C $repoRoot rev-parse HEAD 2>&1 | Out-String).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Unable to record the source repository revision.' }
 $serverBranch = (& git -C $repoRoot branch --show-current 2>&1 | Out-String).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Unable to record the source repository branch.' }
-$candidateProfile = if ($ProductionStudio -and $R2B1Workspaces) { 'r2b1-native-build-ui' } elseif ($ProductionStudio) { 'production-ui' } else { 'phase12-smoke' }
+$candidateProfile = if ($El0NegativeQualification) { 'runsafe2-el0-negative-controls' } elseif ($El0Qualification) { 'runsafe2-el0-qualification' } elseif ($ProductionStudio -and $R2B1Workspaces) { 'r2b1-native-build-ui' } elseif ($ProductionStudio) { 'production-ui' } else { 'phase12-smoke' }
 $studioSmokeEnabled = !$ProductionStudio
 $studioDriverOverlay = Join-Path $studioSourceCopy 'build.ps1'
 $studioCompatOverlay = Join-Path $studioSourceCopy 'src\studio_v05_compile_compat.h'
 $candidateManifest = [ordered]@{
     schemaVersion = 1
-    candidate = 'guideXOS Server ARM64 NativeElf Developer Studio'
+    candidate = if ($El0NegativeQualification) { 'guideXOS Server ARM64 RUNSAFE2 EL0 Negative Controls' } elseif ($El0Qualification) { 'guideXOS Server ARM64 RUNSAFE2 EL0 Qualification Diagnostic' } else { 'guideXOS Server ARM64 NativeElf Developer Studio' }
     profile = $candidateProfile
     server = [ordered]@{
         branch = $serverBranch
@@ -300,6 +310,9 @@ $candidateManifest = [ordered]@{
         compatHeaderSha256 = (Get-Sha256Hex $studioCompatOverlay)
         copiedBuildDriverSha256 = (Get-Sha256Hex $studioDriverOverlay)
         studioSmokeDefine = $studioSmokeEnabled
+        el0QualificationDefine = [bool]$El0Qualification
+        el0NegativeQualificationDefine = [bool]$El0NegativeQualification
+        studioRunRemainsDisabled = $true
     }
     guest = [ordered]@{
         machine = 'virt,gic-version=2,acpi=off'
@@ -318,6 +331,8 @@ $candidateManifest = [ordered]@{
         bootEfiSha256 = (Get-Sha256Hex (Join-Path $OutputDirectory 'BOOTAA64.EFI'))
         kernelElfSha256 = (Get-Sha256Hex (Join-Path $OutputDirectory 'kernel.elf'))
         ramdiskSha256 = (Get-Sha256Hex $ramdisk)
+        trustedEl0PayloadSha256 = '9adb67ab60e0329266473bb0c419ff4167df6fb77c59fec2aff1de57421dd442'
+        el0NegativeProbes = if ($El0NegativeQualification) { @('kernel-data-read', 'gic-distributor-read') } else { @() }
     }
     r2b1VfsFailureWorkspace = if ($R2B1Workspaces) {
         [ordered]@{

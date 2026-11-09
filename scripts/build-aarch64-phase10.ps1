@@ -5,7 +5,9 @@ param(
     [string]$StudioV05SdkInclude = '',
     [switch]$Phase11Proof,
     [switch]$Phase12Proof,
-    [switch]$StudioGuestQualification
+    [switch]$StudioGuestQualification,
+    [switch]$El0Qualification,
+    [switch]$El0NegativeQualification
 )
 
 $ErrorActionPreference = 'Stop'
@@ -40,6 +42,12 @@ if ($Phase12Proof) {
 if ($StudioGuestQualification -and !$Phase12Proof) {
     throw 'StudioGuestQualification requires the versioned Phase 12 adapter profile.'
 }
+if ($El0Qualification -and !$Phase12Proof) {
+    throw 'El0Qualification requires the versioned Phase 12 kernel/runtime profile.'
+}
+if ($El0NegativeQualification -and !$El0Qualification) {
+    throw 'El0NegativeQualification requires the trusted EL0 qualification profile.'
+}
 function Invoke-Checked { param([string]$FilePath, [string[]]$Arguments)
     Write-Host "      $([IO.Path]::GetFileName($FilePath)) $($Arguments -join ' ')" -ForegroundColor DarkGray
     & $FilePath @Arguments
@@ -71,6 +79,8 @@ $loaderSource = Join-Path $repoRoot 'guideXOSBootLoader\aarch64\phase1_loader.cp
 $phase11Define = if ($Phase11Proof) { '-DGXOS_AARCH64_PHASE11' } else { }
 $phase12Define = if ($Phase12Proof) { '-DGXOS_AARCH64_PHASE12' } else { }
 $studioGuestDefine = if ($StudioGuestQualification) { '-DGXOS_AARCH64_ABI3_STUDIO_GUEST' } else { }
+$el0QualificationDefine = if ($El0Qualification) { '-DGXOS_AARCH64_EL0_QUALIFICATION' } else { }
+$el0NegativeDefine = if ($El0NegativeQualification) { '-DGXOS_AARCH64_EL0_NEGATIVE_QUALIFICATION' } else { }
 $loaderFlags = @(
     '--target=aarch64-pc-windows-msvc', '-DGXOS_AARCH64_PHASE4', '-DGXOS_AARCH64_PHASE5', '-DGXOS_AARCH64_PHASE6', '-DGXOS_AARCH64_PHASE7', '-DGXOS_AARCH64_PHASE8', '-DGXOS_AARCH64_PHASE9', '-DGXOS_AARCH64_PHASE10', $phase12Define,
     '-O2', '-ffreestanding', '-fno-builtin', '-fno-stack-protector', '-fno-exceptions', '-fno-rtti', '-fno-unwind-tables', '-fno-asynchronous-unwind-tables', '-fno-ident',
@@ -84,7 +94,7 @@ $kernelSources = @(
     'kernel\arch\arm64\phase3_entry.S','kernel\arch\arm64\phase3_context.S','kernel\arch\arm64\phase3_register_test.S',
     'kernel\arch\arm64\phase3_preemptive_worker.S','kernel\arch\arm64\native_elf_call.S',
     'kernel\arch\arm64\phase3_serial.cpp','kernel\arch\arm64\phase4_serial.cpp','kernel\arch\arm64\serial_console.cpp',
-    'kernel\arch\arm64\phase2_platform.cpp','kernel\arch\arm64\phase2_mmu.cpp','kernel\arch\arm64\phase5_mmu_permissions.cpp',
+    'kernel\arch\arm64\phase2_platform.cpp','kernel\arch\arm64\phase2_mmu.cpp','kernel\arch\arm64\phase2_el0.cpp','kernel\arch\arm64\phase5_mmu_permissions.cpp',
     'kernel\arch\arm64\phase2_gic.cpp','kernel\arch\arm64\gicv3_controller.cpp','kernel\arch\arm64\phase3_timer.cpp','kernel\arch\arm64\phase3_arch.cpp',
     'kernel\arch\arm64\phase3_exceptions.cpp','kernel\arch\arm64\phase4_main.cpp','kernel\arch\arm64\phase6_platform_stubs.cpp',
     'kernel\core\common_scheduler.cpp','kernel\core\common_kernel_entry.cpp','kernel\core\common_boot_info.cpp',
@@ -99,7 +109,8 @@ $kernelFlags = @(
     '--target=aarch64-none-elf','-std=c++14','-march=armv8-a','-O2','-ffreestanding','-nostdlib','-nostdinc++','-fno-builtin','-fno-stack-protector',
     '-fno-exceptions','-fno-rtti','-fno-unwind-tables','-fno-asynchronous-unwind-tables','-fno-pic','-fno-pie','-mcmodel=small',
     '-mgeneral-regs-only','-mstrict-align','-mno-outline-atomics','-ffunction-sections','-fdata-sections','-Wno-c++11-narrowing',
-    '-DGXOS_AARCH64_PHASE4','-DGXOS_AARCH64_PHASE5','-DGXOS_AARCH64_PHASE6','-DGXOS_AARCH64_PHASE7','-DGXOS_AARCH64_PHASE8','-DGXOS_AARCH64_PHASE9','-DGXOS_AARCH64_PHASE10',$phase11Define,$phase12Define,$studioGuestDefine,
+    '-DGXOS_AARCH64_PHASE4','-DGXOS_AARCH64_PHASE5','-DGXOS_AARCH64_PHASE6','-DGXOS_AARCH64_PHASE7','-DGXOS_AARCH64_PHASE8','-DGXOS_AARCH64_PHASE9','-DGXOS_AARCH64_PHASE10',$phase11Define,$phase12Define,$studioGuestDefine,$el0QualificationDefine,$el0NegativeDefine,
+    '-DGXOS_AARCH64_EL0_ISOLATION',
     '-DGXOS_BARE_METAL','-DKERNEL_HAS_VIRTIO_INPUT','-DKERNEL_HAS_COMMON_INPUT_QUEUE','-I',$repoRoot,'-I',(Join-Path $repoRoot 'kernel'),'-I',(Join-Path $repoRoot 'sdk\include'),'-I',(Join-Path $repoRoot 'kernel\core\include'),
     '-I',(Join-Path $repoRoot 'kernel\core\freestanding'),'-I',(Join-Path $repoRoot 'kernel\arch\arm64\include'))
 $kernelObjects = @()

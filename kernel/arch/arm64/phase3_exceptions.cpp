@@ -3,6 +3,9 @@
 #include "phase3_timer.h"
 #include "../../../aarch64/phase2/phase2_platform.h"
 #include "../../../kernel/core/include/kernel/common_scheduler.h"
+#if defined(GXOS_AARCH64_EL0_ISOLATION)
+#include "phase2_el0.h"
+#endif
 #if defined(GXOS_AARCH64_PHASE4)
 #include "../../../kernel/core/include/kernel/irq_registry.h"
 #endif
@@ -45,6 +48,13 @@ static uint64_t read_far()
     return value;
 }
 
+static uint64_t read_spsr()
+{
+    uint64_t value = 0;
+    __asm__ volatile("mrs %0, spsr_el1" : "=r"(value));
+    return value;
+}
+
 static uint64_t read_sp()
 {
     uint64_t value = 0;
@@ -61,6 +71,8 @@ static void fatal(const char* reason)
     phase3_serial_hex(read_esr());
     phase3_serial_print(" ELR=");
     phase3_serial_hex(read_elr());
+    phase3_serial_print(" SPSR=");
+    phase3_serial_hex(read_spsr());
     phase3_serial_print(" FAR=");
     phase3_serial_hex(read_far());
     phase3_serial_print(" SP=");
@@ -85,6 +97,26 @@ extern "C" uint32_t phase3_exception_count()
 
 extern "C" void* phase3_exception_dispatch(uint64_t* frame, uint64_t vector_class)
 {
+#if defined(GXOS_AARCH64_EL0_ISOLATION)
+    if (vector_class == GXOS_AARCH64_EL0_VECTOR_LOWER_SYNC_A64 ||
+        vector_class == GXOS_AARCH64_EL0_VECTOR_LOWER_IRQ_A64) {
+        if (vector_class == GXOS_AARCH64_EL0_VECTOR_LOWER_IRQ_A64) {
+            const uint32_t acknowledgement = phase3_irq_acknowledge();
+            if (!phase3_irq_ack_valid(acknowledgement)) {
+                fatal("invalid lower-EL IRQ acknowledgement");
+            }
+            phase3_irq_complete(acknowledgement);
+        }
+        gxos_aarch64_el0_context* return_context = nullptr;
+        if (!phase2_el0_dispatch_exception(frame, vector_class,
+                                          read_esr(), read_elr(),
+                                          read_spsr(), read_far(),
+                                          &return_context) || !return_context) {
+            fatal("unowned or invalid lower-EL exception");
+        }
+        return return_context;
+    }
+#endif
     if (vector_class == 1) {
 #if defined(GXOS_AARCH64_SCHEDR1_DIAGNOSTICS)
         phase4_diag_irq_entry(frame);

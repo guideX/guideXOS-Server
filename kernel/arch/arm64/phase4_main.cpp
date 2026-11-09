@@ -36,6 +36,7 @@ using Aarch64Handoff = gxos_aarch64_phase4_handoff;
 #include "../../../kernel/core/include/kernel/native_elf_baremetal.h"
 #endif
 #include "phase2_mmu.h"
+#include "phase2_el0.h"
 #include "phase4_boot_info.h"
 #include "phase3_timer.h"
 #if defined(GXOS_AARCH64_SCHEDR1_DIAGNOSTICS)
@@ -607,6 +608,75 @@ static void completion_task(void*)
 static void phase12_app_task(void*)
 {
     while (!g_graphics_complete && !g_graphics_failure) kernel::scheduler::note_execution();
+#if defined(GXOS_AARCH64_EL0_QUALIFICATION)
+    while (g_fs_work.reads == 0 && !g_fs_failure) kernel::scheduler::note_execution();
+    if (g_fs_failure) {
+        g_phase12_failure = 1;
+        g_phase12_complete = 1;
+        g_app_complete = 1;
+        print("[guideXOS] AARCH64_EL0_QUALIFICATION_ERROR prerequisite=vfs\n");
+        for (;;) kernel::scheduler::note_execution();
+    }
+    uint64_t observed_exit_value = 0;
+    uint64_t fault_reason = GXOS_AARCH64_EL0_FAULT_NONE;
+    if (!phase2_el0_run_qualification(&observed_exit_value, &fault_reason) ||
+        observed_exit_value != 42 || fault_reason != GXOS_AARCH64_EL0_FAULT_NONE) {
+        g_phase12_failure = 1;
+        g_phase12_complete = 1;
+        g_app_complete = 1;
+        print("[guideXOS] AARCH64_EL0_QUALIFICATION_ERROR fault=");
+        phase3_serial_hex(fault_reason);
+        print(" exit=");
+        phase3_serial_hex(observed_exit_value);
+        print("\n");
+        for (;;) kernel::scheduler::note_execution();
+    }
+    print("[guideXOS] AARCH64_EL0_QUALIFICATION_PASS observed-exit=2a cleanup=PASS kernel=EL1 scheduler=active vfs=active graphics=ready\n");
+#if defined(GXOS_AARCH64_EL0_NEGATIVE_QUALIFICATION)
+    uint64_t kernel_probe_esr = 0;
+    uint64_t kernel_probe_far = 0;
+    const bool kernel_memory_denied = phase2_el0_run_negative_probe(
+        GXOS_AARCH64_EL0_PROBE_KERNEL_DATA, 0,
+        &kernel_probe_esr, &kernel_probe_far) != 0;
+    print(kernel_memory_denied
+        ? "[guideXOS] AARCH64_EL0_NEGATIVE_KERNEL_DATA_PASS ESR="
+        : "[guideXOS] AARCH64_EL0_NEGATIVE_KERNEL_DATA_FAIL ESR=");
+    phase3_serial_hex(kernel_probe_esr);
+    print(" FAR=");
+    phase3_serial_hex(kernel_probe_far);
+    print(" cleanup=");
+    print(kernel_memory_denied ? "PASS\n" : "FAIL\n");
+
+    uint64_t mmio_probe_esr = 0;
+    uint64_t mmio_probe_far = 0;
+    const uint64_t gicd_base = g_platform_for_tasks ? g_platform_for_tasks->gicd_base : 0;
+    const bool mmio_denied = phase2_el0_run_negative_probe(
+        GXOS_AARCH64_EL0_PROBE_DEVICE_MMIO, gicd_base,
+        &mmio_probe_esr, &mmio_probe_far) != 0;
+    print(mmio_denied
+        ? "[guideXOS] AARCH64_EL0_NEGATIVE_GICD_PASS ESR="
+        : "[guideXOS] AARCH64_EL0_NEGATIVE_GICD_FAIL ESR=");
+    phase3_serial_hex(mmio_probe_esr);
+    print(" FAR=");
+    phase3_serial_hex(mmio_probe_far);
+    print(" cleanup=");
+    print(mmio_denied ? "PASS\n" : "FAIL\n");
+    if (!kernel_memory_denied || !mmio_denied) {
+        g_phase12_failure = 1;
+        g_phase12_complete = 1;
+        g_app_complete = 1;
+        print("[guideXOS] AARCH64_EL0_NEGATIVE_CONTROLS_ERROR\n");
+        for (;;) kernel::scheduler::note_execution();
+    }
+    print("[guideXOS] AARCH64_EL0_NEGATIVE_CONTROLS_PASS kernel=permission-fault gicd=permission-fault cleanup=PASS\n");
+#endif
+    g_phase12_complete = 1;
+    g_app_complete = 1;
+    for (;;) {
+        phase6_maybe_arm_completion();
+        kernel::scheduler::note_execution();
+    }
+#else
     if (!kernel::native_elf::phase12_run_developer_studio()) {
         g_phase12_failure = 1;
         g_phase12_complete = 1;
@@ -624,6 +694,7 @@ static void phase12_app_task(void*)
         phase6_maybe_arm_completion();
         kernel::scheduler::note_execution();
     }
+#endif
 }
 #elif defined(GXOS_AARCH64_PHASE11)
 static void phase11_app_task(void*)

@@ -20,6 +20,8 @@ void phase2_mmu_enable();
 uint64_t phase2_mmu_tables_start();
 uint64_t phase2_mmu_tables_end();
 uint64_t phase2_mmu_root();
+uint64_t phase2_mmu_current_root();
+uint8_t phase2_mmu_activate_root(uint64_t root);
 uint64_t phase2_mmu_read_mair();
 uint64_t phase2_mmu_read_tcr();
 uint64_t phase2_mmu_read_ttbr0();
