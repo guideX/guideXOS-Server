@@ -1,0 +1,42 @@
+{
+  "schema_version": "guidexos.navigator.trust-profile.v1",
+  "profile_id": "navigator-candidate-mozilla-2026-11-05-review",
+  "profile_version": 1,
+  "bundle_identity": "production-source:mozilla-2026-11-05-review",
+  "bundle_sha256": "427c064216761a1e72a8b30f0d954d08cb6e4435a82091fb865afd20c8497285",
+  "source_provenance": "curl CA Extract; Mozilla roots 2026-11-05; review candidate not activated",
+  "source_checksum_sha256": "427c064216761a1e72a8b30f0d954d08cb6e4435a82091fb865afd20c8497285",
+  "source_date": "2026-11-05",
+  "trust_purpose": "tls-server-auth",
+  "supported_restrictions": [
+    "chain-signatures",
+    "validity-periods",
+    "basic-constraints",
+    "path-length",
+    "leaf-server-auth-eku",
+    "leaf-key-usage",
+    "requested-hostname"
+  ],
+  "unsupported_restrictions": [
+    "name-constraints",
+    "mozilla-trust-purpose-bits",
+    "mozilla-domain-restrictions",
+    "certificate-policy-tree",
+    "root-distrust-after-policy"
+  ],
+  "required_verifier_capabilities": [
+    "strict-pem-accounting",
+    "sha256-integrity-match",
+    "hostname-verification",
+    "server-auth-eku",
+    "authenticated-time",
+    "signed-approval-verification"
+  ],
+  "trust_policy_version": 1,
+  "clock_assurance": "authenticated-fresh-rollback-protected-required",
+  "revocation_policy": "owner-decision-pending-no-crl-ocsp-or-stapled-status-enforced",
+  "approval_state": "pending",
+  "authorization_evidence": "none",
+  "approval_authenticated": false,
+  "profile_class": "candidate"
+}

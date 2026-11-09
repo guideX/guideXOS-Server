@@ -13,6 +13,9 @@ $ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RootDir = Split-Path -Parent $ScriptDir
+. (Join-Path $ScriptDir "navigator_https_trust_profile.ps1")
+$httpsPolicyToken = if ([string]::IsNullOrWhiteSpace($env:GXOS_NAVIGATOR_HTTPS_POLICY)) { $null } else { $env:GXOS_NAVIGATOR_HTTPS_POLICY.Trim() }
+Assert-NavigatorHttpsPolicyOverrideAllowed -Value $httpsPolicyToken
 $InputDir = if ([System.IO.Path]::IsPathRooted($InputDir)) { $InputDir } else { Join-Path $RootDir $InputDir }
 $OutputDir = if ([System.IO.Path]::IsPathRooted($OutputDir)) { $OutputDir } else { Join-Path $RootDir $OutputDir }
 $OutputImage = if ([System.IO.Path]::IsPathRooted($OutputImage)) { $OutputImage } else { Join-Path $RootDir $OutputImage }
@@ -200,6 +203,20 @@ function Get-NavigatorManifestModeToken {
     }
 }
 
+function Get-NavigatorTrustProfileModeToken {
+    param([AllowNull()][string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return "normal" }
+    $token = $Value.Trim().ToLowerInvariant()
+    switch ($token) {
+        "normal" { return "normal" }
+        "missing" { return "missing" }
+        "hash-mismatch" { return "hash-mismatch" }
+        "unsupported-version" { return "unsupported-version" }
+        "missing-approval" { return "missing-approval" }
+        default { throw "Unsupported Navigator trust profile mode: $Value" }
+    }
+}
+
 function Get-NavigatorCaBundleManifestProfile {
     param(
         [Parameter(Mandatory = $true)]
@@ -257,7 +274,7 @@ function Get-NavigatorCaBundleManifestProfile {
             BundleType = "shipped-public"
             SourceDescription = "curl-ca-extract:Mozilla-2026-08-13"
             RotationId = $NavigatorProductionCaBundleRotationId
-            ProductionReady = "yes"
+            ProductionReady = "no"
         }
     }
     return [pscustomobject]@{
@@ -446,6 +463,47 @@ function Invoke-NavigatorCaBundleManifestValidation {
         ManifestPath = [System.IO.Path]::GetFullPath($OutputManifestPath)
         Manifest = $manifest
         Output = @($output | ForEach-Object { "$_" })
+    }
+}
+
+function Write-NavigatorTrustProfile {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProfilePath,
+        [Parameter(Mandatory = $true)]$Manifest,
+        [Parameter(Mandatory = $true)][ValidateSet("fixture-only", "candidate")][string]$ProfileClass,
+        [Parameter(Mandatory = $true)][string]$SourceDate
+    )
+
+    $profile = New-NavigatorTrustProfileDocument -Manifest $Manifest -ProfileClass $ProfileClass -SourceDate $SourceDate
+    $json = $profile | ConvertTo-Json -Depth 6
+    [System.IO.File]::WriteAllText($ProfilePath, $json + [Environment]::NewLine, [System.Text.Encoding]::ASCII)
+    return $profile
+}
+
+function Update-NavigatorTrustProfileMode {
+    param([Parameter(Mandatory = $true)][string]$ProfilePath, [Parameter(Mandatory = $true)][string]$Mode)
+    switch ($Mode) {
+        "normal" { return }
+        "missing" {
+            if (Test-Path -LiteralPath $ProfilePath -PathType Leaf) { Remove-Item -LiteralPath $ProfilePath -Force }
+            return
+        }
+        default {
+            if (-not (Test-Path -LiteralPath $ProfilePath -PathType Leaf)) {
+                throw "Trust profile mutation requires a generated profile: $ProfilePath"
+            }
+            $profile = Get-Content -LiteralPath $ProfilePath -Raw | ConvertFrom-Json
+            switch ($Mode) {
+                "hash-mismatch" {
+                    $sha = [string]$profile.bundle_sha256
+                    $profile.bundle_sha256 = $(if ($sha[0] -eq '0') { '1' } else { '0' }) + $sha.Substring(1)
+                }
+                "unsupported-version" { $profile.schema_version = "guidexos.navigator.trust-profile.v99"; $profile.profile_version = 99 }
+                "missing-approval" { $profile.profile_class = "release-approved"; $profile.approval_state = "release-approved"; $profile.authorization_evidence = "none"; $profile.approval_authenticated = $true }
+            }
+            $json = $profile | ConvertTo-Json -Depth 6
+            [System.IO.File]::WriteAllText($ProfilePath, $json + [Environment]::NewLine, [System.Text.Encoding]::ASCII)
+        }
     }
 }
 
@@ -1052,7 +1110,6 @@ foreach ($packageSourceDir in $NativePackageDirs) {
     }
 }
 
-$httpsPolicyToken = if ([string]::IsNullOrWhiteSpace($env:GXOS_NAVIGATOR_HTTPS_POLICY)) { $null } else { $env:GXOS_NAVIGATOR_HTTPS_POLICY.Trim() }
 $httpsFaultModeToken = if ([string]::IsNullOrWhiteSpace($env:GXOS_NAVIGATOR_HTTPS_FAULT_MODE)) { $null } else { $env:GXOS_NAVIGATOR_HTTPS_FAULT_MODE.Trim() }
 $realPublicProbeEnabled = $env:GXOS_NAVIGATOR_SMOKE_ENABLE_REAL_PUBLIC_HTTPS -eq "1"
 $realPublicProbeRequired = $env:GXOS_NAVIGATOR_SMOKE_REQUIRE_REAL_PUBLIC_HTTPS -eq "1"
@@ -1083,6 +1140,7 @@ $candidateRotationId = if ([string]::IsNullOrWhiteSpace($env:GXOS_NAVIGATOR_SHIP
 $candidateProductionReady = $env:GXOS_NAVIGATOR_SHIPPED_ROOT_CANDIDATE_PRODUCTION_READY -eq "1"
 $productionManifestMode = Get-NavigatorManifestModeToken $env:GXOS_NAVIGATOR_PRODUCTION_CA_MANIFEST_MODE
 $userManifestMode = Get-NavigatorManifestModeToken $env:GXOS_NAVIGATOR_USER_CA_MANIFEST_MODE
+$trustProfileMode = Get-NavigatorTrustProfileModeToken $env:GXOS_NAVIGATOR_TRUST_PROFILE_MODE
 
 if ($candidateCaSource -and $productionCaSource) {
     throw "Choose either GXOS_NAVIGATOR_PRODUCTION_CA_BUNDLE_SOURCE or GXOS_NAVIGATOR_SHIPPED_ROOT_CANDIDATE_CA_BUNDLE_SOURCE, not both."
@@ -1106,9 +1164,13 @@ if ($SmokeCaFixture -or $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -eq "1") {
         -SourceDescription $smokeManifestProfile.SourceDescription `
         -GeneratedUtc $NavigatorFixtureCaBundleGeneratedUtc
     Copy-Item -LiteralPath $targetCaManifest -Destination $targetCaManifestCompat -Force
+    $targetTrustProfile = Join-Path $certsDir "trust-profile.json"
+    $null = Write-NavigatorTrustProfile -ProfilePath $targetTrustProfile -Manifest $smokeManifest.Manifest -ProfileClass "fixture-only" -SourceDate "2026-08-13"
+    Update-NavigatorTrustProfileMode -ProfilePath $targetTrustProfile -Mode $trustProfileMode
     $staged += Get-Item $targetCa
     $staged += Get-Item $targetCaManifest
     $staged += Get-Item $targetCaManifestCompat
+    if (Test-Path -LiteralPath $targetTrustProfile -PathType Leaf) { $staged += Get-Item $targetTrustProfile }
     $stagedRootCaBundle = $true
     Write-Host "      staged smoke-only CA bundle at /certs/ca-bundle.pem" -ForegroundColor Yellow
     Write-Host "      staged CA manifest at /certs/ca-bundle.manifest (type=$($smokeManifest.Manifest.bundle_type), production_ready=$($smokeManifest.Manifest.production_ready), test_only=$($smokeManifest.Manifest.test_only))" -ForegroundColor Yellow
@@ -1178,6 +1240,12 @@ if ($SmokeCaFixture -or $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -eq "1") {
                 Output = $productionManifest.Output
             }
             Copy-Item -LiteralPath $targetCaManifest -Destination $targetCaManifestCompat -Force
+            $profileClass = if ($httpsPolicyToken -and $httpsPolicyToken.Equals("controlled-qualification", [System.StringComparison]::OrdinalIgnoreCase)) { "fixture-only" } else { "candidate" }
+            $sourceDate = if ($usingDefaultProductionCaSource) { "2026-08-13" } elseif ($candidateRotationId -match '20[0-9]{2}-[0-9]{2}-[0-9]{2}') { $Matches[0] } else { "unknown" }
+            $targetTrustProfile = Join-Path $certsDir "trust-profile.json"
+            $null = Write-NavigatorTrustProfile -ProfilePath $targetTrustProfile -Manifest $productionManifest.Manifest -ProfileClass $profileClass -SourceDate $sourceDate
+            Update-NavigatorTrustProfileMode -ProfilePath $targetTrustProfile -Mode $trustProfileMode
+            if (Test-Path -LiteralPath $targetTrustProfile -PathType Leaf) { $staged += Get-Item $targetTrustProfile }
         }
         $staged += Get-Item $targetCa
         if (Test-Path -LiteralPath $targetCaManifest -PathType Leaf) {
@@ -1208,7 +1276,7 @@ if ([string]::IsNullOrWhiteSpace($httpsPolicyToken) -and
     -not $SmokeCaFixture -and
     $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -ne "1") {
     $httpsPolicyToken = "disabled"
-    Write-Host "      defaulting bundled Navigator HTTPS policy to Disabled; public HTTPS requires a separately reviewed explicit policy" -ForegroundColor Yellow
+    Write-Host "      defaulting bundled Navigator HTTPS policy to Disabled; this build has no authenticated release trust anchor for public HTTPS" -ForegroundColor Yellow
 }
 
 $userCaSource = Resolve-StagedSourcePath $env:GXOS_NAVIGATOR_USER_CA_BUNDLE_SOURCE
@@ -1252,6 +1320,10 @@ if ($userCaSource) {
             }
             $staged += Get-Item $targetUserManifest
             $staged += Get-Item $targetUserManifestCompat
+            $targetUserTrustProfile = Join-Path $configCertsDir "trust-profile.json"
+            $null = Write-NavigatorTrustProfile -ProfilePath $targetUserTrustProfile -Manifest $userManifest.Manifest -ProfileClass "fixture-only" -SourceDate "unknown"
+            Update-NavigatorTrustProfileMode -ProfilePath $targetUserTrustProfile -Mode $trustProfileMode
+            if (Test-Path -LiteralPath $targetUserTrustProfile -PathType Leaf) { $staged += Get-Item $targetUserTrustProfile }
             Write-Host "      staged CA manifest at /config/certs/ca-bundle.manifest (type=$($userManifest.Manifest.bundle_type), production_ready=$($userManifest.Manifest.production_ready), test_only=$($userManifest.Manifest.test_only))" -ForegroundColor Yellow
             if ($userManifestMode -ne "normal") {
                 Write-Host "      applied user/dev manifest mode override: $userManifestMode" -ForegroundColor DarkYellow
@@ -1386,13 +1458,6 @@ if ($realPublicProbeCaBundleInfo) {
     $targetProbeCaCertsCompat = Join-Path $configNavigatorDir "RPUBCART.TXT"
     [System.IO.File]::WriteAllText($targetProbeCaCertsCompat, $realPublicProbeCaBundleInfo.ParsedCertCount.ToString(), [System.Text.Encoding]::ASCII)
     $staged += Get-Item $targetProbeCaCertsCompat
-
-    $targetProbeCaEnabled = Join-Path $configNavigatorDir "real-public-https-ca-bundle-enabled.txt"
-    [System.IO.File]::WriteAllText($targetProbeCaEnabled, "enabled", [System.Text.Encoding]::ASCII)
-    $staged += Get-Item $targetProbeCaEnabled
-    $targetProbeCaEnabledCompat = Join-Path $configNavigatorDir "RPUBCAEN.TXT"
-    [System.IO.File]::WriteAllText($targetProbeCaEnabledCompat, "enabled", [System.Text.Encoding]::ASCII)
-    $staged += Get-Item $targetProbeCaEnabledCompat
 
     Write-Host "      staged real public CA metadata at /config/navigator/real-public-https-ca-bundle-*.txt" -ForegroundColor Yellow
 }

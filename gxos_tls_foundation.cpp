@@ -443,18 +443,20 @@ namespace {
 
 constexpr const char* kBareMetalCaBundlePath = "/certs/ca-bundle.pem";
 constexpr const char* kBareMetalCaBundleManifestPath = "/certs/ca-bundle.manifest";
+constexpr const char* kBareMetalTrustProfilePath = "/certs/trust-profile.json";
 constexpr const char* kBareMetalUserCaBundlePath = "/config/certs/ca-bundle.pem";
 constexpr const char* kBareMetalUserCaBundleManifestPath = "/config/certs/ca-bundle.manifest";
+constexpr const char* kBareMetalUserTrustProfilePath = "/config/certs/trust-profile.json";
 constexpr const char* kBareMetalHttpsPolicyPath = "/config/navigator/https-policy.txt";
 constexpr const char* kBareMetalCaBundleManifestCompatPath = "/certs/CABUNDLE.MAN";
 constexpr const char* kBareMetalUserCaBundleManifestCompatPath = "/config/certs/CABUNDLE.MAN";
+constexpr const char* kBareMetalTrustProfileCompatPath = "/certs/TRUSTPRO.JSON";
+constexpr const char* kBareMetalUserTrustProfileCompatPath = "/config/certs/TRUSTPRO.JSON";
 constexpr const char* kBareMetalUserCaBundleCompatPath = "/config/certs/CABUNDLE.PEM";
 constexpr const char* kBareMetalHttpsPolicyCompatPath = "/config/navigator/HTTPSPOL.TXT";
 constexpr const char* kBareMetalMissingCaProbePath = "/certs/ca-bundle.missing";
 constexpr const char* kBareMetalSmokeFixtureMarker = "guideXOS Navigator smoke-only root CA fixture";
 constexpr const char* kBareMetalPublicInternetTrustMarker = "guideXOS Navigator real public HTTPS probe trust bundle";
-constexpr const char* kBareMetalPublicInternetTrustOptInPath = "/config/navigator/real-public-https-ca-bundle-enabled.txt";
-constexpr const char* kBareMetalPublicInternetTrustOptInCompatPath = "/config/navigator/RPUBCAEN.TXT";
 constexpr const char* kBareMetalPublicTrustParseMode = "split-pem-validated";
 constexpr const char* kHostedCaBundlePath = "(Windows trust store)";
 constexpr const char* kHostedTrustStoreDetail = "Windows system trust store managed by Schannel";
@@ -468,6 +470,7 @@ constexpr const char* kProductionRootStoreTrustStoreDetail =
     "Production root store loaded from /certs/ca-bundle.pem.";
 constexpr const char* kNoTrustStoreDetail = "No bare-metal trust store is provisioned at the selected CA bundle path.";
 constexpr const char* kCaBundleManifestSchemaVersion = "guidexos.navigator.ca-bundle-manifest.v0.1";
+constexpr const char* kTrustProfileSchemaVersion = "guidexos.navigator.trust-profile.v1";
 constexpr const char* kShippedRootCandidateBundleType = "shipped-root-candidate";
 constexpr const char* kLocalSmokeOnlyPolicyBlocker =
     "Broad validated Navigator https:// remains disabled until a non-smoke trust store policy is explicitly enabled.";
@@ -993,6 +996,189 @@ bool parse_ca_bundle_manifest_json(const uint8_t* bytes,
     return true;
 }
 
+struct ParsedTrustProfile {
+    bool hasSchemaVersion = false;
+    bool hasProfileId = false;
+    bool hasProfileVersion = false;
+    bool hasBundleIdentity = false;
+    bool hasBundleSha256 = false;
+    bool hasSourceChecksumSha256 = false;
+    bool hasSourceProvenance = false;
+    bool hasSourceDate = false;
+    bool hasTrustPurpose = false;
+    bool hasSupportedRestrictions = false;
+    bool hasUnsupportedRestrictions = false;
+    bool hasRequiredCapabilities = false;
+    bool hasTrustPolicyVersion = false;
+    bool hasClockAssurance = false;
+    bool hasRevocationPolicy = false;
+    bool hasApprovalState = false;
+    bool hasAuthorizationEvidence = false;
+    bool hasApprovalAuthenticated = false;
+    bool hasProfileClass = false;
+    char schemaVersion[64] = {};
+    char profileId[96] = {};
+    char bundleIdentity[128] = {};
+    char bundleSha256[65] = {};
+    char sourceChecksumSha256[65] = {};
+    char sourceProvenance[160] = {};
+    char sourceDate[32] = {};
+    char trustPurpose[48] = {};
+    char clockAssurance[80] = {};
+    char revocationPolicy[128] = {};
+    char approvalState[32] = {};
+    char authorizationEvidence[96] = {};
+    char profileClass[32] = {};
+    uint64_t profileVersion = 0;
+    uint64_t trustPolicyVersion = 0;
+    bool approvalAuthenticated = false;
+};
+
+bool parse_trust_profile_json(const uint8_t* bytes,
+                              size_t byteCount,
+                              ParsedTrustProfile* profile,
+                              char* error,
+                              size_t errorSize)
+{
+    if (!bytes || !profile || !error || errorSize == 0) return false;
+    error[0] = '\0';
+    const char* cursor = reinterpret_cast<const char*>(bytes);
+    const char* end = cursor + byteCount;
+    json_skip_whitespace(cursor, end);
+    if (cursor >= end || *cursor != '{') {
+        copy_text(error, errorSize, "Trust profile is not a JSON object.");
+        return false;
+    }
+    ++cursor;
+    json_skip_whitespace(cursor, end);
+    while (cursor < end && *cursor != '}') {
+        char key[64];
+        if (!json_parse_string(cursor, end, key, sizeof(key))) {
+            copy_text(error, errorSize, "Trust profile has an invalid property name.");
+            return false;
+        }
+        json_skip_whitespace(cursor, end);
+        if (cursor >= end || *cursor != ':') {
+            copy_text(error, errorSize, "Trust profile is missing ':' after a property name.");
+            return false;
+        }
+        ++cursor;
+        json_skip_whitespace(cursor, end);
+        if (text_equals(key, "schema_version")) {
+            profile->hasSchemaVersion = json_parse_string(cursor, end, profile->schemaVersion, sizeof(profile->schemaVersion));
+        } else if (text_equals(key, "profile_id")) {
+            profile->hasProfileId = json_parse_string(cursor, end, profile->profileId, sizeof(profile->profileId));
+        } else if (text_equals(key, "profile_version")) {
+            profile->hasProfileVersion = json_parse_unsigned(cursor, end, &profile->profileVersion);
+        } else if (text_equals(key, "bundle_identity")) {
+            profile->hasBundleIdentity = json_parse_string(cursor, end, profile->bundleIdentity, sizeof(profile->bundleIdentity));
+        } else if (text_equals(key, "bundle_sha256")) {
+            profile->hasBundleSha256 = json_parse_string(cursor, end, profile->bundleSha256, sizeof(profile->bundleSha256));
+        } else if (text_equals(key, "source_checksum_sha256")) {
+            profile->hasSourceChecksumSha256 = json_parse_string(cursor, end, profile->sourceChecksumSha256, sizeof(profile->sourceChecksumSha256));
+        } else if (text_equals(key, "source_provenance")) {
+            profile->hasSourceProvenance = json_parse_string(cursor, end, profile->sourceProvenance, sizeof(profile->sourceProvenance));
+        } else if (text_equals(key, "source_date")) {
+            profile->hasSourceDate = json_parse_string(cursor, end, profile->sourceDate, sizeof(profile->sourceDate));
+        } else if (text_equals(key, "trust_purpose")) {
+            profile->hasTrustPurpose = json_parse_string(cursor, end, profile->trustPurpose, sizeof(profile->trustPurpose));
+        } else if (text_equals(key, "supported_restrictions")) {
+            profile->hasSupportedRestrictions = cursor < end && *cursor == '[' && json_skip_value(cursor, end, 0);
+        } else if (text_equals(key, "unsupported_restrictions")) {
+            profile->hasUnsupportedRestrictions = cursor < end && *cursor == '[' && json_skip_value(cursor, end, 0);
+        } else if (text_equals(key, "required_verifier_capabilities")) {
+            profile->hasRequiredCapabilities = cursor < end && *cursor == '[' && json_skip_value(cursor, end, 0);
+        } else if (text_equals(key, "trust_policy_version")) {
+            profile->hasTrustPolicyVersion = json_parse_unsigned(cursor, end, &profile->trustPolicyVersion);
+        } else if (text_equals(key, "clock_assurance")) {
+            profile->hasClockAssurance = json_parse_string(cursor, end, profile->clockAssurance, sizeof(profile->clockAssurance));
+        } else if (text_equals(key, "revocation_policy")) {
+            profile->hasRevocationPolicy = json_parse_string(cursor, end, profile->revocationPolicy, sizeof(profile->revocationPolicy));
+        } else if (text_equals(key, "approval_state")) {
+            profile->hasApprovalState = json_parse_string(cursor, end, profile->approvalState, sizeof(profile->approvalState));
+        } else if (text_equals(key, "authorization_evidence")) {
+            profile->hasAuthorizationEvidence = json_parse_string(cursor, end, profile->authorizationEvidence, sizeof(profile->authorizationEvidence));
+        } else if (text_equals(key, "approval_authenticated")) {
+            profile->hasApprovalAuthenticated = json_parse_yes_no_or_bool(cursor, end, &profile->approvalAuthenticated);
+        } else if (text_equals(key, "profile_class")) {
+            profile->hasProfileClass = json_parse_string(cursor, end, profile->profileClass, sizeof(profile->profileClass));
+        } else if (!json_skip_value(cursor, end, 0)) {
+            copy_text(error, errorSize, "Trust profile contains an unsupported JSON value.");
+            return false;
+        }
+        if ((text_equals(key, "schema_version") && !profile->hasSchemaVersion) ||
+            (text_equals(key, "profile_id") && !profile->hasProfileId) ||
+            (text_equals(key, "profile_version") && !profile->hasProfileVersion) ||
+            (text_equals(key, "bundle_identity") && !profile->hasBundleIdentity) ||
+            (text_equals(key, "bundle_sha256") && !profile->hasBundleSha256) ||
+            (text_equals(key, "source_checksum_sha256") && !profile->hasSourceChecksumSha256) ||
+            (text_equals(key, "source_provenance") && !profile->hasSourceProvenance) ||
+            (text_equals(key, "source_date") && !profile->hasSourceDate) ||
+            (text_equals(key, "trust_purpose") && !profile->hasTrustPurpose) ||
+            (text_equals(key, "supported_restrictions") && !profile->hasSupportedRestrictions) ||
+            (text_equals(key, "unsupported_restrictions") && !profile->hasUnsupportedRestrictions) ||
+            (text_equals(key, "required_verifier_capabilities") && !profile->hasRequiredCapabilities) ||
+            (text_equals(key, "trust_policy_version") && !profile->hasTrustPolicyVersion) ||
+            (text_equals(key, "clock_assurance") && !profile->hasClockAssurance) ||
+            (text_equals(key, "revocation_policy") && !profile->hasRevocationPolicy) ||
+            (text_equals(key, "approval_state") && !profile->hasApprovalState) ||
+            (text_equals(key, "authorization_evidence") && !profile->hasAuthorizationEvidence) ||
+            (text_equals(key, "approval_authenticated") && !profile->hasApprovalAuthenticated) ||
+            (text_equals(key, "profile_class") && !profile->hasProfileClass)) {
+            copy_text(error, errorSize, "Trust profile contains a malformed required field.");
+            return false;
+        }
+        json_skip_whitespace(cursor, end);
+        if (cursor >= end) {
+            copy_text(error, errorSize, "Trust profile ended unexpectedly.");
+            return false;
+        }
+        if (*cursor == ',') {
+            ++cursor;
+            json_skip_whitespace(cursor, end);
+            continue;
+        }
+        if (*cursor != '}') {
+            copy_text(error, errorSize, "Trust profile is missing ',' or '}'.");
+            return false;
+        }
+    }
+    if (cursor >= end || *cursor != '}') {
+        copy_text(error, errorSize, "Trust profile is missing its closing '}'.");
+        return false;
+    }
+    ++cursor;
+    json_skip_whitespace(cursor, end);
+    if (cursor != end) {
+        copy_text(error, errorSize, "Trust profile has trailing data.");
+        return false;
+    }
+    if (!profile->hasSchemaVersion || !text_equals(profile->schemaVersion, kTrustProfileSchemaVersion) ||
+        !profile->hasProfileId || !profile->profileId[0] ||
+        !profile->hasProfileVersion || profile->profileVersion != 1 ||
+        !profile->hasBundleIdentity || !profile->bundleIdentity[0] ||
+        !profile->hasBundleSha256 || !normalize_sha256_hex_in_place(profile->bundleSha256) ||
+        !profile->hasSourceChecksumSha256 || !normalize_sha256_hex_in_place(profile->sourceChecksumSha256) ||
+        !profile->hasSourceProvenance || !profile->sourceProvenance[0] ||
+        !profile->hasSourceDate || !profile->sourceDate[0] ||
+        !profile->hasTrustPurpose || !text_equals(profile->trustPurpose, "tls-server-auth") ||
+        !profile->hasSupportedRestrictions || !profile->hasUnsupportedRestrictions ||
+        !profile->hasRequiredCapabilities ||
+        !profile->hasTrustPolicyVersion || profile->trustPolicyVersion != 1 ||
+        !profile->hasClockAssurance || !profile->clockAssurance[0] ||
+        !profile->hasRevocationPolicy || !profile->revocationPolicy[0] ||
+        !profile->hasApprovalState || !profile->approvalState[0] ||
+        !profile->hasAuthorizationEvidence || !profile->authorizationEvidence[0] ||
+        !profile->hasApprovalAuthenticated || !profile->hasProfileClass ||
+        !(text_equals(profile->profileClass, "fixture-only") ||
+          text_equals(profile->profileClass, "candidate") ||
+          text_equals(profile->profileClass, "release-approved"))) {
+        copy_text(error, errorSize, "Trust profile is missing required metadata or uses an unsupported profile version/value.");
+        return false;
+    }
+    return true;
+}
+
 #if defined(GXOS_BARE_METAL)
 bool buffer_contains_token(const uint8_t* buffer, size_t buffer_len, const char* token)
 {
@@ -1456,8 +1642,18 @@ struct BareMetalCaStoreState {
     char computedSha256[65] = {};
     char manifestError[160] = {};
     uint8_t manifestBytes[kGxosMaxCaManifestBytes + 1] = {};
-    bool publicInternetOptInChecked = false;
-    bool publicInternetOptInEnabled = false;
+    bool trustProfileAttempted = false;
+    bool trustProfilePresent = false;
+    bool trustProfileValid = false;
+    bool trustProfileBundleHashMatch = false;
+    bool trustProfileApprovalAuthenticated = false;
+    char trustProfileSchemaVersion[64] = {};
+    char trustProfileId[96] = {};
+    char trustProfileClass[32] = {};
+    char trustProfileApprovalState[32] = {};
+    char trustProfileAuthorizationEvidence[96] = {};
+    char trustProfileError[160] = {};
+    uint8_t trustProfileBytes[4097] = {};
 };
 
 struct BareMetalHttpsPolicyConfigInfo {
@@ -1683,6 +1879,90 @@ bool load_selected_ca_bundle_manifest(BareMetalCaStoreState& state,
     return true;
 }
 
+bool load_selected_ca_bundle_trust_profile(BareMetalCaStoreState& state,
+                                           const char* profilePath,
+                                           const char* compatProfilePath)
+{
+    state.trustProfileAttempted = true;
+    state.trustProfilePresent = false;
+    state.trustProfileValid = false;
+    state.trustProfileBundleHashMatch = false;
+    state.trustProfileApprovalAuthenticated = false;
+    state.trustProfileSchemaVersion[0] = '\0';
+    state.trustProfileId[0] = '\0';
+    state.trustProfileClass[0] = '\0';
+    state.trustProfileApprovalState[0] = '\0';
+    state.trustProfileAuthorizationEvidence[0] = '\0';
+    state.trustProfileError[0] = '\0';
+
+    kernel::vfs::FileInfo info{};
+    kernel::vfs::Status statStatus = kernel::vfs::VFS_ERR_INVALID;
+    const char* readPath = fallback_path_if_missing(profilePath, compatProfilePath, &info, &statStatus);
+    if (statStatus == kernel::vfs::VFS_ERR_NOT_FOUND || statStatus == kernel::vfs::VFS_ERR_NOT_MOUNT) {
+        copy_text(state.trustProfileError, sizeof(state.trustProfileError), "Trust profile metadata is missing.");
+        return false;
+    }
+    if (statStatus != kernel::vfs::VFS_OK || info.type != kernel::vfs::FILE_TYPE_REGULAR ||
+        info.size == 0 || info.size > 4096u) {
+        copy_text(state.trustProfileError, sizeof(state.trustProfileError), "Trust profile metadata is unreadable or exceeds its 4 KiB safety cap.");
+        return false;
+    }
+    const int32_t bytesRead = kernel::vfs::read_file(readPath, state.trustProfileBytes, 4096u);
+    if (bytesRead <= 0 || static_cast<uint64_t>(bytesRead) != info.size) {
+        copy_text(state.trustProfileError, sizeof(state.trustProfileError), "Trust profile metadata read did not complete successfully.");
+        return false;
+    }
+    state.trustProfilePresent = true;
+    state.trustProfileBytes[bytesRead] = 0;
+    ParsedTrustProfile parsed{};
+    if (!parse_trust_profile_json(state.trustProfileBytes, static_cast<size_t>(bytesRead),
+            &parsed, state.trustProfileError, sizeof(state.trustProfileError))) {
+        return false;
+    }
+    copy_text(state.trustProfileSchemaVersion, sizeof(state.trustProfileSchemaVersion), parsed.schemaVersion);
+    copy_text(state.trustProfileId, sizeof(state.trustProfileId), parsed.profileId);
+    copy_text(state.trustProfileClass, sizeof(state.trustProfileClass), parsed.profileClass);
+    copy_text(state.trustProfileApprovalState, sizeof(state.trustProfileApprovalState), parsed.approvalState);
+    copy_text(state.trustProfileAuthorizationEvidence, sizeof(state.trustProfileAuthorizationEvidence), parsed.authorizationEvidence);
+    state.trustProfileApprovalAuthenticated = parsed.approvalAuthenticated;
+    if (state.info.manifest.status != GxosCaManifestStatus::Loaded ||
+        !state.info.manifest.manifestSha256 ||
+        !text_equals(parsed.bundleSha256, state.info.manifest.manifestSha256) ||
+        !text_equals(parsed.sourceChecksumSha256, parsed.bundleSha256)) {
+        copy_text(state.trustProfileError, sizeof(state.trustProfileError), "Trust profile bundle identity does not match the CA manifest hash.");
+        return false;
+    }
+    if (!state.info.manifest.bundleType || !state.info.manifest.bundleType[0] ||
+        !state.info.manifest.rotationId || !state.info.manifest.rotationId[0]) {
+        copy_text(state.trustProfileError, sizeof(state.trustProfileError), "CA manifest is missing the bundle identity required by the trust profile.");
+        return false;
+    }
+    char expectedIdentity[192];
+    copy_text(expectedIdentity, sizeof(expectedIdentity), state.info.manifest.bundleType);
+    size_t used = token_length(expectedIdentity);
+    if (used + 1u < sizeof(expectedIdentity)) expectedIdentity[used++] = ':';
+    copy_text(expectedIdentity + used, sizeof(expectedIdentity) - used, state.info.manifest.rotationId);
+    if (!text_equals(parsed.bundleIdentity, expectedIdentity)) {
+        copy_text(state.trustProfileError, sizeof(state.trustProfileError), "Trust profile bundle identity does not match the CA manifest identity.");
+        return false;
+    }
+    state.trustProfileBundleHashMatch = true;
+    state.trustProfileValid = true;
+    state.trustProfileError[0] = '\0';
+    return true;
+}
+
+const char* trust_profile_blocker(const BareMetalCaStoreState& state, const char* requiredClass)
+{
+    if (!state.trustProfilePresent || !state.trustProfileValid) {
+        return state.trustProfileError[0] ? state.trustProfileError : "Trust profile metadata is missing or invalid.";
+    }
+    if (requiredClass && !text_equals(state.trustProfileClass, requiredClass)) {
+        return "Trust profile class does not match the selected HTTPS policy.";
+    }
+    return nullptr;
+}
+
 bool hook_ready(GxosTlsHookStatus status)
 {
     return status == GxosTlsHookStatus::Ready;
@@ -1722,7 +2002,6 @@ const char* fallback_path_if_missing(const char* primaryPath,
                                      const char* compatPath,
                                      kernel::vfs::FileInfo* info,
                                      kernel::vfs::Status* statStatus);
-bool public_internet_trust_opt_in_enabled();
 #endif
 
 #if GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
@@ -1753,10 +2032,18 @@ GxosValidatedHttpsPolicyState parse_https_policy_token(const char* token, bool* 
         text_equals_insensitive(token, "localsmokeonly")) {
         return GxosValidatedHttpsPolicyState::LocalSmokeOnly;
     }
+    if (text_equals_insensitive(token, "controlled-qualification") ||
+        text_equals_insensitive(token, "controlledqualification")) {
+        return GxosValidatedHttpsPolicyState::ControlledQualification;
+    }
     if (text_equals_insensitive(token, "user-trust-dev-mode") ||
         text_equals_insensitive(token, "usertruststoredevmode") ||
         text_equals_insensitive(token, "user-trust-store-dev-mode")) {
         return GxosValidatedHttpsPolicyState::UserTrustStoreDevMode;
+    }
+    if (text_equals_insensitive(token, "public-pilot-candidate") ||
+        text_equals_insensitive(token, "publicpilotcandidate")) {
+        return GxosValidatedHttpsPolicyState::PublicPilotCandidate;
     }
     if (text_equals_insensitive(token, "production-validated") ||
         text_equals_insensitive(token, "productionvalidated")) {
@@ -1946,6 +2233,20 @@ const char* selected_ca_bundle_manifest_path_for_policy(GxosValidatedHttpsPolicy
         : kBareMetalCaBundleManifestPath;
 }
 
+const char* selected_trust_profile_path_for_policy(GxosValidatedHttpsPolicyState state)
+{
+    return policy_state_supports_user_trust(state)
+        ? kBareMetalUserTrustProfilePath
+        : kBareMetalTrustProfilePath;
+}
+
+const char* compat_trust_profile_path_for_policy(GxosValidatedHttpsPolicyState state)
+{
+    return policy_state_supports_user_trust(state)
+        ? kBareMetalUserTrustProfileCompatPath
+        : kBareMetalTrustProfileCompatPath;
+}
+
 const char* compat_ca_bundle_manifest_path_for_policy(GxosValidatedHttpsPolicyState state)
 {
     return policy_state_supports_user_trust(state)
@@ -1979,57 +2280,6 @@ const char* fallback_path_if_missing(const char* primaryPath,
     return primaryPath;
 }
 
-bool public_internet_trust_opt_in_enabled()
-{
-    BareMetalCaStoreState& caState = ca_store_state();
-    if (caState.publicInternetOptInChecked) {
-        return caState.publicInternetOptInEnabled;
-    }
-
-    caState.publicInternetOptInChecked = true;
-    kernel::vfs::FileInfo info{};
-    kernel::vfs::Status statStatus = kernel::vfs::VFS_ERR_INVALID;
-    const char* readPath = fallback_path_if_missing(
-        kBareMetalPublicInternetTrustOptInPath,
-        kBareMetalPublicInternetTrustOptInCompatPath,
-        &info,
-        &statStatus);
-    if (statStatus != kernel::vfs::VFS_OK ||
-        info.type != kernel::vfs::FILE_TYPE_REGULAR ||
-        info.size == 0 ||
-        info.size > 32u) {
-        return false;
-    }
-
-    char buffer[33];
-    const int32_t bytesRead = kernel::vfs::read_file(
-        readPath,
-        reinterpret_cast<uint8_t*>(buffer),
-        32u);
-    if (bytesRead <= 0) return false;
-    buffer[bytesRead < 32 ? bytesRead : 32] = '\0';
-
-    const char* begin = buffer;
-    const char* end = buffer;
-    while (*end != '\0') ++end;
-    while (begin < end &&
-        (*begin == ' ' || *begin == '\t' || *begin == '\r' || *begin == '\n')) {
-        ++begin;
-    }
-    while (end > begin &&
-        (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r' || end[-1] == '\n')) {
-        --end;
-    }
-
-    char token[33];
-    copy_trimmed_ascii_span(token, sizeof(token), begin, end);
-    const bool enabled = text_equals_insensitive(token, "enabled") ||
-        text_equals_insensitive(token, "1") ||
-        text_equals_insensitive(token, "true") ||
-        text_equals_insensitive(token, "yes");
-    caState.publicInternetOptInEnabled = enabled;
-    return caState.publicInternetOptInEnabled;
-}
 #endif
 
 GxosCaStoreParseInfo gxos_ca_store_parse_info()
@@ -2117,8 +2367,6 @@ GxosTrustStoreSource trust_store_source_from_ca_info(const GxosCaStoreInfo& info
         (info.manifest.status == GxosCaManifestStatus::Loaded &&
             info.manifest.bundleType &&
             text_equals(info.manifest.bundleType, "production-public-probe-merged") &&
-            info.manifest.productionReady &&
-            !info.manifest.testOnly &&
             info.manifest.hashMatch)) {
         return GxosTrustStoreSource::ProductionPublicProbeTrust;
     }
@@ -2196,21 +2444,8 @@ GxosTrustStorePolicyInfo make_trust_store_policy_info()
             source == GxosTrustStoreSource::SmokeFixtureTrust
                 ? nullptr
                 : trust_store_manifest_blocker(caInfo);
-        const bool manifestProductionReady =
-            caInfo.manifest.status == GxosCaManifestStatus::Loaded &&
-            caInfo.manifest.productionReady &&
-            !caInfo.manifest.testOnly &&
-            caInfo.manifest.hashMatch;
-        const bool publicOptIn =
-            source == GxosTrustStoreSource::ProductionPublicProbeTrust
-                ? public_internet_trust_opt_in_enabled()
-                : false;
         const bool publicInternetReady =
-            manifestBlocker == nullptr &&
-            manifestProductionReady &&
-            (source == GxosTrustStoreSource::ProductionRootStore ||
-             (source == GxosTrustStoreSource::ProductionPublicProbeTrust &&
-              publicOptIn));
+            false;
         if (manifestBlocker) {
             return {
                 GxosTrustStorePolicyState::TrustStoreMalformed,
@@ -2233,7 +2468,7 @@ GxosTrustStorePolicyInfo make_trust_store_policy_info()
             caInfo.bytesLoaded,
             caInfo.parsedCertificateCount,
             caInfo.testOnlyFixture || caInfo.manifest.testOnly,
-            trust_source_is_production_policy_source(source),
+            false,
             publicInternetReady,
             caInfo.error
         };
@@ -2349,11 +2584,15 @@ GxosValidatedHttpsPolicyInfo make_validated_https_policy_info()
     } else if (effectiveSelection == GxosValidatedHttpsPolicyState::UserTrustStoreDevMode) {
         if (trustPolicy.source != GxosTrustStoreSource::UserProvidedTrustStore) {
             detail = "User/dev HTTPS policy is selected, but the active trust store is not the user bundle path.";
-            publicHttpsPilotReason = "Public HTTPS pilot requires a production CA bundle at /certs/ca-bundle.pem.";
+            publicHttpsPilotReason = "Public HTTPS requires authenticated release approval and a policy-reviewed trust profile.";
             blocker = "User/dev HTTPS policy requires /config/certs/ca-bundle.pem.";
+        } else if (const char* profileBlocker = trust_profile_blocker(ca_store_state(), "fixture-only")) {
+            detail = "User/dev HTTPS policy is selected, but its fixture-only trust profile is missing or invalid.";
+            publicHttpsPilotReason = profileBlocker;
+            blocker = profileBlocker;
         } else if (!nonSmokeReady) {
             detail = "User/dev HTTPS policy is selected, but bare-metal TLS prerequisites are not yet complete.";
-            publicHttpsPilotReason = "Public HTTPS pilot requires ProductionValidated and complete production TLS prerequisites.";
+            publicHttpsPilotReason = "Public HTTPS remains disabled until authenticated release approval and complete security prerequisites are available.";
             blocker = trustPolicy.error ? trustPolicy.error : "User/dev HTTPS prerequisites are incomplete.";
         } else {
             effectiveState = GxosValidatedHttpsPolicyState::UserTrustStoreDevMode;
@@ -2362,45 +2601,64 @@ GxosValidatedHttpsPolicyInfo make_validated_https_policy_info()
             publicHttpsPilotReason = "Public HTTPS pilot is unavailable in UserTrustStoreDevMode.";
             blocker = nullptr;
         }
+    } else if (effectiveSelection == GxosValidatedHttpsPolicyState::ControlledQualification) {
+        if (!trust_source_is_production_policy_source(trustPolicy.source)) {
+            detail = "Controlled HTTPS qualification requires the isolated /certs trust bundle.";
+            publicHttpsPilotReason = "Controlled qualification requires a fixture-only trust profile.";
+            blocker = "Controlled qualification requires a non-smoke bundle at /certs/ca-bundle.pem.";
+        } else if (const char* profileBlocker = trust_profile_blocker(ca_store_state(), "fixture-only")) {
+            detail = "Controlled HTTPS qualification is selected, but its fixture-only trust profile is missing or invalid.";
+            publicHttpsPilotReason = profileBlocker;
+            blocker = profileBlocker;
+        } else if (!nonSmokeReady) {
+            detail = "Controlled HTTPS qualification is selected, but its TLS fixture prerequisites are not ready.";
+            publicHttpsPilotReason = trustPolicy.error ? trustPolicy.error : "Controlled HTTPS prerequisites are incomplete.";
+            blocker = trustPolicy.error ? trustPolicy.error : "Controlled HTTPS prerequisites are incomplete.";
+        } else {
+            effectiveState = GxosValidatedHttpsPolicyState::ControlledQualification;
+            validatedNavigationEnabled = true;
+            detail = "Explicit controlled qualification is enabled for .guidexos.test fixture targets only; public origins remain disabled.";
+            publicHttpsPilotReason = "Public HTTPS remains disabled until authenticated release approval and security prerequisites are available.";
+            blocker = nullptr;
+        }
+    } else if (effectiveSelection == GxosValidatedHttpsPolicyState::PublicPilotCandidate) {
+        detail = "Public pilot candidate is prepared for review but cannot be activated by configuration.";
+        const char* profileBlocker = trust_profile_blocker(ca_store_state(), nullptr);
+        if (profileBlocker) {
+            publicHttpsPilotReason = profileBlocker;
+        } else if (!text_equals(ca_store_state().trustProfileClass, "release-approved")) {
+            publicHttpsPilotReason = "Trust profile is a review candidate; approval state and production_ready labels do not authorize public HTTPS.";
+        } else if (!text_equals(ca_store_state().trustProfileApprovalState, "release-approved") ||
+            text_equals(ca_store_state().trustProfileAuthorizationEvidence, "none")) {
+            publicHttpsPilotReason = "Release-approved trust profile is missing approval evidence.";
+        } else {
+            publicHttpsPilotReason = "Trust profile approval is not signature-verified; no release-owner trust anchor is configured.";
+        }
+        blocker = publicHttpsPilotReason;
     } else if (effectiveSelection == GxosValidatedHttpsPolicyState::ProductionValidated) {
         if (!trust_source_is_production_policy_source(trustPolicy.source)) {
             detail = "Production HTTPS policy is selected, but the active trust store is not a production bundle.";
-            publicHttpsPilotReason = "Public HTTPS pilot requires a non-smoke production CA bundle at /certs/ca-bundle.pem.";
+            publicHttpsPilotReason = "Public HTTPS requires authenticated release approval; a production CA bundle alone is insufficient.";
             blocker = "Production HTTPS policy requires a non-smoke bundle at /certs/ca-bundle.pem.";
         } else if (!nonSmokeReady) {
             detail = "Production HTTPS policy is selected, but bare-metal TLS prerequisites are not yet complete.";
-            publicHttpsPilotReason = trustPolicy.error ? trustPolicy.error : "Production HTTPS prerequisites are incomplete.";
+            publicHttpsPilotReason = trustPolicy.error ? trustPolicy.error : "Public HTTPS remains disabled until authenticated release approval and security prerequisites are available.";
             blocker = trustPolicy.error ? trustPolicy.error : "Production HTTPS prerequisites are incomplete.";
         } else {
-            effectiveState = GxosValidatedHttpsPolicyState::ProductionValidated;
-            validatedNavigationEnabled = true;
-            productionReady = trustPolicy.publicInternetReady;
-            // A production-ready manifest is the security boundary for
-            // arbitrary origins. Deterministic non-production bundles may
-            // still exercise the explicit validated fixture rails, but they
-            // must never turn on generic public HTTPS navigation.
-            broadPublicHttpsEnabled = trustPolicy.publicInternetReady;
-            if (trustPolicy.publicInternetReady) {
-                detail = "Production HTTPS prerequisites are satisfied; arbitrary-origin HTTPS navigation is enabled with production trust and hostname validation.";
-                publicHttpsPilotReason = publicHttpsPilotRequested
-                    ? "Arbitrary-origin HTTPS is enabled; legacy public-https-pilot proof token is present."
-                    : "Arbitrary-origin HTTPS is enabled by ProductionValidated trust prerequisites; public-https-pilot is only a legacy proof token.";
-            } else {
-                detail = "The deterministic production-policy fixture is parsed and usable for explicit certificate-validation rails, but its manifest is not production-ready; arbitrary-origin HTTPS remains disabled.";
-                publicHttpsPilotReason = "Public HTTPS pilot requires a production-ready CA manifest; deterministic fixture trust is never sufficient.";
-            }
-            blocker = nullptr;
+            detail = "Production HTTPS policy is inert: trust-profile metadata is unsigned and no release-owner trust anchor is configured.";
+            publicHttpsPilotReason = "Production trust activation requires signature-verified approval evidence; an unsigned readiness label is insufficient.";
+            blocker = publicHttpsPilotReason;
         }
     } else {
         if (trustPolicy.state == GxosTrustStorePolicyState::TrustStoreParsed &&
             trustPolicy.source == GxosTrustStoreSource::UserProvidedTrustStore) {
             detail = "A user CA bundle is parsed, but UserTrustStoreDevMode is not selected.";
-            publicHttpsPilotReason = "Public HTTPS pilot requires ProductionValidated.";
+            publicHttpsPilotReason = "Public HTTPS requires a signature-verified release-approved trust profile.";
             blocker = "User/dev HTTPS policy is off by default.";
         } else if (trustPolicy.state == GxosTrustStorePolicyState::TrustStoreParsed &&
             trust_source_is_production_policy_source(trustPolicy.source)) {
             detail = "A production CA bundle is parsed, but ProductionValidated is not selected.";
-            publicHttpsPilotReason = "Public HTTPS pilot requires ProductionValidated and public-https-pilot=enabled.";
+            publicHttpsPilotReason = "Public HTTPS remains disabled until signature-verified release approval and security prerequisites are available.";
             blocker = "Production HTTPS policy is off by default.";
         }
     }
@@ -3359,6 +3617,7 @@ const char* compute_tls_prerequisites_blocker()
 
     const GxosValidatedHttpsPolicyInfo httpsPolicy = make_validated_https_policy_info();
     if (httpsPolicy.state != GxosValidatedHttpsPolicyState::ProductionValidated &&
+        httpsPolicy.state != GxosValidatedHttpsPolicyState::ControlledQualification &&
         httpsPolicy.state != GxosValidatedHttpsPolicyState::UserTrustStoreDevMode) {
         return httpsPolicy.blocker ? httpsPolicy.blocker : "Broader validated HTTPS policy is disabled.";
     }
@@ -3462,6 +3721,8 @@ bool gxos_ca_store_load_once()
     const char* activeCaBundlePath = selected_ca_bundle_path_for_policy(selectedPolicyState);
     const char* activeManifestPath = selected_ca_bundle_manifest_path_for_policy(selectedPolicyState);
     const char* activeCompatManifestPath = compat_ca_bundle_manifest_path_for_policy(selectedPolicyState);
+    const char* activeTrustProfilePath = selected_trust_profile_path_for_policy(selectedPolicyState);
+    const char* activeCompatTrustProfilePath = compat_trust_profile_path_for_policy(selectedPolicyState);
     const char* activeCaBundleReadPath = activeCaBundlePath;
     reset_ca_manifest_info(state, activeManifestPath);
 
@@ -3588,6 +3849,27 @@ bool gxos_ca_store_load_once()
     }
 
     load_selected_ca_bundle_manifest(state, activeManifestPath, activeCompatManifestPath);
+    load_selected_ca_bundle_trust_profile(state, activeTrustProfilePath, activeCompatTrustProfilePath);
+
+    if (state.info.manifest.status == GxosCaManifestStatus::Loaded &&
+        (state.info.manifest.pemBytes != loaded || state.info.manifest.rootCount != pemBegins)) {
+        copy_text(state.manifestError, sizeof(state.manifestError),
+            "CA bundle manifest byte or PEM certificate count does not match the loaded bundle.");
+        state.info.manifest.status = GxosCaManifestStatus::Invalid;
+        state.info.manifest.error = state.manifestError;
+        state.info = {
+            GxosCaStoreStatus::Loaded,
+            GxosCaParseStatus::ParseError,
+            loaded,
+            pemBegins,
+            0,
+            testOnlyFixture,
+            activeCaBundlePath,
+            state.manifestError,
+            state.info.manifest
+        };
+        return false;
+    }
 
     const GxosTlsMbedTlsImportInfo importInfo = make_mbedtls_import_info();
     if (!importInfo.sourcePresent || !importInfo.sourceReadyForCompile) {
@@ -3771,6 +4053,23 @@ bool gxos_ca_store_load_once()
         parsedCount = count_ca_chain(&runtime.caChain);
     }
 
+    if (skippedCount > 0) {
+        mbedtls_x509_crt_free(&runtime.caChain);
+        mbedtls_x509_crt_init(&runtime.caChain);
+        state.info = {
+            GxosCaStoreStatus::Loaded,
+            GxosCaParseStatus::ParseError,
+            loaded,
+            pemBegins,
+            parsedCount,
+            testOnlyFixture,
+            activeCaBundlePath,
+            "CA bundle rejected because one or more certificates were unsupported or malformed; filtered trust parsing is disabled.",
+            state.info.manifest
+        };
+        return false;
+    }
+
     if (parsedCount == 0) {
         mbedtls_x509_crt_free(&runtime.caChain);
         mbedtls_x509_crt_init(&runtime.caChain);
@@ -3899,7 +4198,9 @@ const char* gxos_validated_https_policy_state_name(GxosValidatedHttpsPolicyState
     switch (state) {
     case GxosValidatedHttpsPolicyState::Disabled: return "Disabled";
     case GxosValidatedHttpsPolicyState::LocalSmokeOnly: return "LocalSmokeOnly";
+    case GxosValidatedHttpsPolicyState::ControlledQualification: return "ControlledQualification";
     case GxosValidatedHttpsPolicyState::UserTrustStoreDevMode: return "UserTrustStoreDevMode";
+    case GxosValidatedHttpsPolicyState::PublicPilotCandidate: return "PublicPilotCandidate";
     case GxosValidatedHttpsPolicyState::ProductionValidated: return "ProductionValidated";
     default: return "Unknown";
     }
@@ -4482,23 +4783,21 @@ const char* gxos_tls_certificate_validation_policy()
         policy.state == GxosValidatedHttpsPolicyState::UserTrustStoreDevMode) {
         return "dev-mode enabled; explicit validated fixture HTTPS requires the user trust store, secure RNG, plausible wall clock, CA chain validation, hostname validation, and explicit policy selection, while public HTTPS pilot remains disabled";
     }
-    if (policy.selectedState == GxosValidatedHttpsPolicyState::ProductionValidated &&
-        policy.productionReady &&
-        policy.broadPublicHttpsEnabled) {
-        return "production validated arbitrary-origin HTTPS enabled; production CA, hostname validation, secure RNG, and plausible wall clock are required, and plaintext fallback remains disabled";
+    if (policy.selectedState == GxosValidatedHttpsPolicyState::ControlledQualification &&
+        policy.state == GxosValidatedHttpsPolicyState::ControlledQualification) {
+        return "controlled-qualification enabled for .guidexos.test fixture hosts only; public HTTPS remains disabled and approval metadata is not authenticated";
     }
-    if (policy.selectedState == GxosValidatedHttpsPolicyState::ProductionValidated &&
-        policy.productionReady) {
-        return "production validated arbitrary-origin HTTPS enabled; production CA, hostname validation, secure RNG, and plausible wall clock are required, and plaintext fallback remains disabled";
+    if (policy.selectedState == GxosValidatedHttpsPolicyState::PublicPilotCandidate) {
+        return "public-pilot-candidate is review metadata only; runtime activation requires signature-verified release approval and is currently disabled";
     }
     if (policy.selectedState == GxosValidatedHttpsPolicyState::ProductionValidated) {
-        return "production-selected but not effective; broader validated bare-metal https:// remains fail-closed until the production CA bundle and TLS prerequisites are complete";
+        return "ProductionValidated is inert; public HTTPS remains disabled until signature-verified release approval and security prerequisites are available";
     }
     if (policy.selectedState == GxosValidatedHttpsPolicyState::UserTrustStoreDevMode) {
         return "dev-mode selected but not effective; broader validated bare-metal https:// remains fail-closed until the user CA bundle and TLS prerequisites are complete";
     }
     if (policy.state == GxosValidatedHttpsPolicyState::ProductionValidated) {
-        return "enabled for validated bare-metal HTTPS";
+        return "ProductionValidated runtime authorization is disabled by the trust-profile guard";
     }
 
     const GxosTlsMbedTlsImportInfo importInfo = gxos_tls_mbedtls_import_info();

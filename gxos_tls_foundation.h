@@ -179,7 +179,9 @@ GxosTrustStorePolicyInfo gxos_tls_trust_store_policy_info();
 enum class GxosValidatedHttpsPolicyState {
     Disabled,
     LocalSmokeOnly,
+    ControlledQualification,
     UserTrustStoreDevMode,
+    PublicPilotCandidate,
     ProductionValidated
 };
 

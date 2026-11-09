@@ -276,6 +276,11 @@ if (-not (Test-Path $validatedCaFixture)) {
     if ($httpsQualificationRequested) { Write-NavigatorHttpsQualificationBlocked -Reason "Fixture trust prerequisite missing: $validatedCaFixture" }
     throw "Navigator validated CA fixture not found: $validatedCaFixture"
 }
+$criticalNameConstraintsCaFixture = Join-Path $Root "scripts\fixtures\navigator-critical-name-constraints-root.pem"
+if (-not (Test-Path $criticalNameConstraintsCaFixture)) {
+    if ($httpsQualificationRequested) { Write-NavigatorHttpsQualificationBlocked -Reason "Fixture trust prerequisite missing: $criticalNameConstraintsCaFixture" }
+    throw "Navigator critical Name Constraints CA fixture not found: $criticalNameConstraintsCaFixture"
+}
 $emptyCaFixture = Join-Path $Root "scripts\fixtures\navigator-empty-ca-bundle.pem"
 if (-not (Test-Path $emptyCaFixture)) {
     if ($httpsQualificationRequested) { Write-NavigatorHttpsQualificationBlocked -Reason "TLS smoke prerequisite missing: $emptyCaFixture" }
@@ -578,6 +583,7 @@ $navigatorSmokeEnvNames = @(
     "GXOS_NAVIGATOR_SHIPPED_ROOT_CANDIDATE_PRODUCTION_READY",
     "GXOS_NAVIGATOR_USER_CA_MANIFEST_MODE",
     "GXOS_NAVIGATOR_PRODUCTION_CA_MANIFEST_MODE",
+    "GXOS_NAVIGATOR_TRUST_PROFILE_MODE",
     "GXOS_NAVIGATOR_SMOKE_ENABLE_REAL_PUBLIC_HTTPS",
     "GXOS_NAVIGATOR_SMOKE_REQUIRE_REAL_PUBLIC_HTTPS",
     "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_URL",
@@ -624,6 +630,7 @@ function Invoke-NavigatorKernelSmokeRamdiskStage {
         [bool]$CandidateProductionReady = $false,
         [string]$UserManifestMode = "normal",
         [string]$ProductionManifestMode = "normal",
+        [string]$TrustProfileMode = "normal",
         [bool]$UseSmokeFixture,
         [bool]$EnableRealPublicProbe = $false,
         [bool]$RequireRealPublicProbe = $false,
@@ -643,6 +650,7 @@ function Invoke-NavigatorKernelSmokeRamdiskStage {
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SHIPPED_ROOT_CANDIDATE_PRODUCTION_READY" -Value ($(if ($CandidateProductionReady) { "1" } else { $null }))
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_USER_CA_MANIFEST_MODE" -Value $UserManifestMode
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_PRODUCTION_CA_MANIFEST_MODE" -Value $ProductionManifestMode
+    Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_TRUST_PROFILE_MODE" -Value $TrustProfileMode
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_ENABLE_REAL_PUBLIC_HTTPS" -Value ($(if ($EnableRealPublicProbe) { "1" } else { $null }))
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_REQUIRE_REAL_PUBLIC_HTTPS" -Value ($(if ($RequireRealPublicProbe) { "1" } else { $null }))
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_URL" -Value ($(if ($EnableRealPublicProbe) { $RealPublicProbeTarget } else { $null }))
@@ -688,7 +696,7 @@ function Invoke-NavigatorKernelSmokeRamdiskStage {
             [string]$productionManifest.test_only -ne 'no') {
             throw 'production_validated trust staging mismatch: the selected controlled CA, manifest, or existing trust classification changed.'
         }
-        if ((Get-Content -LiteralPath $policyPath -Raw) -notmatch '(?im)^\s*production-validated\s*$') {
+        if ((Get-Content -LiteralPath $policyPath -Raw) -notmatch '(?im)^\s*controlled-qualification\s*$') {
             throw "production_validated staging has an incompatible HTTPS policy: $policyPath"
         }
         $packText = ($packOutput | ForEach-Object { [string]$_ }) -join "`n"
@@ -1020,7 +1028,7 @@ function Test-NavigatorKernelSmokeProductionPolicy {
     param($Scenario)
 
     $policyText = [string]$Scenario.HttpsPolicy
-    return $policyText -match '(?im)^\s*production-validated\s*$'
+    return $policyText -match '(?im)^\s*controlled-qualification\s*$'
 }
 
 function Test-NavigatorKernelSmokeRealPublicProbeOutput {
@@ -1234,7 +1242,7 @@ $commonChecks = @(
     "[NAVIGATOR-SMOKE] launch.path=AppManager::registerApp -> NavigatorApp::create",
     "[NAVIGATOR-SMOKE] capability.http=enabled numeric IPv4 and hostname HTTP/1.1 GET/POST with redirects/chunked",
     "[NAVIGATOR-SMOKE] capability.http_transport=shared HttpByteStream policy layer (PlainTcpHttp + LocalAllowlistedTlsHttps + PolicyValidatedTlsHttps)",
-    "[NAVIGATOR-SMOKE] capability.tls_policy_layer=shared HttpByteStream transport policy layer selects plain TCP HTTP, local allowlisted Mbed TLS, or policy-validated Mbed TLS; production trust enables arbitrary-origin HTTPS, plaintext fallback stays disabled, and policy stays fail-closed by default",
+    "[NAVIGATOR-SMOKE] capability.tls_policy_layer=shared HttpByteStream transport policy layer selects plain TCP HTTP, local allowlisted Mbed TLS, or explicit controlled qualification; public HTTPS remains disabled pending signature-verified release approval, plaintext fallback stays disabled, and policy defaults fail-closed",
     "[NAVIGATOR-SMOKE] tls_prereq.rng_quality=Secure",
     "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_status=Plausible",
     "[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_available=yes",
@@ -1727,7 +1735,7 @@ $scenarioDefinitions = @(
     },
     [pscustomobject]@{
         Name = "production_missing_ca_user_only"
-        HttpsPolicy = "production-validated"
+        HttpsPolicy = "controlled-qualification"
         HttpsFaultMode = $null
         UseSmokeFixture = $false
         UserCaSource = $validatedCaFixture
@@ -1739,12 +1747,12 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_status=Missing",
             "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=None",
             "[NAVIGATOR-SMOKE] tls_prereq.https_smoke_fault_mode=None",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=ProductionValidated",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=ControlledQualification",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=Disabled",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_validated_navigation_enabled=no",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_requested=no",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_broad_public_enabled=no",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_blocker=Production HTTPS policy requires a non-smoke bundle at /certs/ca-bundle.pem.",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_blocker=Controlled qualification requires a non-smoke bundle at /certs/ca-bundle.pem.",
             "[NAVIGATOR-SMOKE] tls_readiness=no",
             "[NAVIGATOR-SMOKE] https.case.policy_validated.enabled=no",
             "[NAVIGATOR-SMOKE] https.case.policy_validated.result=PASS"
@@ -1753,7 +1761,7 @@ $scenarioDefinitions = @(
     },
     [pscustomobject]@{
         Name = "production_validated"
-        HttpsPolicy = "production-validated"
+        HttpsPolicy = "controlled-qualification"
         HttpsFaultMode = $null
         UseSmokeFixture = $false
         UserCaSource = $null
@@ -1774,14 +1782,14 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_test_only=no",
             "[NAVIGATOR-SMOKE] tls_prereq.trust_store_public_ready=no",
             "[NAVIGATOR-SMOKE] tls_prereq.https_smoke_fault_mode=None",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=ProductionValidated",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=ProductionValidated",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=ControlledQualification",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=ControlledQualification",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_config_source=VFS config file /config/navigator/https-policy.txt",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_error=(none)",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_validated_navigation_enabled=yes",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_requested=no",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_broad_public_enabled=no",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_reason=Public HTTPS pilot requires a production-ready CA manifest; deterministic fixture trust is never sufficient.",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_reason=Public HTTPS remains disabled until authenticated release approval and security prerequisites are available.",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_production_ready=no",
             "[NAVIGATOR-SMOKE] tls_readiness=yes",
             "[NAVIGATOR-SMOKE] tls_readiness_blocker=(none)",
@@ -1843,7 +1851,7 @@ $scenarioDefinitions = @(
     },
     [pscustomobject]@{
         Name = "production_missing_manifest"
-        HttpsPolicy = "production-validated"
+        HttpsPolicy = "controlled-qualification"
         HttpsFaultMode = $null
         UseSmokeFixture = $false
         UserCaSource = $null
@@ -1856,7 +1864,7 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=ProductionRootStore",
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_status=Missing",
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_present=no",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=ProductionValidated",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=ControlledQualification",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=Disabled",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_blocker=CA bundle manifest not found at /certs/ca-bundle.manifest.",
             "[NAVIGATOR-SMOKE] tls_prereq.trust_store_readiness_blocker=CA bundle manifest not found at /certs/ca-bundle.manifest.",
@@ -1868,7 +1876,7 @@ $scenarioDefinitions = @(
     },
     [pscustomobject]@{
         Name = "production_manifest_test_only"
-        HttpsPolicy = "production-validated"
+        HttpsPolicy = "controlled-qualification"
         HttpsFaultMode = $null
         UseSmokeFixture = $false
         UserCaSource = $null
@@ -1882,7 +1890,7 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_status=Loaded",
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_present=yes",
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_test_only=yes",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=ProductionValidated",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=ControlledQualification",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=Disabled",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_blocker=CA bundle manifest is marked test_only=yes; broader validated HTTPS remains fail-closed.",
             "[NAVIGATOR-SMOKE] tls_prereq.trust_store_readiness_blocker=CA bundle manifest is marked test_only=yes; broader validated HTTPS remains fail-closed.",
@@ -1894,7 +1902,7 @@ $scenarioDefinitions = @(
     },
     [pscustomobject]@{
         Name = "production_manifest_hash_mismatch"
-        HttpsPolicy = "production-validated"
+        HttpsPolicy = "controlled-qualification"
         HttpsFaultMode = $null
         UseSmokeFixture = $false
         UserCaSource = $null
@@ -1909,7 +1917,7 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_present=yes",
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_hash_match=no",
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_error=CA bundle manifest sha256 does not match the loaded PEM bytes.",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=ProductionValidated",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=ControlledQualification",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=Disabled",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_blocker=CA bundle manifest sha256 does not match the loaded PEM bytes.",
             "[NAVIGATOR-SMOKE] tls_prereq.trust_store_readiness_blocker=CA bundle manifest sha256 does not match the loaded PEM bytes.",
@@ -1920,37 +1928,38 @@ $scenarioDefinitions = @(
         RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsExplicitPolicyTrustMismatchRegexChecks
     },
     [pscustomobject]@{
-        Name = "production_public_pilot_enabled"
-        HttpsPolicy = "production-validated`npublic-https-pilot=enabled"
+        Name = "public_pilot_candidate_blocked"
+        HttpsPolicy = "public-pilot-candidate"
         HttpsFaultMode = $null
         UseSmokeFixture = $false
         UserCaSource = $null
         ProductionCaSource = $validatedCaFixture
         TlsCert = $defaultHttpsCert
         TlsKey = $defaultHttpsKey
-        PublicPilotEnabled = $true
+        TrustProfileMode = "normal"
+        PublicPilotEnabled = $false
         PersistentNavigation = $true
         Checks = $commonChecks + @(
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_path=/certs/ca-bundle.pem",
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_fixture=normal",
-            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=ProductionPublicProbeTrust",
+            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=ProductionRootStore",
             "[NAVIGATOR-SMOKE] tls_prereq.https_smoke_fault_mode=None",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=ProductionValidated",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=ProductionValidated",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_validated_navigation_enabled=yes",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_requested=yes",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_broad_public_enabled=yes",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_reason=Arbitrary-origin HTTPS is enabled; legacy public-https-pilot proof token is present.",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_production_ready=yes",
-            "[NAVIGATOR-SMOKE] tls_readiness=yes",
-            "[NAVIGATOR-SMOKE] https.case.policy_validated.enabled=yes",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=PublicPilotCandidate",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=Disabled",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_validated_navigation_enabled=no",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_requested=no",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_broad_public_enabled=no",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_reason=Trust profile is a review candidate; approval state and production_ready labels do not authorize public HTTPS.",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_production_ready=no",
+            "[NAVIGATOR-SMOKE] tls_readiness=no",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.enabled=no",
             "[NAVIGATOR-SMOKE] https.case.policy_validated.result=PASS"
         )
         RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsExplicitPolicyTrustMismatchRegexChecks
     },
     [pscustomobject]@{
         Name = "persistent_navigation_scheduler"
-        HttpsPolicy = "production-validated`npublic-https-pilot=enabled"
+        HttpsPolicy = "public-pilot-candidate"
         HttpsFaultMode = $null
         UseSmokeFixture = $false
         UserCaSource = $null
@@ -1989,8 +1998,116 @@ $scenarioDefinitions = @(
         RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsExplicitPolicyTrustMismatchRegexChecks
     },
     [pscustomobject]@{
+        Name = "production_trust_profile_missing"
+        HttpsPolicy = "controlled-qualification"
+        HttpsFaultMode = $null
+        UseSmokeFixture = $false
+        UserCaSource = $null
+        ProductionCaSource = $validatedCaFixture
+        TrustProfileMode = "missing"
+        TlsCert = $defaultHttpsCert
+        TlsKey = $defaultHttpsKey
+        Checks = $commonChecks + @(
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=ControlledQualification",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=Disabled",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_blocker=Trust profile metadata is missing.",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_reason=Trust profile metadata is missing.",
+            "[NAVIGATOR-SMOKE] tls_readiness=no",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.enabled=no",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.result=PASS"
+        )
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsSelectedBlockedRegexChecks
+    },
+    [pscustomobject]@{
+        Name = "production_trust_profile_unsupported_version"
+        HttpsPolicy = "controlled-qualification"
+        HttpsFaultMode = $null
+        UseSmokeFixture = $false
+        UserCaSource = $null
+        ProductionCaSource = $validatedCaFixture
+        TrustProfileMode = "unsupported-version"
+        TlsCert = $defaultHttpsCert
+        TlsKey = $defaultHttpsKey
+        Checks = $commonChecks + @(
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=ControlledQualification",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=Disabled",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_blocker=Trust profile is missing required metadata or uses an unsupported profile version/value.",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_reason=Trust profile is missing required metadata or uses an unsupported profile version/value.",
+            "[NAVIGATOR-SMOKE] tls_readiness=no",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.enabled=no",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.result=PASS"
+        )
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsSelectedBlockedRegexChecks
+    },
+    [pscustomobject]@{
+        Name = "production_critical_name_constraints"
+        HttpsPolicy = "controlled-qualification"
+        HttpsFaultMode = $null
+        UseSmokeFixture = $false
+        UserCaSource = $null
+        ProductionCaSource = $criticalNameConstraintsCaFixture
+        TlsCert = $defaultHttpsCert
+        TlsKey = $defaultHttpsKey
+        Checks = $manifestBlockedChecks + @(
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_path=/certs/ca-bundle.pem",
+            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=ProductionRootStore",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_status=Loaded",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_parse_status=ParseError",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_pem_blocks=1",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_parsed_certs=0",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_detail=CA bundle rejected because one or more certificates were unsupported or malformed; filtered trust parsing is disabled.",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_status=Loaded",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_hash_match=yes",
+            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_policy=TrustStoreMalformed",
+            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=ProductionRootStore",
+            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_public_ready=no",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=ControlledQualification",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=Disabled",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_validated_navigation_enabled=no",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_broad_public_enabled=no",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_blocker=CA bundle rejected because one or more certificates were unsupported or malformed; filtered trust parsing is disabled.",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_reason=CA bundle rejected because one or more certificates were unsupported or malformed; filtered trust parsing is disabled.",
+            "[NAVIGATOR-SMOKE] tls_prereq.tls_backend_status=CaParseFailed",
+            "[NAVIGATOR-SMOKE] tls_readiness=no",
+            "[NAVIGATOR-SMOKE] tls_smoke.result=FAIL",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.enabled=no",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.result=PASS"
+        )
+        RegexChecks = Merge-CheckMaps -Base $clockUnavailableRegexChecks -Extra @{
+            '\[NAVIGATOR-SMOKE\] tls_prereq\.wall_clock_epoch=[1-9][0-9]+' = "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_epoch=<positive Unix seconds>"
+            '\[NAVIGATOR-SMOKE\] tls_prereq\.wall_clock_utc=20[2-9][0-9]-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z' = "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_utc=<plausible UTC date>"
+            '\[NAVIGATOR-SMOKE\] tls_prereq\.tls_backend_status=CaParseFailed' = "[NAVIGATOR-SMOKE] tls_prereq.tls_backend_status=CaParseFailed"
+            '\[NAVIGATOR-SMOKE\] tls_prereq\.root_ca_bytes=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] tls_prereq.root_ca_bytes=<positive bytes>"
+            '\[NAVIGATOR-SMOKE\] tls_prereq\.root_ca_manifest_sha256=[0-9a-f]{64}' = "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_sha256=<64 hex>"
+            '\[NAVIGATOR-SMOKE\] tls_prereq\.root_ca_computed_sha256=[0-9a-f]{64}' = "[NAVIGATOR-SMOKE] tls_prereq.root_ca_computed_sha256=<64 hex>"
+        }
+    },
+    [pscustomobject]@{
+        Name = "public_candidate_missing_approval_evidence"
+        HttpsPolicy = "public-pilot-candidate"
+        HttpsFaultMode = $null
+        UseSmokeFixture = $false
+        UserCaSource = $null
+        ProductionCaSource = $validatedCaFixture
+        TrustProfileMode = "missing-approval"
+        TlsCert = $defaultHttpsCert
+        TlsKey = $defaultHttpsKey
+        Checks = $commonChecks + @(
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=PublicPilotCandidate",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=Disabled",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_blocker=Release-approved trust profile is missing approval evidence.",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_reason=Release-approved trust profile is missing approval evidence.",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_requested=no",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_broad_public_enabled=no",
+            "[NAVIGATOR-SMOKE] tls_readiness=no",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.enabled=no",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.result=PASS"
+        )
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsSelectedBlockedRegexChecks
+    },
+    [pscustomobject]@{
         Name = "production_untrusted_root"
-        HttpsPolicy = "production-validated"
+        HttpsPolicy = "controlled-qualification"
         HttpsFaultMode = "untrusted-root"
         UseSmokeFixture = $false
         UserCaSource = $null
@@ -1999,7 +2116,7 @@ $scenarioDefinitions = @(
         TlsKey = $untrustedHttpsKey
         Checks = $commonChecks + @(
             "[NAVIGATOR-SMOKE] tls_prereq.https_smoke_fault_mode=UntrustedRoot",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=ProductionValidated",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=ControlledQualification",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_validated_navigation_enabled=yes",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_requested=no",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_broad_public_enabled=no",
@@ -2024,7 +2141,7 @@ $scenarioDefinitions = @(
     },
     [pscustomobject]@{
         Name = "production_expired_cert"
-        HttpsPolicy = "production-validated"
+        HttpsPolicy = "controlled-qualification"
         HttpsFaultMode = "expired-cert"
         UseSmokeFixture = $false
         UserCaSource = $null
@@ -2033,7 +2150,7 @@ $scenarioDefinitions = @(
         TlsKey = $expiredHttpsKey
         Checks = $commonChecks + @(
             "[NAVIGATOR-SMOKE] tls_prereq.https_smoke_fault_mode=ExpiredCertificate",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=ProductionValidated",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=ControlledQualification",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_validated_navigation_enabled=yes",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_requested=no",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_broad_public_enabled=no",
@@ -2110,7 +2227,7 @@ $scenarioDefinitions = @(
     },
     [pscustomobject]@{
         Name = "production_clock_unavailable"
-        HttpsPolicy = "production-validated"
+        HttpsPolicy = "controlled-qualification"
         HttpsFaultMode = $null
         UseSmokeFixture = $false
         UserCaSource = $null
@@ -2125,7 +2242,7 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_epoch=(unavailable)",
             "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_utc=(unavailable)",
             "[NAVIGATOR-SMOKE] tls_prereq.tls_backend_status=ClockCallbackUnavailable",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=ProductionValidated",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=ControlledQualification",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=Disabled",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_validated_navigation_enabled=no",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_requested=no",
@@ -2437,11 +2554,11 @@ function Assert-NavigatorHttpsQualificationAttestation {
         [string]$manifest.test_only -ne 'no') {
         throw 'Reused artifact rejected: required controlled CA bundle or its compatible manifest is missing, stale, or mismatched.'
     }
-    if ($policy -notmatch '(?im)^production-validated$' -or
+    if ($policy -notmatch '(?im)^controlled-qualification$' -or
         $policy -match '(?im)^public-https-pilot\s*=\s*enabled$' -or
         $policy -ne [string]$attestation.policy.content -or
         (Get-NavigatorHttpsFileHash -LiteralPath $policyPath) -ne [string]$attestation.policy.sha256) {
-        throw 'Reused artifact rejected: required production-validated test policy is missing, stale, or incompatible.'
+        throw 'Reused artifact rejected: controlled-qualification policy is missing, stale, or incompatible.'
     }
     if ([int]$attestation.trust.root_count -ne 1 -or
         [string]$attestation.trust.source_fixture_sha256 -ne $fixtureHash) {
@@ -2571,6 +2688,7 @@ try {
                 -CandidateProductionReady:$effectiveCandidateProductionReadyForScenario `
                 -UserManifestMode $(if ($scenario.UserManifestMode) { [string]$scenario.UserManifestMode } else { "normal" }) `
                 -ProductionManifestMode $(if ($scenario.ProductionManifestMode) { [string]$scenario.ProductionManifestMode } else { "normal" }) `
+                -TrustProfileMode $(if ($scenario.TrustProfileMode) { [string]$scenario.TrustProfileMode } else { "normal" }) `
                 -UseSmokeFixture $scenario.UseSmokeFixture `
                 -EnablePersistentNavigation:($scenario.PSObject.Properties.Match("PersistentNavigation").Count -gt 0 -and $scenario.PersistentNavigation) `
                 -EnableRealPublicProbe:$enableRealPublicProbeForScenario `

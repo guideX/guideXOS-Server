@@ -65,7 +65,9 @@ function Get-NavigatorCaBundleProfile {
         }
         "shipped-public" {
             return [pscustomobject]@{
-                ProductionReady = "yes"
+                # Historical release label retained in older sidecars is not
+                # approval evidence. Regenerated manifests are conservative.
+                ProductionReady = "no"
                 TestOnly = "no"
             }
         }

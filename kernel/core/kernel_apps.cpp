@@ -9422,8 +9422,8 @@ void NavigatorApp::buildRuntimeDocument()
     addBlock(BLOCK_LIST_ITEM, "HTTP: enabled for numeric IPv4 and hostname HTTP/1.1 GET/POST with redirects and chunked decoding");
     addBlock(BLOCK_LIST_ITEM, "DNS: enabled-basic for A/IPv4 records; HTTP redirects: enabled, limit 5; HTTP chunked transfer decoding: enabled");
     addBlock(BLOCK_LIST_ITEM, "Remote PNG/JPEG: enabled-basic for numeric IPv4 and hostname http:// PNG/JPEG images; Downloads: enabled for unsupported HTTP(S) content within the response body limit");
-    addBlock(BLOCK_LIST_ITEM, "Bookmark persistence: unavailable; bookmarks are in-memory defaults; HTTPS/TLS: controlled local smoke remains available, and ProductionValidated trust-store policy enables arbitrary-origin bare-metal https:// with DNS, SNI, certificate, and hostname checks without plaintext fallback");
-    addBlock(BLOCK_LIST_ITEM, "Public HTTPS: enabled for arbitrary hostnames only after ProductionValidated trust-store prerequisites; IPv4-only, bounded, and fail-closed without a real production CA bundle");
+    addBlock(BLOCK_LIST_ITEM, "Bookmark persistence: unavailable; bookmarks are in-memory defaults; HTTPS/TLS: controlled local smoke and explicit .guidexos.test qualification use certificate and hostname validation; public-origin HTTPS remains disabled pending authenticated release approval");
+    addBlock(BLOCK_LIST_ITEM, "Public HTTPS: disabled; unsigned manifest readiness labels and configuration overrides cannot authorize arbitrary hostnames");
     addBlock(BLOCK_LIST_ITEM, "TLS backend: Mbed TLS bare-metal transport is ready with CA and hostname validation");
     addBlock(BLOCK_LIST_ITEM, "TLS policy layer: shared HttpByteStream transport policy selects plain TCP HTTP, local allowlisted Mbed TLS, or policy-validated Mbed TLS; plaintext fallback stays disabled");
     addBlock(BLOCK_LIST_ITEM, "Content encodings: identity, gzip, and zlib-wrapped deflate are decoded under the bounded body policy; unsupported br and stacked encodings produce a friendly document after successful TLS");
@@ -9757,8 +9757,8 @@ void NavigatorApp::buildHttpsUnsupportedDocument(const char* url, bool redirecte
     m_blockCount = 0;
     addBlock(BLOCK_HEADING, redirected ? "HTTPS Redirect Unsupported" : "HTTPS Unsupported");
     addBlock(BLOCK_PARAGRAPH, redirected
-        ? "Navigator only follows HTTPS redirects that satisfy the active bare-metal TLS policy. ProductionValidated trust enables arbitrary hostnames; other policy states remain fail-closed."
-        : "Bare-metal Navigator https:// requires either the controlled local smoke allowlist, dev fixture policy, or ProductionValidated trust prerequisites. Otherwise navigation fails closed.");
+        ? "Navigator only follows HTTPS redirects that satisfy the active bare-metal TLS policy. Controlled qualification is limited to .guidexos.test fixture hosts; public origins remain fail-closed."
+        : "Bare-metal Navigator https:// requires the controlled local smoke allowlist or an explicit .guidexos.test fixture policy. Public origins remain fail-closed.");
     if (detail && detail[0]) addBlock(BLOCK_PARAGRAPH, detail);
     addBlock(BLOCK_LINK, "Page Info", "about:page-info");
     addBlock(BLOCK_LINK, "Go to about:navigator", "about:navigator");
@@ -10555,8 +10555,6 @@ static const char* kNavigatorRealPublicProbeCaBytesPath = "/config/navigator/rea
 static const char* kNavigatorRealPublicProbeCaBytesCompatPath = "/config/navigator/RPUBCABY.TXT";
 static const char* kNavigatorRealPublicProbeCaCertsPath = "/config/navigator/real-public-https-ca-bundle-certs.txt";
 static const char* kNavigatorRealPublicProbeCaCertsCompatPath = "/config/navigator/RPUBCART.TXT";
-static const char* kNavigatorRealPublicProbeCaEnabledPath = "/config/navigator/real-public-https-ca-bundle-enabled.txt";
-static const char* kNavigatorRealPublicProbeCaEnabledCompatPath = "/config/navigator/RPUBCAEN.TXT";
 static const char* kNavigatorRealPublicProbeDefaultTarget = "https://sha256.badssl.com/";
 static const char* kNavigatorRealPublicProbeReviewedAllowlistName = "guidexos-reviewed-public-https-v0.7";
 static const uint32_t kNavigatorSmokeTextFileMaxBytes = 512u;
@@ -11406,6 +11404,7 @@ static gxos::web::HttpTransportPolicyDecision kernel_http_transport_policy_for_h
         serial::puts(caInfo.manifest.hashMatch ? "yes\n" : "no\n");
     }
     const bool policyValidatedEnabled =
+        httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::ControlledQualification ||
         httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::UserTrustStoreDevMode ||
         httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::ProductionValidated;
     const bool productionValidated =
@@ -11416,7 +11415,9 @@ static gxos::web::HttpTransportPolicyDecision kernel_http_transport_policy_for_h
                 strcopy(reason,
                     httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::UserTrustStoreDevMode
                         ? "Explicit validated HTTPS dev-mode fixture matched."
-                        : "Explicit validated HTTPS production fixture matched.",
+                        : (httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::ControlledQualification
+                            ? "Controlled HTTPS qualification fixture matched."
+                            : "Explicit validated HTTPS production fixture matched."),
                     reasonSize);
             }
             return kernel_http_policy_validated_tls_transport_policy(reason);
@@ -11446,7 +11447,9 @@ static gxos::web::HttpTransportPolicyDecision kernel_http_transport_policy_for_h
     }
 
     if ((httpsPolicy.selectedState == gxos::GxosValidatedHttpsPolicyState::UserTrustStoreDevMode ||
-         httpsPolicy.selectedState == gxos::GxosValidatedHttpsPolicyState::ProductionValidated) &&
+         httpsPolicy.selectedState == gxos::GxosValidatedHttpsPolicyState::ProductionValidated ||
+         httpsPolicy.selectedState == gxos::GxosValidatedHttpsPolicyState::ControlledQualification ||
+         httpsPolicy.selectedState == gxos::GxosValidatedHttpsPolicyState::PublicPilotCandidate) &&
         httpsPolicy.blocker && httpsPolicy.blocker[0]) {
         if (reason && reasonSize > 0) strcopy(reason, httpsPolicy.blocker, reasonSize);
         return kernel_http_blocked_policy_transport_policy(reason);
@@ -15652,8 +15655,11 @@ bool NavigatorApp::smokeHttpsUnsupportedDocument(const char* url, const char* ex
         !httpsPolicy.broadPublicHttpsEnabled;
     const bool selectedButBlocked =
         (httpsPolicy.selectedState == gxos::GxosValidatedHttpsPolicyState::UserTrustStoreDevMode ||
-         httpsPolicy.selectedState == gxos::GxosValidatedHttpsPolicyState::ProductionValidated) &&
+         httpsPolicy.selectedState == gxos::GxosValidatedHttpsPolicyState::ProductionValidated ||
+         httpsPolicy.selectedState == gxos::GxosValidatedHttpsPolicyState::ControlledQualification ||
+         httpsPolicy.selectedState == gxos::GxosValidatedHttpsPolicyState::PublicPilotCandidate) &&
         !(httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::UserTrustStoreDevMode ||
+          httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::ControlledQualification ||
           httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::ProductionValidated) &&
         httpsPolicy.blocker && httpsPolicy.blocker[0];
     const bool selectedOrBroadPublicBlocked = selectedButBlocked || broadPublicBlocked;
@@ -16725,7 +16731,6 @@ struct NavigatorRealPublicProbeConfig {
     bool enabled;
     bool requireSuccess;
     bool targetValid;
-    bool publicCaOptInEnabled;
     bool reviewedOverrideEnabled;
     bool reviewedTargetMatched;
     char targetUrl[160];
@@ -16899,15 +16904,6 @@ static NavigatorRealPublicProbeConfig navigator_real_public_probe_config()
             nav_smoke_text_equals_insensitive(requireToken, "enabled");
     }
 
-    char enabledToken[32];
-    if (nav_smoke_read_vfs_token_file(kNavigatorRealPublicProbeCaEnabledPath,
-            kNavigatorRealPublicProbeCaEnabledCompatPath, enabledToken, sizeof(enabledToken))) {
-        config.publicCaOptInEnabled =
-            nav_smoke_text_equals_insensitive(enabledToken, "1") ||
-            nav_smoke_text_equals_insensitive(enabledToken, "true") ||
-            nav_smoke_text_equals_insensitive(enabledToken, "yes") ||
-            nav_smoke_text_equals_insensitive(enabledToken, "enabled");
-    }
     char reviewedOverrideToken[32];
     if (nav_smoke_read_vfs_token_file(kNavigatorRealPublicProbeReviewedOverridePath,
             kNavigatorRealPublicProbeReviewedOverrideCompatPath,
@@ -17005,23 +17001,23 @@ static const char* navigator_real_public_probe_prerequisite_blocker(
         return
             httpsPolicy.publicHttpsPilotReason && httpsPolicy.publicHttpsPilotReason[0]
                 ? httpsPolicy.publicHttpsPilotReason
-                : "Real public HTTPS probe requires ProductionValidated trust prerequisites.";
+                : "Public HTTPS remains disabled until signature-verified release approval and security prerequisites are available.";
     }
 
     if (trustStorePolicy.state != gxos::GxosTrustStorePolicyState::TrustStoreParsed) {
         return
             trustStorePolicy.error && trustStorePolicy.error[0]
                 ? trustStorePolicy.error
-                : "Real public HTTPS probe requires a parsed production CA bundle.";
+                : "Public HTTPS requires an authenticated release-approved trust profile in addition to a parsed CA bundle.";
     }
 
     if (trustStorePolicy.source != gxos::GxosTrustStoreSource::ProductionPublicProbeTrust) {
-        return "Real public HTTPS probe requires a production CA bundle at /certs/ca-bundle.pem.";
+        return "Public HTTPS requires a signature-verified release-approved trust profile; a production CA bundle alone is insufficient.";
     }
 
     if (!trustStorePolicy.publicInternetReady) {
         return
-            "Real public HTTPS probe requires an opt-in public-root production CA bundle; deterministic validated fixture trust is not public internet trust.";
+            "Public HTTPS remains disabled because no authenticated release approval or supported public root policy is configured.";
     }
 
     return nullptr;
@@ -17029,7 +17025,8 @@ static const char* navigator_real_public_probe_prerequisite_blocker(
 
 static bool navigator_https_policy_state_enabled(gxos::GxosValidatedHttpsPolicyState state)
 {
-    return state == gxos::GxosValidatedHttpsPolicyState::UserTrustStoreDevMode ||
+    return state == gxos::GxosValidatedHttpsPolicyState::ControlledQualification ||
+        state == gxos::GxosValidatedHttpsPolicyState::UserTrustStoreDevMode ||
         state == gxos::GxosValidatedHttpsPolicyState::ProductionValidated;
 }
 
@@ -17040,7 +17037,8 @@ static bool navigator_https_policy_effectively_enabled(const gxos::GxosValidated
 
 static bool navigator_https_policy_selected(const gxos::GxosValidatedHttpsPolicyInfo& info)
 {
-    return navigator_https_policy_state_enabled(info.selectedState);
+    return navigator_https_policy_state_enabled(info.selectedState) ||
+        info.selectedState == gxos::GxosValidatedHttpsPolicyState::PublicPilotCandidate;
 }
 
 static bool navigator_https_policy_selected_but_blocked(const gxos::GxosValidatedHttpsPolicyInfo& info)
@@ -17060,6 +17058,7 @@ static bool navigator_https_cert_fault_expected(NavigatorHttpsSmokeFaultMode mod
 static const char* navigator_https_policy_host_for_info(const gxos::GxosValidatedHttpsPolicyInfo& info)
 {
     if (info.selectedState == gxos::GxosValidatedHttpsPolicyState::ProductionValidated ||
+        info.selectedState == gxos::GxosValidatedHttpsPolicyState::ControlledQualification ||
         info.state == gxos::GxosValidatedHttpsPolicyState::ProductionValidated) {
         return kNavigatorPolicyProdHttpsHost;
     }
@@ -18509,15 +18508,15 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial::puts("[NAVIGATOR-SMOKE] capability.http_dns=enabled-basic A records\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_redirects=enabled limit 5\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_chunked=enabled\n");
-    serial::puts("[NAVIGATOR-SMOKE] capability.https_tls=controlled local smoke remains enabled for guidexos.test:8443/navigator-smoke/; ProductionValidated trust-store policy enables arbitrary-origin IPv4 HTTPS with CA, SNI, and hostname checks and no plaintext fallback\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.https_tls=controlled local smoke and explicit .guidexos.test qualification use CA, SNI, and hostname checks; public-origin HTTPS remains disabled pending authenticated release approval\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.tls_backend=Mbed TLS transport ready with CA and hostname validation\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.tls_smoke_local=enabled wrong-host and direct hook diagnostics remain available\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_transport=shared HttpByteStream policy layer (PlainTcpHttp + LocalAllowlistedTlsHttps + PolicyValidatedTlsHttps)\n");
-    serial::puts("[NAVIGATOR-SMOKE] capability.tls_policy_layer=shared HttpByteStream transport policy layer selects plain TCP HTTP, local allowlisted Mbed TLS, or policy-validated Mbed TLS; production trust enables arbitrary-origin HTTPS, plaintext fallback stays disabled, and policy stays fail-closed by default\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.tls_policy_layer=shared HttpByteStream transport policy layer selects plain TCP HTTP, local allowlisted Mbed TLS, or explicit controlled qualification; public HTTPS remains disabled pending signature-verified release approval, plaintext fallback stays disabled, and policy defaults fail-closed\n");
     serial::puts("[NAVIGATOR-SMOKE] coverage.direct_https_allowlist=covered\n");
     serial::puts("[NAVIGATOR-SMOKE] coverage.direct_https_unsupported=covered\n");
-    serial::puts("[NAVIGATOR-SMOKE] coverage.http_to_https_redirect_policy=local allowlist, validated fixture HTTPS, and controlled public HTTPS pilot redirect policy are covered\n");
-    serial::puts("[NAVIGATOR-SMOKE] coverage.real_public_https_probe=opt-in only; sha256.badssl.com production-public HTTPS probe reports pass, skip, or fail without weakening validation\n");
+    serial::puts("[NAVIGATOR-SMOKE] coverage.http_to_https_redirect_policy=local allowlist, validated fixture HTTPS, controlled qualification, and blocked public-candidate redirect policy are covered\n");
+    serial::puts("[NAVIGATOR-SMOKE] coverage.real_public_https_probe=guarded diagnostic lane; runtime remains blocked until signature-verified release approval and supported public trust policy are configured\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.remote_png=enabled-basic numeric IPv4 and hostname http:// PNG images\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.downloads=unavailable for bare-metal HTTP v0.1\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.css_lite=enabled for embedded style blocks\n");
