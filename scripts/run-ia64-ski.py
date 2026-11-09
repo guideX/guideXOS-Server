@@ -192,6 +192,7 @@ def validate_break_probe_elf(artifact: Path) -> dict[str, int]:
     required = ("ia64_ivt", "ia64_ivt_end", "ivt_break",
                 "ia64_break_exception_entry", "ia64_break_exception_test",
                 "ia64_break_slot1_bundle", "ia64_break_slot2_bundle",
+                "ia64_break_slot1_post_rfi_capture", "ia64_break_slot2_continuation",
                 "rse_backing_store_base", "rse_backing_store_top")
     missing = [name for name in required if name not in elf.symbols]
     if missing:
@@ -206,6 +207,10 @@ def validate_break_probe_elf(artifact: Path) -> dict[str, int]:
     return {"ivt": base,
             "break_slot1": elf.symbols["ia64_break_slot1_bundle"]["value"],
             "break_slot2": elf.symbols["ia64_break_slot2_bundle"]["value"],
+            "post_rfi_slot1_continuation": elf.symbols[
+                "ia64_break_slot1_post_rfi_capture"]["value"],
+            "post_rfi_slot2_continuation": elf.symbols[
+                "ia64_break_slot2_continuation"]["value"],
             "rse_base": elf.symbols["rse_backing_store_base"]["value"],
             "rse_top": elf.symbols["rse_backing_store_top"]["value"]}
 
@@ -226,30 +231,60 @@ def extract_ski_counts(stdout_text: str, stderr_text: str, counts_path: Path) ->
 
 
 def parse_break_post_rfi_psr_observations(
-        stdout_text: str) -> tuple[dict[str, int] | None, list[str]]:
-    """Parse optional direct PSR reads emitted immediately after each rfi return."""
+        stdout_text: str, contract: dict[str, Any]) -> tuple[dict[str, dict[str, int]], list[str]]:
+    """Parse and attest both immediate post-rfi capture records."""
     marker = "IA64_BREAK_POST_RFI_PSR"
     lines = [line for line in stdout_text.splitlines() if line.startswith(marker)]
-    if not lines:
-        return None, []
-
     errors: list[str] = []
-    observations: dict[str, int] = {}
+    observations: dict[str, dict[str, int]] = {}
     if len(lines) != 2:
         errors.append("expected exactly two direct post-rfi PSR observations")
-    for line in lines:
+    expected_records = (
+        ("slot1", 0x6a17, contract["post_rfi_slot1_continuation"], 2, 1,
+         0xBEEFC0DE4B505231),
+        ("slot2", 0x6a18, contract["post_rfi_slot2_continuation"], 0, 2,
+         0xBEEFC0DE4B505232),
+    )
+    for index, line in enumerate(lines):
         match = re.fullmatch(
-            r"IA64_BREAK_POST_RFI_PSR slot=(slot1|slot2) PSR=(0x[0-9A-Fa-f]+)",
+            r"IA64_BREAK_POST_RFI_PSR slot=(slot1|slot2) "
+            r"immediate=(0x[0-9A-Fa-f]+) continuation=(0x[0-9A-Fa-f]+) "
+            r"return_slot=(0x[0-9A-Fa-f]+) order=(0x[0-9A-Fa-f]+) "
+            r"valid=(0x[0-9A-Fa-f]+) PSR=(0x[0-9A-Fa-f]+)",
             line.strip())
         if not match:
-            errors.append("malformed direct post-rfi PSR observation")
+            errors.append("malformed direct post-rfi PSR record")
             continue
-        slot, value = match.groups()
+        slot, *raw_values = match.groups()
         if slot in observations:
-            errors.append(f"duplicate direct post-rfi PSR observation for {slot}")
+            errors.append(f"duplicate direct post-rfi PSR record for {slot}")
             continue
-        psr = int(value, 16)
-        observations[slot] = psr
+        immediate, continuation, return_slot, order, valid, psr = (
+            int(value, 16) for value in raw_values)
+        observations[slot] = {
+            "immediate": immediate,
+            "continuation": continuation,
+            "return_slot": return_slot,
+            "order": order,
+            "valid": valid,
+            "PSR": psr,
+        }
+        if index < len(expected_records):
+            expected_slot, expected_immediate, expected_continuation, expected_return_slot, \
+                expected_order, expected_valid = expected_records[index]
+            if slot != expected_slot:
+                errors.append("post-rfi capture order contradicts the instruction path")
+            expected_fields = {
+                "immediate": expected_immediate,
+                "continuation": expected_continuation,
+                "return_slot": expected_return_slot,
+                "order": expected_order,
+                "valid": expected_valid,
+            }
+            for field, expected in expected_fields.items():
+                actual = observations[slot][field]
+                if actual != expected:
+                    errors.append(f"{slot} post-rfi {field}={actual:#x}, expected {expected:#x}")
         if ((psr >> 14) & 1) != 0 or ((psr >> 13) & 1) != 1:
             errors.append(f"{slot} post-rfi PSR did not restore i=0 and ic=1")
     missing = {"slot1", "slot2"} - observations.keys()
@@ -275,7 +310,8 @@ def validate_exception_return_state(saved_ipsr: int, expected_slot: int,
 
 def validate_break_output(stdout_text: str, contract: dict[str, Any]) -> list[str]:
     errors: list[str] = []
-    post_rfi_observations, post_rfi_errors = parse_break_post_rfi_psr_observations(stdout_text)
+    post_rfi_observations, post_rfi_errors = parse_break_post_rfi_psr_observations(
+        stdout_text, contract)
     errors.extend(post_rfi_errors)
     pass_marker = contract["pass_marker"]
     fail_marker = contract["fail_marker"]
@@ -331,7 +367,7 @@ def validate_break_output(stdout_text: str, contract: dict[str, Any]) -> list[st
         else:
             for state_error in validate_exception_return_state(
                     ipsr, slot,
-                    post_rfi_observations.get(name) if post_rfi_observations is not None else None):
+                    post_rfi_observations.get(name, {}).get("PSR")):
                 errors.append(f"{name} {state_error}")
         if isr is None or ((isr >> 41) & 7) != slot or (isr & (1 << 38)) or (isr & 0xffff):
             errors.append(f"{name} saved ISR does not match the expected faulting slot")
@@ -538,8 +574,9 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
         "break_exception_evidence_errors": break_evidence_errors,
         "break_exception_expected_faults": (
             break_exception_contract["expected_faults"] if break_exception_contract else None),
-        "break_exception_post_rfi_psr_observations": (
-            parse_break_post_rfi_psr_observations(stdout_text)[0]
+        "break_exception_post_rfi_observations": (
+            parse_break_post_rfi_psr_observations(
+                stdout_text, break_exception_contract)[0]
             if break_exception_contract else None),
     }
     (capture_dir / "run-result.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
@@ -617,7 +654,7 @@ def run_smoke(args: argparse.Namespace) -> int:
 
 def validate_probe_manifest_fields(manifest: dict[str, Any]) -> None:
     expected = {
-        "schema": "guidexos-ia64-break-exception-probe-v1",
+        "schema": "guidexos-ia64-break-exception-probe-v2",
         "profile": "break-probe",
         "guest_execution_authorized": "probe-only",
         "system_mode": "-forcesystem",
@@ -626,6 +663,10 @@ def validate_probe_manifest_fields(manifest: dict[str, Any]) -> None:
         "break_immediates": [0x6a17, 0x6a18],
         "expected_break_faults": 2,
         "expected_continuations": [1, 1],
+        "post_rfi_capture_required": True,
+        "post_rfi_capture_order": ["slot1", "slot2"],
+        "post_rfi_return_slots": [2, 0],
+        "post_rfi_before_cleanup": True,
         "all_other_vectors": "fail-stop",
     }
     mismatches = [f"{key}={manifest.get(key)!r}, expected {value!r}"
@@ -645,6 +686,8 @@ def make_break_contract(symbols: dict[str, int], success_classification: str,
         "record_prefix": record_prefix,
         "break_slot1": symbols["break_slot1"],
         "break_slot2": symbols["break_slot2"],
+        "post_rfi_slot1_continuation": symbols["post_rfi_slot1_continuation"],
+        "post_rfi_slot2_continuation": symbols["post_rfi_slot2_continuation"],
         "rse_base": symbols["rse_base"],
         "rse_top": symbols["rse_top"],
         "success_classification": success_classification,
@@ -657,7 +700,7 @@ def run_break_probe(args: argparse.Namespace) -> int:
         raise GateError(f"selected Break probe ELF does not exist: {args.artifact}")
     manifest = check_manifest(args.artifact, args.manifest, "break-probe",
                               args.expected_sha256,
-                              "guidexos-ia64-break-exception-probe-v1")
+                              "guidexos-ia64-break-exception-probe-v2")
     validate_probe_manifest_fields(manifest)
     symbols = validate_break_probe_elf(args.artifact)
     validate_direct_system_elf(args.artifact)
@@ -700,6 +743,8 @@ def run_break_probe(args: argparse.Namespace) -> int:
         "load_ranges": validate_direct_system_elf(args.artifact),
         "break_record_symbols": {
             "slot1": symbols["break_slot1"], "slot2": symbols["break_slot2"],
+            "post_rfi_slot1_continuation": symbols["post_rfi_slot1_continuation"],
+            "post_rfi_slot2_continuation": symbols["post_rfi_slot2_continuation"],
             "rse_base": symbols["rse_base"], "rse_top": symbols["rse_top"],
         },
     })
@@ -710,7 +755,7 @@ def run_break_probe(args: argparse.Namespace) -> int:
 def verify_break_probe_evidence(manifest: dict[str, Any]) -> dict[str, Any]:
     evidence = manifest.get("break_exception_probe")
     if not isinstance(evidence, dict) or \
-            evidence.get("schema") != "guidexos-ia64-break-probe-evidence-v1" or \
+            evidence.get("schema") != "guidexos-ia64-break-probe-evidence-v2" or \
             evidence.get("qualified") is not True or \
             evidence.get("expected_faults") != 2:
         raise GateError("candidate manifest lacks a passing independent Break probe record")
@@ -740,7 +785,7 @@ def verify_break_probe_evidence(manifest: dict[str, Any]) -> dict[str, Any]:
 
     probe_manifest = check_manifest(probe_elf, probe_manifest_path, "break-probe",
                                     evidence["artifact_sha256"],
-                                    "guidexos-ia64-break-exception-probe-v1")
+                                    "guidexos-ia64-break-exception-probe-v2")
     validate_probe_manifest_fields(probe_manifest)
     probe_symbols = validate_break_probe_elf(probe_elf)
     run_record = read_json(run_result_path, "Break probe run result")
@@ -777,12 +822,17 @@ def verify_break_probe_evidence(manifest: dict[str, Any]) -> dict[str, Any]:
     errors = validate_break_output(stdout_text, contract)
     if errors:
         raise GateError("independent Break probe output failed revalidation: " + "; ".join(errors))
+    observations, observation_errors = parse_break_post_rfi_psr_observations(stdout_text, contract)
+    if observation_errors or run_record.get("break_exception_post_rfi_observations") != observations:
+        raise GateError("Break probe run-result does not bind both direct post-rfi captures")
     probe_load_ranges = validate_direct_system_elf(probe_elf)
     if run_record.get("load_ranges") != probe_load_ranges:
         raise GateError("Break probe result does not bind the current system-mode PT_LOAD ranges")
     if run_record.get("break_record_symbols") != {
             "slot1": probe_symbols["break_slot1"],
             "slot2": probe_symbols["break_slot2"],
+            "post_rfi_slot1_continuation": probe_symbols["post_rfi_slot1_continuation"],
+            "post_rfi_slot2_continuation": probe_symbols["post_rfi_slot2_continuation"],
             "rse_base": probe_symbols["rse_base"],
             "rse_top": probe_symbols["rse_top"]}:
         raise GateError("Break probe result does not bind its exception-record/RSE symbols")
@@ -844,6 +894,7 @@ def run_kernel(args: argparse.Namespace) -> int:
                 manifest.get("cpu_state_checkpoint_schema") != "guidexos-ia64-cpu-state-checkpoints-v1" or \
                 manifest.get("cpu_state_static_gates") != "PASS" or \
                 manifest.get("break_exception_static_gates") != "PASS" or \
+                manifest.get("post_rfi_static_gates") != "PASS" or \
                 manifest.get("guest_execution_authorized") is not False:
             raise GateError("early-exec manifest or static gates are incomplete")
         probe_evidence = verify_break_probe_evidence(manifest)
@@ -899,7 +950,10 @@ def run_kernel(args: argparse.Namespace) -> int:
     break_exception_contract = None
     if args.profile == "early-exec":
         candidate_elf = ELF_VALIDATOR.Elf64(args.artifact)
-        required_symbols = ("ia64_ivt", "rse_backing_store_base", "rse_backing_store_top")
+        required_symbols = ("ia64_ivt", "rse_backing_store_base", "rse_backing_store_top",
+                            "ia64_break_slot1_bundle", "ia64_break_slot2_bundle",
+                            "ia64_break_slot1_post_rfi_capture",
+                            "ia64_break_slot2_continuation")
         if any(name not in candidate_elf.symbols for name in required_symbols):
             raise GateError("candidate ELF lacks CPU-state checkpoint expectation symbols")
         checkpoint_expectations = {
@@ -910,6 +964,10 @@ def run_kernel(args: argparse.Namespace) -> int:
         break_exception_contract = make_break_contract(
             {"break_slot1": candidate_elf.symbols["ia64_break_slot1_bundle"]["value"],
              "break_slot2": candidate_elf.symbols["ia64_break_slot2_bundle"]["value"],
+             "post_rfi_slot1_continuation": candidate_elf.symbols[
+                 "ia64_break_slot1_post_rfi_capture"]["value"],
+             "post_rfi_slot2_continuation": candidate_elf.symbols[
+                 "ia64_break_slot2_continuation"]["value"],
              "rse_base": candidate_elf.symbols["rse_backing_store_base"]["value"],
              "rse_top": candidate_elf.symbols["rse_backing_store_top"]["value"]},
             "BREAK_EXCEPTION_KERNEL_PASS", "IA64_BREAK_RECORD",

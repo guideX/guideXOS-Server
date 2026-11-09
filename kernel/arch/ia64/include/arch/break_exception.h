@@ -7,12 +7,18 @@ namespace kernel {
 namespace arch {
 namespace ia64 {
 
-static const uint64_t BREAK_EXCEPTION_SCHEMA_VERSION = 1;
+static const uint64_t BREAK_EXCEPTION_SCHEMA_VERSION = 2;
 static const uint64_t BREAK_EXCEPTION_VALID_MARKER = 0xBEEFC0DE4B56414Cull;
 static const uint64_t BREAK_EXCEPTION_COMPLETION_SLOT1 = 0xBEEFC0DE4B000001ull;
 static const uint64_t BREAK_EXCEPTION_COMPLETION_SLOT2 = 0xBEEFC0DE4B000002ull;
 static const uint64_t BREAK_EXCEPTION_RETURN_SLOT1 = 0xBEEFC0DE4B100001ull;
 static const uint64_t BREAK_EXCEPTION_RETURN_SLOT2 = 0xBEEFC0DE4B100002ull;
+static const uint64_t BREAK_POST_RFI_VALID_SLOT1 = 0xBEEFC0DE4B505231ull;
+static const uint64_t BREAK_POST_RFI_VALID_SLOT2 = 0xBEEFC0DE4B505232ull;
+static const uint64_t BREAK_POST_RFI_ORDER_SLOT1 = 1;
+static const uint64_t BREAK_POST_RFI_ORDER_SLOT2 = 2;
+static const uint64_t BREAK_POST_RFI_RETURN_SLOT1 = 2;
+static const uint64_t BREAK_POST_RFI_RETURN_SLOT2 = 0;
 
 struct alignas(16) BreakExceptionRecord {
     uint64_t valid_marker;
@@ -31,9 +37,14 @@ struct alignas(16) BreakExceptionRecord {
     uint64_t return_marker;
     uint64_t continuation_count;
     uint64_t saved_predicates;
+    uint64_t post_rfi_psr;
+    uint64_t post_rfi_continuation;
+    uint64_t post_rfi_return_slot;
+    uint64_t post_rfi_order;
+    uint64_t post_rfi_valid_marker;
 };
 
-static_assert(sizeof(BreakExceptionRecord) == 128, "break exception record layout changed");
+static_assert(sizeof(BreakExceptionRecord) == 176, "break exception record layout changed");
 static_assert(offsetof(BreakExceptionRecord, valid_marker) == 0, "record validity offset changed");
 static_assert(offsetof(BreakExceptionRecord, schema_version) == 8, "record version offset changed");
 static_assert(offsetof(BreakExceptionRecord, vector_offset) == 16, "record vector offset changed");
@@ -50,11 +61,20 @@ static_assert(offsetof(BreakExceptionRecord, completion_marker) == 96, "record c
 static_assert(offsetof(BreakExceptionRecord, return_marker) == 104, "record continuation offset changed");
 static_assert(offsetof(BreakExceptionRecord, continuation_count) == 112, "record count offset changed");
 static_assert(offsetof(BreakExceptionRecord, saved_predicates) == 120, "record predicates offset changed");
+static_assert(offsetof(BreakExceptionRecord, post_rfi_psr) == 128, "post-rfi PSR offset changed");
+static_assert(offsetof(BreakExceptionRecord, post_rfi_continuation) == 136, "post-rfi continuation offset changed");
+static_assert(offsetof(BreakExceptionRecord, post_rfi_return_slot) == 144, "post-rfi return-slot offset changed");
+static_assert(offsetof(BreakExceptionRecord, post_rfi_order) == 152, "post-rfi order offset changed");
+static_assert(offsetof(BreakExceptionRecord, post_rfi_valid_marker) == 160, "post-rfi validity offset changed");
 
 extern "C" volatile BreakExceptionRecord ia64_break_exception_record_slot1;
 extern "C" volatile BreakExceptionRecord ia64_break_exception_record_slot2;
+extern "C" volatile uint64_t ia64_break_post_rfi_sequence;
 extern "C" char ia64_break_slot1_bundle[];
 extern "C" char ia64_break_slot2_bundle[];
+extern "C" char ia64_break_slot1_post_rfi_capture[];
+extern "C" char ia64_break_slot2_continuation[];
+extern "C" char ia64_break_exception_test_cleanup[];
 extern "C" char rse_backing_store_base[];
 extern "C" char rse_backing_store_top[];
 

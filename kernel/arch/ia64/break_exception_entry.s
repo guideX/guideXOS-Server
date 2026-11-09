@@ -15,6 +15,8 @@
 .equ BREAK_COMPLETION_SLOT2,    0xbeefc0de4b000002
 .equ BREAK_RETURN_SLOT1,        0xbeefc0de4b100001
 .equ BREAK_RETURN_SLOT2,        0xbeefc0de4b100002
+.equ BREAK_POST_RFI_VALID_SLOT1, 0xbeefc0de4b505231
+.equ BREAK_POST_RFI_VALID_SLOT2, 0xbeefc0de4b505232
 
 .equ REC_VALID,                 0
 .equ REC_SCHEMA,                8
@@ -32,19 +34,29 @@
 .equ REC_RETURN,                104
 .equ REC_CONTINUATION_COUNT,    112
 .equ REC_SAVED_PR,              120
+.equ REC_POST_RFI_PSR,          128
+.equ REC_POST_RFI_CONTINUATION, 136
+.equ REC_POST_RFI_RETURN_SLOT,  144
+.equ REC_POST_RFI_ORDER,        152
+.equ REC_POST_RFI_VALID,        160
 
 .section .bss.break_exception, "aw", @nobits
 .align 16
 .global ia64_break_exception_record_slot1
 .type ia64_break_exception_record_slot1, @object
 ia64_break_exception_record_slot1:
-    .skip 128
-.size ia64_break_exception_record_slot1, 128
+    .skip 176
+.size ia64_break_exception_record_slot1, 176
 .global ia64_break_exception_record_slot2
 .type ia64_break_exception_record_slot2, @object
 ia64_break_exception_record_slot2:
-    .skip 128
-.size ia64_break_exception_record_slot2, 128
+    .skip 176
+.size ia64_break_exception_record_slot2, 176
+.global ia64_break_post_rfi_sequence
+.type ia64_break_post_rfi_sequence, @object
+ia64_break_post_rfi_sequence:
+    .skip 8
+.size ia64_break_post_rfi_sequence, 8
 
 .section .text.break_exception, "ax"
 .align 16
@@ -151,7 +163,7 @@ break_exception_record:
     cmp.eq p6, p7 = r25, r0 ;;
 (p7) br.cond.sptk break_exception_fail ;;
 
-    mov r25 = 1 ;;
+    mov r25 = 2 ;;
     mov r27 = r28 ;;
     adds r28 = REC_SCHEMA, r28 ;;
     st8 [r28] = r25, 8 ;;
@@ -230,13 +242,16 @@ ia64_break_exception_test:
     adds r15 = 176, sp ;;
     st8 [r15] = r8 ;;
     mov r8 = ar.unat ;;
+    mov r15 = sp ;;
     adds r15 = 128, r15 ;;
     st8 [r15] = r8 ;;
-    adds r15 = -128, r15 ;;
+    mov r15 = sp ;;
+    adds r15 = 192, r15 ;;
+    st8.spill [r15] = r13 ;;
     mov r8 = pr ;;
+    mov r15 = sp ;;
     adds r15 = 136, r15 ;;
     st8 [r15] = r8 ;;
-    adds r15 = -136, r15 ;;
     mov r15 = sp ;;
     st8.spill [r15] = r16, 8 ;;
     st8.spill [r15] = r17, 8 ;;
@@ -296,23 +311,66 @@ ia64_break_exception_test:
     movl r15 = 0x401 ;;
     mov pr = r15, -1 ;;
     mov r8 = r0 ;;
+    mov r10 = 1 ;;
+    mov r11 = 2 ;;
     ssm psr.ic ;;
 
 .align 16
 .global ia64_break_slot1_bundle
 ia64_break_slot1_bundle:
-    { .mii
+    { .mib
         nop.m 0
         break.i BREAK_IMMEDIATE_SLOT1
-        (p10) adds r8 = 1, r8 ;;
+        br.sptk.many ia64_break_slot1_post_rfi_capture ;;
+    }
+.align 16
+.global ia64_break_slot1_post_rfi_capture
+ia64_break_slot1_post_rfi_capture:
+    /* RI=2 lands on the B-slot branch above; this is its first PSR-capable slot. */
+    { .mii
+        mov r15 = psr
+        nop.i 0
+        nop.i 0 ;;
     }
 .global ia64_break_slot1_resume_tail
 ia64_break_slot1_resume_tail:
     { .mii
         nop.m 0
+        (p10) adds r8 = 1, r8
+        nop.i 0 ;;
+    }
+    { .mii
+        nop.m 0
         (p11) adds r8 = 2, r8
         nop.i 0
     }
+
+    /* Save the sampled PSR first, then attest this is the first return path. */
+    movl r14 = ia64_break_exception_record_slot1 ;;
+    adds r13 = REC_POST_RFI_VALID, r14 ;;
+    ld8 r9 = [r13] ;;
+    cmp.eq p6, p7 = r9, r0 ;;
+(p7) br.cond.sptk ia64_break_exception_test_fail ;;
+    adds r13 = REC_POST_RFI_PSR, r14 ;;
+    st8 [r13] = r15 ;;
+    movl r13 = ia64_break_post_rfi_sequence ;;
+    ld8 r9 = [r13] ;;
+    cmp.eq p6, p7 = r9, r0 ;;
+(p7) br.cond.sptk ia64_break_exception_test_fail ;;
+    st8 [r13] = r10 ;;
+    adds r13 = REC_POST_RFI_CONTINUATION, r14 ;;
+    movl r9 = ia64_break_slot1_post_rfi_capture ;;
+    st8 [r13] = r9 ;
+    adds r13 = REC_POST_RFI_RETURN_SLOT, r14 ;;
+    st8 [r13] = r11 ;
+    adds r13 = REC_POST_RFI_ORDER, r14 ;;
+    st8 [r13] = r10 ;
+    mf ;;
+    adds r13 = REC_POST_RFI_VALID, r14 ;;
+    movl r9 = BREAK_POST_RFI_VALID_SLOT1 ;;
+    st8 [r13] = r9 ;;
+    mf ;;
+
     movl r15 = ia64_break_exception_record_slot1 ;;
     adds r15 = REC_CONTINUATION_COUNT, r15 ;;
     st8 [r15] = r8 ;;
@@ -390,7 +448,8 @@ ia64_break_slot2_bundle:
 .global ia64_break_slot2_continuation
 ia64_break_slot2_continuation:
     { .mii
-        nop.m 0
+        /* RFI resumes at slot 0, so the PSR read is the first instruction. */
+        mov r15 = psr
         (p10) adds r8 = 1, r8
         nop.i 0 ;;
     }
@@ -399,6 +458,33 @@ ia64_break_slot2_continuation:
         (p11) adds r8 = 2, r8
         nop.i 0
     }
+
+    /* Save the sampled PSR first, then attest this is the second return path. */
+    movl r14 = ia64_break_exception_record_slot2 ;;
+    adds r13 = REC_POST_RFI_VALID, r14 ;;
+    ld8 r9 = [r13] ;;
+    cmp.eq p6, p7 = r9, r0 ;;
+(p7) br.cond.sptk ia64_break_exception_test_fail ;;
+    adds r13 = REC_POST_RFI_PSR, r14 ;;
+    st8 [r13] = r15 ;
+    movl r13 = ia64_break_post_rfi_sequence ;;
+    ld8 r9 = [r13] ;;
+    cmp.eq p6, p7 = r9, r10 ;;
+(p7) br.cond.sptk ia64_break_exception_test_fail ;;
+    st8 [r13] = r11 ;
+    adds r13 = REC_POST_RFI_CONTINUATION, r14 ;;
+    movl r9 = ia64_break_slot2_continuation ;;
+    st8 [r13] = r9 ;
+    adds r13 = REC_POST_RFI_RETURN_SLOT, r14 ;;
+    st8 [r13] = r0 ;
+    adds r13 = REC_POST_RFI_ORDER, r14 ;;
+    st8 [r13] = r11 ;
+    mf ;;
+    adds r13 = REC_POST_RFI_VALID, r14 ;;
+    movl r9 = BREAK_POST_RFI_VALID_SLOT2 ;;
+    st8 [r13] = r9 ;;
+    mf ;;
+
     movl r15 = ia64_break_exception_record_slot2 ;;
     adds r15 = REC_CONTINUATION_COUNT, r15 ;;
     st8 [r15] = r8 ;;
@@ -466,6 +552,7 @@ ia64_break_slot2_continuation:
 ia64_break_exception_test_fail:
     mov r8 = 1 ;;
 ia64_break_exception_test_cleanup:
+.global ia64_break_exception_test_cleanup
     mov r9 = r8 ;;
     rsm psr.ic ;;
     bsw.0 ;;
@@ -488,6 +575,9 @@ ia64_break_exception_test_cleanup:
     ld8.fill r29 = [r15], 8 ;;
     ld8.fill r30 = [r15], 8 ;;
     ld8.fill r31 = [r15], 8 ;;
+    mov r15 = sp ;;
+    adds r15 = 192, r15 ;;
+    ld8.fill r13 = [r15] ;;
     mov r15 = sp ;;
     adds r15 = 128, r15 ;;
     ld8 r15 = [r15] ;;

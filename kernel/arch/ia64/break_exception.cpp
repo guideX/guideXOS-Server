@@ -33,6 +33,11 @@ enum RecordError : uint64_t {
     RECORD_BAD_COMPLETION  = 1ull << 11,
     RECORD_BAD_RETURN      = 1ull << 12,
     RECORD_BAD_PREDICATES  = 1ull << 13,
+    RECORD_BAD_POST_RFI_PSR = 1ull << 14,
+    RECORD_BAD_POST_RFI_IDENTITY = 1ull << 15,
+    RECORD_BAD_POST_RFI_ORDER = 1ull << 16,
+    RECORD_BAD_POST_RFI_VALID = 1ull << 17,
+    RECORD_BAD_POST_RFI_SEQUENCE = 1ull << 18,
 };
 
 bool is_zero(const volatile BreakExceptionRecord& record)
@@ -44,13 +49,18 @@ bool is_zero(const volatile BreakExceptionRecord& record)
         record.saved_isr == 0 && record.handler_entry_psr == 0 &&
         record.handler_entry_rsc == 0 && record.handler_entry_bsp == 0 &&
         record.completion_marker == 0 && record.return_marker == 0 &&
-        record.continuation_count == 0 && record.saved_predicates == 0;
+        record.continuation_count == 0 && record.saved_predicates == 0 &&
+        record.post_rfi_psr == 0 && record.post_rfi_continuation == 0 &&
+        record.post_rfi_return_slot == 0 && record.post_rfi_order == 0 &&
+        record.post_rfi_valid_marker == 0;
 }
 
 uint64_t validate_one(const volatile BreakExceptionRecord& record,
                       uint64_t expected_immediate, uint64_t expected_iip,
                       uint64_t expected_slot, uint64_t expected_completion,
-                      uint64_t expected_return)
+                      uint64_t expected_return, uint64_t expected_continuation,
+                      uint64_t expected_return_slot, uint64_t expected_order,
+                      uint64_t expected_post_rfi_valid)
 {
     uint64_t errors = 0;
     if (record.valid_marker != BREAK_EXCEPTION_VALID_MARKER) errors |= RECORD_BAD_VALID;
@@ -88,6 +98,15 @@ uint64_t validate_one(const volatile BreakExceptionRecord& record,
         errors |= RECORD_BAD_RETURN;
     if (record.saved_predicates != 0x401ull)
         errors |= RECORD_BAD_PREDICATES;
+    if ((record.post_rfi_psr & (PSR_I | PSR_IC)) != PSR_IC)
+        errors |= RECORD_BAD_POST_RFI_PSR;
+    if (record.post_rfi_continuation != expected_continuation ||
+        record.post_rfi_return_slot != expected_return_slot)
+        errors |= RECORD_BAD_POST_RFI_IDENTITY;
+    if (record.post_rfi_order != expected_order)
+        errors |= RECORD_BAD_POST_RFI_ORDER;
+    if (record.post_rfi_valid_marker != expected_post_rfi_valid)
+        errors |= RECORD_BAD_POST_RFI_VALID;
     return errors;
 }
 
@@ -113,6 +132,20 @@ void report_record(const char* name, const volatile BreakExceptionRecord& record
     ski_console::puts("\r\n");
 }
 
+void report_post_rfi(const char* name, uint64_t immediate,
+                     const volatile BreakExceptionRecord& record)
+{
+    ski_console::puts("IA64_BREAK_POST_RFI_PSR slot=");
+    ski_console::puts(name);
+    ski_console::puts(" immediate="); ski_console::put_hex(immediate);
+    ski_console::puts(" continuation="); ski_console::put_hex(record.post_rfi_continuation);
+    ski_console::puts(" return_slot="); ski_console::put_hex(record.post_rfi_return_slot);
+    ski_console::puts(" order="); ski_console::put_hex(record.post_rfi_order);
+    ski_console::puts(" valid="); ski_console::put_hex(record.post_rfi_valid_marker);
+    ski_console::puts(" PSR="); ski_console::put_hex(record.post_rfi_psr);
+    ski_console::puts("\r\n");
+}
+
 } // namespace
 
 uint64_t ia64_break_exception_validate_records()
@@ -120,11 +153,19 @@ uint64_t ia64_break_exception_validate_records()
     uint64_t errors = validate_one(
         ia64_break_exception_record_slot1, 0x6a17,
         reinterpret_cast<uint64_t>(ia64_break_slot1_bundle), 1,
-        BREAK_EXCEPTION_COMPLETION_SLOT1, BREAK_EXCEPTION_RETURN_SLOT1);
+        BREAK_EXCEPTION_COMPLETION_SLOT1, BREAK_EXCEPTION_RETURN_SLOT1,
+        reinterpret_cast<uint64_t>(ia64_break_slot1_post_rfi_capture),
+        BREAK_POST_RFI_RETURN_SLOT1, BREAK_POST_RFI_ORDER_SLOT1,
+        BREAK_POST_RFI_VALID_SLOT1);
     errors |= validate_one(
         ia64_break_exception_record_slot2, 0x6a18,
         reinterpret_cast<uint64_t>(ia64_break_slot2_bundle), 2,
-        BREAK_EXCEPTION_COMPLETION_SLOT2, BREAK_EXCEPTION_RETURN_SLOT2);
+        BREAK_EXCEPTION_COMPLETION_SLOT2, BREAK_EXCEPTION_RETURN_SLOT2,
+        reinterpret_cast<uint64_t>(ia64_break_slot2_continuation),
+        BREAK_POST_RFI_RETURN_SLOT2, BREAK_POST_RFI_ORDER_SLOT2,
+        BREAK_POST_RFI_VALID_SLOT2);
+    if (ia64_break_post_rfi_sequence != BREAK_POST_RFI_ORDER_SLOT2)
+        errors |= RECORD_BAD_POST_RFI_SEQUENCE;
     return errors;
 }
 
@@ -132,7 +173,8 @@ uint64_t ia64_break_exception_validate_records()
 bool run_break_exception_qualification()
 {
     if (!is_zero(ia64_break_exception_record_slot1) ||
-        !is_zero(ia64_break_exception_record_slot2)) {
+        !is_zero(ia64_break_exception_record_slot2) ||
+        ia64_break_post_rfi_sequence != 0) {
         ski_console::puts("IA64_BREAK_EXCEPTION_RESULT=FAIL reason=stale-record\r\n");
         return false;
     }
@@ -141,6 +183,8 @@ bool run_break_exception_qualification()
     const uint64_t errors = ia64_break_exception_validate_records();
     report_record("slot1", ia64_break_exception_record_slot1);
     report_record("slot2", ia64_break_exception_record_slot2);
+    report_post_rfi("slot1", 0x6a17, ia64_break_exception_record_slot1);
+    report_post_rfi("slot2", 0x6a18, ia64_break_exception_record_slot2);
     ski_console::puts("IA64_BREAK_EXCEPTION_VALIDATION errors=");
     ski_console::put_hex(errors);
     ski_console::puts(" test=");

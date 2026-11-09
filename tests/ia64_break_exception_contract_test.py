@@ -37,14 +37,27 @@ def valid_output(prefix: str = "IA64_BREAK_RECORD") -> str:
     return "\n".join((
         record_line("slot1", 0x6A17, 0x109000, 1).replace("IA64_BREAK_RECORD", prefix),
         record_line("slot2", 0x6A18, 0x109010, 2).replace("IA64_BREAK_RECORD", prefix),
+        post_rfi_line("slot1", 0x6A17, 0x109020, 2, 1, 0xBEEFC0DE4B505231, 0x2000),
+        post_rfi_line("slot2", 0x6A18, 0x109030, 0, 2, 0xBEEFC0DE4B505232, 0x2000),
         "IA64_BREAK_EXCEPTION_VALIDATION errors=0x0 test=0x0",
         "IA64_BREAK_EXCEPTION_RESULT=PASS",
     )) + "\n"
 
 
+def post_rfi_line(slot: str, immediate: int, continuation: int, return_slot: int,
+                  order: int, valid: int, psr: int) -> str:
+    return (
+        f"IA64_BREAK_POST_RFI_PSR slot={slot} immediate=0x{immediate:x} "
+        f"continuation=0x{continuation:x} return_slot=0x{return_slot:x} "
+        f"order=0x{order:x} valid=0x{valid:x} PSR=0x{psr:x}"
+    )
+
+
 def contract() -> dict[str, object]:
     return runner.make_break_contract(
         {"break_slot1": 0x109000, "break_slot2": 0x109010,
+         "post_rfi_slot1_continuation": 0x109020,
+         "post_rfi_slot2_continuation": 0x109030,
          "rse_base": 0x110000, "rse_top": 0x120000},
         "BREAK_EXCEPTION_PROBE_PASS", "IA64_BREAK_RECORD",
         "IA64_BREAK_EXCEPTION_RESULT=PASS", "IA64_BREAK_EXCEPTION_RESULT=FAIL",
@@ -69,28 +82,77 @@ class BreakExceptionContractTests(unittest.TestCase):
         errors = runner.validate_break_output(output, contract())
         self.assertTrue(any("duplicate IA64_BREAK_RECORD slot1" in error for error in errors), errors)
 
-    def test_rfi_restoration_when_direct_psr_observations_are_present(self) -> None:
+    def test_rfi_restoration_requires_both_direct_psr_records(self) -> None:
         incoming_ipsr = (1 << 13) | (1 << 44) | (1 << 41)
         self.assertEqual(runner.validate_exception_return_state(incoming_ipsr, 1, 0x2000), [])
         lost_ic = runner.validate_exception_return_state(incoming_ipsr, 1, 0x0000)
         self.assertTrue(any("post-rfi PSR did not restore i=0 and ic=1" in error
                             for error in lost_ic), lost_ic)
 
-        correct = valid_output() + (
-            "IA64_BREAK_POST_RFI_PSR slot=slot1 PSR=0x2000\n"
-            "IA64_BREAK_POST_RFI_PSR slot=slot2 PSR=0x2000\n")
+        correct = valid_output()
         self.assertEqual(runner.validate_break_output(correct, contract()), [])
 
-        incorrect = valid_output() + (
-            "IA64_BREAK_POST_RFI_PSR slot=slot1 PSR=0x0\n"
-            "IA64_BREAK_POST_RFI_PSR slot=slot2 PSR=0x2000\n")
+        incorrect = correct.replace(
+            "slot=slot1 immediate=0x6a17 continuation=0x109020 return_slot=0x2 order=0x1 "
+            "valid=0xbeefc0de4b505231 PSR=0x2000",
+            "slot=slot1 immediate=0x6a17 continuation=0x109020 return_slot=0x2 order=0x1 "
+            "valid=0xbeefc0de4b505231 PSR=0x0")
         errors = runner.validate_break_output(incorrect, contract())
         self.assertTrue(any("slot1 post-rfi PSR did not restore i=0 and ic=1" in error
                             for error in errors), errors)
 
-        duplicate = correct + "IA64_BREAK_POST_RFI_PSR slot=slot1 PSR=0x2000\n"
+        duplicate = correct + post_rfi_line(
+            "slot1", 0x6A17, 0x109020, 2, 1, 0xBEEFC0DE4B505231, 0x2000) + "\n"
         errors = runner.validate_break_output(duplicate, contract())
         self.assertTrue(any("exactly two direct post-rfi" in error for error in errors), errors)
+        self.assertTrue(any("duplicate direct post-rfi PSR record" in error for error in errors), errors)
+
+    def test_post_rfi_negative_fixtures_reject_missing_stale_and_wrong_state(self) -> None:
+        valid = valid_output()
+        slot1_line = post_rfi_line(
+            "slot1", 0x6A17, 0x109020, 2, 1, 0xBEEFC0DE4B505231, 0x2000)
+        missing = valid.replace(slot1_line + "\n", "")
+        errors = runner.validate_break_output(missing, contract())
+        self.assertTrue(any("exactly two direct post-rfi" in error for error in errors), errors)
+        self.assertTrue(any("missing direct post-rfi" in error for error in errors), errors)
+
+        stale = valid.replace("valid=0xbeefc0de4b505231", "valid=0x0")
+        errors = runner.validate_break_output(stale, contract())
+        self.assertTrue(any("slot1 post-rfi valid" in error for error in errors), errors)
+
+        i_enabled = valid.replace("PSR=0x2000", "PSR=0x6000", 1)
+        errors = runner.validate_break_output(i_enabled, contract())
+        self.assertTrue(any("slot1 post-rfi PSR did not restore i=0 and ic=1" in error
+                            for error in errors), errors)
+
+    def test_post_rfi_identity_and_capture_order_are_enforced(self) -> None:
+        valid = valid_output()
+        lines = valid.splitlines()
+        first = next(i for i, line in enumerate(lines) if line.startswith("IA64_BREAK_POST_RFI_PSR"))
+        second = first + 1
+        lines[first], lines[second] = lines[second], lines[first]
+        errors = runner.validate_break_output("\n".join(lines) + "\n", contract())
+        self.assertTrue(any("capture order contradicts the instruction path" in error
+                            for error in errors), errors)
+        self.assertTrue(any("post-rfi immediate" in error for error in errors), errors)
+
+        reversed_identity = valid.replace(
+            "IA64_BREAK_POST_RFI_PSR slot=slot1 immediate=0x6a17 continuation=0x109020",
+            "IA64_BREAK_POST_RFI_PSR slot=slot1 immediate=0x6a18 continuation=0x109030", 1)
+        errors = runner.validate_break_output(reversed_identity, contract())
+        self.assertTrue(any("slot1 post-rfi immediate" in error for error in errors), errors)
+
+        wrong_order = valid.replace("order=0x2 valid=0xbeefc0de4b505232",
+                                     "order=0x1 valid=0xbeefc0de4b505232", 1)
+        errors = runner.validate_break_output(wrong_order, contract())
+        self.assertTrue(any("slot2 post-rfi order" in error for error in errors), errors)
+
+    def test_checkpoint_d_cannot_substitute_for_bad_immediate_capture(self) -> None:
+        correct_d = (
+            "IA64_CHECKPOINT_D stage=0x4 valid=0x1e7 PSR=0x2000 PSR.i=0 PSR.ic=1\n")
+        bad_direct = valid_output().replace("PSR=0x2000", "PSR=0x0", 1)
+        errors = runner.validate_break_output(correct_d + bad_direct, contract())
+        self.assertTrue(any("slot1 post-rfi PSR did not restore" in error for error in errors), errors)
 
     def test_unexpected_exception_and_duplicate_pass_marker_are_rejected(self) -> None:
         checked = contract()
@@ -165,7 +227,7 @@ class BreakExceptionContractTests(unittest.TestCase):
             self.assertEqual(result["classification"], "BREAK_EXCEPTION_PROBE_PASS")
             self.assertEqual(result["ski_fault_count"], 2)
             self.assertEqual(result["ski_instruction_count"], 0x1ADEF)
-            self.assertIsNone(result["break_exception_post_rfi_psr_observations"])
+            self.assertEqual(result["break_exception_post_rfi_observations"]["slot1"]["PSR"], 0x2000)
             self.assertTrue(result["cleanup_complete"])
             self.assertFalse(result["timed_out"])
             failed_result = json.loads(

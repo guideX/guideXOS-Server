@@ -75,7 +75,7 @@ elf = pathlib.Path(sys.argv[1]).resolve()
 manifest = pathlib.Path(sys.argv[2])
 digest = hashlib.sha256(elf.read_bytes()).hexdigest()
 manifest.write_text(json.dumps({
-    "schema": "guidexos-ia64-break-exception-probe-v1",
+    "schema": "guidexos-ia64-break-exception-probe-v2",
     "profile": "break-probe",
     "elf": elf.name,
     "sha256": digest,
@@ -86,6 +86,10 @@ manifest.write_text(json.dumps({
     "break_immediates": [0x6a17, 0x6a18],
     "expected_break_faults": 2,
     "expected_continuations": [1, 1],
+    "post_rfi_capture_required": True,
+    "post_rfi_capture_order": ["slot1", "slot2"],
+    "post_rfi_return_slots": [2, 0],
+    "post_rfi_before_cleanup": True,
     "all_other_vectors": "fail-stop",
 }, indent=2) + "\n", encoding="utf-8")
 print(f"BREAK_PROBE_SHA256={digest}")

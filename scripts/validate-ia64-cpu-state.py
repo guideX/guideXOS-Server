@@ -294,6 +294,28 @@ def validate_runtime_evidence(stdout: str, stderr: str, instruction_counts: str,
                 run_result.get("break_exception_expected_faults") != 2 or \
                 run_result.get("break_exception_evidence_errors") != []:
             errors.append("runner did not bind exactly two validated Break Instruction faults")
+        post_rfi = run_result.get("break_exception_post_rfi_observations")
+        if not isinstance(post_rfi, dict) or set(post_rfi) != {"slot1", "slot2"}:
+            errors.append("runner did not bind both immediate post-rfi PSR records")
+        else:
+            expected_post_rfi = {
+                "slot1": (0x6a17, 2, 1, 0xBEEFC0DE4B505231),
+                "slot2": (0x6a18, 0, 2, 0xBEEFC0DE4B505232),
+            }
+            for slot, (immediate, return_slot, order, valid) in expected_post_rfi.items():
+                record = post_rfi[slot]
+                psr = record.get("PSR") if isinstance(record, dict) else None
+                if not isinstance(record, dict) or \
+                        record.get("immediate") != immediate or \
+                        record.get("return_slot") != return_slot or \
+                        record.get("order") != order or record.get("valid") != valid or \
+                        not isinstance(psr, int) or ((psr >> 14) & 1) != 0 or \
+                        ((psr >> 13) & 1) != 1:
+                    errors.append(f"runner {slot} post-rfi capture is missing, stale, out of order, or has wrong PSR")
+        post_rfi_lines = [line for line in stdout.splitlines()
+                          if line.startswith("IA64_BREAK_POST_RFI_PSR")]
+        if len(post_rfi_lines) != 2:
+            errors.append("raw guest output lacks exactly two immediate post-rfi PSR records")
     elif classification == "GUEST_EXIT_ZERO" and run_result.get("ski_fault_count") not in (None, 0):
         errors.append("zero-fault kernel classification reports a simulator fault")
     simulator_output = stdout + "\n" + stderr
@@ -568,7 +590,10 @@ def validate_runtime_files(repo_root: Path, elf_path: Path, manifest_path: Path,
     except (OSError, ValueError, RuntimeError) as exc:
         return {}, errors + [f"candidate ELF cannot supply runtime invariants: {exc}"]
     symbols = candidate.symbols
-    required_symbols = ("ia64_ivt", "rse_backing_store_base", "rse_backing_store_top")
+    required_symbols = ("ia64_ivt", "rse_backing_store_base", "rse_backing_store_top",
+                        "ia64_break_slot1_bundle", "ia64_break_slot2_bundle",
+                        "ia64_break_slot1_post_rfi_capture",
+                        "ia64_break_slot2_continuation")
     if any(name not in symbols for name in required_symbols):
         return {}, errors + ["candidate ELF lacks IVT or RSE expectation symbols"]
     gp_symbol = symbols.get("__gp")
@@ -627,6 +652,10 @@ def validate_runtime_files(repo_root: Path, elf_path: Path, manifest_path: Path,
             contract = runner.make_break_contract(
                 {"break_slot1": symbols["ia64_break_slot1_bundle"]["value"],
                  "break_slot2": symbols["ia64_break_slot2_bundle"]["value"],
+                 "post_rfi_slot1_continuation": symbols[
+                     "ia64_break_slot1_post_rfi_capture"]["value"],
+                 "post_rfi_slot2_continuation": symbols[
+                     "ia64_break_slot2_continuation"]["value"],
                  "rse_base": symbols["rse_backing_store_base"]["value"],
                  "rse_top": symbols["rse_backing_store_top"]["value"]},
                 "BREAK_EXCEPTION_KERNEL_PASS", "IA64_BREAK_RECORD",
@@ -636,11 +665,12 @@ def validate_runtime_files(repo_root: Path, elf_path: Path, manifest_path: Path,
             break_errors = runner.validate_break_output(stdout, contract)
             if break_errors:
                 errors.extend(f"Break exception evidence: {error}" for error in break_errors)
-            observed_psr, observation_errors = runner.parse_break_post_rfi_psr_observations(stdout)
+            observed_psr, observation_errors = runner.parse_break_post_rfi_psr_observations(
+                stdout, contract)
             if observation_errors:
                 errors.extend(f"Break exception evidence: {error}" for error in observation_errors)
-            if run_result.get("break_exception_post_rfi_psr_observations") != observed_psr:
-                errors.append("runner post-rfi PSR observations differ from raw guest output")
+            if run_result.get("break_exception_post_rfi_observations") != observed_psr:
+                errors.append("runner post-rfi capture records differ from raw guest output")
 
     source_errors = validate_checkpoint_sources(repo_root)
     if source_errors:
@@ -699,10 +729,7 @@ def main() -> int:
             if run_record.get("classification") == "BREAK_EXCEPTION_KERNEL_PASS":
                 print("BREAK_EXCEPTION_EVIDENCE=PASS two records, exact vector/immediates/slots, "
                       "distinct return markers, and one continuation per slot")
-                if run_record.get("break_exception_post_rfi_psr_observations") is None:
-                    print("POST_RFI_PSR=UNOBSERVED before test cleanup")
-                else:
-                    print("POST_RFI_PSR=PASS direct observations match runner revalidation")
+                print("POST_RFI_PSR=PASS two ordered direct captures show PSR.i=0, PSR.ic=1 before cleanup")
                 print("SIMULATOR_FAULTS=PASS total=2 expected_break=2 unexpected=0")
             else:
                 print("SIMULATOR_FAULTS=PASS total=0")

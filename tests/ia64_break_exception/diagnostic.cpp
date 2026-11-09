@@ -28,6 +28,20 @@ void report_record(const char* name, const volatile BreakExceptionRecord& record
     ski_console::puts("\r\n");
 }
 
+void report_post_rfi(const char* name, uint64_t immediate,
+                     const volatile BreakExceptionRecord& record)
+{
+    ski_console::puts("IA64_BREAK_POST_RFI_PSR slot=");
+    ski_console::puts(name);
+    ski_console::puts(" immediate="); ski_console::put_hex(immediate);
+    ski_console::puts(" continuation="); ski_console::put_hex(record.post_rfi_continuation);
+    ski_console::puts(" return_slot="); ski_console::put_hex(record.post_rfi_return_slot);
+    ski_console::puts(" order="); ski_console::put_hex(record.post_rfi_order);
+    ski_console::puts(" valid="); ski_console::put_hex(record.post_rfi_valid_marker);
+    ski_console::puts(" PSR="); ski_console::put_hex(record.post_rfi_psr);
+    ski_console::puts("\r\n");
+}
+
 } // namespace
 
 extern "C" void break_probe_main()
@@ -35,7 +49,8 @@ extern "C" void break_probe_main()
     ski_console::init();
     ski_console::puts("IA64_BREAK_PROBE_START vector=0x2C00 immediates=0x6A17,0x6A18\r\n");
     if (ia64_break_exception_record_slot1.valid_marker != 0 ||
-        ia64_break_exception_record_slot2.valid_marker != 0) {
+        ia64_break_exception_record_slot2.valid_marker != 0 ||
+        ia64_break_post_rfi_sequence != 0) {
         ski_console::puts("IA64_BREAK_PROBE_RESULT=FAIL reason=stale-record\r\n");
         ski_console::stop();
         for (;;) asm volatile("hint @pause");
@@ -45,6 +60,8 @@ extern "C" void break_probe_main()
     const uint64_t errors = ia64_break_exception_validate_records();
     report_record("slot1", ia64_break_exception_record_slot1);
     report_record("slot2", ia64_break_exception_record_slot2);
+    report_post_rfi("slot1", 0x6a17, ia64_break_exception_record_slot1);
+    report_post_rfi("slot2", 0x6a18, ia64_break_exception_record_slot2);
     ski_console::puts("IA64_BREAK_PROBE_VALIDATION errors=");
     ski_console::put_hex(errors);
     ski_console::puts(" test=");

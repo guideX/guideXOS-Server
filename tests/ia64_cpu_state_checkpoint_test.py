@@ -51,6 +51,25 @@ def valid_guest_output() -> str:
     )) + "\r\n"
 
 
+def valid_post_rfi_records() -> dict[str, dict[str, int]]:
+    return {
+        "slot1": {"immediate": 0x6A17, "continuation": 0x109020,
+                  "return_slot": 2, "order": 1, "valid": 0xBEEFC0DE4B505231,
+                  "PSR": 0x2000},
+        "slot2": {"immediate": 0x6A18, "continuation": 0x109030,
+                  "return_slot": 0, "order": 2, "valid": 0xBEEFC0DE4B505232,
+                  "PSR": 0x2000},
+    }
+
+
+def valid_post_rfi_output() -> str:
+    return (
+        "IA64_BREAK_POST_RFI_PSR slot=slot1 immediate=0x6a17 continuation=0x109020 "
+        "return_slot=0x2 order=0x1 valid=0xbeefc0de4b505231 PSR=0x2000\n"
+        "IA64_BREAK_POST_RFI_PSR slot=slot2 immediate=0x6a18 continuation=0x109030 "
+        "return_slot=0x0 order=0x2 valid=0xbeefc0de4b505232 PSR=0x2000\n")
+
+
 class CpuStateCheckpointTests(unittest.TestCase):
     def test_current_source_obeys_mode_and_frame_contracts(self) -> None:
         self.assertEqual(validator.validate_checkpoint_sources(ROOT), [])
@@ -225,6 +244,7 @@ class CpuStateCheckpointTests(unittest.TestCase):
         stdout = valid_guest_output() + (
             "IA64_BREAK_RECORD slot1 valid=0xbeefc0de4b56414c\n"
             "IA64_BREAK_RECORD slot2 valid=0xbeefc0de4b56414c\n"
+            + valid_post_rfi_output() +
             "IA64_BREAK_EXCEPTION_RESULT=PASS\n"
             "kernel exited with status 0\n")
         parsed, parse_errors = validator.validate_checkpoint_output(
@@ -242,6 +262,7 @@ class CpuStateCheckpointTests(unittest.TestCase):
             "ski_fault_count": 2,
             "break_exception_expected_faults": 2,
             "break_exception_evidence_errors": [],
+            "break_exception_post_rfi_observations": valid_post_rfi_records(),
             "cpu_state_checkpoints": parsed,
             "cpu_state_checkpoint_errors": [],
         }
@@ -250,6 +271,18 @@ class CpuStateCheckpointTests(unittest.TestCase):
             "per-instruction counts captured", run_result, "a" * 64,
             ivt=IVT, rse_base=RSE_BASE, rse_top=RSE_TOP)
         self.assertEqual(errors, [])
+
+        wrong_post_rfi = dict(
+            run_result,
+            break_exception_post_rfi_observations={
+                **valid_post_rfi_records(),
+                "slot1": {**valid_post_rfi_records()["slot1"], "PSR": 0x6000},
+            })
+        _, post_rfi_errors = validator.validate_runtime_evidence(
+            stdout, "kernel exited with status 0\n100 insts (2 faults), 0.01 sec",
+            "per-instruction counts captured", wrong_post_rfi, "a" * 64,
+            ivt=IVT, rse_base=RSE_BASE, rse_top=RSE_TOP)
+        self.assertTrue(any("slot1 post-rfi" in error for error in post_rfi_errors), post_rfi_errors)
 
         wrong_expected_count = dict(run_result, break_exception_expected_faults=1)
         _, wrong_count_errors = validator.validate_runtime_evidence(
