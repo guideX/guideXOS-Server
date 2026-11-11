@@ -4,6 +4,7 @@
 - **Branch:** `AARCH64_SUPPORT`
 - **Starting source commit:** `65f0a0d5e79b08ba6d74aa49971635bb0321f071`
 - **Outcome:** `EL0_NATIVE_ISOLATION_DENIAL_VERIFIED` for kernel-data and GIC Distributor reads in the QEMU ARM64 guest
+- **R2 supervision outcome:** `QAC_SUPERVISION_DEFECT_LOCALIZED`; the one authorized run produced the EL0 diagnostics but missed its bounded shutdown deadline
 - **Scope:** trusted, internally constructed EL0 probes; no Studio Run, arbitrary application loading, SMP, or general process scheduling
 
 ## Candidate identity
@@ -127,6 +128,8 @@ GICv2 guest only. Physical ARM64 hardware has not been qualified. The harness
 is synchronous, uses a fixed trusted payload, masks interrupts during its short
 entry interval, and has no per-task address-space switching, cancellation, or
 timer-enforced EL0 deadline. General application loading, immutable
-Build-to-Run binding, and Studio Run remain separate work. The monitor's
-300-second shutdown bound also needs a successful rerun with the corrected
-`Starting` handling when QAC is free.
+Build-to-Run binding, and Studio Run remain separate work. The original R1
+monitor exceeded its 300-second bound after treating `Starting` as terminal.
+The QMP socket-table defect, later graceful stop and QAC release, and host-tested
+fallback correction with per-session QMP identity are recorded in
+[AARCH64_RUNSAFE2_R2_QAC_SUPERVISION.md](AARCH64_RUNSAFE2_R2_QAC_SUPERVISION.md).

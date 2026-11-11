@@ -5,6 +5,7 @@
 - **Scope:** trusted, internally constructed EL0 qualification payload only
 - **Studio Run:** disabled
 - **Outcome:** `EL0_NATIVE_ISOLATION_DENIAL_VERIFIED` — both native denial probes passed under QAC; the run's shutdown monitor exceeded its intended 300-second bound
+- **R2 QAC supervision:** `QAC_SUPERVISION_DEFECT_LOCALIZED` — the single authorized rerun produced the expected EL0 evidence but missed the bounded QMP cleanup deadline; a socket-table fallback correction now passes host regressions
 
 ## Status
 
@@ -229,13 +230,21 @@ v0.5 layout remain separate and unchanged.
 
 ## Next milestone
 
-The negative isolation milestone is guest verified for the tested QEMU
-configuration. A later QAC run should verify the corrected monitor's bounded
-shutdown behavior when the slot is available; this run's fault evidence was
-captured within 24 seconds, but its managed QEMU child exited after 365.984
-seconds because the first monitor treated the transient `Starting` state as a
-terminal state and stopped supervising it. A subsequent invocation correctly
-refused admission while another unrelated managed QEMU was active and launched
-no guest. General task scheduling, cancellation/deadlines, physical-hardware
-qualification, immutable Build-to-Run binding, and any Studio Run enablement
-remain later milestones.
+The negative isolation milestone remains guest verified for the tested QEMU
+configuration. RUNSAFE2 R2 records the monitor defect, the one authorized rerun,
+and the unqualified cleanup result in
+[AARCH64_RUNSAFE2_R2_QAC_SUPERVISION.md](AARCH64_RUNSAFE2_R2_QAC_SUPERVISION.md).
+The preserved r6 candidate produced the expected positive SVC, both permission
+faults, cleanup, and scheduler evidence. The runner missed its 45-second QMP
+cleanup deadline because the Windows socket-table query failed; exact QMP
+identity was later verified and QAC logged exit code 0 and reservation release.
+The corrected fallback passes host regressions, but the authorized attempt has
+been used and no bounded-supervision pass is claimed. The R1 negative guest
+reached all permission and scheduler checks in 23.286 seconds; its full child
+runtime was 365.984 seconds.
+
+General scheduled child execution, per-task address-space switching,
+cancellation/deadlines inside the guest, physical-hardware qualification,
+immutable Build-to-Run binding, and any Studio Run enablement remain later
+milestones. The R2 harness result does not change the privileged Phase 9
+NativeElf path or enable arbitrary application isolation.
