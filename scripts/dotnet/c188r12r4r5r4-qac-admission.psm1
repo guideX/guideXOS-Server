@@ -470,17 +470,18 @@ function Test-QacTransitionCandidateProfile {
     }
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
     $manifestHash = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToUpperInvariant()
+    $isManagedGcRootProbe = [string]$manifest.mode -ceq 'NativeAotManagedGcRootProbe'
     $isManagedSettingsObjectProbe = [string]$manifest.mode -ceq 'NativeAotManagedSettingsObjectProbe'
     $isManagedEntryProbe = [string]$manifest.mode -ceq 'NativeAotFirstManagedEntryProbe'
-    $managedEntryDispatchProfile = $isManagedEntryProbe -or $isManagedSettingsObjectProbe
-    $expectedIdentity = if ($isManagedSettingsObjectProbe) {
+    $managedEntryDispatchProfile = $isManagedEntryProbe -or $isManagedSettingsObjectProbe -or $isManagedGcRootProbe
+    $expectedIdentity = if ($isManagedSettingsObjectProbe -or $isManagedGcRootProbe) {
         'guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r2r3-managed-settings-object-v1'
     } elseif ($isManagedEntryProbe) {
         'guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r2r3-managed-entry-v1'
     } else { 'guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r2r3-transition-attribution-v1' }
-    $expectedResult = if ($isManagedSettingsObjectProbe) { 'MANAGED_SETTINGS_OBJECT_PROBE_HOSTED_READY' } elseif ($isManagedEntryProbe) { 'MANAGED_ENTRY_PROBE_HOSTED_READY' } else { 'TRANSITION_ATTRIBUTION_HOSTED_READY' }
-    $expectedNextPhase = if ($isManagedSettingsObjectProbe) { 'C188R12R4R5R4R5R2R2R4R2R3R12_Managed_Settings_Object_Guest' } elseif ($isManagedEntryProbe) { 'C188R12R4R5R2R3_First_Managed_Entry_Guest' } else { 'C188R12R4R5R4R5R2R2R4R2R3R1_InitializeModules_Transition_Attribution_Guest' }
-    if ([string]$manifest.mode -cnotin @('NativeAotInitializeModulesTransitionAttribution','NativeAotFirstManagedEntryProbe','NativeAotManagedSettingsObjectProbe') -or
+    $expectedResult = if ($isManagedGcRootProbe) { 'MANAGED_GC_ROOT_PROBE_HOSTED_READY' } elseif ($isManagedSettingsObjectProbe) { 'MANAGED_SETTINGS_OBJECT_PROBE_HOSTED_READY' } elseif ($isManagedEntryProbe) { 'MANAGED_ENTRY_PROBE_HOSTED_READY' } else { 'TRANSITION_ATTRIBUTION_HOSTED_READY' }
+    $expectedNextPhase = if ($isManagedGcRootProbe) { 'C188R13_One_Managed_GC_Collection_and_Live_Root_Guest' } elseif ($isManagedSettingsObjectProbe) { 'C188R12R4R5R4R5R2R2R4R2R3R12_Managed_Settings_Object_Guest' } elseif ($isManagedEntryProbe) { 'C188R12R4R5R2R3_First_Managed_Entry_Guest' } else { 'C188R12R4R5R4R5R2R2R4R2R3R1_InitializeModules_Transition_Attribution_Guest' }
+    if ([string]$manifest.mode -cnotin @('NativeAotInitializeModulesTransitionAttribution','NativeAotFirstManagedEntryProbe','NativeAotManagedSettingsObjectProbe','NativeAotManagedGcRootProbe') -or
         [string]$manifest.result -cne $expectedResult -or
         [string]$manifest.candidateRoot -cne $candidateFull -or
         [string]$manifest.runtimePackIdentity -cne $expectedIdentity -or
@@ -534,6 +535,25 @@ function Test-QacTransitionCandidateProfile {
          [bool]$manifest.c188R12R4R5R2R3ManagedSettingsObjectProbeContract.nativeObjectPointerPersisted -or
          [bool]$manifest.c188R12R4R5R2R3ManagedSettingsObjectProbeContract.collectionRequested)) {
         throw 'R12 managed-settings allocation, collection, or lifetime contract is missing or mismatched.'
+    }
+    if ($isManagedGcRootProbe) {
+        $gcRootContract=$manifest.c188R13ManagedGcRootProbeContract
+        if (-not [bool]$manifest.c188R13ManagedGcRootProbe -or
+            -not [bool]$manifest.managedCollectionRequested -or
+            [int]$gcRootContract.nativeRecordSizeBytes -ne 44 -or
+            [int]$gcRootContract.initialResult -ne 1122 -or
+            [int]$gcRootContract.expectedResult -ne 1123 -or
+            -not [bool]$gcRootContract.oneCollectionOnly -or
+            [string]$gcRootContract.entryMethod -cne 'HostLogProof.ManagedSettingsObjectProbe.ManagedMain' -or
+            [string]$gcRootContract.allocationHelper -cne 'RhpNewFast' -or
+            [string]$gcRootContract.collectionHelper -cne 'RhpCollect' -or
+            [string]$gcRootContract.nativeCounterApi -cne 'guideXosNativeAotC188R12R4R5ReadCounters' -or
+            [bool]$gcRootContract.finalizers -or [bool]$gcRootContract.managedThreads -or
+            [bool]$gcRootContract.concurrentGC -or [bool]$gcRootContract.nativeObjectPointerPersisted -or
+            [string]$gcRootContract.rootManagedRegister -notmatch 'RSI' -or
+            [string]$gcRootContract.generatedGcInfoEvidence -notmatch 'EnumerateLiveSlots.*ReportSlotToGC') {
+            throw 'R13 candidate managed-GC, native collection, or generated root-map contract is missing or mismatched.'
+        }
     }
     $contract = $manifest.transitionAttributionContract
     if ([string]$contract.recordSchema -cne 'fixed-size C188R12R4R5R2R3_FATAL plus C188R12R4R5R2R3_STATE' -or
@@ -621,7 +641,7 @@ function Test-QacTransitionCandidateProfile {
         $layout = $layoutEvidenceProperty.Value
         $artifactRootProperty = $manifest.PSObject.Properties['artifactRoot']
         $layoutArtifactRoot = if ($null -eq $artifactRootProperty) { '' } else { [string]$artifactRootProperty.Value }
-        $layoutPhaseName = if ($isManagedSettingsObjectProbe) { 'c188r12r4r5r4r5r2r2r4r2r3r12-managed-settings-object' } elseif ($isManagedEntryProbe) { 'c188r12r4r5r2r3-managed-entry' } else { 'c188r12r4r5r4r5r2r2r4r2r3-transition-attribution' }
+        $layoutPhaseName = if ($isManagedGcRootProbe) { 'c188r13-managed-gc-root' } elseif ($isManagedSettingsObjectProbe) { 'c188r12r4r5r4r5r2r2r4r2r3r12-managed-settings-object' } elseif ($isManagedEntryProbe) { 'c188r12r4r5r2r3-managed-entry' } else { 'c188r12r4r5r4r5r2r2r4r2r3-transition-attribution' }
         $layoutPhaseRoot = [System.IO.Path]::GetFullPath((Join-Path $layoutArtifactRoot $layoutPhaseName))
         $layoutSourceFiles = $runtime.c188r12r4r5r4ThreadStoreReadinessSourceFiles
         if ([string]::IsNullOrWhiteSpace($layoutArtifactRoot) -or
@@ -649,7 +669,11 @@ function Test-QacTransitionCandidateProfile {
         throw 'Transition candidate hosted evidence is missing, incomplete, or crossed the native-guest boundary.'
     }
     $plan = Get-Content -LiteralPath $phasePlanPath -Raw | ConvertFrom-Json -ErrorAction Stop
-    if ([string]$plan.schema -cne 'C188R12R4R5R2R3R1_GUEST_PHASE_PLAN_V1' -or
+    $expectedPhasePlanSchema = if ($isManagedGcRootProbe) { 'C188R13_GUEST_PHASE_PLAN_V1' } else { 'C188R12R4R5R2R3R1_GUEST_PHASE_PLAN_V1' }
+    $expectedGuardPath = if ($isManagedGcRootProbe) {
+        Join-Path $phaseFull ("guest-launch-attempt-" + [System.IO.Path]::GetFileName($candidateFull) + ".json")
+    } else { [string]$plan.oneBootGuard.path }
+    if ([string]$plan.schema -cne $expectedPhasePlanSchema -or
         [string]$plan.status -cne 'prepared_not_executed' -or
         [string]$plan.candidateManifest -cne $manifestPath -or
         [string]$plan.candidateMode -cne [string]$manifest.mode -or
@@ -661,12 +685,17 @@ function Test-QacTransitionCandidateProfile {
         [bool]$plan.oneBootGuard.automaticRetry -or
         -not [bool]$plan.oneBootGuard.bindsCandidateManifestSha256 -or
         -not [bool]$plan.oneBootGuard.bindsDiagnosticElfKernelAndRamdiskSha256 -or
+        ($isManagedGcRootProbe -and [System.IO.Path]::GetFullPath([string]$plan.oneBootGuard.path) -cne
+            [System.IO.Path]::GetFullPath($expectedGuardPath)) -or
         [bool]$plan.executionNotPerformed.qemuLaunched -or [bool]$plan.executionNotPerformed.qacReserved -or
-        [bool]$plan.executionNotPerformed.guardCreated -or [int]$plan.executionNotPerformed.guestBoots -ne 0) {
+        [bool]$plan.executionNotPerformed.guardCreated -or [int]$plan.executionNotPerformed.guestBoots -ne 0 -or
+        ($isManagedGcRootProbe -and ([string]$plan.executionContract[5] -notmatch 'exactly one synchronous GC\.Collect' -or
+            [string]$plan.executionContract[5] -notmatch 'native collection-count advance and completion evidence' -or
+            [string]$plan.executionContract[5] -notmatch '1123'))) {
         throw 'Prepared transition guest plan is malformed, already consumed, or allows more than one boot.'
     }
     $template = Get-Content -LiteralPath $guardTemplatePath -Raw | ConvertFrom-Json -ErrorAction Stop
-    $expectedGuardTemplateSchema = if ($isManagedSettingsObjectProbe) { 'C188R12R4R5R4R5R2R2R4R2R3R12_ONE_BOOT_GUARD_TEMPLATE_V1' } else { 'C188R12R4R5R2R3R1_ONE_BOOT_GUARD_TEMPLATE_V1' }
+    $expectedGuardTemplateSchema = if ($isManagedGcRootProbe) { 'C188R13_ONE_BOOT_GUARD_TEMPLATE_V1' } elseif ($isManagedSettingsObjectProbe) { 'C188R12R4R5R4R5R2R2R4R2R3R12_ONE_BOOT_GUARD_TEMPLATE_V1' } else { 'C188R12R4R5R2R3R1_ONE_BOOT_GUARD_TEMPLATE_V1' }
     if ([string]$template.schema -cne $expectedGuardTemplateSchema -or
         [string]$template.candidateManifest -cne $manifestPath -or
         [string]$template.diagnosticElfSha256 -cne [string]$manifest.managedElfSha256 -or
@@ -686,7 +715,7 @@ function Test-QacTransitionCandidateProfile {
         [string]$matrix.candidateMode -cne [string]$manifest.mode -or
         ([bool]$matrix.safetyGate.noManagedDispatch -eq $managedEntryDispatchProfile) -or
         ($managedDispatchConditional -ne $managedEntryDispatchProfile) -or
-        -not [bool]$matrix.safetyGate.noCollection) {
+        ([bool]$matrix.safetyGate.noCollection -eq $isManagedGcRootProbe)) {
         throw 'Transition prerequisite matrix does not preserve the diagnostic safety gate.'
     }
     if ($isManagedEntryProbe) {
@@ -777,6 +806,92 @@ function Test-QacTransitionCandidateProfile {
             [string]$r11Hosted.result -cne 'PASS' -or [bool]$r11Hosted.qemuLaunched -or
             [bool]$r11Hosted.qacReserved -or [bool]$r11Hosted.managedCollectionRequested) {
             throw 'R12 source, generated path, pinned allocation contract, or hosted regression evidence is incomplete.'
+        }
+    }
+    if ($isManagedGcRootProbe) {
+        $probeDisassembly = Join-Path $candidateFull 'managedEntryProbe.disassembly.txt'
+        $gcCollectWrapper = & $RequireContainedFile ([string]$gcRootContract.collectionWrapperDisassembly) 'R13 GC.Collect wrapper disassembly'
+        $constructorDisassembly = & $RequireContainedFile ([string]$gcRootContract.constructorDisassembly) 'R13 constructor disassembly'
+        $calculateDisassembly = & $RequireContainedFile ([string]$gcRootContract.calculateDisassembly) 'R13 field-consumer disassembly'
+        $probeSource = Join-Path $repoFull 'samples\managed\HostLogProof\ManagedGcRootProbe.cs'
+        $probeHeader = Join-Path $repoFull 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_managed_gc_root_probe.h'
+        $probeAnalyzer = Join-Path $repoFull 'scripts\dotnet\analyze-c188r13-managed-gc-root.ps1'
+        $probeTestScript = Join-Path $repoFull 'scripts\dotnet\test-c188r13-managed-gc-root.ps1'
+        $probeHostedResultsPath = & $RequireContainedFile ([string]$gcRootContract.hostedResults) 'R13 managed-GC hosted-test results'
+        $r11HostedResultsPath = & $RequireContainedFile ([string]$manifest.c188R12R4R5R2R3ManagedEntryProbeContract.hostedResults) 'R11 managed-entry regression results'
+        foreach ($target in @(
+            @($probeDisassembly,[string]$artifactHashes.candidateManagedEntryProbeDisassembly,'R13 ManagedMain disassembly'),
+            @($gcCollectWrapper,[string]$artifactHashes.candidateGcCollectWrapperDisassembly,'R13 GC.Collect wrapper disassembly'),
+            @($constructorDisassembly,[string]$artifactHashes.candidateSettingsObjectConstructorDisassembly,'R13 constructor disassembly'),
+            @($calculateDisassembly,[string]$artifactHashes.candidateSettingsObjectCalculateDisassembly,'R13 field-consumer disassembly'),
+            @($probeSource,[string]$artifactHashes.managedGcRootProbeSource,'R13 managed probe source'),
+            @($probeHeader,[string]$artifactHashes.managedGcRootProbeRuntimeHeader,'R13 native record header'),
+            @($probeAnalyzer,[string]$artifactHashes.managedGcRootProbeAnalyzer,'R13 serial analyzer'),
+            @($probeTestScript,[string]$artifactHashes.managedGcRootProbeHostedTestScript,'R13 hosted-test source'),
+            @(([System.IO.Path]::GetFullPath((Join-Path $repoFull 'scripts\dotnet\c188r12r4r5r4-qac-admission.psm1'))),[string]$artifactHashes.transitionQacAdmissionModule,'R13 QAC admission module'),
+            @($probeHostedResultsPath,[string]$artifactHashes.managedGcRootProbeHostedTestResults,'R13 hosted results'),
+            @($r11HostedResultsPath,[string]$artifactHashes.managedEntryRegressionHostedTestResults,'R11 managed-entry regression results')
+        )) { & $RequireHash $target[0] $target[1] $target[2] }
+
+        $probeMapText = Get-Content -LiteralPath $managedMap -Raw
+        $probeDisassemblyText = Get-Content -LiteralPath $probeDisassembly -Raw
+        $wrapperDisassemblyText = Get-Content -LiteralPath $gcCollectWrapper -Raw
+        $constructorText = Get-Content -LiteralPath $constructorDisassembly -Raw
+        $calculateText = Get-Content -LiteralPath $calculateDisassembly -Raw
+        $rhCollectMap = [regex]::Match($probeMapText,'(?m)^\s*0001:[0-9A-Fa-f]{8}\s+S_P_CoreLib_System_Runtime_InternalCalls__RhCollect\s+(?<address>[0-9A-Fa-f]{16})\b')
+        $rhpCollectMap = [regex]::Match($probeMapText,'(?m)^\s*0001:[0-9A-Fa-f]{8}\s+RhpCollect\s+(?<address>[0-9A-Fa-f]{16})\s+f(?:\s|$)')
+        $calculateMap = [regex]::Match($probeMapText,'(?m)^\s*0001:[0-9A-Fa-f]{8}\s+\S*DisplaySettingsProbe__Calculate\S*\s+(?<address>[0-9A-Fa-f]{16})\b')
+        $r13CallPathValid = $rhCollectMap.Success -and $rhpCollectMap.Success -and $calculateMap.Success
+        $collectionCallPosition = -1
+        $postCollectionMutationPosition = -1
+        $postCollectionCalculatePosition = -1
+        if ($r13CallPathValid) {
+            $rhCollectAddress = ([Convert]::ToUInt64($rhCollectMap.Groups['address'].Value,16)).ToString('x')
+            $rhpCollectAddress = ([Convert]::ToUInt64($rhpCollectMap.Groups['address'].Value,16)).ToString('x')
+            $calculateAddress = ([Convert]::ToUInt64($calculateMap.Groups['address'].Value,16)).ToString('x')
+            $r13CallPathValid = $probeDisassemblyText -match ('(?mi)\bcall\s+0x' + $rhCollectAddress + '\b') -and
+                $wrapperDisassemblyText -match ('(?mi)\bcall\s+0x' + $rhpCollectAddress + '\b')
+            $collectionMatch = [regex]::Match($probeDisassemblyText,'(?mi)\bcall\s+0x' + $rhCollectAddress + '\b')
+            if ($collectionMatch.Success) {
+                $collectionCallPosition = $collectionMatch.Index
+                $postCollectionMutationPosition = $probeDisassemblyText.IndexOf('DWORD PTR [rsi+0x10],0x3',$collectionCallPosition,[StringComparison]::OrdinalIgnoreCase)
+                if ($postCollectionMutationPosition -ge 0) {
+                    $calculateMatch = [regex]::Match($probeDisassemblyText.Substring($postCollectionMutationPosition),'(?mi)\bcall\s+0x' + $calculateAddress + '\b')
+                    if ($calculateMatch.Success) { $postCollectionCalculatePosition = $postCollectionMutationPosition + $calculateMatch.Index }
+                }
+            }
+        }
+        if (-not (Select-String -LiteralPath $managedMap -Pattern 'ManagedSettingsObjectProbe.*ManagedMain' -Quiet) -or
+            -not (Select-String -LiteralPath $managedMap -Pattern 'DisplaySettingsProbe.*___ctor' -Quiet) -or
+            -not (Select-String -LiteralPath $managedMap -Pattern 'RhpNewFast' -Quiet) -or
+            -not (Select-String -LiteralPath $managedMap -Pattern 'guideXosNativeAotC188R12R4R5ReadCounters' -Quiet) -or
+            $probeDisassemblyText -notmatch '52313345' -or $probeDisassemblyText -notmatch '52313351' -or
+            $probeDisassemblyText -notmatch '52313343' -or $probeDisassemblyText -notmatch '52313352' -or
+            $probeDisassemblyText -notmatch 'mov\s+rsi,rax' -or -not $r13CallPathValid -or
+            $postCollectionMutationPosition -le $collectionCallPosition -or
+            $postCollectionCalculatePosition -le $postCollectionMutationPosition -or
+            $probeMapText -notmatch '\.managedcode\$I' -or
+            $probeMapText -notmatch 'EnumerateLiveSlots' -or $probeMapText -notmatch 'ReportSlotToGC' -or
+            $constructorText -notmatch '5231334[fF]' -or
+            [string]$runtime.c188r12r4r5r2r3ManagedSettingsObjectAllocationContract.helper -cne 'RhpNewFast' -or
+            [string]$runtime.c188r12r4r5r2r3ManagedSettingsObjectAllocationContract.stockHelper -cne 'guideXosStockRhpNewFast' -or
+            -not [bool]$runtime.c188r12r4r5r2r3ManagedSettingsObjectAllocationContract.implicitCollectionCountRecorded) {
+            throw 'R13 map, generated live-root path, actual GC helper linkage, or stock allocation contract is incomplete.'
+        }
+        $r13Hosted = Get-Content -LiteralPath $probeHostedResultsPath -Raw | ConvertFrom-Json -ErrorAction Stop
+        $r11Hosted = Get-Content -LiteralPath $r11HostedResultsPath -Raw | ConvertFrom-Json -ErrorAction Stop
+        if ([string]$r13Hosted.result -cne 'PASS' -or [int]$r13Hosted.assertionCount -lt 34 -or
+            -not [bool]$r13Hosted.managedCollectionRequested -or [bool]$r13Hosted.collectionExecuted -or
+            [bool]$r13Hosted.qemuLaunched -or [bool]$r13Hosted.qacReserved -or
+            [string]$r11Hosted.result -cne 'PASS' -or [bool]$r11Hosted.qemuLaunched -or
+            [bool]$r11Hosted.qacReserved -or [bool]$r11Hosted.managedCollectionRequested) {
+            throw 'R13/R11 hosted evidence is missing, incomplete, or crossed the hosted-only boundary.'
+        }
+        $planContent = Get-Content -LiteralPath $phasePlanPath -Raw
+        if ($planContent -notmatch 'exactly one synchronous GC\.Collect' -or
+            $planContent -notmatch 'native collection-count advance and completion evidence' -or
+            $planContent -notmatch 'same rooted object.*1123') {
+            throw 'R13 prepared guest plan does not authorize exactly one verified collection with a post-collection live-root result.'
         }
     }
     return [pscustomobject]@{

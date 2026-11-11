@@ -52,7 +52,9 @@
 #if defined(GXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE)
 #include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_managed_entry_probe.h"
 #endif
-#if defined(GXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_SETTINGS_OBJECT_PROBE)
+#if defined(GXOS_NATIVEAOT_C188R13_MANAGED_GC_ROOT_PROBE)
+#include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_managed_gc_root_probe.h"
+#elif defined(GXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_SETTINGS_OBJECT_PROBE)
 #include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_managed_settings_object_probe.h"
 #endif
 #include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_threadstore_adapter.h"
@@ -3353,29 +3355,64 @@ void runFirstRealAllocationImpl(
         managedEntryProbeCaptureStateAddress)(&handoffState);
     emitManagedEntryHandoffSnapshot("before_managed_main", handoffStatus, handoffState);
 
+#if defined(GXOS_NATIVEAOT_C188R13_MANAGED_GC_ROOT_PROBE)
+    GuideXosNativeAotManagedGcRootProbeRecord probeRecord{};
+    serial::puts("[C188R13_GC_ROOT_ENTRY] event=attempt abi=UnmanagedCallersOnly-Cdecl seed=");
+    serial::put_hex32(kGuideXosManagedGcRootSeed);
+    serial::puts(" symbol=ManagedMain model=DisplaySettingsProbe collection=one_synchronous_full_request\n");
+#else
     GuideXosNativeAotManagedEntryProbeRecord probeRecord{};
-#if defined(GXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_SETTINGS_OBJECT_PROBE)
+#endif
+#if defined(GXOS_NATIVEAOT_C188R13_MANAGED_GC_ROOT_PROBE)
+    using ManagedEntryProbe = int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(
+        GuideXosNativeAotManagedGcRootProbeRecord*, uint32_t);
+#elif defined(GXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_SETTINGS_OBJECT_PROBE)
+    using ManagedEntryProbe = int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(
+        GuideXosNativeAotManagedEntryProbeRecord*, uint32_t);
+#else
+    using ManagedEntryProbe = int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(
+        GuideXosNativeAotManagedEntryProbeRecord*, uint32_t);
+#endif
+#if defined(GXOS_NATIVEAOT_C188R13_MANAGED_GC_ROOT_PROBE)
+    const int32_t managedResult = reinterpret_cast<ManagedEntryProbe>(
+        managedMainAddress)(&probeRecord, kGuideXosManagedGcRootSeed);
+#elif defined(GXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_SETTINGS_OBJECT_PROBE)
     serial::puts("[C188R12R4R5R4R5R2R2R4R2R3R12_ENTRY] event=attempt abi=UnmanagedCallersOnly-Cdecl seed=");
     serial::put_hex32(kGuideXosManagedSettingsObjectSeed);
     serial::puts(" symbol=ManagedMain model=DisplaySettingsProbe collection=not_requested\n");
-#else
+#endif
+#if !defined(GXOS_NATIVEAOT_C188R13_MANAGED_GC_ROOT_PROBE) && !defined(GXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_SETTINGS_OBJECT_PROBE)
     serial::puts("[C188R12R4R5R2R3_ENTRY] event=attempt abi=UnmanagedCallersOnly-Cdecl seed=");
     serial::put_hex32(kGuideXosManagedEntryProbeSeed);
     serial::puts(" symbol=ManagedMain collection=not_requested\n");
 #endif
-    using ManagedEntryProbe = int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(
-        GuideXosNativeAotManagedEntryProbeRecord*, uint32_t);
+#if !defined(GXOS_NATIVEAOT_C188R13_MANAGED_GC_ROOT_PROBE)
     const int32_t managedResult = reinterpret_cast<ManagedEntryProbe>(
 #if defined(GXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_SETTINGS_OBJECT_PROBE)
         managedMainAddress)(&probeRecord, kGuideXosManagedSettingsObjectSeed);
 #else
         managedMainAddress)(&probeRecord, kGuideXosManagedEntryProbeSeed);
 #endif
+#endif
 
     GuideXosNativeAotManagedEntryProbeRuntimeState runtimeState{};
     const uint32_t runtimeStatus = reinterpret_cast<CaptureManagedEntryRuntimeState>(
         managedEntryProbeCaptureStateAddress)(&runtimeState);
-#if defined(GXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_SETTINGS_OBJECT_PROBE)
+#if defined(GXOS_NATIVEAOT_C188R13_MANAGED_GC_ROOT_PROBE)
+    const bool probePassed =
+        probeRecord.entryMarker == kGuideXosManagedGcRootEntryMarker &&
+        probeRecord.input == kGuideXosManagedGcRootSeed &&
+        probeRecord.initialResult == kGuideXosManagedGcRootInitialResult &&
+        probeRecord.requestMarker == kGuideXosManagedGcRootRequestMarker &&
+        probeRecord.counterStatusBefore == 0u &&
+        probeRecord.collectionCountAfter > probeRecord.collectionCountBefore &&
+        probeRecord.counterStatusAfter == 0u &&
+        probeRecord.completionMarker == kGuideXosManagedGcRootCompletionMarker &&
+        probeRecord.finalResult == kGuideXosManagedGcRootFinalResult &&
+        probeRecord.returnMarker == kGuideXosManagedGcRootReturnMarker &&
+        managedResult == static_cast<int32_t>(kGuideXosManagedGcRootFinalResult);
+    serial::puts("[C188R13_GC_ROOT_ENTRY] event=returned entry=");
+#elif defined(GXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_SETTINGS_OBJECT_PROBE)
     const bool probePassed =
         probeRecord.entryMarker == kGuideXosManagedSettingsObjectEntryMarker &&
         probeRecord.input == kGuideXosManagedSettingsObjectSeed &&
@@ -3392,6 +3429,33 @@ void runFirstRealAllocationImpl(
         managedResult == static_cast<int32_t>(kGuideXosManagedEntryProbeResult);
     serial::puts("[C188R12R4R5R2R3_ENTRY] event=returned entry=");
 #endif
+#if defined(GXOS_NATIVEAOT_C188R13_MANAGED_GC_ROOT_PROBE)
+    serial::put_hex32(probeRecord.entryMarker);
+    serial::puts(" input=");
+    serial::put_hex32(probeRecord.input);
+    serial::puts(" initial=");
+    serial::put_hex32(probeRecord.initialResult);
+    serial::puts(" request=");
+    serial::put_hex32(probeRecord.requestMarker);
+    serial::puts(" counterStatusBefore=");
+    serial::put_hex32(probeRecord.counterStatusBefore);
+    serial::puts(" countBefore=");
+    serial::put_hex32(probeRecord.collectionCountBefore);
+    serial::puts(" countAfter=");
+    serial::put_hex32(probeRecord.collectionCountAfter);
+    serial::puts(" counterStatusAfter=");
+    serial::put_hex32(probeRecord.counterStatusAfter);
+    serial::puts(" completion=");
+    serial::put_hex32(probeRecord.completionMarker);
+    serial::puts(" final=");
+    serial::put_hex32(probeRecord.finalResult);
+    serial::puts(" returnMarker=");
+    serial::put_hex32(probeRecord.returnMarker);
+    serial::puts(" return=");
+    serial::put_hex32(static_cast<uint32_t>(managedResult));
+    serial::puts(" expected=");
+    serial::put_hex32(kGuideXosManagedGcRootFinalResult);
+#else
     serial::put_hex32(probeRecord.entryMarker);
     serial::puts(" input=");
     serial::put_hex32(probeRecord.input);
@@ -3402,14 +3466,35 @@ void runFirstRealAllocationImpl(
     serial::puts(" return=");
     serial::put_hex32(static_cast<uint32_t>(managedResult));
     serial::puts(" expected=");
-#if defined(GXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_SETTINGS_OBJECT_PROBE)
+#if defined(GXOS_NATIVEAOT_C188R13_MANAGED_GC_ROOT_PROBE)
+    serial::put_hex32(kGuideXosManagedGcRootFinalResult);
+#elif defined(GXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_SETTINGS_OBJECT_PROBE)
     serial::put_hex32(kGuideXosManagedSettingsObjectResult);
 #else
     serial::put_hex32(kGuideXosManagedEntryProbeResult);
 #endif
+#endif
     serial::puts(" record=");
     serial::puts(probePassed ? "PASS" : "FAIL");
-#if defined(GXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_SETTINGS_OBJECT_PROBE)
+#if defined(GXOS_NATIVEAOT_C188R13_MANAGED_GC_ROOT_PROBE)
+    serial::puts(" collection=requested model=DisplaySettingsProbe\n");
+    serial::puts("[C188R13_GC_ROOT_NATIVE] request=");
+    serial::put_hex32(probeRecord.requestMarker == kGuideXosManagedGcRootRequestMarker ? 1u : 0u);
+    serial::puts(" counterStatusBefore=");
+    serial::put_hex32(probeRecord.counterStatusBefore);
+    serial::puts(" countBefore=");
+    serial::put_hex32(probeRecord.collectionCountBefore);
+    serial::puts(" countAfter=");
+    serial::put_hex32(probeRecord.collectionCountAfter);
+    serial::puts(" counterStatusAfter=");
+    serial::put_hex32(probeRecord.counterStatusAfter);
+    serial::puts(" completed=");
+    serial::put_hex32(probeRecord.completionMarker == kGuideXosManagedGcRootCompletionMarker ? 1u : 0u);
+    serial::puts(" delta=");
+    serial::put_hex32(probeRecord.collectionCountAfter - probeRecord.collectionCountBefore);
+    serial::puts(" result=");
+    serial::puts(probePassed ? "PASS\n" : "FAIL\n");
+#elif defined(GXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_SETTINGS_OBJECT_PROBE)
     serial::puts(" collection=not_requested model=DisplaySettingsProbe\n");
 #else
     serial::puts(" collection=not_requested\n");

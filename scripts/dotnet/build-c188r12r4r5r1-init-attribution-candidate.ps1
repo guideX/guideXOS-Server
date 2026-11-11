@@ -10,21 +10,24 @@ param(
     [switch]$InitializeModulesAttribution,
     [switch]$ManagedEntryProbe,
     [switch]$ManagedSettingsObjectProbe,
+    [switch]$ManagedGcRootProbe,
     [switch]$ResumeCandidate
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = [System.IO.Path]::GetFullPath($RepoRoot)
+$ManagedGcRootProbe = [bool]$ManagedGcRootProbe
+$ManagedSettingsObjectProbe = [bool]$ManagedSettingsObjectProbe -or $ManagedGcRootProbe
 $ManagedEntryProbe = [bool]$ManagedEntryProbe -or [bool]$ManagedSettingsObjectProbe
-$managedCandidateMode = if ($ManagedSettingsObjectProbe) { 'NativeAotManagedSettingsObjectProbe' } elseif ($ManagedEntryProbe) { 'NativeAotFirstManagedEntryProbe' } else { 'NativeAotInitializeModulesTransitionAttribution' }
+$managedCandidateMode = if ($ManagedGcRootProbe) { 'NativeAotManagedGcRootProbe' } elseif ($ManagedSettingsObjectProbe) { 'NativeAotManagedSettingsObjectProbe' } elseif ($ManagedEntryProbe) { 'NativeAotFirstManagedEntryProbe' } else { 'NativeAotInitializeModulesTransitionAttribution' }
 $managedEntryMethod = if ($ManagedSettingsObjectProbe) { 'HostLogProof.ManagedSettingsObjectProbe.ManagedMain' } else { 'HostLogProof.ManagedEntryProbe.ManagedMain' }
 $managedEntryMapPattern = if ($ManagedSettingsObjectProbe) { '\S*ManagedSettingsObjectProbe\S*ManagedMain\S*' } else { '\S*ManagedEntryProbe\S*ManagedMain\S*' }
-$managedExpectedResult = if ($ManagedSettingsObjectProbe) { 1122 } else { 49 }
+$managedExpectedResult = if ($ManagedGcRootProbe) { 1123 } elseif ($ManagedSettingsObjectProbe) { 1122 } else { 49 }
 $artifactBase = if ([string]::IsNullOrWhiteSpace($ArtifactRoot)) {
     [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet'))
 } else { [System.IO.Path]::GetFullPath($ArtifactRoot) }
-$phaseName = if ($ManagedSettingsObjectProbe) { 'c188r12r4r5r4r5r2r2r4r2r3r12-managed-settings-object' } elseif ($ManagedEntryProbe) { 'c188r12r4r5r2r3-managed-entry' } elseif ($InitializeModulesAttribution) { 'c188r12r4r5r4r5r2r2r4r2r3-transition-attribution' } elseif ($SafeHandoff) { 'c188r12r4r5r4r5r2r2r4r2-safe-handoff' } elseif ($NativeAllocationAttribution) { 'c188r12r4r5r4r5r2r2-native-allocation-attribution' } elseif ($SemiSharedAttribution) { 'c188r12r4r5r4r5r2-semishared-attribution' } elseif ($GcInitProbes) { 'c188r12r4r5r4r5-gc-init-probes' } elseif ($ThreadStoreReadiness) { 'c188r12r4r5r4-threadstore-readiness' } else { 'c188r12r4r5r3-init-return-contract' }
+$phaseName = if ($ManagedGcRootProbe) { 'c188r13-managed-gc-root' } elseif ($ManagedSettingsObjectProbe) { 'c188r12r4r5r4r5r2r2r4r2r3r12-managed-settings-object' } elseif ($ManagedEntryProbe) { 'c188r12r4r5r2r3-managed-entry' } elseif ($InitializeModulesAttribution) { 'c188r12r4r5r4r5r2r2r4r2r3-transition-attribution' } elseif ($SafeHandoff) { 'c188r12r4r5r4r5r2r2r4r2-safe-handoff' } elseif ($NativeAllocationAttribution) { 'c188r12r4r5r4r5r2r2-native-allocation-attribution' } elseif ($SemiSharedAttribution) { 'c188r12r4r5r4r5r2-semishared-attribution' } elseif ($GcInitProbes) { 'c188r12r4r5r4r5-gc-init-probes' } elseif ($ThreadStoreReadiness) { 'c188r12r4r5r4-threadstore-readiness' } else { 'c188r12r4r5r3-init-return-contract' }
 $phaseRoot = Join-Path $artifactBase $phaseName
 if ([string]::IsNullOrWhiteSpace($CandidateRoot)) {
     $stamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')
@@ -66,7 +69,8 @@ if ($ResumeCandidate) {
         [System.IO.Path]::GetFullPath((Join-Path $artifactBase 'c188r12r4r5r4r5r2r2r4r2-safe-handoff')),
         [System.IO.Path]::GetFullPath((Join-Path $artifactBase 'c188r12r4r5r4r5r2r2r4r2r2-diagnostic-recovery')),
         [System.IO.Path]::GetFullPath((Join-Path $artifactBase 'c188r12r4r5r4r5r2r2r4r2r3-transition-attribution')),
-        [System.IO.Path]::GetFullPath((Join-Path $artifactBase 'c188r12r4r5r2r3-managed-entry'))
+        [System.IO.Path]::GetFullPath((Join-Path $artifactBase 'c188r12r4r5r2r3-managed-entry')),
+        [System.IO.Path]::GetFullPath((Join-Path $artifactBase 'c188r13-managed-gc-root'))
     )
     $resumeAllowed = $false
     foreach ($resumeRoot in $resumeRoots) {
@@ -77,7 +81,7 @@ if ($ResumeCandidate) {
         }
     }
     if (-not $resumeAllowed) {
-        throw 'ResumeCandidate is limited to isolated diagnostic, safe-handoff, transition, and managed-entry output roots.'
+        throw 'ResumeCandidate is limited to isolated diagnostic, safe-handoff, transition, managed-entry, and R13 output roots.'
     }
 }
 
@@ -118,7 +122,7 @@ $elfPath = Join-Path $artifactRoot 'HostLogProof.elf'
 $embeddedRaw = Join-Path $candidate 'gc-ownership-artifact.raw.o'
 $embeddedObject = Join-Path $candidate 'gc-ownership-artifact.o'
 $esp = Join-Path $candidate 'esp'
-$kernelBuildPrefix = if ($ManagedSettingsObjectProbe) { 'build/c188r12r4r5r4r5r2r2r4r2r3r12-managed-object-' } elseif ($ManagedEntryProbe) { 'build/c188r12r4r5r2r3-managed-entry-' } elseif ($InitializeModulesAttribution) { 'build/c188r12r4r5r2r3-transition-attribution-' } elseif ($SafeHandoff) { 'build/c188r12r4r5r2r2r4r2-safe-handoff-' } elseif ($NativeAllocationAttribution) { 'build/c188r12r4r5r4r5r2r2-native-allocation-' } elseif ($SemiSharedAttribution) { 'build/c188r12r4r5r4r5r2-semishared-' } elseif ($GcInitProbes) { 'build/c188r12r4r5r4r5-gc-init-probes-' } elseif ($ThreadStoreReadiness) { 'build/c188r12r4r5r4-threadstore-readiness-' } else { 'build/c188r12r4r5r1-init-attribution-' }
+$kernelBuildPrefix = if ($ManagedGcRootProbe) { 'build/c188r13-managed-gc-root-' } elseif ($ManagedSettingsObjectProbe) { 'build/c188r12r4r5r4r5r2r2r4r2r3r12-managed-object-' } elseif ($ManagedEntryProbe) { 'build/c188r12r4r5r2r3-managed-entry-' } elseif ($InitializeModulesAttribution) { 'build/c188r12r4r5r2r3-transition-attribution-' } elseif ($SafeHandoff) { 'build/c188r12r4r5r2r2r4r2-safe-handoff-' } elseif ($NativeAllocationAttribution) { 'build/c188r12r4r5r4r5r2r2-native-allocation-' } elseif ($SemiSharedAttribution) { 'build/c188r12r4r5r4r5r2-semishared-' } elseif ($GcInitProbes) { 'build/c188r12r4r5r4r5-gc-init-probes-' } elseif ($ThreadStoreReadiness) { 'build/c188r12r4r5r4-threadstore-readiness-' } else { 'build/c188r12r4r5r1-init-attribution-' }
 $kernelBuildDir = Join-Path $artifactBase (Join-Path 'build' (($kernelBuildPrefix -replace '^build/','') + [guid]::NewGuid().ToString('N')))
 $kernel = Join-Path $kernelBuildDir 'bin\kernel.elf'
 $bootloader = Join-Path $root 'guideXOSBootLoader\x64\Release\guideXOSBootLoader.exe'
@@ -153,7 +157,8 @@ if ($NativeAllocationAttribution) { $managedBuildArguments += '-C188R12R4R5R4R5R
 if ($SafeHandoff) { $managedBuildArguments += '-C188R12R4R5R2R2R4SafeHandoff' }
 if ($InitializeModulesAttribution) { $managedBuildArguments += '-C188R12R4R5R2R3InitializeModulesAttribution' }
 if ($ManagedEntryProbe) { $managedBuildArguments += '-C188R12R4R5R2R3ManagedEntryProbe' }
-if ($ManagedSettingsObjectProbe) { $managedBuildArguments += '-C188R12R4R5R2R3ManagedSettingsObjectProbe' }
+if ($ManagedGcRootProbe) { $managedBuildArguments += '-C188R13ManagedGcRootProbe' }
+elseif ($ManagedSettingsObjectProbe) { $managedBuildArguments += '-C188R12R4R5R2R3ManagedSettingsObjectProbe' }
 if ($ResumeCandidate) {
     if (-not (Test-Path -LiteralPath $pePath -PathType Leaf) -or
         -not (Test-Path -LiteralPath $mapPath -PathType Leaf) -or
@@ -366,6 +371,10 @@ if ($ManagedEntryProbe) {
             constructor='DisplaySettingsProbe___ctor'
             calculate='DisplaySettingsProbe__Calculate'
         }
+        if ($ManagedGcRootProbe) {
+            $requiredManagedMethodSymbols['rhCollect'] = 'S_P_CoreLib_System_Runtime_InternalCalls__RhCollect'
+            $requiredManagedMethodSymbols['rhpCollect'] = 'RhpCollect'
+        }
         $managedMethodAddresses = @{}
         foreach ($method in $requiredManagedMethodSymbols.GetEnumerator()) {
             $methodMatch = [regex]::Match($mapText,
@@ -382,12 +391,28 @@ if ($ManagedEntryProbe) {
             $managedMethodAddresses.constructor.ToString('x'),
             $managedMethodAddresses.calculate.ToString('x')
         )
+        $gcCollectWrapperDisassemblyPath = $null
+        if ($ManagedGcRootProbe) {
+            $requiredCalls += $managedMethodAddresses.rhCollect.ToString('x')
+            $wrapperAddress = [uint64]$managedMethodAddresses.rhCollect
+            $wrapperNextAddress = @($codeAddresses | Where-Object { $_ -gt $wrapperAddress } | Sort-Object | Select-Object -First 1)
+            if ($wrapperNextAddress.Count -ne 1) { throw 'No following linked code symbol bounds the GC.Collect internal-call wrapper.' }
+            $gcCollectWrapperDisassemblyPath = Join-Path $candidate 'gcCollectWrapper.disassembly.txt'
+            Invoke-Logged $objdump @('-d','-C','-M','intel',
+                ('--start-address=0x{0:X}' -f $wrapperAddress),
+                ('--stop-address=0x{0:X}' -f [uint64]$wrapperNextAddress[0]),$pePath) $gcCollectWrapperDisassemblyPath
+            $gcCollectWrapperText = Get-Content -LiteralPath $gcCollectWrapperDisassemblyPath -Raw
+            if ($gcCollectWrapperText -notmatch '(?m)^\s*[0-9a-fA-F]{8,16}:\s+[0-9a-fA-F]{2}\b' -or
+                $gcCollectWrapperText -notmatch ('call\s+0x' + $managedMethodAddresses.rhpCollect.ToString('x') + '\b')) {
+                throw 'The linked GC.Collect wrapper does not call the pinned NativeAOT RhpCollect helper.'
+            }
+        }
         $mainCallsMatch = @($probeCalls | ForEach-Object { $_.Value.ToLowerInvariant() })
+        $requiredProbeMarkers = if ($ManagedGcRootProbe) { @('52313345','52313351','52313343','52313352') } else { @('52313245','52313244') }
         if ($probeDisassemblyText -notmatch '(?m)^\s*[0-9a-fA-F]{8,16}:\s+[0-9a-fA-F]{2}\b' -or
-            $probeDisassemblyText -notmatch '52313245' -or
-            $probeDisassemblyText -notmatch '52313244' -or
+            @($requiredProbeMarkers | Where-Object { $probeDisassemblyText -notmatch $_ }).Count -ne 0 -or
             @($requiredCalls | Where-Object { $probeDisassemblyText -notmatch ('call\s+0x' + $_ + '\b') }).Count -ne 0) {
-            throw 'ManagedMain does not retain R12 markers, the stock reverse-P/Invoke pair, one RhpNewFast allocation, the constructor, and the non-inlined field consumer.'
+            throw 'ManagedMain does not retain the expected managed probe markers, required stock GC and allocation calls, constructor, and non-inlined field consumer.'
         }
         $managedMethodDisassemblies = @(
             @{name='constructor';symbol='DisplaySettingsProbe___ctor'},
@@ -407,7 +432,8 @@ if ($ManagedEntryProbe) {
             if ($methodDisassembly -notmatch '(?m)^\s*[0-9a-fA-F]{8,16}:\s+[0-9a-fA-F]{2}\b') {
                 throw "Linked $($entry.symbol) disassembly contains no compiled instructions."
             }
-            if ($methodName -eq 'constructor' -and $methodDisassembly -notmatch '52313243') {
+            $constructorWitness = if ($ManagedGcRootProbe) { '5231334[fF]' } else { '52313243' }
+            if ($methodName -eq 'constructor' -and $methodDisassembly -notmatch $constructorWitness) {
                 throw 'The compiled DisplaySettingsProbe constructor does not store its construction witness.'
             }
         }
@@ -743,6 +769,7 @@ if ($SafeHandoff) { $kernelDefines += ' -DGXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_
 if ($InitializeModulesAttribution) { $kernelDefines += ' -DGXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION' }
 if ($ManagedEntryProbe) { $kernelDefines += ' -DGXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE' }
 if ($ManagedSettingsObjectProbe) { $kernelDefines += ' -DGXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_SETTINGS_OBJECT_PROBE' }
+if ($ManagedGcRootProbe) { $kernelDefines += ' -DGXOS_NATIVEAOT_C188R13_MANAGED_GC_ROOT_PROBE' }
 $makeArgs = @(
     '-C', 'kernel', 'ARCH=amd64', "BUILD_DIR=$($kernelBuildDir.Replace('\','/'))",
     'GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1',
@@ -783,6 +810,9 @@ if ($ManagedEntryProbe -and $kernelLog -notmatch '-DGXOS_NATIVEAOT_C188R12R4R5R2
 }
 if ($ManagedSettingsObjectProbe -and $kernelLog -notmatch '-DGXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_SETTINGS_OBJECT_PROBE') {
     throw 'R12 managed-settings object kernel build does not show its isolated probe define.'
+}
+if ($ManagedGcRootProbe -and $kernelLog -notmatch '-DGXOS_NATIVEAOT_C188R13_MANAGED_GC_ROOT_PROBE') {
+    throw 'R13 managed-GC kernel build does not show its isolated probe define.'
 }
 if ($SafeHandoff) {
     $kernelDispatchSymbolTable = & $objdump -t $kernel
@@ -962,12 +992,21 @@ if ($InitializeModulesAttribution) {
             Copy-Item -LiteralPath $managedEntryRegressionHostedResultsPath -Destination (Join-Path $stagedDiagnostic 'managed-entry-probe-regression-hosted-test-results.json')
             $managedEntryProbeHostedResultsPath = $managedEntryRegressionHostedResultsPath
 
-            Copy-Item -LiteralPath (Join-Path $root 'samples\managed\HostLogProof\ManagedSettingsObjectProbe.cs') -Destination (Join-Path $stagedRuntimeSource 'ManagedSettingsObjectProbe.cs')
-            Copy-Item -LiteralPath (Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_managed_settings_object_probe.h') -Destination $stagedRuntimeSource
-            Copy-Item -LiteralPath (Join-Path $root 'scripts\dotnet\analyze-c188r12r4r5r4r5r2r2r4r2r3r12-managed-settings-object.ps1') -Destination $stagedDiagnostic
-            Copy-Item -LiteralPath (Join-Path $root 'scripts\dotnet\test-c188r12r4r5r4r5r2r2r4r2r3r12-managed-settings-object.ps1') -Destination $stagedDiagnostic
-            $managedSettingsObjectHostedTestRoot = Join-Path $candidate 'managed-settings-object-hosted-tests'
-            $managedSettingsObjectHostedTestLog = Join-Path $candidate 'managed-settings-object-hosted-tests.log'
+            if ($ManagedGcRootProbe) {
+                Copy-Item -LiteralPath (Join-Path $root 'samples\managed\HostLogProof\ManagedGcRootProbe.cs') -Destination (Join-Path $stagedRuntimeSource 'ManagedGcRootProbe.cs')
+                Copy-Item -LiteralPath (Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_managed_gc_root_probe.h') -Destination $stagedRuntimeSource
+                Copy-Item -LiteralPath (Join-Path $root 'scripts\dotnet\analyze-c188r13-managed-gc-root.ps1') -Destination $stagedDiagnostic
+                Copy-Item -LiteralPath (Join-Path $root 'scripts\dotnet\test-c188r13-managed-gc-root.ps1') -Destination $stagedDiagnostic
+                $managedSettingsObjectHostedTestRoot = Join-Path $candidate 'managed-gc-root-hosted-tests'
+                $managedSettingsObjectHostedTestLog = Join-Path $candidate 'managed-gc-root-hosted-tests.log'
+            } else {
+                Copy-Item -LiteralPath (Join-Path $root 'samples\managed\HostLogProof\ManagedSettingsObjectProbe.cs') -Destination (Join-Path $stagedRuntimeSource 'ManagedSettingsObjectProbe.cs')
+                Copy-Item -LiteralPath (Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_managed_settings_object_probe.h') -Destination $stagedRuntimeSource
+                Copy-Item -LiteralPath (Join-Path $root 'scripts\dotnet\analyze-c188r12r4r5r4r5r2r2r4r2r3r12-managed-settings-object.ps1') -Destination $stagedDiagnostic
+                Copy-Item -LiteralPath (Join-Path $root 'scripts\dotnet\test-c188r12r4r5r4r5r2r2r4r2r3r12-managed-settings-object.ps1') -Destination $stagedDiagnostic
+                $managedSettingsObjectHostedTestRoot = Join-Path $candidate 'managed-settings-object-hosted-tests'
+                $managedSettingsObjectHostedTestLog = Join-Path $candidate 'managed-settings-object-hosted-tests.log'
+            }
         } else {
             $managedEntryProbeHostedTestRoot = Join-Path $candidate 'managed-entry-probe-hosted-tests'
             $managedEntryProbeHostedTestLog = Join-Path $candidate 'managed-entry-probe-hosted-tests.log'
@@ -1024,7 +1063,8 @@ if ($InitializeModulesAttribution) {
             managedDispatchConditional=[bool]$ManagedEntryProbe
             managedDispatchGate='The generated InitializeModules transition gate must return status 0 before the separately exported ManagedMain call; any failure returns to the kernel safe-stop.'
             managedEntryProbeAllocationFree=([bool]$ManagedEntryProbe -and -not [bool]$ManagedSettingsObjectProbe)
-            noCollection=$true
+            noCollection=(-not $ManagedGcRootProbe)
+            managedGcCollectionContract=if ($ManagedGcRootProbe) { 'one explicit synchronous GC.Collect request; native read-only GC collection count must increase before completion is accepted' } else { 'not requested' }
             failFastPreserved=$true
         }
     }
@@ -1039,7 +1079,7 @@ $stagedFiles = @(Get-ChildItem -LiteralPath $stagedRoot -File -Recurse | ForEach
 })
 $stagedQualification = [ordered]@{
     result = 'PASS'
-    phase = if ($ManagedSettingsObjectProbe) { 'C188R12R4R5R4R5R2R2R4R2R3R12' } elseif ($InitializeModulesAttribution) { 'C188R12R4R5R4R5R2R2R4R2R3' } elseif ($SafeHandoff) { 'C188R12R4R5R4R5R2R2R4R2' } elseif ($NativeAllocationAttribution) { 'C188R12R4R5R4R5R2R2' } elseif ($SemiSharedAttribution) { 'C188R12R4R5R4R5R2' } else { 'C188R12R4R5R4R5' }
+    phase = if ($ManagedGcRootProbe) { 'C188R13' } elseif ($ManagedSettingsObjectProbe) { 'C188R12R4R5R4R5R2R2R4R2R3R12' } elseif ($InitializeModulesAttribution) { 'C188R12R4R5R4R5R2R2R4R2R3' } elseif ($SafeHandoff) { 'C188R12R4R5R4R5R2R2R4R2' } elseif ($NativeAllocationAttribution) { 'C188R12R4R5R4R5R2R2' } elseif ($SemiSharedAttribution) { 'C188R12R4R5R4R5R2' } else { 'C188R12R4R5R4R5' }
     sourceHead = (& git -C $root rev-parse HEAD).Trim()
     runtimeSourceCommit = [string]$runtimeManifest.runtimeIdentity.sourceCommit
     files = $stagedFiles
@@ -1169,11 +1209,17 @@ if ($LASTEXITCODE -ne 0 -or ($productionKernelSymbols -join "`n") -match
 }
 
 if ($ManagedSettingsObjectProbe) {
+    $managedProbeHostedTestScript = if ($ManagedGcRootProbe) {
+        Join-Path $root 'scripts\dotnet\test-c188r13-managed-gc-root.ps1'
+    } else {
+        Join-Path $root 'scripts\dotnet\test-c188r12r4r5r4r5r2r2r4r2r3r12-managed-settings-object.ps1'
+    }
     Invoke-Logged 'pwsh' @('-NoProfile','-ExecutionPolicy','Bypass','-File',
-        (Join-Path $root 'scripts\dotnet\test-c188r12r4r5r4r5r2r2r4r2r3r12-managed-settings-object.ps1'),
+        $managedProbeHostedTestScript,
         '-RepoRoot',$root,'-OutputDirectory',$managedSettingsObjectHostedTestRoot,
         '-RuntimePackManifest',$runtimeManifestPath,'-ManagedMap',$mapPath,
         '-ManagedMainDisassembly',$managedEntryProbeDisassemblyPath,
+        '-GcCollectWrapperDisassembly',$(if ($ManagedGcRootProbe) { $gcCollectWrapperDisassemblyPath } else { '' }),
         '-ConstructorDisassembly',(Join-Path $candidate 'displaySettingsProbeConstructor.disassembly.txt'),
         '-CalculateDisassembly',(Join-Path $candidate 'displaySettingsProbeCalculate.disassembly.txt'),
         '-KernelBuildLog',(Join-Path $candidate 'kernel-build.log'),
@@ -1181,16 +1227,16 @@ if ($ManagedSettingsObjectProbe) {
         '-R11HostedTestResults',$managedEntryRegressionHostedResultsPath,
         '-CallSiteMapPath',$transitionCallSiteMapPath) $managedSettingsObjectHostedTestLog
     $managedSettingsObjectHostedResultsPath = Join-Path $managedSettingsObjectHostedTestRoot 'hosted-test-results.json'
-    Require-File $managedSettingsObjectHostedResultsPath 'R12 managed-settings object focused hosted-test result'
+    Require-File $managedSettingsObjectHostedResultsPath 'Managed object focused hosted-test result'
     $managedSettingsObjectHostedResults = Get-Content -LiteralPath $managedSettingsObjectHostedResultsPath -Raw | ConvertFrom-Json
     if ($managedSettingsObjectHostedResults.result -cne 'PASS' -or
         [int]$managedSettingsObjectHostedResults.assertionCount -lt 20 -or
         [bool]$managedSettingsObjectHostedResults.qemuLaunched -or
         [bool]$managedSettingsObjectHostedResults.qacReserved -or
-        [bool]$managedSettingsObjectHostedResults.managedCollectionRequested) {
-        throw 'R12 managed-settings hosted checks failed or crossed the hosted-only boundary.'
+        ([bool]$managedSettingsObjectHostedResults.managedCollectionRequested -ne [bool]$ManagedGcRootProbe)) {
+        throw 'Managed object hosted checks failed or crossed the requested hosted-only boundary.'
     }
-    Copy-Item -LiteralPath $managedSettingsObjectHostedResultsPath -Destination (Join-Path $stagedDiagnostic 'managed-settings-object-hosted-test-results.json')
+    Copy-Item -LiteralPath $managedSettingsObjectHostedResultsPath -Destination (Join-Path $stagedDiagnostic 'managed-object-hosted-test-results.json')
 }
 
 $branchMapPath = Join-Path $candidate 'native-allocation-failure-branch-map.json'
@@ -1327,8 +1373,8 @@ if ($InitializeModulesAttribution) {
     $transitionAnalyzerStaged = Join-Path $stagedDiagnostic 'analyze-c188r12r4r5r2r3-transition-attribution.ps1'
 
     $transitionGuestPhasePlan = [ordered]@{
-        schema='C188R12R4R5R2R3R1_GUEST_PHASE_PLAN_V1'
-        phase=if ($ManagedSettingsObjectProbe) { 'C188R12R4R5R4R5R2R2R4R2R3R12 — Managed Settings Object Guest' } elseif ($ManagedEntryProbe) { 'C188R12R4R5R2R3 — First Managed Entry Guest' } else { 'C188R12R4R5R4R5R2R2R4R2R3R1 — InitializeModules Transition Attribution Guest' }
+        schema=if ($ManagedGcRootProbe) { 'C188R13_GUEST_PHASE_PLAN_V1' } else { 'C188R12R4R5R2R3R1_GUEST_PHASE_PLAN_V1' }
+        phase=if ($ManagedGcRootProbe) { 'C188R13 — One Managed GC Collection and Live Root Guest' } elseif ($ManagedSettingsObjectProbe) { 'C188R12R4R5R4R5R2R2R4R2R3R12 — Managed Settings Object Guest' } elseif ($ManagedEntryProbe) { 'C188R12R4R5R2R3 — First Managed Entry Guest' } else { 'C188R12R4R5R4R5R2R2R4R2R3R1 — InitializeModules Transition Attribution Guest' }
         status='prepared_not_executed'
         candidateManifest=(Join-Path $candidate 'candidate-manifest.json')
         candidateMode=$managedCandidateMode
@@ -1352,7 +1398,11 @@ if ($InitializeModulesAttribution) {
             noAdmissionNoGuard=$true
         }
         oneBootGuard=[ordered]@{
-            path=(Join-Path $candidate 'guest-phase\C188R12R4R5R2R3R12-one-boot.guard.json')
+            path=if ($ManagedGcRootProbe) {
+                Join-Path $phaseRoot ("guest-launch-attempt-" + [System.IO.Path]::GetFileName($candidate) + ".json")
+            } else {
+                Join-Path $candidate 'guest-phase\C188R12R4R5R2R3R12-one-boot.guard.json'
+            }
             materialized=$false
             creation='System.IO.FileMode.CreateNew after fresh successful QAC preflight only'
             maxGuestBoots=1
@@ -1366,7 +1416,7 @@ if ($InitializeModulesAttribution) {
             'Allow one guest boot and no retry; capture baseline accepted initialization milestones again.',
             'Record TLS/FLS, ThreadStore raw/current identity, flags, attachment, PAL stack bounds, frame, GC readiness, and module/code-manager registration.',
             'Attempt InitializeModules only when the candidate gate reports GX_TRANSITION_GATE_NONE; otherwise preserve the safe-stop outcome.',
-            $(if ($ManagedSettingsObjectProbe) { 'After InitializeModules returns, invoke the separately linked Cdecl UnmanagedCallersOnly ManagedMain with a native stack record and seed 14; require one stock RhpNewFast allocation, the DisplaySettingsProbe constructor and field consumer, result 1122, read-only runtime state, and recorded implicit collection counts. Never request collection.' } elseif ($ManagedEntryProbe) { 'After InitializeModules returns, invoke the separately linked Cdecl UnmanagedCallersOnly ManagedMain with a native stack record and seed 14; verify its 49 result, markers, and read-only runtime state. Never request managed GC collection.' } else { 'Keep the original safe-handoff profile separately selectable as the reference; never dispatch ManagedMain or request managed GC collection.' }),
+            $(if ($ManagedGcRootProbe) { 'After InitializeModules returns, invoke the separately linked Cdecl UnmanagedCallersOnly ManagedMain with a native stack record and seed 14; require one stock RhpNewFast DisplaySettingsProbe allocation, constructor execution and initial result 1122, then exactly one synchronous GC.Collect through the linked RhCollect to RhpCollect path. Require native collection-count advance and completion evidence, then prove the same rooted object is mutated and read after collection for 1123 before validating return, ThreadStore, FLS, and frame state. No managed worker or finalizer is introduced.' } elseif ($ManagedSettingsObjectProbe) { 'After InitializeModules returns, invoke the separately linked Cdecl UnmanagedCallersOnly ManagedMain with a native stack record and seed 14; require one stock RhpNewFast allocation, the DisplaySettingsProbe constructor and field consumer, result 1122, read-only runtime state, and recorded implicit collection counts. Never request collection.' } elseif ($ManagedEntryProbe) { 'After InitializeModules returns, invoke the separately linked Cdecl UnmanagedCallersOnly ManagedMain with a native stack record and seed 14; verify its 49 result, markers, and read-only runtime state. Never request managed GC collection.' } else { 'Keep the original safe-handoff profile separately selectable as the reference; never dispatch ManagedMain or request managed GC collection.' }),
             'Preserve raw serial before analysis, run the staged transition analyzer independently, shut down only the owned QEMU process, and verify QAC release.'
         )
         executionNotPerformed=[ordered]@{ qemuLaunched=$false; qacReserved=$false; guardCreated=$false; guestBoots=0 }
@@ -1376,7 +1426,7 @@ if ($InitializeModulesAttribution) {
     [System.IO.File]::WriteAllText($transitionGuestPhasePlanPath,
         ($transitionGuestPhasePlan | ConvertTo-Json -Depth 10),[System.Text.UTF8Encoding]::new($false))
     $transitionGuestGuardTemplate = [ordered]@{
-        schema=if ($ManagedSettingsObjectProbe) { 'C188R12R4R5R4R5R2R2R4R2R3R12_ONE_BOOT_GUARD_TEMPLATE_V1' } else { 'C188R12R4R5R2R3R1_ONE_BOOT_GUARD_TEMPLATE_V1' }
+        schema=if ($ManagedGcRootProbe) { 'C188R13_ONE_BOOT_GUARD_TEMPLATE_V1' } elseif ($ManagedSettingsObjectProbe) { 'C188R12R4R5R4R5R2R2R4R2R3R12_ONE_BOOT_GUARD_TEMPLATE_V1' } else { 'C188R12R4R5R2R3R1_ONE_BOOT_GUARD_TEMPLATE_V1' }
         phase=$transitionGuestPhasePlan.phase
         candidateManifest=(Join-Path $candidate 'candidate-manifest.json')
         candidateManifestSha256='MUST_BE_COMPUTED_AFTER_FINAL_CANDIDATE_MANIFEST_IS_WRITTEN'
@@ -1422,7 +1472,7 @@ if ($InitializeModulesAttribution) {
     }
     if ($ManagedEntryProbe) {
         $stagedQualification['managedEntryProbe'] = [ordered]@{
-            mode=if ($ManagedSettingsObjectProbe) { 'NativeAotManagedSettingsObjectProbe' } else { 'NativeAotFirstManagedEntryProbe' }
+            mode=if ($ManagedGcRootProbe) { 'NativeAotManagedGcRootProbe' } elseif ($ManagedSettingsObjectProbe) { 'NativeAotManagedSettingsObjectProbe' } else { 'NativeAotFirstManagedEntryProbe' }
             entrySymbol='ManagedMain'
             entryMethod=$managedEntryMethod
             runtimeCaptureSymbol='GuideXosNativeAotC188R12R4R5R2R3ManagedEntryProbeCaptureState'
@@ -1431,11 +1481,11 @@ if ($InitializeModulesAttribution) {
             methodDisassemblySha256=Hash-File $managedEntryProbeDisassemblyPath
             hostedResultsPath='diagnostic/managed-entry-probe-hosted-test-results.json'
             hostedResultsSha256=Hash-File (Join-Path $stagedDiagnostic 'managed-entry-probe-hosted-test-results.json')
-            managedCollectionRequested=$false
+            managedCollectionRequested=[bool]$ManagedGcRootProbe
             guestRunPerformed=$false
         }
     }
-    if ($ManagedSettingsObjectProbe) {
+    if ($ManagedSettingsObjectProbe -and -not $ManagedGcRootProbe) {
         $stagedQualification['managedSettingsObjectProbe'] = [ordered]@{
             mode='NativeAotManagedSettingsObjectProbe'
             managedType='HostLogProof.DisplaySettingsProbe'
@@ -1455,20 +1505,43 @@ if ($InitializeModulesAttribution) {
             guestRunPerformed=$false
         }
     }
+    if ($ManagedGcRootProbe) {
+        $stagedQualification['managedGcRootProbe'] = [ordered]@{
+            mode='NativeAotManagedGcRootProbe'
+            managedType='HostLogProof.DisplaySettingsProbe'
+            entryMethod='HostLogProof.ManagedSettingsObjectProbe.ManagedMain'
+            allocationHelper='RhpNewFast'
+            collectionHelper='RhpCollect'
+            nativeCollectionCounter='guideXosNativeAotC188R12R4R5ReadCounters'
+            initialResult=1122
+            finalResult=1123
+            recordSizeBytes=44
+            oneCollectionRequested=$true
+            collectionMustComplete=$true
+            liveReferenceRootedBy='generated NativeAOT stack-map root; GC.KeepAlive extends lifetime through post-collection use'
+            usesNativeObjectPointer=$false
+            hostedResultsPath='diagnostic/managed-object-hosted-test-results.json'
+            hostedResultsSha256=Hash-File (Join-Path $stagedDiagnostic 'managed-object-hosted-test-results.json')
+            mainDisassemblySha256=Hash-File $managedEntryProbeDisassemblyPath
+            constructorDisassemblySha256=Hash-File (Join-Path $candidate 'displaySettingsProbeConstructor.disassembly.txt')
+            calculateDisassemblySha256=Hash-File (Join-Path $candidate 'displaySettingsProbeCalculate.disassembly.txt')
+            guestRunPerformed=$false
+        }
+    }
     [System.IO.File]::WriteAllText($stagedQualificationPath,($stagedQualification | ConvertTo-Json -Depth 10),[System.Text.UTF8Encoding]::new($false))
 }
 $manifest = [ordered]@{
-    result = if ($ManagedSettingsObjectProbe) { 'MANAGED_SETTINGS_OBJECT_PROBE_HOSTED_READY' } elseif ($ManagedEntryProbe) { 'MANAGED_ENTRY_PROBE_HOSTED_READY' } elseif ($InitializeModulesAttribution) { 'TRANSITION_ATTRIBUTION_HOSTED_READY' } elseif ($SafeHandoff) { 'SAFE_HANDOFF_HOSTED_READY' } elseif ($NativeAllocationAttribution) { 'NATIVE_ALLOC_PROBES_HOSTED_READY' } elseif ($SemiSharedAttribution) { 'PASS_BUILD_READY_FOR_SEMISHARED_ATTRIBUTION_GUEST' } elseif ($GcInitProbes) { 'PASS_BUILD_READY_FOR_GC_INIT_ATTRIBUTION_GUEST' } elseif ($ThreadStoreReadiness) { 'PASS_BUILD_READY_FOR_THREADSTORE_READINESS' } else { 'PASS_BUILD_READY_FOR_INIT_RETURN_CONTRACT_GUEST' }
+    result = if ($ManagedGcRootProbe) { 'MANAGED_GC_ROOT_PROBE_HOSTED_READY' } elseif ($ManagedSettingsObjectProbe) { 'MANAGED_SETTINGS_OBJECT_PROBE_HOSTED_READY' } elseif ($ManagedEntryProbe) { 'MANAGED_ENTRY_PROBE_HOSTED_READY' } elseif ($InitializeModulesAttribution) { 'TRANSITION_ATTRIBUTION_HOSTED_READY' } elseif ($SafeHandoff) { 'SAFE_HANDOFF_HOSTED_READY' } elseif ($NativeAllocationAttribution) { 'NATIVE_ALLOC_PROBES_HOSTED_READY' } elseif ($SemiSharedAttribution) { 'PASS_BUILD_READY_FOR_SEMISHARED_ATTRIBUTION_GUEST' } elseif ($GcInitProbes) { 'PASS_BUILD_READY_FOR_GC_INIT_ATTRIBUTION_GUEST' } elseif ($ThreadStoreReadiness) { 'PASS_BUILD_READY_FOR_THREADSTORE_READINESS' } else { 'PASS_BUILD_READY_FOR_INIT_RETURN_CONTRACT_GUEST' }
     repoRoot = $root
     head = (& git -C $root rev-parse HEAD).Trim()
     branch = (& git -C $root branch --show-current).Trim()
     candidateRoot = $candidate
     artifactRoot = $artifactBase
     artifactPhaseRoot = $phaseRoot
-    mode = if ($ManagedSettingsObjectProbe) { 'NativeAotManagedSettingsObjectProbe' } elseif ($ManagedEntryProbe) { 'NativeAotFirstManagedEntryProbe' } elseif ($InitializeModulesAttribution) { 'NativeAotInitializeModulesTransitionAttribution' } elseif ($SafeHandoff) { 'NativeAotSafeHandoff' } elseif ($NativeAllocationAttribution) { 'NativeAllocationFailureAttribution' } elseif ($SemiSharedAttribution) { 'SemiSharedAttribution' } elseif ($GcInitProbes) { 'GcInitFailureAttribution' } elseif ($ThreadStoreReadiness) { 'ThreadStoreReadiness' } else { 'InitReturnContract' }
+    mode = if ($ManagedGcRootProbe) { 'NativeAotManagedGcRootProbe' } elseif ($ManagedSettingsObjectProbe) { 'NativeAotManagedSettingsObjectProbe' } elseif ($ManagedEntryProbe) { 'NativeAotFirstManagedEntryProbe' } elseif ($InitializeModulesAttribution) { 'NativeAotInitializeModulesTransitionAttribution' } elseif ($SafeHandoff) { 'NativeAotSafeHandoff' } elseif ($NativeAllocationAttribution) { 'NativeAllocationFailureAttribution' } elseif ($SemiSharedAttribution) { 'SemiSharedAttribution' } elseif ($GcInitProbes) { 'GcInitFailureAttribution' } elseif ($ThreadStoreReadiness) { 'ThreadStoreReadiness' } else { 'InitReturnContract' }
     productionApplicationStartupOnly = $true
     managedMainEnteredByCandidate = $false
-    managedMainGateReason = if ($ManagedSettingsObjectProbe) { 'After the explicit R6 read-only prerequisite gate passes, the kernel enters generated InitializeModules through stock reverse-P/Invoke, then invokes the separately linked Cdecl ManagedMain that allocates one DisplaySettingsProbe with stock RhpNewFast. A failed gate stops before dispatch. The probe does not explicitly request collection.' } elseif ($ManagedEntryProbe) { 'After the explicit R6 read-only prerequisite gate passes, the kernel enters the generated InitializeModules path through stock reverse-P/Invoke, then calls the separately linked Cdecl UnmanagedCallersOnly ManagedMain probe. Any failed gate stops before the probe; no collection is requested.' } elseif ($InitializeModulesAttribution) { 'Explicit transition-attribution mode performs real initialization and module registration, then a shared read-only prerequisite gate; it enters the generated InitializeModules path only when the stock attachment/frame contract is satisfied. It returns before ManagedMain and collection.' } elseif ($SafeHandoff) { 'Explicit diagnostic safe-handoff mode closes the gate and stops after the real RhInitialize, native TLS/FLS setup, and actual RhRegisterOSModule/code-manager registration; InitializeModules and managed entry are not attempted.' } elseif ($GcInitProbes) { 'Candidate is unbooted; after RhInitialize returns, the adapter snapshots the internal GC initialization record. Managed dispatch remains governed by actual initialization success and the established R4 thread-attachment gate.' } elseif ($ThreadStoreReadiness) { 'Candidate is unbooted; a successful RhInitialize proceeds through module registration and the pinned stock reverse-P/Invoke attachment helper before ManagedMain.' } else { 'Runtime ThreadStore attachment is not exposed by a safe read-only accessor in this freestanding path.' }
+    managedMainGateReason = if ($ManagedGcRootProbe) { 'After the R6 read-only prerequisite gate passes, the kernel invokes one ManagedMain, allocates one DisplaySettingsProbe, and requests one synchronous GC.Collect. Native collection counters must advance and the same managed reference must return 1123 after collection. No retry or finalizer wait is included.' } elseif ($ManagedSettingsObjectProbe) { 'After the explicit R6 read-only prerequisite gate passes, the kernel enters generated InitializeModules through stock reverse-P/Invoke, then invokes the separately linked Cdecl ManagedMain that allocates one DisplaySettingsProbe with stock RhpNewFast. A failed gate stops before dispatch. The probe does not explicitly request collection.' } elseif ($ManagedEntryProbe) { 'After the explicit R6 read-only prerequisite gate passes, the kernel enters the generated InitializeModules path through stock reverse-P/Invoke, then calls the separately linked Cdecl UnmanagedCallersOnly ManagedMain probe. Any failed gate stops before the probe; no collection is requested.' } elseif ($InitializeModulesAttribution) { 'Explicit transition-attribution mode performs real initialization and module registration, then a shared read-only prerequisite gate; it enters the generated InitializeModules path only when the stock attachment/frame contract is satisfied. It returns before ManagedMain and collection.' } elseif ($SafeHandoff) { 'Explicit diagnostic safe-handoff mode closes the gate and stops after the real RhInitialize, native TLS/FLS setup, and actual RhRegisterOSModule/code-manager registration; InitializeModules and managed entry are not attempted.' } elseif ($GcInitProbes) { 'Candidate is unbooted; after RhInitialize returns, the adapter snapshots the internal GC initialization record. Managed dispatch remains governed by actual initialization success and the established R4 thread-attachment gate.' } elseif ($ThreadStoreReadiness) { 'Candidate is unbooted; a successful RhInitialize proceeds through module registration and the pinned stock reverse-P/Invoke attachment helper before ManagedMain.' } else { 'Runtime ThreadStore attachment is not exposed by a safe read-only accessor in this freestanding path.' }
     managedGraphCallbacks = 0
     isolatedKernelBuildDirectory = $kernelBuildDir
     runtimePackManifest = $runtimeManifestPath
@@ -1496,7 +1569,9 @@ $manifest = [ordered]@{
     c188R12R4R5R2R3InitializeModulesAttributionTransition = [string]$runtimeManifest.c188r12r4r5r2r3InitializeModulesAttributionTransition
     c188R12R4R5R2R3ThreadLayoutEvidence = $runtimeManifest.c188r12r4r5r2r3ThreadLayoutEvidence
     c188R12R4R5R2R3ManagedEntryProbe = [bool]$runtimeManifest.c188r12r4r5r2r3ManagedEntryProbe
-    c188R12R4R5R2R3ManagedSettingsObjectProbe = [bool]$runtimeManifest.c188r12r4r5r2r3ManagedSettingsObjectProbe
+    c188R12R4R5R2R3ManagedSettingsObjectProbe = [bool]$ManagedSettingsObjectProbe -and -not $ManagedGcRootProbe
+    c188R13ManagedGcRootProbe = [bool]$ManagedGcRootProbe
+    managedCollectionRequested = [bool]$ManagedGcRootProbe
     c188R12R4R5R2R3ManagedSettingsObjectAllocationContract = $runtimeManifest.c188r12r4r5r2r3ManagedSettingsObjectAllocationContract
     c188R12R4R5R2R3ManagedEntryHandoffDiagnostics = [bool]$runtimeManifest.c188r12r4r5r2r3ManagedEntryHandoffDiagnostics
     c188R12R4R5R2R3ManagedEntryHandoffDiagnosticContract = if ($ManagedEntryProbe) { [ordered]@{
@@ -1523,18 +1598,18 @@ $manifest = [ordered]@{
         runtimeCaptureSymbol='GuideXosNativeAotC188R12R4R5R2R3ManagedEntryProbeCaptureState'
         ABI='UnmanagedCallersOnly(CallConvCdecl)'
         seed=14;expectedResult=$managedExpectedResult
-        entryMarker=if ($ManagedSettingsObjectProbe) { '0x52313245' } else { '0x5237454E' }
-        completionMarker=if ($ManagedSettingsObjectProbe) { '0x52313244' } else { '0x5237444E' }
-        nativeRecordSizeBytes=16
+        entryMarker=if ($ManagedGcRootProbe) { '0x52313345' } elseif ($ManagedSettingsObjectProbe) { '0x52313245' } else { '0x5237454E' }
+        completionMarker=if ($ManagedGcRootProbe) { '0x52313343' } elseif ($ManagedSettingsObjectProbe) { '0x52313244' } else { '0x5237444E' }
+        nativeRecordSizeBytes=if ($ManagedGcRootProbe) { 44 } else { 16 }
         methodAllocationFree=[bool]$runtimeManifest.c188r12r4r5r2r3ManagedEntryProbeContract.methodAllocationFree
         runtimeInitializationMayAllocate=[bool]$runtimeManifest.c188r12r4r5r2r3ManagedEntryProbeContract.runtimeInitializationMayAllocate
         implicitCollectionMayOccur=[bool]$runtimeManifest.c188r12r4r5r2r3ManagedEntryProbeContract.implicitCollectionMayOccur
-        collectionRequested=$false
+        collectionRequested=[bool]$ManagedGcRootProbe
         gate='R6 read-only prerequisite gate must pass before the probe call.'
         postCallStateChecks=@('ThreadStore membership','TSF_Attached','PAL FLS current-thread identity','native OS thread ID match','preemptive mode','TOP_OF_STACK_MARKER transition frame','PAL stack bounds','module initialization','code-manager registration')
         hostedResults=if ($ManagedSettingsObjectProbe) { $managedEntryRegressionHostedResultsPath } else { $managedEntryProbeHostedResultsPath }
     } } else { $null }
-    c188R12R4R5R2R3ManagedSettingsObjectProbeContract = if ($ManagedSettingsObjectProbe) { [ordered]@{
+    c188R12R4R5R2R3ManagedSettingsObjectProbeContract = if ($ManagedSettingsObjectProbe -and -not $ManagedGcRootProbe) { [ordered]@{
         managedType='HostLogProof.DisplaySettingsProbe'
         entryMethod='HostLogProof.ManagedSettingsObjectProbe.ManagedMain'
         allocationHelper='RhpNewFast'
@@ -1549,6 +1624,34 @@ $manifest = [ordered]@{
         implicitCollectionCountRecorded=$true
         collectionRequested=$false
         nativeObjectPointerPersisted=$false
+    } } else { $null }
+    c188R13ManagedGcRootProbeContract = if ($ManagedGcRootProbe) { [ordered]@{
+        mode='NativeAotManagedGcRootProbe'
+        managedType='HostLogProof.DisplaySettingsProbe'
+        entryMethod=$managedEntryMethod
+        allocationHelper='RhpNewFast'
+        collectionHelper='RhpCollect'
+        collectionWrapperDisassembly=Join-Path $candidate 'gcCollectWrapper.disassembly.txt'
+        collectionWrapperDisassemblySha256=Hash-File (Join-Path $candidate 'gcCollectWrapper.disassembly.txt')
+        nativeCounterApi='guideXosNativeAotC188R12R4R5ReadCounters'
+        seed=14
+        initialResult=1122
+        expectedResult=1123
+        nativeRecordSizeBytes=44
+        oneCollectionOnly=$true
+        collectionRequest='synchronous GC.Collect()'
+        collectionEvidence='native GC count increases before GC returns; read-state accessor requires no collection in progress'
+        liveObjectRoot='managed reference live across GC.Collect and accessed after it; GC.KeepAlive after last managed access'
+        rootManagedRegister='RSI; linked ManagedMain keeps the object reference in RSI across the RhCollect call, then mutates Scale and calls the non-inlined Calculate method with the same reference'
+        generatedGcInfoEvidence='NativeAOT .managedcode$I metadata is present in the linked map; GcInfoDecoder::EnumerateLiveSlots and ReportSlotToGC are linked. The R13 hosted disassembly assertion verifies the root remains live across the collection call and is consumed afterward.'
+        finalizers=$false
+        managedThreads=$false
+        concurrentGC=$false
+        nativeObjectPointerPersisted=$false
+        mainDisassembly=Join-Path $candidate 'managedEntryProbe.disassembly.txt'
+        constructorDisassembly=Join-Path $candidate 'displaySettingsProbeConstructor.disassembly.txt'
+        calculateDisassembly=Join-Path $candidate 'displaySettingsProbeCalculate.disassembly.txt'
+        hostedResults=$managedSettingsObjectHostedResultsPath
     } } else { $null }
     transitionAttributionContract = if ($InitializeModulesAttribution) { [ordered]@{
         recordSchema='fixed-size C188R12R4R5R2R3_FATAL plus C188R12R4R5R2R3_STATE'
@@ -1586,7 +1689,7 @@ $manifest = [ordered]@{
     nativeAllocationFailureBranchMap = $branchMapPath
     nativeAllocationHostedTestResults = Join-Path $hostedTestRoot 'hosted-test-results.json'
     nativeAllocationHostedTestClassifications = @($hostedTestResults.fixtureClassifications)
-    nextGuestPhase = if ($ManagedSettingsObjectProbe) { 'C188R12R4R5R4R5R2R2R4R2R3R12_Managed_Settings_Object_Guest' } elseif ($ManagedEntryProbe) { 'C188R12R4R5R2R3_First_Managed_Entry_Guest' } elseif ($InitializeModulesAttribution) { 'C188R12R4R5R4R5R2R2R4R2R3R1_InitializeModules_Transition_Attribution_Guest' } elseif ($SafeHandoff) { 'C188R12R4R5R4R5R2R2R4R2R1_NativeAOT_SafeHandoff_Guest_Qualification' } else { 'C188R12R4R5R4R5R2R2R1_Native_Allocation_Failure_Guest_Attribution' }
+    nextGuestPhase = if ($ManagedGcRootProbe) { 'C188R13_One_Managed_GC_Collection_and_Live_Root_Guest' } elseif ($ManagedSettingsObjectProbe) { 'C188R12R4R5R4R5R2R2R4R2R3R12_Managed_Settings_Object_Guest' } elseif ($ManagedEntryProbe) { 'C188R12R4R5R2R3_First_Managed_Entry_Guest' } elseif ($InitializeModulesAttribution) { 'C188R12R4R5R4R5R2R2R4R2R3R1_InitializeModules_Transition_Attribution_Guest' } elseif ($SafeHandoff) { 'C188R12R4R5R4R5R2R2R4R2R1_NativeAOT_SafeHandoff_Guest_Qualification' } else { 'C188R12R4R5R4R5R2R2R1_Native_Allocation_Failure_Guest_Attribution' }
     nextGuestRunPerformed = $false
     semiSharedSourceFiles = $runtimeManifest.c188r12r4r5r4r5r2SourceFiles
     gcInitProbeSourceFiles = $runtimeManifest.c188r12r4r5r4r5GcInitSourceFiles
@@ -1739,17 +1842,23 @@ $manifest = [ordered]@{
         candidateInitializeModulesDisassembly = if ($SafeHandoff) { Hash-File (Join-Path $candidate 'initializeModules.disassembly.txt') } else { $null }
         candidateTransitionPrepareDisassembly = if ($InitializeModulesAttribution) { Hash-File (Join-Path $candidate 'transitionPrepare.disassembly.txt') } else { $null }
         candidateManagedEntryProbeDisassembly = if ($ManagedEntryProbe) { Hash-File $managedEntryProbeDisassemblyPath } else { $null }
+        candidateGcCollectWrapperDisassembly = if ($ManagedGcRootProbe) { Hash-File (Join-Path $candidate 'gcCollectWrapper.disassembly.txt') } else { $null }
         managedEntryProbeHostedTestResults = if ($ManagedEntryProbe) { Hash-File $managedEntryProbeHostedResultsPath } else { $null }
         managedEntryProbeSource = if ($ManagedEntryProbe) { Hash-File (Join-Path $root 'samples\managed\HostLogProof\ManagedEntryProbe.cs') } else { $null }
         managedEntryProbeRuntimeHeader = if ($ManagedEntryProbe) { Hash-File (Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_managed_entry_probe.h') } else { $null }
-        managedSettingsObjectProbeSource = if ($ManagedSettingsObjectProbe) { Hash-File (Join-Path $root 'samples\managed\HostLogProof\ManagedSettingsObjectProbe.cs') } else { $null }
-        managedSettingsObjectProbeRuntimeHeader = if ($ManagedSettingsObjectProbe) { Hash-File (Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_managed_settings_object_probe.h') } else { $null }
-        managedSettingsObjectProbeHostedTestScript = if ($ManagedSettingsObjectProbe) { Hash-File (Join-Path $root 'scripts\dotnet\test-c188r12r4r5r4r5r2r2r4r2r3r12-managed-settings-object.ps1') } else { $null }
-        managedSettingsObjectProbeAnalyzer = if ($ManagedSettingsObjectProbe) { Hash-File (Join-Path $root 'scripts\dotnet\analyze-c188r12r4r5r4r5r2r2r4r2r3r12-managed-settings-object.ps1') } else { $null }
-        managedSettingsObjectProbeHostedTestResults = if ($ManagedSettingsObjectProbe) { Hash-File $managedSettingsObjectHostedResultsPath } else { $null }
+        managedSettingsObjectProbeSource = if ($ManagedSettingsObjectProbe -and -not $ManagedGcRootProbe) { Hash-File (Join-Path $root 'samples\managed\HostLogProof\ManagedSettingsObjectProbe.cs') } else { $null }
+        managedSettingsObjectProbeRuntimeHeader = if ($ManagedSettingsObjectProbe -and -not $ManagedGcRootProbe) { Hash-File (Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_managed_settings_object_probe.h') } else { $null }
+        managedSettingsObjectProbeHostedTestScript = if ($ManagedSettingsObjectProbe -and -not $ManagedGcRootProbe) { Hash-File (Join-Path $root 'scripts\dotnet\test-c188r12r4r5r4r5r2r2r4r2r3r12-managed-settings-object.ps1') } else { $null }
+        managedSettingsObjectProbeAnalyzer = if ($ManagedSettingsObjectProbe -and -not $ManagedGcRootProbe) { Hash-File (Join-Path $root 'scripts\dotnet\analyze-c188r12r4r5r4r5r2r2r4r2r3r12-managed-settings-object.ps1') } else { $null }
+        managedSettingsObjectProbeHostedTestResults = if ($ManagedSettingsObjectProbe -and -not $ManagedGcRootProbe) { Hash-File $managedSettingsObjectHostedResultsPath } else { $null }
         managedEntryRegressionHostedTestResults = if ($ManagedSettingsObjectProbe) { Hash-File $managedEntryRegressionHostedResultsPath } else { $null }
         candidateSettingsObjectConstructorDisassembly = if ($ManagedSettingsObjectProbe) { Hash-File (Join-Path $candidate 'displaySettingsProbeConstructor.disassembly.txt') } else { $null }
         candidateSettingsObjectCalculateDisassembly = if ($ManagedSettingsObjectProbe) { Hash-File (Join-Path $candidate 'displaySettingsProbeCalculate.disassembly.txt') } else { $null }
+        managedGcRootProbeSource = if ($ManagedGcRootProbe) { Hash-File (Join-Path $root 'samples\managed\HostLogProof\ManagedGcRootProbe.cs') } else { $null }
+        managedGcRootProbeRuntimeHeader = if ($ManagedGcRootProbe) { Hash-File (Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_managed_gc_root_probe.h') } else { $null }
+        managedGcRootProbeHostedTestScript = if ($ManagedGcRootProbe) { Hash-File (Join-Path $root 'scripts\dotnet\test-c188r13-managed-gc-root.ps1') } else { $null }
+        managedGcRootProbeAnalyzer = if ($ManagedGcRootProbe) { Hash-File (Join-Path $root 'scripts\dotnet\analyze-c188r13-managed-gc-root.ps1') } else { $null }
+        managedGcRootProbeHostedTestResults = if ($ManagedGcRootProbe) { Hash-File $managedSettingsObjectHostedResultsPath } else { $null }
         candidateTransitionCallSiteMap = if ($InitializeModulesAttribution) { Hash-File $transitionCallSiteMapPath } else { $null }
         candidateTransitionCallSiteHeader = if ($InitializeModulesAttribution) { Hash-File $transitionCallSiteHeaderPath } else { $null }
         candidateFatalCallerDisassemblies = if ($InitializeModulesAttribution) { [ordered]@{
@@ -1762,6 +1871,7 @@ $manifest = [ordered]@{
         transitionHostedTestResults = if ($InitializeModulesAttribution) { Hash-File (Join-Path $transitionHostedTestRoot 'hosted-test-results.json') } else { $null }
         transitionAnalyzer = if ($InitializeModulesAttribution) { Hash-File (Join-Path $root 'scripts\dotnet\analyze-c188r12r4r5r2r3-transition-attribution.ps1') } else { $null }
         transitionTestRunner = if ($InitializeModulesAttribution) { Hash-File (Join-Path $root 'scripts\dotnet\test-c188r12r4r5r2r3-transition-attribution.ps1') } else { $null }
+        transitionQacAdmissionModule = if ($ManagedGcRootProbe) { Hash-File (Join-Path $root 'scripts\dotnet\c188r12r4r5r4-qac-admission.psm1') } else { $null }
         transitionPrerequisiteMatrix = if ($InitializeModulesAttribution) { Hash-File $transitionPrerequisiteMatrixPath } else { $null }
         transitionGuestPhasePlan = if ($InitializeModulesAttribution) { Hash-File $transitionGuestPhasePlanPath } else { $null }
         transitionGuestGuardTemplate = if ($InitializeModulesAttribution) { Hash-File $transitionGuestGuardTemplatePath } else { $null }

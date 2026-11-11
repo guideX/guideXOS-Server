@@ -104,12 +104,21 @@
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE;HOSTLOGPROOF_C188R12R4R5R2R3_MANAGED_SETTINGS_OBJECT_PROBE</DefineConstants>
   </PropertyGroup>
 
-  <ItemGroup Condition="'$(HostLogProofC188R12R4R5R2R3ManagedEntryProbe)' == 'true' and '$(HostLogProofC188R12R4R5R2R3ManagedSettingsObjectProbe)' != 'true'">
+  <PropertyGroup Condition="'$(HostLogProofC188R13ManagedGcRootProbe)' == 'true'">
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE;HOSTLOGPROOF_C188R12R4R5R2R3_MANAGED_SETTINGS_OBJECT_PROBE;HOSTLOGPROOF_C188R13_MANAGED_GC_ROOT_PROBE</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(HostLogProofC188R12R4R5R2R3ManagedEntryProbe)' == 'true' and '$(HostLogProofC188R12R4R5R2R3ManagedSettingsObjectProbe)' != 'true' and '$(HostLogProofC188R13ManagedGcRootProbe)' != 'true'">
     <Compile Include="ManagedEntryProbe.cs" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(HostLogProofC188R12R4R5R2R3ManagedSettingsObjectProbe)' == 'true'">
     <Compile Include="ManagedSettingsObjectProbe.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(HostLogProofC188R13ManagedGcRootProbe)' == 'true'">
+    <Compile Include="ManagedGcRootProbe.cs" />
   </ItemGroup>
 
   <PropertyGroup Condition="'$(HostLogProofC188R12R4R5GcOwnershipTests)' == 'true'">
@@ -892,7 +901,15 @@
     <Compile Remove="ManagedSettingsObjectProbe.cs" />
   </ItemGroup>
 
+  <ItemGroup Condition="'$(HostLogProofC188R13ManagedGcRootProbe)' != 'true'">
+    <Compile Remove="ManagedGcRootProbe.cs" />
+  </ItemGroup>
+
   <ItemGroup Condition="'$(HostLogProofC188R12R4R5R2R3ManagedSettingsObjectProbe)' == 'true'">
+    <Compile Remove="Program.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(HostLogProofC188R13ManagedGcRootProbe)' == 'true'">
     <Compile Remove="Program.cs" />
   </ItemGroup>
 

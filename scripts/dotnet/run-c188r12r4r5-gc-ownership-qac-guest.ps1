@@ -39,11 +39,26 @@ $isInitReturnContract = [string]$candidateManifest.mode -ceq 'InitReturnContract
 $isThreadStoreReadiness = [string]$candidateManifest.mode -ceq 'ThreadStoreReadiness'
 $isSemiSharedAttribution = [string]$candidateManifest.mode -ceq 'SemiSharedAttribution'
 $isSafeHandoff = [string]$candidateManifest.mode -ceq 'NativeAotSafeHandoff'
+$isManagedGcRootProbe = [string]$candidateManifest.mode -ceq 'NativeAotManagedGcRootProbe'
 $isManagedSettingsObjectProbe = [string]$candidateManifest.mode -ceq 'NativeAotManagedSettingsObjectProbe'
-$isManagedEntryProbe = [string]$candidateManifest.mode -in @('NativeAotFirstManagedEntryProbe','NativeAotManagedSettingsObjectProbe')
-$isTransitionAttribution = [string]$candidateManifest.mode -in @('NativeAotInitializeModulesTransitionAttribution','NativeAotFirstManagedEntryProbe','NativeAotManagedSettingsObjectProbe')
+$isManagedEntryProbe = [string]$candidateManifest.mode -in @('NativeAotFirstManagedEntryProbe','NativeAotManagedSettingsObjectProbe','NativeAotManagedGcRootProbe')
+$isTransitionAttribution = [string]$candidateManifest.mode -in @('NativeAotInitializeModulesTransitionAttribution','NativeAotFirstManagedEntryProbe','NativeAotManagedSettingsObjectProbe','NativeAotManagedGcRootProbe')
 $isNativeAllocationFailureAttribution = [string]$candidateManifest.mode -in @('NativeAllocationFailureAttribution','NativeAotSafeHandoff')
 $isGcInitFailureAttribution = [string]$candidateManifest.mode -in @('GcInitFailureAttribution','SemiSharedAttribution','NativeAllocationFailureAttribution','NativeAotSafeHandoff')
+if ($isManagedGcRootProbe) {
+    $gcRootContract = $candidateManifest.c188R13ManagedGcRootProbeContract
+    if (-not [bool]$candidateManifest.c188R13ManagedGcRootProbe -or
+        [int]$gcRootContract.nativeRecordSizeBytes -ne 44 -or
+        [int]$gcRootContract.initialResult -ne 1122 -or
+        [int]$gcRootContract.expectedResult -ne 1123 -or
+        -not [bool]$gcRootContract.oneCollectionOnly -or
+        [string]$gcRootContract.collectionHelper -cne 'RhpCollect' -or
+        [string]$gcRootContract.nativeCounterApi -cne 'guideXosNativeAotC188R12R4R5ReadCounters' -or
+        [bool]$gcRootContract.finalizers -or [bool]$gcRootContract.managedThreads -or
+        [bool]$gcRootContract.concurrentGC -or [bool]$gcRootContract.nativeObjectPointerPersisted) {
+        throw 'R13 candidate manifest does not match the bounded single-collection live-root contract.'
+    }
+}
 if ($ThreadStoreAttempt -in @('R2','R3') -and -not $isThreadStoreReadiness) {
     throw "ThreadStoreAttempt $ThreadStoreAttempt is valid only for the C188 R4 ThreadStore candidate."
 }
@@ -61,7 +76,9 @@ if ($isThreadStoreReadiness) {
     $r4RuntimePackManifest = Get-Content -LiteralPath $r4RuntimePackManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
     $r4PalCommonMembership = $r4RuntimePackManifest.archiveMembership.threadStorePalCommonReplacement
 }
-$phaseRoot = if ($isManagedSettingsObjectProbe) {
+$phaseRoot = if ($isManagedGcRootProbe) {
+    [System.IO.Path]::GetFullPath((Join-Path $artifactRoot 'c188r13-managed-gc-root'))
+} elseif ($isManagedSettingsObjectProbe) {
     [System.IO.Path]::GetFullPath((Join-Path $artifactRoot 'c188r12r4r5r4r5r2r2r4r2r3r12-managed-settings-object'))
 } elseif ($isManagedEntryProbe) {
     [System.IO.Path]::GetFullPath((Join-Path $artifactRoot 'c188r12r4r5r2r3-managed-entry'))
@@ -394,9 +411,10 @@ if ($isNativeAllocationFailureAttribution -and -not $isSafeHandoff) {
 
 $candidateEsp = [System.IO.Path]::GetFullPath([string]$candidateManifest.esp)
 $runCorrelationId = if ($isTransitionAttribution) {
-    $(if ($isManagedSettingsObjectProbe) { 'C188R12R4R5R2R3R12-' } elseif ($isManagedEntryProbe) { 'C188R12R4R5R2R3R7-' } else { 'C188R12R4R5R2R3R1-' }) + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ') + '-' + [guid]::NewGuid().ToString('N')
+    $(if ($isManagedGcRootProbe) { 'C188R13-' } elseif ($isManagedSettingsObjectProbe) { 'C188R12R4R5R2R3R12-' } elseif ($isManagedEntryProbe) { 'C188R12R4R5R2R3R7-' } else { 'C188R12R4R5R2R3R1-' }) + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ') + '-' + [guid]::NewGuid().ToString('N')
 } else { $null }
-$runDirectory = if ($isManagedSettingsObjectProbe) { "qac-guest-managed-settings-object-$runCorrelationId" }
+$runDirectory = if ($isManagedGcRootProbe) { "qac-guest-managed-gc-root-$runCorrelationId" }
+    elseif ($isManagedSettingsObjectProbe) { "qac-guest-managed-settings-object-$runCorrelationId" }
     elseif ($isManagedEntryProbe) { "qac-guest-managed-entry-$runCorrelationId" }
     elseif ($isTransitionAttribution) { "qac-guest-transition-attribution-$runCorrelationId" }
     elseif ($isSafeHandoff) { 'qac-guest-r2r2r4r2r1-001' }
@@ -420,7 +438,9 @@ $ovmf = if ($isTransitionAttribution) { Join-Path $qemuShare 'edk2-x86_64-code.f
 $uefiVarsTemplate = if ($isTransitionAttribution) { Join-Path $qemuShare 'edk2-i386-vars.fd' } else { $null }
 $uefiVarsImage = if ($isTransitionAttribution) { Join-Path $runRoot 'uefi-vars.fd' } else { $null }
 $runnerScriptSha256 = Get-Sha256 $PSCommandPath
-$attemptPath = if ($isManagedEntryProbe) {
+$attemptPath = if ($isManagedGcRootProbe) {
+    Join-Path $phaseRoot ("guest-launch-attempt-" + [System.IO.Path]::GetFileName($candidate) + ".json")
+} elseif ($isManagedEntryProbe) {
     Join-Path $phaseRoot ("guest-launch-attempt-" + $candidateManifestSha256 + ".json")
 } elseif ($isTransitionAttribution) {
     $legacyAttemptPath = Join-Path $phaseRoot 'guest-launch-attempt-C188R12R4R5R2R3R1.json'
@@ -858,7 +878,10 @@ if ($HostedPreflightOnly) {
     }
     $hostedPreflightPath = Join-Path $runRoot 'hosted-preflight.json'
     $hostedPreflight | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $hostedPreflightPath -Encoding utf8
-    if ($isManagedSettingsObjectProbe) {
+    if ($isManagedGcRootProbe) {
+        Write-Output "C188R13_MANAGED_GC_ROOT_HOSTED_PREFLIGHT=PASS RUN_ROOT=$runRoot"
+        Write-Output "C188R13_MANAGED_GC_ROOT_HOSTED_PREFLIGHT_MANIFEST=$hostedPreflightPath"
+    } elseif ($isManagedSettingsObjectProbe) {
         Write-Output "C188R12R4R5R2R3R12_MANAGED_SETTINGS_OBJECT_HOSTED_PREFLIGHT=PASS RUN_ROOT=$runRoot"
         Write-Output "C188R12R4R5R2R3R12_MANAGED_SETTINGS_OBJECT_HOSTED_PREFLIGHT_MANIFEST=$hostedPreflightPath"
     } elseif ($isManagedEntryProbe) {
@@ -1065,7 +1088,11 @@ try {
     $deadline = (Get-Date).AddSeconds($BootTimeoutSeconds)
     do {
         $serialText = Read-GuestSerial
-        if ($isTransitionAttribution) {
+        if ($isManagedGcRootProbe) {
+            $transitionTerminalSeen = $serialText -match '(?m)^\[C188R12R4R5R2R3_ENTRY_STATE\].* result=(?:PASS|FAIL)\s*$' -or
+                $serialText -match '(?m)^\[nativeaot-pal-qemu-test\] FAIL_FAST\b'
+            $guestPass = $transitionTerminalSeen
+        } elseif ($isTransitionAttribution) {
             $transitionTerminalSeen = $serialText -match '(?m)^\[C188R12R4R5R2R3_TRANSITION\] ' -or
                 $serialText -match '(?m)^\[C188R12R4R5R2R3_FATAL\] ' -or
                 $serialText -match '(?m)^\[nativeaot-pal-qemu-test\] FAIL_FAST\b'
@@ -1108,7 +1135,11 @@ try {
     } while ((Get-Date) -lt $deadline)
     $serialText = Read-GuestSerial
 $safeHandoffTerminal = $false
-if ($isTransitionAttribution) {
+if ($isManagedGcRootProbe) {
+    $transitionTerminalSeen = $serialText -match '(?m)^\[C188R12R4R5R2R3_ENTRY_STATE\].* result=(?:PASS|FAIL)\s*$' -or
+        $serialText -match '(?m)^\[nativeaot-pal-qemu-test\] FAIL_FAST\b'
+    $guestPass = $transitionTerminalSeen
+} elseif ($isTransitionAttribution) {
     $transitionTerminalSeen = $serialText -match '(?m)^\[C188R12R4R5R2R3_TRANSITION\] ' -or
         $serialText -match '(?m)^\[C188R12R4R5R2R3_FATAL\] ' -or
         $serialText -match '(?m)^\[nativeaot-pal-qemu-test\] FAIL_FAST\b'
@@ -1242,7 +1273,9 @@ if ($isTransitionAttribution) {
 
 $serialText = Read-GuestSerial
 $serialAnalysisPath = Join-Path $runRoot 'serial-analysis.json'
-$serialAnalyzer = if ($isManagedSettingsObjectProbe) {
+$serialAnalyzer = if ($isManagedGcRootProbe) {
+    Join-Path $PSScriptRoot 'analyze-c188r13-managed-gc-root.ps1'
+} elseif ($isManagedSettingsObjectProbe) {
     Join-Path $PSScriptRoot 'analyze-c188r12r4r5r4r5r2r2r4r2r3r12-managed-settings-object.ps1'
 } elseif ($isManagedEntryProbe) {
     Join-Path $PSScriptRoot 'analyze-c188r12r4r5r2r3-managed-entry-probe.ps1'
@@ -1255,7 +1288,7 @@ $serialAnalyzer = if ($isManagedSettingsObjectProbe) {
 } else { Join-Path $PSScriptRoot 'analyze-c188r12r4r5r1-init-serial.ps1' }
 $serialSha256BeforeAnalysis = if (Test-Path -LiteralPath $serial) { Get-Sha256 $serial } else { $null }
 $serialAnalysis = $null
-$transitionAttributionAnalysisPath = if ($isManagedSettingsObjectProbe) { Join-Path $runRoot 'managed-settings-object-analysis.json' } elseif ($isManagedEntryProbe) { Join-Path $runRoot 'managed-entry-probe-analysis.json' } elseif ($isTransitionAttribution) { Join-Path $runRoot 'transition-attribution-analysis.json' } else { $null }
+$transitionAttributionAnalysisPath = if ($isManagedGcRootProbe) { Join-Path $runRoot 'managed-gc-root-analysis.json' } elseif ($isManagedSettingsObjectProbe) { Join-Path $runRoot 'managed-settings-object-analysis.json' } elseif ($isManagedEntryProbe) { Join-Path $runRoot 'managed-entry-probe-analysis.json' } elseif ($isTransitionAttribution) { Join-Path $runRoot 'transition-attribution-analysis.json' } else { $null }
 $transitionAttributionAnalysis = $null
 $transitionAttributionAnalysisExitCode = $null
 $transitionAttributionAnalysisError = $null
@@ -1405,7 +1438,12 @@ $rawSerialPreservedByAnalysis = $null -ne $serialSha256BeforeAnalysis -and
 $transitionAttributionCaptureComplete = $false
 $transitionAttributionClassification = if ($null -ne $transitionAttributionAnalysis) { [string]$transitionAttributionAnalysis.classification } else { $null }
 if ($isTransitionAttribution) {
-    $recognizedTransitionClass = if ($isManagedSettingsObjectProbe) {
+    $recognizedTransitionClass = if ($isManagedGcRootProbe) {
+        $transitionAttributionClassification -in @(
+            'MANAGED_GC_ROOT_COLLECTION_VERIFIED','MANAGED_GC_ROOT_RETURNED_MISMATCH',
+            'MANAGED_GC_ROOT_BLOCKED_BEFORE_CALL','MANAGED_GC_ROOT_RUNTIME_FAIL_FAST_AFTER_ENTRY',
+            'MANAGED_GC_ROOT_INCOMPLETE')
+    } elseif ($isManagedSettingsObjectProbe) {
         $transitionAttributionClassification -in @(
             'MANAGED_SETTINGS_OBJECT_RETURNED_RUNTIME_STATE_READY',
             'MANAGED_SETTINGS_OBJECT_RETURNED_MISMATCH',
@@ -1429,7 +1467,15 @@ if ($isTransitionAttribution) {
         [string]$transitionAttributionAnalysis.callSiteMap.sha256 -ceq [string]$candidateManifest.transitionCallSiteMapSha256 -and
         [bool]$rawSerialPreservedByAnalysis
     $guestPass = $transitionAttributionCaptureComplete -and
-        (($isManagedSettingsObjectProbe -and $transitionAttributionClassification -eq 'MANAGED_SETTINGS_OBJECT_RETURNED_RUNTIME_STATE_READY' -and
+        (($isManagedGcRootProbe -and $transitionAttributionClassification -eq 'MANAGED_GC_ROOT_COLLECTION_VERIFIED' -and
+            [bool]$transitionAttributionAnalysis.allocationSucceeded -and
+            [bool]$transitionAttributionAnalysis.gcCollectionRequested -and
+            [bool]$transitionAttributionAnalysis.gcCollectionStarted -and
+            [bool]$transitionAttributionAnalysis.gcCollectionCompleted -and
+            [bool]$transitionAttributionAnalysis.liveObjectSurvived -and
+            [bool]$transitionAttributionAnalysis.runtimeStateReady -and
+            [string]$transitionAttributionAnalysis.managedEntryReturnValue -ceq '00000463') -or
+         ($isManagedSettingsObjectProbe -and $transitionAttributionClassification -eq 'MANAGED_SETTINGS_OBJECT_RETURNED_RUNTIME_STATE_READY' -and
             [bool]$transitionAttributionAnalysis.allocationSucceeded -and [bool]$transitionAttributionAnalysis.runtimeStateReady -and
             [string]$transitionAttributionAnalysis.managedEntryReturnValue -ceq '00000462') -or
          ($isManagedEntryProbe -and -not $isManagedSettingsObjectProbe -and $transitionAttributionClassification -eq 'MANAGED_ENTRY_PROBE_RETURNED_RUNTIME_STATE_READY') -or
@@ -1563,7 +1609,21 @@ $outcome = if (-not $sourceRamdiskPreserved) { 'SOURCE_RAMDISK_CHANGED_DURING_GU
     elseif ($startupFailure) { 'EXPERIMENT_BLOCKED' }
     elseif ($admitted) { 'GC_ROOT_OR_COLLECTION_DEFECT_OR_GUEST_INCOMPLETE' }
     else { 'EXPERIMENT_READY_BUT_GUEST_NOT_ADMITTED' }
-if ($isManagedSettingsObjectProbe) {
+if ($isManagedGcRootProbe) {
+    $outcome = if (-not $sourceRamdiskPreserved) { 'SOURCE_RAMDISK_CHANGED_DURING_GUEST' }
+        elseif (-not $preflightPassed -or -not $admitted) { 'NATIVEAOT_GC_HOSTED_READY_GUEST_DEFERRED' }
+        elseif (-not $releaseVerified -or $qacExitCode -ne 0) { 'MANAGED_GC_ROOT_QAC_CLEANUP_UNVERIFIED' }
+        elseif (-not $candidateIntegrityPreservedAfterGuest -or -not $qemuFirmwareCodePreserved -or -not $uefiVarsTemplatePreserved) { 'MANAGED_GC_ROOT_CANDIDATE_OR_BASELINE_MUTATED' }
+        elseif (-not $transitionAttributionCaptureComplete) { 'MANAGED_GC_ROOT_EVIDENCE_INCOMPLETE' }
+        elseif ($transitionAttributionClassification -eq 'MANAGED_GC_ROOT_COLLECTION_VERIFIED' -and
+                [bool]$transitionAttributionAnalysis.gcCollectionStarted -and
+                [bool]$transitionAttributionAnalysis.gcCollectionCompleted -and
+                [bool]$transitionAttributionAnalysis.liveObjectSurvived -and
+                [string]$transitionAttributionAnalysis.managedEntryReturnValue -ceq '00000463') { 'NATIVEAOT_SINGLE_COLLECTION_VERIFIED' }
+        elseif ($transitionAttributionClassification -eq 'MANAGED_GC_ROOT_BLOCKED_BEFORE_CALL') { 'MANAGED_GC_ROOT_GATE_BLOCKED_SAFE_STOP' }
+        elseif ($transitionAttributionAnalysis.gcCollectionStarted) { 'NATIVEAOT_GC_BOUNDARY_NARROWED' }
+        else { 'MANAGED_GC_ROOT_EVIDENCE_INCOMPLETE' }
+} elseif ($isManagedSettingsObjectProbe) {
     $objectAllocationBoundaryAttributed = $false
     if ($null -ne $transitionAttributionAnalysis.callSite) {
         $objectAllocationBoundaryAttributed = ([string]$transitionAttributionAnalysis.callSite.key -match 'RhpNewFast|RhpGcAlloc' -or
@@ -1736,6 +1796,14 @@ $manifest = [ordered]@{
     initAttributionProfile=$isInitAttribution;initCaptureComplete=$initCaptureComplete
     transitionAttributionProfile=$isTransitionAttribution
     managedEntryProbeProfile=$isManagedEntryProbe
+    managedGcRootProbeProfile=$isManagedGcRootProbe
+    managedGcCollectionRequested=if ($isManagedGcRootProbe -and $null -ne $transitionAttributionAnalysis) { [bool]$transitionAttributionAnalysis.gcCollectionRequested } else { $false }
+    managedGcCollectionStarted=if ($isManagedGcRootProbe -and $null -ne $transitionAttributionAnalysis) { [bool]$transitionAttributionAnalysis.gcCollectionStarted } else { $false }
+    managedGcCollectionCompleted=if ($isManagedGcRootProbe -and $null -ne $transitionAttributionAnalysis) { [bool]$transitionAttributionAnalysis.gcCollectionCompleted } else { $false }
+    managedGcLiveObjectSurvived=if ($isManagedGcRootProbe -and $null -ne $transitionAttributionAnalysis) { [bool]$transitionAttributionAnalysis.liveObjectSurvived } else { $false }
+    managedGcCollectionCountBefore=if ($isManagedGcRootProbe -and $null -ne $transitionAttributionAnalysis) { $transitionAttributionAnalysis.collectionCountBefore } else { $null }
+    managedGcCollectionCountAfter=if ($isManagedGcRootProbe -and $null -ne $transitionAttributionAnalysis) { $transitionAttributionAnalysis.collectionCountAfter } else { $null }
+    managedGcPostCollectionResult=if ($isManagedGcRootProbe -and $null -ne $transitionAttributionAnalysis) { $transitionAttributionAnalysis.postCollectionResult } else { $null }
     managedSettingsObjectProbeProfile=$isManagedSettingsObjectProbe
     managedEntryProbeAnalysis=if ($isManagedEntryProbe) { $transitionAttributionAnalysisPath } else { $null }
     managedEntryProbeAnalysisResult=if ($isManagedEntryProbe) { $transitionAttributionClassification } else { $null }
@@ -1862,7 +1930,10 @@ $manifest = [ordered]@{
     qacArguments=(Join-Path $runRoot 'qac-run-arguments.json');guestAttempt=$attemptPath;error=$runError
 }
 $manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $manifestPath -Encoding utf8
-if ($isManagedSettingsObjectProbe) {
+if ($isManagedGcRootProbe) {
+    Write-Output "C188R13_MANAGED_GC_ROOT=$outcome ADMITTED=$admitted CAPTURE_COMPLETE=$transitionAttributionCaptureComplete CLASSIFICATION=$transitionAttributionClassification GC_STARTED=$($transitionAttributionAnalysis.gcCollectionStarted) GC_COMPLETED=$($transitionAttributionAnalysis.gcCollectionCompleted) LIVE_OBJECT=$($transitionAttributionAnalysis.liveObjectSurvived) RETURN=$($transitionAttributionAnalysis.managedEntryReturnValue) QAC_RELEASE=$releaseVerified"
+    Write-Output "C188R13_MANAGED_GC_ROOT_MANIFEST=$manifestPath"
+} elseif ($isManagedSettingsObjectProbe) {
     $entryReturned = Get-AnalysisBoolean $transitionAttributionAnalysis 'managedEntryReturned'
     $runtimeStateReady = Get-AnalysisBoolean $transitionAttributionAnalysis 'runtimeStateReady'
     Write-Output "C188R12R4R5R2R3R12_MANAGED_SETTINGS_OBJECT=$outcome ADMITTED=$admitted CAPTURE_COMPLETE=$transitionAttributionCaptureComplete CLASSIFICATION=$transitionAttributionClassification ALLOCATION_SUCCEEDED=$($transitionAttributionAnalysis.allocationSucceeded) ENTRY_RETURNED=$entryReturned RUNTIME_READY=$runtimeStateReady QAC_RELEASE=$releaseVerified"

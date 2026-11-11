@@ -151,8 +151,20 @@ if ($LASTEXITCODE -ne 0) { throw 'R12 analyzer failed to analyze the marker-only
 $validMarkerAnalysis = Get-Content -LiteralPath $validMarkerAnalysisPath -Raw | ConvertFrom-Json
 Assert-R12 ($validMarkerAnalysis.managedEntryReturned -and $validMarkerAnalysis.allocationSucceeded -and
     $validMarkerAnalysis.runtimeStateReady -and $validMarkerAnalysis.classification -ceq 'MANAGED_SETTINGS_OBJECT_RETURNED_MISMATCH' -and
+    [string]::IsNullOrWhiteSpace([string]$validMarkerAnalysis.parseError) -and
     -not $validMarkerAnalysis.qemuLaunched -and -not $validMarkerAnalysis.qacReserved -and
     -not $validMarkerAnalysis.managedCollectionRequested) 'R12 analyzer parses markers without promoting a synthetic log to guest qualification'
+
+$reorderedFixturePath = Join-Path $analyzerFixtureRoot 'allocation-after-return.serial.log'
+$reorderedFixture = @($validMarkerFixture[0],$validMarkerFixture[2],$validMarkerFixture[1],$validMarkerFixture[3])
+[System.IO.File]::WriteAllLines($reorderedFixturePath,[string[]]$reorderedFixture,[System.Text.UTF8Encoding]::new($false))
+$reorderedAnalysisPath = Join-Path $analyzerFixtureRoot 'allocation-after-return.analysis.json'
+& pwsh -NoProfile -ExecutionPolicy Bypass -File $analyzerPath -SerialPath $reorderedFixturePath `
+    -CallSiteMapPath $CallSiteMapPath -OutputPath $reorderedAnalysisPath | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'R12 analyzer failed to analyze the reordered allocation fixture.' }
+$reorderedAnalysis = Get-Content -LiteralPath $reorderedAnalysisPath -Raw | ConvertFrom-Json
+Assert-R12 ($reorderedAnalysis.classification -ceq 'MANAGED_SETTINGS_OBJECT_INCOMPLETE' -and
+    [string]$reorderedAnalysis.parseError -ceq 'r12_managed_entry_return_contract_mismatch') 'R12 analyzer accepts allocation-before-return and rejects allocation-after-return ordering'
 
 $duplicateFixturePath = Join-Path $analyzerFixtureRoot 'duplicate-allocation.serial.log'
 [System.IO.File]::WriteAllLines($duplicateFixturePath,[string[]]($validMarkerFixture + $validMarkerFixture[2]),[System.Text.UTF8Encoding]::new($false))

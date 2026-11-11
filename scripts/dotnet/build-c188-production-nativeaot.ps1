@@ -35,7 +35,8 @@ $phaseRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4r5r4r5r2r2r4r2r2-diagnostic-recovery')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4r5r4r5r2r2r4r2r3-transition-attribution')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4r5r2r3-managed-entry')),
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4r5r4r5r2r2r4r2r3r12-managed-settings-object')))
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4r5r4r5r2r2r4r2r3r12-managed-settings-object')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r13-managed-gc-root')))
 $phaseRoots = @($phaseRoots | ForEach-Object {
     $relativePhase = [System.IO.Path]::GetRelativePath($defaultArtifactRoot,[string]$_)
     [System.IO.Path]::GetFullPath((Join-Path $configuredArtifactRoot $relativePhase))
