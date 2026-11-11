@@ -2209,7 +2209,7 @@ $scenarioDefinitions = @(
         Checks = @($manifestBlockedChecks | Where-Object {
             $_ -ne "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_status=Plausible"
         }) + @(
-            "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_status=Unavailable",
+            "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_status=Invalid",
             "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_epoch=(unavailable)",
             "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_utc=(unavailable)",
             "[NAVIGATOR-SMOKE] tls_prereq.tls_backend_status=ClockCallbackUnavailable",
@@ -2238,7 +2238,7 @@ $scenarioDefinitions = @(
         Checks = @($manifestBlockedChecks | Where-Object {
             $_ -ne "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_status=Plausible"
         }) + @(
-            "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_status=Unavailable",
+            "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_status=Invalid",
             "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_epoch=(unavailable)",
             "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_utc=(unavailable)",
             "[NAVIGATOR-SMOKE] tls_prereq.tls_backend_status=ClockCallbackUnavailable",

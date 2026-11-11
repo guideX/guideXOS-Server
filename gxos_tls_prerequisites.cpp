@@ -1,4 +1,5 @@
 #include "gxos_tls_prerequisites.h"
+#include "gxos_clock_assurance.h"
 
 #if defined(GXOS_BARE_METAL)
 
@@ -6,12 +7,14 @@
 #include "kernel/core/include/kernel/serial_debug.h"
 #include "kernel/core/include/kernel/secure_random.h"
 #include "kernel/core/include/kernel/time.h"
+#include "kernel/core/include/kernel/pit.h"
 #include "kernel/core/include/kernel/virtio_rng.h"
 
 namespace gxos {
 namespace {
 
 bool s_entropyReadMarkerEmitted = false;
+clockassurance::WithinBootContinuity s_rtcContinuity;
 
 bool is_leap_year(uint16_t year)
 {
@@ -37,6 +40,80 @@ void put_two_digits(char* out, uint8_t value)
 {
     out[0] = static_cast<char>('0' + ((value / 10) % 10));
     out[1] = static_cast<char>('0' + (value % 10));
+}
+
+int64_t datetime_to_unix_seconds(const kernel::time::DateTime& dt)
+{
+    int64_t days = 0;
+    for (uint16_t year = 1970; year < dt.year; ++year) {
+        days += is_leap_year(year) ? 366 : 365;
+    }
+    for (uint8_t month = 1; month < dt.month; ++month) {
+        days += days_in_month(dt.year, month);
+    }
+    days += static_cast<int64_t>(dt.day - 1);
+    return (((days * 24) + dt.hour) * 60 + dt.minute) * 60 + dt.second;
+}
+
+bool unix_seconds_to_datetime(int64_t seconds, kernel::time::DateTime* out)
+{
+    if (!out || seconds < clockassurance::kPlausibleMinimumUnixSeconds ||
+        seconds >= clockassurance::kPlausibleMaximumUnixSeconds) return false;
+    uint64_t days = static_cast<uint64_t>(seconds / 86400);
+    const uint32_t daySeconds = static_cast<uint32_t>(seconds % 86400);
+    uint16_t year = 1970;
+    while (year < 2101) {
+        const uint16_t daysThisYear = is_leap_year(year) ? 366u : 365u;
+        if (days < daysThisYear) break;
+        days -= daysThisYear;
+        ++year;
+    }
+    if (year > 2100) return false;
+    uint8_t month = 1;
+    while (month <= 12) {
+        const uint8_t daysThisMonth = days_in_month(year, month);
+        if (days < daysThisMonth) break;
+        days -= daysThisMonth;
+        ++month;
+    }
+    if (month > 12) return false;
+    out->year = year;
+    out->month = month;
+    out->day = static_cast<uint8_t>(days + 1u);
+    out->hour = static_cast<uint8_t>(daySeconds / 3600u);
+    out->minute = static_cast<uint8_t>((daySeconds / 60u) % 60u);
+    out->second = static_cast<uint8_t>(daySeconds % 60u);
+    return true;
+}
+
+GxosClockAssuranceInfo rtc_failure_info()
+{
+    const clockassurance::ContinuityFailure failure = s_rtcContinuity.failure();
+    const bool rollback = failure == clockassurance::ContinuityFailure::MonotonicWentBackwards ||
+        failure == clockassurance::ContinuityFailure::WallClockWentBackwards;
+    const char* reason = "CMOS RTC is unavailable or invalid; certificate time checks fail closed.";
+    if (failure == clockassurance::ContinuityFailure::WallClockWentBackwards) {
+        reason = "CMOS RTC moved backward against this boot's clock evidence; time is rejected until reboot.";
+    } else if (failure == clockassurance::ContinuityFailure::MonotonicWentBackwards) {
+        reason = "PIT monotonic evidence moved backward; time is rejected until reboot.";
+    } else if (failure == clockassurance::ContinuityFailure::ExcessiveForwardJump) {
+        reason = "CMOS RTC jumped forward beyond the bounded PIT consistency allowance; time is rejected until reboot.";
+    }
+    return {
+        rollback ? GxosClockStatus::RollbackSuspected : GxosClockStatus::Invalid,
+        "CMOS RTC",
+        0,
+        0,
+        0,
+        0,
+        kernel::pit::ticks() / 100u,
+        0,
+        false,
+        false,
+        false,
+        rollback,
+        reason
+    };
 }
 
 } // namespace
@@ -118,40 +195,57 @@ GxosSecureRandomDiagnostics gxos_secure_random_diagnostics()
     };
 }
 
+GxosClockAssuranceInfo gxos_wall_clock_assurance()
+{
+    if (s_rtcContinuity.failed()) return rtc_failure_info();
+
+    kernel::time::DateTime dt{};
+    if (!kernel::time::get_current_datetime(dt) || !plausible_datetime(dt)) {
+        s_rtcContinuity.source_failure();
+        return rtc_failure_info();
+    }
+
+    const int64_t seconds = datetime_to_unix_seconds(dt);
+    const uint64_t monotonicSeconds = kernel::pit::ticks() / 100u;
+    const clockassurance::Observation observation = s_rtcContinuity.observe(seconds, monotonicSeconds);
+    if (observation != clockassurance::Observation::Accepted) return rtc_failure_info();
+
+    return {
+        GxosClockStatus::Plausible,
+        "CMOS RTC",
+        seconds,
+        0,
+        0,
+        0,
+        monotonicSeconds,
+        0,
+        false,
+        false,
+        false,
+        false,
+        "Stable RTC date passes calendar and range checks; authenticity, uncertainty bounds, and cross-boot rollback protection are unavailable."
+    };
+}
+
 bool gxos_wall_clock_unix_seconds(int64_t* out)
 {
     if (!out) return false;
-
-    kernel::time::DateTime dt{};
-    if (!kernel::time::get_current_datetime(dt) || !plausible_datetime(dt)) return false;
-
-    int64_t days = 0;
-    for (uint16_t year = 1970; year < dt.year; ++year) {
-        days += is_leap_year(year) ? 366 : 365;
-    }
-    for (uint8_t month = 1; month < dt.month; ++month) {
-        days += days_in_month(dt.year, month);
-    }
-    days += static_cast<int64_t>(dt.day - 1);
-
-    const int64_t seconds = (((days * 24) + dt.hour) * 60 + dt.minute) * 60 + dt.second;
-    if (seconds <= 0) return false;
-    *out = seconds;
+    const GxosClockAssuranceInfo assurance = gxos_wall_clock_assurance();
+    if (assurance.status != GxosClockStatus::Plausible &&
+        assurance.status != GxosClockStatus::Authenticated) return false;
+    *out = assurance.estimateUnixSeconds;
     return true;
 }
 
 GxosClockStatus gxos_wall_clock_status()
 {
-    int64_t seconds = 0;
-    return gxos_wall_clock_unix_seconds(&seconds)
-        ? GxosClockStatus::Plausible
-        : GxosClockStatus::Unavailable;
+    return gxos_wall_clock_assurance().status;
 }
 
 const char* gxos_wall_clock_backend()
 {
 #if ARCH_HAS_PORT_IO
-    return "CMOS RTC (interpreted as UTC)";
+    return "CMOS RTC (raw date interpreted as UTC; timezone metadata unavailable)";
 #else
     return "none (unsupported architecture)";
 #endif
@@ -160,9 +254,11 @@ const char* gxos_wall_clock_backend()
 bool gxos_wall_clock_utc_text(char* out, size_t out_size)
 {
     if (!out || out_size < 21) return false;
-
+    const GxosClockAssuranceInfo assurance = gxos_wall_clock_assurance();
+    if (assurance.status != GxosClockStatus::Plausible &&
+        assurance.status != GxosClockStatus::Authenticated) return false;
     kernel::time::DateTime dt{};
-    if (!kernel::time::get_current_datetime(dt) || !plausible_datetime(dt)) return false;
+    if (!unix_seconds_to_datetime(assurance.estimateUnixSeconds, &dt)) return false;
 
     out[0] = static_cast<char>('0' + ((dt.year / 1000) % 10));
     out[1] = static_cast<char>('0' + ((dt.year / 100) % 10));
@@ -304,7 +400,7 @@ GxosSecureRandomDiagnostics gxos_secure_random_diagnostics()
 #endif
 }
 
-bool gxos_wall_clock_unix_seconds(int64_t* out)
+static bool read_host_system_utc(int64_t* out)
 {
 #if defined(_WIN32)
     if (!out) return false;
@@ -327,12 +423,64 @@ bool gxos_wall_clock_unix_seconds(int64_t* out)
 #endif
 }
 
-GxosClockStatus gxos_wall_clock_status()
+GxosClockAssuranceInfo gxos_wall_clock_assurance()
 {
     int64_t seconds = 0;
-    return gxos_wall_clock_unix_seconds(&seconds)
-        ? GxosClockStatus::Verified
-        : GxosClockStatus::Unavailable;
+    if (read_host_system_utc(&seconds)) {
+        return {
+            GxosClockStatus::Plausible,
+            "Windows system UTC",
+            seconds,
+            0,
+            0,
+            0,
+#if defined(_WIN32)
+            static_cast<uint64_t>(GetTickCount64() / 1000ull),
+#else
+            0,
+#endif
+            0,
+            false,
+            false,
+            false,
+            false,
+            "Host operating-system UTC passes range checks; guideXOS has no cryptographic freshness or rollback evidence."
+        };
+    }
+    return {
+        GxosClockStatus::Invalid,
+#if defined(_WIN32)
+        "Windows system UTC",
+#else
+        "none",
+#endif
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        false,
+        false,
+        false,
+        false,
+        "Host wall clock is unavailable or outside the supported date range."
+    };
+}
+
+bool gxos_wall_clock_unix_seconds(int64_t* out)
+{
+    if (!out) return false;
+    const GxosClockAssuranceInfo assurance = gxos_wall_clock_assurance();
+    if (assurance.status != GxosClockStatus::Plausible &&
+        assurance.status != GxosClockStatus::Authenticated) return false;
+    *out = assurance.estimateUnixSeconds;
+    return true;
+}
+
+GxosClockStatus gxos_wall_clock_status()
+{
+    return gxos_wall_clock_assurance().status;
 }
 
 const char* gxos_wall_clock_backend()
@@ -377,9 +525,11 @@ const char* gxos_random_quality_name(GxosRandomQuality quality)
 const char* gxos_wall_clock_status_name(GxosClockStatus status)
 {
     switch (status) {
+    case GxosClockStatus::Invalid: return "Invalid";
     case GxosClockStatus::Plausible: return "Plausible";
-    case GxosClockStatus::Verified: return "Verified";
-    default: return "Unavailable";
+    case GxosClockStatus::Authenticated: return "Authenticated";
+    case GxosClockStatus::RollbackSuspected: return "RollbackSuspected";
+    default: return "Invalid";
     }
 }
 

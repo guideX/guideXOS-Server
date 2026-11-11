@@ -29,6 +29,10 @@ Assert-Equal "profile class" $profile.profile_class "candidate"
 Assert-Equal "profile hash" $profile.bundle_sha256 $sha
 Assert-Equal "legacy readiness ignored" $profile.approval_state "pending"
 Assert-Equal "no generated authorization evidence" $profile.authorization_evidence "none"
+Assert-Equal "candidate requires authenticated time" $profile.clock_assurance "authenticated-fresh-rollback-protected-required"
+$fixtureProfile = New-NavigatorTrustProfileDocument -Manifest $manifest -ProfileClass "fixture-only" -SourceDate "2026-11-05"
+Assert-Equal "fixture permits plausible time only in fixture lane" $fixtureProfile.clock_assurance "plausible-allowed-controlled-fixtures-only"
+Assert-Equal "fixture does not claim authenticated-time capability" ($fixtureProfile.required_verifier_capabilities -contains "authenticated-time") $false
 
 $result = Test-NavigatorTrustProfileMetadata -Profile $profile -ExpectedBundleSha256 $sha
 Assert-Equal "candidate profile syntax" $result.Valid $true

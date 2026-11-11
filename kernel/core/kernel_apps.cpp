@@ -18455,6 +18455,7 @@ static bool printNavigatorRuntimeSmokePreamble()
     char wallClockUtc[32];
     const bool wallClockAvailable = gxos::gxos_wall_clock_unix_seconds(&wallClockSeconds);
     const gxos::GxosClockStatus wallClockStatus = gxos::gxos_wall_clock_status();
+    const gxos::GxosClockAssuranceInfo wallClockAssurance = gxos::gxos_wall_clock_assurance();
     const bool wallClockUtcAvailable = gxos::gxos_wall_clock_utc_text(wallClockUtc, sizeof(wallClockUtc));
     bool rngReadsIdentical = true;
     for (size_t i = 0; i < sizeof(rngProbe1); ++i) {
@@ -18470,7 +18471,7 @@ static bool printNavigatorRuntimeSmokePreamble()
         ? (rngRead1 && rngRead2)
         : rngFailsClosed;
     const bool wallClockPlausible = wallClockAvailable &&
-        (wallClockStatus == gxos::GxosClockStatus::Plausible || wallClockStatus == gxos::GxosClockStatus::Verified);
+        (wallClockStatus == gxos::GxosClockStatus::Plausible || wallClockStatus == gxos::GxosClockStatus::Authenticated);
     const gxos::GxosTlsBackendInfo tlsBackendInfo = gxos::gxos_tls_backend_info();
     const gxos::GxosTlsMbedTlsImportInfo tlsImportInfo = gxos::gxos_tls_mbedtls_import_info();
     const gxos::GxosTlsRuntimeHookInfo tlsHookInfo = gxos::gxos_tls_runtime_hook_info();
@@ -18620,6 +18621,18 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial::puts(gxos::gxos_wall_clock_status_name(wallClockStatus));
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.wall_clock_backend=");
     serial::puts(gxos::gxos_wall_clock_backend());
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.clock_source=");
+    serial::puts(wallClockAssurance.source ? wallClockAssurance.source : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.clock_rollback_suspected=");
+    serial::puts(wallClockAssurance.rollbackSuspected ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.clock_interval_known=");
+    serial::puts(wallClockAssurance.intervalKnown ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.clock_uncertainty_known=");
+    serial::puts(wallClockAssurance.uncertaintyKnown ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.clock_freshness_known=");
+    serial::puts(wallClockAssurance.freshnessKnown ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.clock_reason=");
+    serial::puts(wallClockAssurance.reason ? wallClockAssurance.reason : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.wall_clock_epoch=");
     if (wallClockAvailable) serial_put_dec64(static_cast<uint64_t>(wallClockSeconds));
     else serial::puts("(unavailable)");

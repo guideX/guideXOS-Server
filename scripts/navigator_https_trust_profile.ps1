@@ -34,9 +34,17 @@ function New-NavigatorTrustProfileDocument {
         trust_purpose = "tls-server-auth"
         supported_restrictions = @("chain-signatures", "validity-periods", "basic-constraints", "path-length", "leaf-server-auth-eku", "leaf-key-usage", "requested-hostname")
         unsupported_restrictions = @("name-constraints", "mozilla-trust-purpose-bits", "mozilla-domain-restrictions", "certificate-policy-tree", "root-distrust-after-policy")
-        required_verifier_capabilities = @("strict-pem-accounting", "sha256-integrity-match", "hostname-verification", "server-auth-eku", "authenticated-time", "signed-approval-verification")
+        required_verifier_capabilities = if ($ProfileClass -eq "fixture-only") {
+            @("strict-pem-accounting", "sha256-integrity-match", "hostname-verification", "server-auth-eku", "plausible-clock-fixture-only")
+        } else {
+            @("strict-pem-accounting", "sha256-integrity-match", "hostname-verification", "server-auth-eku", "authenticated-time", "signed-approval-verification")
+        }
         trust_policy_version = 1
-        clock_assurance = "authenticated-fresh-rollback-protected-required"
+        clock_assurance = if ($ProfileClass -eq "fixture-only") {
+            "plausible-allowed-controlled-fixtures-only"
+        } else {
+            "authenticated-fresh-rollback-protected-required"
+        }
         revocation_policy = "owner-decision-pending-no-crl-ocsp-or-stapled-status-enforced"
         approval_state = "pending"
         authorization_evidence = "none"

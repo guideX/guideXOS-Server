@@ -1165,7 +1165,9 @@ bool parse_trust_profile_json(const uint8_t* bytes,
         !profile->hasSupportedRestrictions || !profile->hasUnsupportedRestrictions ||
         !profile->hasRequiredCapabilities ||
         !profile->hasTrustPolicyVersion || profile->trustPolicyVersion != 1 ||
-        !profile->hasClockAssurance || !profile->clockAssurance[0] ||
+        !profile->hasClockAssurance ||
+        !(text_equals(profile->clockAssurance, "plausible-allowed-controlled-fixtures-only") ||
+          text_equals(profile->clockAssurance, "authenticated-fresh-rollback-protected-required")) ||
         !profile->hasRevocationPolicy || !profile->revocationPolicy[0] ||
         !profile->hasApprovalState || !profile->approvalState[0] ||
         !profile->hasAuthorizationEvidence || !profile->authorizationEvidence[0] ||
@@ -1268,7 +1270,19 @@ bool extract_pem_block(const uint8_t* buffer, size_t buffer_len, size_t index, c
 
 bool is_clock_ready(GxosClockStatus status)
 {
-    return status == GxosClockStatus::Plausible || status == GxosClockStatus::Verified;
+    return status == GxosClockStatus::Plausible || status == GxosClockStatus::Authenticated;
+}
+
+bool authenticated_clock_ready()
+{
+    const GxosClockAssuranceInfo assurance = gxos_wall_clock_assurance();
+    return assurance.status == GxosClockStatus::Authenticated &&
+        assurance.source != nullptr && assurance.source[0] != '\0' &&
+        assurance.intervalKnown && assurance.uncertaintyKnown && assurance.freshnessKnown &&
+        !assurance.rollbackSuspected &&
+        assurance.intervalStartUnixSeconds <= assurance.estimateUnixSeconds &&
+        assurance.estimateUnixSeconds <= assurance.intervalEndUnixSeconds &&
+        assurance.monotonicSeconds <= assurance.freshnessDeadlineMonotonicSeconds;
 }
 
 const char* detected_mbedtls_version()
@@ -1650,6 +1664,7 @@ struct BareMetalCaStoreState {
     char trustProfileSchemaVersion[64] = {};
     char trustProfileId[96] = {};
     char trustProfileClass[32] = {};
+    char trustProfileClockAssurance[80] = {};
     char trustProfileApprovalState[32] = {};
     char trustProfileAuthorizationEvidence[96] = {};
     char trustProfileError[160] = {};
@@ -1891,6 +1906,7 @@ bool load_selected_ca_bundle_trust_profile(BareMetalCaStoreState& state,
     state.trustProfileSchemaVersion[0] = '\0';
     state.trustProfileId[0] = '\0';
     state.trustProfileClass[0] = '\0';
+    state.trustProfileClockAssurance[0] = '\0';
     state.trustProfileApprovalState[0] = '\0';
     state.trustProfileAuthorizationEvidence[0] = '\0';
     state.trustProfileError[0] = '\0';
@@ -1922,6 +1938,7 @@ bool load_selected_ca_bundle_trust_profile(BareMetalCaStoreState& state,
     copy_text(state.trustProfileSchemaVersion, sizeof(state.trustProfileSchemaVersion), parsed.schemaVersion);
     copy_text(state.trustProfileId, sizeof(state.trustProfileId), parsed.profileId);
     copy_text(state.trustProfileClass, sizeof(state.trustProfileClass), parsed.profileClass);
+    copy_text(state.trustProfileClockAssurance, sizeof(state.trustProfileClockAssurance), parsed.clockAssurance);
     copy_text(state.trustProfileApprovalState, sizeof(state.trustProfileApprovalState), parsed.approvalState);
     copy_text(state.trustProfileAuthorizationEvidence, sizeof(state.trustProfileAuthorizationEvidence), parsed.authorizationEvidence);
     state.trustProfileApprovalAuthenticated = parsed.approvalAuthenticated;
@@ -1959,6 +1976,18 @@ const char* trust_profile_blocker(const BareMetalCaStoreState& state, const char
     }
     if (requiredClass && !text_equals(state.trustProfileClass, requiredClass)) {
         return "Trust profile class does not match the selected HTTPS policy.";
+    }
+    if (requiredClass && text_equals(requiredClass, "fixture-only") &&
+        !text_equals(state.trustProfileClockAssurance, "plausible-allowed-controlled-fixtures-only")) {
+        return "Fixture trust profile does not explicitly limit plausible time to controlled fixtures.";
+    }
+    if (text_equals(state.trustProfileClockAssurance,
+            "authenticated-fresh-rollback-protected-required") && !authenticated_clock_ready()) {
+        const GxosClockAssuranceInfo assurance = gxos_wall_clock_assurance();
+        if (assurance.status == GxosClockStatus::RollbackSuspected) {
+            return "Trust profile requires authenticated time, and clock rollback is suspected.";
+        }
+        return "Trust profile requires authenticated fresh rollback-protected time; current clock assurance is insufficient.";
     }
     return nullptr;
 }
@@ -2640,10 +2669,19 @@ GxosValidatedHttpsPolicyInfo make_validated_https_policy_info()
             detail = "Production HTTPS policy is selected, but the active trust store is not a production bundle.";
             publicHttpsPilotReason = "Public HTTPS requires authenticated release approval; a production CA bundle alone is insufficient.";
             blocker = "Production HTTPS policy requires a non-smoke bundle at /certs/ca-bundle.pem.";
+        } else if (const char* profileBlocker = trust_profile_blocker(ca_store_state(), nullptr)) {
+            detail = "Production HTTPS policy is selected, but its trust profile or required clock assurance is not ready.";
+            publicHttpsPilotReason = profileBlocker;
+            blocker = profileBlocker;
         } else if (!nonSmokeReady) {
             detail = "Production HTTPS policy is selected, but bare-metal TLS prerequisites are not yet complete.";
             publicHttpsPilotReason = trustPolicy.error ? trustPolicy.error : "Public HTTPS remains disabled until authenticated release approval and security prerequisites are available.";
             blocker = trustPolicy.error ? trustPolicy.error : "Production HTTPS prerequisites are incomplete.";
+        } else if (!authenticated_clock_ready()) {
+            const GxosClockAssuranceInfo assurance = gxos_wall_clock_assurance();
+            detail = "Production HTTPS policy is selected, but the current clock is not authenticated and rollback-protected.";
+            publicHttpsPilotReason = assurance.reason ? assurance.reason : "Authenticated fresh time is required for public HTTPS.";
+            blocker = "Authenticated fresh rollback-protected time is required for the selected public trust profile.";
         } else {
             detail = "Production HTTPS policy is inert: trust-profile metadata is unsigned and no release-owner trust anchor is configured.";
             publicHttpsPilotReason = "Production trust activation requires signature-verified approval evidence; an unsigned readiness label is insufficient.";
@@ -2761,14 +2799,18 @@ GxosTlsRuntimeHookInfo make_runtime_hook_info()
             "PSA external RNG callback is wired, but the kernel secure-random provider is unavailable.");
     }
 
-    if (is_clock_ready(gxos_wall_clock_status())) {
+    const GxosClockAssuranceInfo clockAssurance = gxos_wall_clock_assurance();
+    if (is_clock_ready(clockAssurance.status)) {
         state.timeStatus = GxosTlsHookStatus::Ready;
         copy_text(state.timeDetail, sizeof(state.timeDetail),
-            "mbedtls_time() and UTC gmtime_r() are wired to the guideXOS wall clock and fail closed when time is implausible.");
+            clockAssurance.status == GxosClockStatus::Authenticated
+                ? "mbedtls_time() has fresh authenticated time with a bounded interval; public trust still requires its rollback policy."
+                : "mbedtls_time() has plausible unauthenticated time for controlled fixtures only; public trust requires fresh Authenticated time.");
     } else {
         state.timeStatus = GxosTlsHookStatus::Unavailable;
-        copy_text(state.timeDetail, sizeof(state.timeDetail),
-            "Wall clock callback is wired, but guideXOS does not currently report a plausible UTC time.");
+        copy_text(state.timeDetail, sizeof(state.timeDetail), clockAssurance.reason
+            ? clockAssurance.reason
+            : "Wall clock callback is wired, but guideXOS does not have a usable UTC time.");
     }
 
     return {

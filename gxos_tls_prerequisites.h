@@ -16,9 +16,27 @@ enum class GxosRandomQuality {
 };
 
 enum class GxosClockStatus {
-    Unavailable,
+    Invalid,
+    Unavailable = Invalid,
     Plausible,
-    Verified
+    Authenticated,
+    RollbackSuspected
+};
+
+struct GxosClockAssuranceInfo {
+    GxosClockStatus status;
+    const char* source;
+    int64_t estimateUnixSeconds;
+    int64_t intervalStartUnixSeconds;
+    int64_t intervalEndUnixSeconds;
+    uint64_t uncertaintySeconds;
+    uint64_t monotonicSeconds;
+    uint64_t freshnessDeadlineMonotonicSeconds;
+    bool intervalKnown;
+    bool uncertaintyKnown;
+    bool freshnessKnown;
+    bool rollbackSuspected;
+    const char* reason;
 };
 
 struct GxosSecureRandomDiagnostics {
@@ -49,6 +67,7 @@ const char* gxos_virtio_rng_status();
 GxosSecureRandomDiagnostics gxos_secure_random_diagnostics();
 
 bool gxos_wall_clock_unix_seconds(int64_t* out);
+GxosClockAssuranceInfo gxos_wall_clock_assurance();
 GxosClockStatus gxos_wall_clock_status();
 const char* gxos_wall_clock_status_name(GxosClockStatus status);
 const char* gxos_wall_clock_backend();

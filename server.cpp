@@ -407,7 +407,7 @@ static std::string navigatorHostedSmokeDiagnostic() {
     add("hosted RNG quality Secure", gxos::gxos_random_quality() == gxos::GxosRandomQuality::Secure,
         gxos::gxos_random_backend());
     add("hosted RNG reads differ", randomDiffers, randomDiffers ? "two 32-byte reads differ" : "system RNG read failed or repeated");
-    add("hosted wall clock Verified", gxos::gxos_wall_clock_status() == gxos::GxosClockStatus::Verified && wallClockOk,
+    add("hosted wall clock Plausible", gxos::gxos_wall_clock_status() == gxos::GxosClockStatus::Plausible && wallClockOk,
         gxos::gxos_wall_clock_backend() + std::string(" epoch=") + std::to_string(wallClockSeconds));
 
     const std::string inspect = gxos::gui::DesktopService::InspectNativeAppPipeline("guideXOS Navigator");
@@ -570,7 +570,12 @@ static std::string navigatorHostedSmokeDiagnostic() {
     add("HTTPS downgrade redirect blocked by default", contains(runtimeReport, "Capabilities.HTTPS-to-HTTP redirect policy=blocked by default"), "expected hosted downgrade policy");
     add("bare-metal TLS remains gated", contains(runtimeReport, "Capabilities.Bare-metal TLS=foundation only; https:// stays blocked until readiness is true"), "expected honest bare-metal boundary");
     add("runtime RNG quality Secure", contains(runtimeReport, "TLS Prerequisites.RNG quality=Secure"), "expected BCrypt-backed system RNG");
-    add("runtime wall clock Verified", contains(runtimeReport, "TLS Prerequisites.Wall-clock status=Verified"), "expected Windows system UTC");
+    add("runtime wall clock Plausible", contains(runtimeReport, "TLS Prerequisites.Wall-clock status=Plausible"), "Windows system UTC is range-checked but not cryptographically authenticated");
+    add("runtime clock source and assurance limits surfaced",
+        contains(runtimeReport, "TLS Prerequisites.Clock source identity=Windows system UTC") &&
+        contains(runtimeReport, "TLS Prerequisites.Clock uncertainty=unknown") &&
+        contains(runtimeReport, "TLS Prerequisites.Clock rollback suspected=no"),
+        "host system UTC is an input with no guideXOS authentication or rollback evidence");
     add("runtime TLS backend ready", contains(runtimeReport, "TLS Prerequisites.TLS backend status=ReadyForValidatedNavigation") &&
         contains(runtimeReport, "TLS Prerequisites.TLS backend name=Schannel hosted") &&
         contains(runtimeReport, "TLS Prerequisites.TLS backend version=Windows Schannel"), "expected hosted backend readiness details");

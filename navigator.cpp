@@ -11570,6 +11570,7 @@ namespace {
 	{
 		const GxosRandomQuality randomQuality = gxos_random_quality();
 		const GxosClockStatus clockStatus = gxos_wall_clock_status();
+		const GxosClockAssuranceInfo clockAssurance = gxos_wall_clock_assurance();
 		const GxosTlsBackendInfo tlsBackendInfo = gxos_tls_backend_info();
 		const GxosTlsMbedTlsImportInfo tlsImportInfo = gxos_tls_mbedtls_import_info();
 		const GxosTlsRuntimeHookInfo tlsHookInfo = gxos_tls_runtime_hook_info();
@@ -11651,6 +11652,13 @@ namespace {
 			{"TLS Prerequisites", "Random read smoke", rngReadSmoke ? "PASS" : "FAIL"},
 			{"TLS Prerequisites", "Wall-clock status", gxos_wall_clock_status_name(clockStatus)},
 			{"TLS Prerequisites", "Wall-clock backend", gxos_wall_clock_backend()},
+			{"TLS Prerequisites", "Clock source identity", clockAssurance.source ? clockAssurance.source : "(none)"},
+			{"TLS Prerequisites", "Clock assurance reason", clockAssurance.reason ? clockAssurance.reason : "(none)"},
+			{"TLS Prerequisites", "Clock rollback suspected", clockAssurance.rollbackSuspected ? "yes" : "no"},
+			{"TLS Prerequisites", "Clock uncertainty", clockAssurance.uncertaintyKnown ? std::to_string(clockAssurance.uncertaintySeconds) + " seconds" : "unknown"},
+			{"TLS Prerequisites", "Clock estimate interval", clockAssurance.intervalKnown ? std::to_string(clockAssurance.intervalStartUnixSeconds) + ".." + std::to_string(clockAssurance.intervalEndUnixSeconds) : "unknown"},
+			{"TLS Prerequisites", "Clock freshness deadline", clockAssurance.freshnessKnown ? std::to_string(clockAssurance.freshnessDeadlineMonotonicSeconds) + " monotonic seconds" : "unknown"},
+			{"TLS Prerequisites", "Clock profile contract", "Plausible time is limited to fixture-only profiles; public trust requires fresh Authenticated time with bounded uncertainty and no rollback conflict"},
 			{"TLS Prerequisites", "Wall-clock Unix seconds", wallClockAvailable ? std::to_string(wallClockSeconds) : "(unavailable)"},
 			{"TLS Prerequisites", "Wall-clock UTC", wallClockUtcAvailable ? wallClockUtc : "(unavailable)"},
 			{"TLS Prerequisites", "TLS backend status", gxos_tls_backend_status_name(tlsBackendInfo.status)},
