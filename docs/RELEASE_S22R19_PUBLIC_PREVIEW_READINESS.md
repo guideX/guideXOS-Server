@@ -167,3 +167,17 @@ Recommend exactly one next major direction: **Path C — Security or provenance 
 - [S22R18 Disposable VM Qualification](RELEASE_S22R18_DISPOSABLE_VM_QUALIFICATION.md)
 - [S22R14R2 Build Reproducibility](RELEASE_S22R14R2_BUILD_REPRODUCIBILITY.md)
 - [S22R14R1R6 COM2 and Legacy Coverage](RELEASE_S22R14R1R6_COM2_AND_LEGACY_COVERAGE.md)
+
+## S22R21 addendum — 2026-11-10
+
+This section supplements the historical S22R19 snapshot above. Its Outcome C remains the S22R19 assessment, not the result of S22R21 and not a current approval marker. S22R21 has closed the known Legacy Display presentation issue on a new, separately identified candidate; the release remains **DRAFT — NOT APPROVED**.
+
+The Legacy Display Options Displays tab now states that display configuration is unsupported in the v0.3 Public Technical Preview and that the page is read-only until a supported backend is qualified. Configuration controls and Apply/OK are absent; Close, window lifecycle, Backgrounds, Desktop Icons, Gradients, and modern Settings navigation remain functional. The exact candidate received hosted/freestanding validation, direct ISO and embedded ESP verification, QAC UI evidence, a separate PacMan clean-return guest pass, and a new diagnostic resource-tamper rejection. Details and evidence paths are in [S22R21 remediation](RELEASE_S22R21_LEGACY_DISPLAY_UI_REMEDIATION.md), [candidate provenance](RELEASE_S22R21_BUILD_PROVENANCE_AND_CANDIDATE.md), and [guest qualification](RELEASE_S22R21_PUBLIC_PREVIEW_GUEST_QUALIFICATION.md).
+
+The S22R21 phase result is `DISPLAY_CORRECTED_CANDIDATE_QUALIFIED`, and the new ISO is eligible for subsequent owner review only. It does not authorize substitution into the S22R19 contract, signing, publication, or readiness promotion. The candidate is `guideXOS-Server-v0.3.0-amd64-public-preview-pacman-only-candidate.iso`, 90,245,120 bytes, SHA-256 `86a3296adf0558fa509a044232b0086e57edd6c0bd4236677fba90d8a294d5fe`.
+
+S22R20's adjacent ESP discrepancy remains limited to FAT32 backup sector 6, with cause and actor unknown. S22R21 did not repair or attribute that intermediate artifact, nor claim that the S22R20 authoritative ISO changed. The S22R21 candidate has its own clean-source record and its own ESP extracted from and verified against its ISO. Its build provenance is traceable but does not establish an independent reproducible build; the content-equivalence contract remains, and ISO byte identity is not promised.
+
+All existing owner decisions remain pending except the already selected Model B target: `/Documents` FAT short-name failure and persistence boundary, recent-history persistence, COM2 scope, content-equivalence/reproducibility acceptance, privileged PacMan risk and absent process isolation, final preview contract and user instructions, signing identity/format/key custody/trusted key route, distribution channel, and explicit authorization for the exact final ISO digest. The SSHSIG proposal remains synthetic and unapproved. No production key, signature, tag, upload, publication, or readiness marker was created.
+
+**Readiness disposition:** engineering remediation and exact-candidate requalification are complete for the changed Display behavior. Release-owner review and all listed authorization/authentication decisions remain prerequisites to publication.

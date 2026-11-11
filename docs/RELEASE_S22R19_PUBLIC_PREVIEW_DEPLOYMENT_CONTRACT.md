@@ -1,7 +1,7 @@
 # Server v0.3 — S22R19 Public Preview Deployment Contract
 
 **DRAFT — NOT APPROVED**
-**Scope:** exact S22R18 public-preview candidate only.
+**Historical base scope:** exact S22R18 public-preview candidate. The original contract below remains its identity-specific record; see the proposed S22R21 addendum at the end for the separately qualified candidate and revised Display behavior.
 
 This contract describes the narrow disposable virtual machine profile that received S22R18 QAC evidence. It is not approval to distribute the ISO. It does not describe physical installation, a general-purpose OS security model, or a sandbox for Native ELF applications.
 
@@ -55,14 +55,14 @@ The following are outside the proposed preview contract:
 
 - Persistent user files, /Documents, and save workflows.
 - Persistent settings and Start-menu recent history.
-- Legacy Display mode or topology configuration.
+- Legacy Display mode or topology configuration (S22R21 now presents this as an explicit read-only unsupported state on its candidate).
 - Third-party or user-installed Native ELF applications.
 - General Native ELF compatibility or isolation.
 - Network browsing, TLS, remote downloads, and bookmarks persistence.
 - COM2 host storage service or writable storage management.
 - Physical hardware, other hypervisors, or alternate QEMU virtual devices.
 
-The /Documents creation path has a recorded FAT short-name failure. Read-only listing/reading of /Documents was not demonstrated on the S22R18 candidate, and no user-created file can be saved on its read-only root. The Start-menu history path reports no persisted state at boot. The Display backend is unavailable, and its visible UI needs a clear unsupported label and disabled configuration controls before public use. These are proposed contract exclusions; the release owner has not approved them.
+The /Documents creation path has a recorded FAT short-name failure. Read-only listing/reading of /Documents was not demonstrated on the S22R18 candidate, and no user-created file can be saved on its read-only root. The Start-menu history path reports no persisted state at boot. The Display backend is unavailable. The S22R19 assessment required a clear unsupported label; the S22R21 addendum records that correction and its exact-candidate QAC evidence. These are proposed contract exclusions; the release owner has not approved them.
 
 ## Security expectations
 
@@ -73,3 +73,34 @@ The runtime allows the exact first-party PacMan package from the release read-on
 ## Evidence and approval
 
 The exact ISO received two positive QAC runs and one separate diagnostic resource-tamper rejection. The QAC-tested host display frontend differs from the public interactive launcher proposed above. No public user launch configuration has been authorized. See [S22R18 Disposable VM Qualification](RELEASE_S22R18_DISPOSABLE_VM_QUALIFICATION.md), [S22R19 Readiness](RELEASE_S22R19_PUBLIC_PREVIEW_READINESS.md), and [S22R19 Owner Approval Sheet](RELEASE_S22R19_OWNER_APPROVAL_SHEET.md).
+
+## Proposed S22R21 addendum — 2026-11-10
+
+**DRAFT — NOT APPROVED.** This addendum records engineering evidence and a proposed identity update only. It does not amend approval status or authorize release-owner acceptance, signing, or distribution. The S22R18 values above remain the historical candidate identity; they are not transferred to the new ISO.
+
+### Proposed candidate identity
+
+- Product: guideXOS Server 0.3.0, AMD64.
+- Build ID: `861456a4-85fd-4aee-9f95-9b34b763e83d`.
+- Source: `b71147271d046a547885c47f333561dd66425785`.
+- Release profile: `ServerV03PublicPreviewPacManOnly`.
+- Candidate ISO: `guideXOS-Server-v0.3.0-amd64-public-preview-pacman-only-candidate.iso`.
+- Size: 90,245,120 bytes.
+- SHA-256: `86a3296adf0558fa509a044232b0086e57edd6c0bd4236677fba90d8a294d5fe`.
+- Candidate is unsigned and unpublished; SHA-256 is a local identity, not publisher authentication.
+
+The image is AMD64 UEFI with no legacy BIOS boot entry. PacMan is the only Native ELF package; DeveloperStudio is absent. It is intended for the restricted, disposable QEMU profile described above, subject to owner approval and final user-facing launch instructions. Keep the read-only ISO and OVMF code, no writable guest storage or UEFI variables, no NIC, no host share, no guest COM2 service, and no exposed monitor. QAC's loopback QMP was host control for qualification, not guest access.
+
+### Proposed Display behavior and supported scope
+
+Legacy Display Options remains visible so users can inspect its page. Its Displays tab states: “Display configuration is not supported in the v0.3 public technical preview.” The page also explains it is read-only until a supported backend is qualified. Mode/topology, monitor, resolution, Apply, and OK controls are hidden and blocked; Close remains available. Reopening the window and re-navigation were observed in QAC. Modern Settings navigation remains active, and its Display page remains a read-only framebuffer snapshot. No display backend or GPU probe is enabled. The S22R21 UI result does not qualify other hardware or a public interactive host launcher.
+
+The exact new candidate received direct ISO/embedded-ESP verification and focused QAC evidence for the Display state and Modern Settings navigation. A separate QAC run passed PacMan gameplay input and Escape cleanup. A separately hashed, one-byte resource-tamper diagnostic was rejected before native entry; that diagnostic media is not a release candidate. See [S22R21 guest qualification](RELEASE_S22R21_PUBLIC_PREVIEW_GUEST_QUALIFICATION.md).
+
+### Remaining proposed exclusions and owner decisions
+
+The following remain outside the proposed supported scope until the owner decides otherwise: `/Documents` creation and persistence, recent-history persistence, COM2 host storage/service scope, arbitrary or third-party Native ELF execution, general app isolation, network use, writable disks/package sources, physical installation, other hypervisors, and other QEMU hardware profiles. PacMan continues to execute with kernel privilege and the kernel has no process address-space isolation. Those are explicit residual risks, not claims of a sandbox.
+
+S22R21 records exact point-in-time host tool identities and a clean source/build state. Host toolchain/SDK inputs are not repository-pinned, a second independent build was not performed, and nondeterministic ISO timestamps/UUIDs mean byte-identical ISO output is not promised. Retain S22R14R2 content-equivalence as the reproducibility contract. The S22R20 backup-sector-6 discrepancy remains unexplained and unmodified; this new candidate does not repair or attribute the older adjacent ESP.
+
+Owner decisions still required include acceptance of the candidate and exact VM scope, `/Documents` and recent-history behavior, COM2 scope, content-equivalence and provenance sufficiency, privileged PacMan/no-process-isolation risk, final user documentation/support ownership, production signer and signature format, key custody/recovery/rotation, independently trusted verification-key delivery, distribution host/channel, and explicit publication authorization naming the ISO digest. The synthetic SSHSIG proposal remains unapproved. No production signing key, signature, Git tag, upload, publication, or release-readiness marker has been created.
