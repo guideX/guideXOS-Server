@@ -166,6 +166,11 @@ Assert-R13 ($runner -match 'CreateNew' -and $runner -match 'automaticRetry=\$fal
     $admissionModule -match '\$expectedGuardPath') 'QAC runner, phase plan, and admission checks bind the candidate-specific one-boot guard path and require native collection completion'
 Assert-R13 ($runner -match 'Capture-R13TimeoutCpuState' -and
     $runner -match 'Complete-R13TimeoutCpuStateSerialHash' -and
+    $runner -match 'Capture-R16TimeoutStackWindow' -and
+    $runner -match 'Complete-R16TimeoutStackSerialHash' -and
+    $runner -match 'memsave 0x' -and $runner -match 'guest-virtual' -and
+    $runner -match 'managedGcTimeoutStackCaptureMetadataSha256=Hash-IfPresent' -and
+    $runner -match 'managedGcTimeoutStackSerialHashStatus=\$managedGcTimeoutStackSerialHashStatus' -and
     $runner -match 'serialHashStatus=''deferred-until-qemu-exit''' -and
     $runner -match 'verified-after-qemu-exit' -and
     $runner -match "human-monitor-command" -and $runner -match 'info registers' -and
@@ -178,9 +183,11 @@ $ownedQemuCheckIndex=$runner.LastIndexOf('Test-QacLocalQemuChildIdentity',$cpuCa
 $qmpQuitAfterCaptureIndex=$runner.IndexOf("Invoke-Qmp 'quit'",$cpuCaptureCallIndex,[StringComparison]::Ordinal)
 $qacExitWaitIndex=$runner.IndexOf('$qacProcess.WaitForExit(90000)',$cpuCaptureCallIndex,[StringComparison]::Ordinal)
 $serialHashFinalizeIndex=$runner.IndexOf('Complete-R13TimeoutCpuStateSerialHash -CapturePath',$cpuCaptureCallIndex,[StringComparison]::Ordinal)
+$stackSerialHashFinalizeIndex=$runner.IndexOf('Complete-R16TimeoutStackSerialHash -CapturePath',$cpuCaptureCallIndex,[StringComparison]::Ordinal)
 Assert-R13 ($cpuCaptureCallIndex -ge 0 -and $ownedQemuCheckIndex -ge 0 -and
     $ownedQemuCheckIndex -lt $cpuCaptureCallIndex -and $qmpQuitAfterCaptureIndex -gt $cpuCaptureCallIndex -and
-    $qacExitWaitIndex -gt $qmpQuitAfterCaptureIndex -and $serialHashFinalizeIndex -gt $qacExitWaitIndex) 'Timeout snapshot is ownership-gated and serial hashing waits for QAC process exit'
+    $qacExitWaitIndex -gt $qmpQuitAfterCaptureIndex -and $serialHashFinalizeIndex -gt $qacExitWaitIndex -and
+    $stackSerialHashFinalizeIndex -gt $qacExitWaitIndex) 'Timeout CPU and stack snapshots are ownership-gated and serial hashing waits for QAC process exit'
 $r13ScriptTokens=$null; $r13ScriptParseErrors=$null
 $runnerAst=[System.Management.Automation.Language.Parser]::ParseFile($runnerPath,[ref]$r13ScriptTokens,[ref]$r13ScriptParseErrors)
 $integrityFunctionAst=$runnerAst.Find({param($node)
@@ -196,15 +203,56 @@ $completeCpuStateAst=$runnerAst.Find({param($node)
     $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
     $node.Name -ceq 'Complete-R13TimeoutCpuStateSerialHash'
 },$true)
-Assert-R13 ($null -ne $captureCpuStateAst -and $null -ne $completeCpuStateAst) 'R15 CPU snapshot and post-exit serial finalizer are isolated runner functions'
-if ($null -ne $captureCpuStateAst -and $null -ne $completeCpuStateAst) {
+$stackBoundsAst=$runnerAst.Find({param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -ceq 'Get-R16StackBoundsObservation'
+},$true)
+$captureStackAst=$runnerAst.Find({param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -ceq 'Capture-R16TimeoutStackWindow'
+},$true)
+$completeStackHashAst=$runnerAst.Find({param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -ceq 'Complete-R16TimeoutStackSerialHash'
+},$true)
+$hashIfPresentAst=$runnerAst.Find({param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -ceq 'Hash-IfPresent'
+},$true)
+Assert-R13 ($null -ne $captureCpuStateAst -and $null -ne $completeCpuStateAst -and
+    $null -ne $stackBoundsAst -and $null -ne $captureStackAst -and $null -ne $completeStackHashAst -and
+    $null -ne $hashIfPresentAst) 'R15/R16 capture and final-manifest hash helper functions are isolated in the runner'
+if ($null -ne $captureCpuStateAst -and $null -ne $completeCpuStateAst -and
+    $null -ne $stackBoundsAst -and $null -ne $captureStackAst -and $null -ne $completeStackHashAst -and
+    $null -ne $hashIfPresentAst) {
     . ([scriptblock]::Create($captureCpuStateAst.Extent.Text))
     . ([scriptblock]::Create($completeCpuStateAst.Extent.Text))
+    . ([scriptblock]::Create($stackBoundsAst.Extent.Text))
+    . ([scriptblock]::Create($captureStackAst.Extent.Text))
+    . ([scriptblock]::Create($completeStackHashAst.Extent.Text))
+    . ([scriptblock]::Create($hashIfPresentAst.Extent.Text))
+    $script:mockStackMemsaveCalls=0
+    $script:mockStackMemsaveTruncate=$false
+    $script:mockStackMemsaveFailure=$false
+    $script:mockStackMemsaveFailureResponse=$false
     function Invoke-Qmp([string]$Command,[System.Collections.IDictionary]$QmpArguments=$null) {
         switch ($Command) {
             'stop' { return '{"return":{}}' }
             'query-status' { return '{"return":{"status":"paused","running":false}}' }
-            'human-monitor-command' { return '{"return":"RIP=0000000100057ecc RSP=00000000052b5200 RBP=00000000052b5360"}' }
+            'human-monitor-command' {
+                $hmp=[string]$QmpArguments['command-line']
+                if ($hmp -match '^memsave 0x[0-9A-Fa-f]+ 0x(?<length>[0-9A-Fa-f]+) "(?<path>.*)"$') {
+                    $script:mockStackMemsaveCalls++
+                    if ($script:mockStackMemsaveFailure) { throw 'Synthetic bounded memsave failure.' }
+                    $byteCount=[Convert]::ToInt32($Matches.length,16)
+                    if ($script:mockStackMemsaveTruncate) { $byteCount=[Math]::Max(0,$byteCount-8) }
+                    $mockStackPath=$Matches.path.Replace('/','\')
+                    [System.IO.File]::WriteAllBytes($mockStackPath,[byte[]]::new($byteCount))
+                    if ($script:mockStackMemsaveFailureResponse) { return '{"return":"Could not write bounded test stack"}' }
+                    return '{"return":"Saved bounded test stack window"}'
+                }
+                return '{"return":"RIP=0000000100057ecc RSP=00000000052b5200 RBP=00000000052b5360"}'
+            }
             default { throw "Unexpected mocked QMP command: $Command" }
         }
     }
@@ -227,6 +275,9 @@ if ($null -ne $captureCpuStateAst -and $null -ne $completeCpuStateAst) {
         Assert-R13 ($mockCapture.Status -ceq 'captured' -and $mockCaptureJson.serialHashStatus -ceq 'deferred-until-qemu-exit' -and
             $null -eq $mockCaptureJson.serialSha256 -and $mockCaptureJson.rip -ceq '0000000100057ECC') 'Exclusive serial lock does not prevent the paused QMP register snapshot'
     } finally { $serialMockStream.Dispose() }
+    Assert-R13 ((Hash-IfPresent (Join-Path $captureMockRoot 'absent-stack-sidecar.json')) -eq $null -and
+        (Hash-IfPresent $mockCapture.RegistersPath) -ceq (Get-Sha256 $mockCapture.RegistersPath)) `
+        'Final manifest hash helper returns null for an absent sidecar and hashes a present capture'
     $mockSerialFinalization=Complete-R13TimeoutCpuStateSerialHash -CapturePath $mockCapture.Path -SerialPath $serialMockPath
     $mockCaptureFinal=Get-Content -LiteralPath $mockCapture.Path -Raw | ConvertFrom-Json
     Assert-R13 ($mockSerialFinalization.Status -ceq 'verified-after-qemu-exit' -and
@@ -239,6 +290,98 @@ if ($null -ne $captureCpuStateAst -and $null -ne $completeCpuStateAst) {
     Assert-R13 ($missingSerialResult.Status -ceq 'unavailable-after-qemu-exit' -and
         $missingSerialCaptureJson.status -ceq 'captured' -and
         $missingSerialCaptureJson.registersSha256 -ceq (Get-Sha256 $mockCapture.RegistersPath)) 'Serial hash failure preserves the completed CPU register evidence'
+
+    $validBoundsSerial='[C188R12R4R5R2R3_HANDOFF] checkpoint=before_managed_main status=00000000 stackReady=00000001 stackInBounds=00000001 stackLow=0000000000100000 stackHigh=0000000000102000 result=PASS'
+    $validBounds=Get-R16StackBoundsObservation $validBoundsSerial
+    Assert-R13 ($validBounds.Valid -and $validBounds.Low -eq 0x100000 -and $validBounds.High -eq 0x102000) 'R16 stack window accepts only a passing bounded ThreadStore stack observation'
+    $r16SuccessRoot=Join-Path $captureMockRoot 'r16-success'
+    [void](New-Item -ItemType Directory -Path $r16SuccessRoot -Force)
+    $runRoot=$r16SuccessRoot
+    $r16RegisterPath=Join-Path $r16SuccessRoot 'registers.txt'
+    Set-Content -LiteralPath $r16RegisterPath -Value "CPU#0`nRIP=0000000100057ECC RSP=0000000000101FF0 RBP=0000000000101FF8" -Encoding ascii
+    $stackCapture=Capture-R16TimeoutStackWindow -CandidateManifestHash ('b'*64) `
+        -RegistersPath $r16RegisterPath -SerialText $validBoundsSerial
+    $stackCaptureJson=Get-Content -LiteralPath $stackCapture.Path -Raw | ConvertFrom-Json
+    Assert-R13 ($stackCapture.Status -ceq 'captured' -and $stackCapture.LengthBytes -eq 16 -and
+        $stackCapture.StartAddress -ceq '0000000000101FF0' -and
+        $stackCaptureJson.guestCpuIndex -eq 0 -and $stackCaptureJson.status -ceq 'captured' -and
+        $stackCaptureJson.stackSha256 -ceq (Get-Sha256 $stackCapture.StackPath) -and
+        $mockStackMemsaveCalls -eq 1) 'R16 memsave captures the exact RSP-to-stack-high virtual range and binds its hash'
+    $r16MaximumRoot=Join-Path $captureMockRoot 'r16-maximum-window'
+    [void](New-Item -ItemType Directory -Path $r16MaximumRoot -Force)
+    $runRoot=$r16MaximumRoot
+    Set-Content -LiteralPath $r16RegisterPath -Value "CPU#0`nRIP=0000000100057ECC RSP=0000000000100000 RBP=0000000000100008" -Encoding ascii
+    $maximumWindowCapture=Capture-R16TimeoutStackWindow -CandidateManifestHash ('b'*64) `
+        -RegistersPath $r16RegisterPath -SerialText $validBoundsSerial
+    Assert-R13 ($maximumWindowCapture.Status -ceq 'captured' -and $maximumWindowCapture.LengthBytes -eq 8192) `
+        'R16 memsave never exceeds the fixed 8192-byte window when the whole stack range is available'
+    $stackHashFinal=Complete-R16TimeoutStackSerialHash -CapturePath $stackCapture.Path `
+        -HashStatus 'verified-after-qemu-exit' -SerialSha256 ('c'*64)
+    $stackCaptureFinal=Get-Content -LiteralPath $stackCapture.Path -Raw | ConvertFrom-Json
+    Assert-R13 ($stackHashFinal.Status -ceq 'verified-after-qemu-exit' -and
+        $stackCaptureFinal.serialSha256 -ceq (('c'*64).ToUpperInvariant())) 'R16 stack metadata binds serial evidence only after QAC exit'
+    $unavailableStackHash=Complete-R16TimeoutStackSerialHash -CapturePath $maximumWindowCapture.Path `
+        -HashStatus 'unavailable-after-qemu-exit' -SerialSha256 $null
+    $unavailableStackJson=Get-Content -LiteralPath $maximumWindowCapture.Path -Raw | ConvertFrom-Json
+    Assert-R13 ($unavailableStackHash.Status -ceq 'unavailable-after-qemu-exit' -and
+        $unavailableStackJson.status -ceq 'captured' -and $null -eq $unavailableStackJson.serialSha256 -and
+        $unavailableStackJson.serialHashError) 'R16 post-exit serial hash failure preserves captured stack bytes and records the hash gap'
+
+    $r16MissingRoot=Join-Path $captureMockRoot 'r16-missing-bounds'
+    [void](New-Item -ItemType Directory -Path $r16MissingRoot -Force)
+    $runRoot=$r16MissingRoot
+    $beforeMissingBoundsCalls=$mockStackMemsaveCalls
+    $missingBoundsCapture=Capture-R16TimeoutStackWindow -CandidateManifestHash ('b'*64) `
+        -RegistersPath $r16RegisterPath -SerialText '[C188R12R4R5R2R3_HANDOFF] status=00000000 stackReady=00000000 stackInBounds=00000000'
+    $missingBoundsJson=Get-Content -LiteralPath $missingBoundsCapture.Path -Raw | ConvertFrom-Json
+    Assert-R13 ($missingBoundsCapture.Status -ceq 'unavailable-stack-bounds-missing' -and
+        $missingBoundsJson.status -ceq 'unavailable-stack-bounds-missing' -and
+        $mockStackMemsaveCalls -eq $beforeMissingBoundsCalls) 'R16 does not read guest memory when valid stack-bound metadata is missing'
+
+    $r16InvalidRoot=Join-Path $captureMockRoot 'r16-invalid-rsp'
+    [void](New-Item -ItemType Directory -Path $r16InvalidRoot -Force)
+    $runRoot=$r16InvalidRoot
+    Set-Content -LiteralPath $r16RegisterPath -Value "CPU#0`nRIP=0000000100057ECC RSP=0000000000102000 RBP=0000000000101FF8" -Encoding ascii
+    $beforeInvalidRspCalls=$mockStackMemsaveCalls
+    $invalidRspCapture=Capture-R16TimeoutStackWindow -CandidateManifestHash ('b'*64) `
+        -RegistersPath $r16RegisterPath -SerialText $validBoundsSerial
+    Assert-R13 ($invalidRspCapture.Status -ceq 'unavailable-rsp-outside-reported-stack' -and
+        $mockStackMemsaveCalls -eq $beforeInvalidRspCalls) 'R16 rejects an RSP outside the recorded stack bounds before memsave'
+
+    $r16TruncatedRoot=Join-Path $captureMockRoot 'r16-incomplete-memsave'
+    [void](New-Item -ItemType Directory -Path $r16TruncatedRoot -Force)
+    $runRoot=$r16TruncatedRoot
+    Set-Content -LiteralPath $r16RegisterPath -Value "CPU#0`nRIP=0000000100057ECC RSP=0000000000101FF0 RBP=0000000000101FF8" -Encoding ascii
+    $script:mockStackMemsaveTruncate=$true
+    $incompleteStackCapture=Capture-R16TimeoutStackWindow -CandidateManifestHash ('b'*64) `
+        -RegistersPath $r16RegisterPath -SerialText $validBoundsSerial
+    $script:mockStackMemsaveTruncate=$false
+    $incompleteStackJson=Get-Content -LiteralPath $incompleteStackCapture.Path -Raw | ConvertFrom-Json
+    Assert-R13 ($incompleteStackCapture.Status -ceq 'incomplete' -and
+        $incompleteStackJson.lengthBytesCaptured -eq 8 -and $incompleteStackJson.lengthBytesRequested -eq 16 -and
+        $incompleteStackJson.registersSha256 -ceq (Get-Sha256 $r16RegisterPath)) 'R16 incomplete memsave preserves register evidence and reports the short stack read'
+    $failedMemsaveRoot=Join-Path $captureMockRoot 'r16-failed-memsave'
+    [void](New-Item -ItemType Directory -Path $failedMemsaveRoot -Force)
+    $runRoot=$failedMemsaveRoot
+    $script:mockStackMemsaveFailure=$true
+    $failedStackCapture=Capture-R16TimeoutStackWindow -CandidateManifestHash ('b'*64) `
+        -RegistersPath $r16RegisterPath -SerialText $validBoundsSerial
+    $script:mockStackMemsaveFailure=$false
+    $failedStackJson=Get-Content -LiteralPath $failedStackCapture.Path -Raw | ConvertFrom-Json
+    Assert-R13 ($failedStackCapture.Status -ceq 'failed' -and
+        $failedStackJson.status -ceq 'failed' -and $failedStackJson.registersSha256 -ceq (Get-Sha256 $r16RegisterPath) -and
+        $failedStackJson.error -match 'Synthetic bounded memsave failure') 'R16 failed stack reads retain CPU-register provenance and report the bounded-read failure'
+    $errorResponseRoot=Join-Path $captureMockRoot 'r16-error-response'
+    [void](New-Item -ItemType Directory -Path $errorResponseRoot -Force)
+    $runRoot=$errorResponseRoot
+    $script:mockStackMemsaveFailureResponse=$true
+    $errorResponseCapture=Capture-R16TimeoutStackWindow -CandidateManifestHash ('b'*64) `
+        -RegistersPath $r16RegisterPath -SerialText $validBoundsSerial
+    $script:mockStackMemsaveFailureResponse=$false
+    $errorResponseJson=Get-Content -LiteralPath $errorResponseCapture.Path -Raw | ConvertFrom-Json
+    Assert-R13 ($errorResponseCapture.Status -ceq 'failed' -and
+        $errorResponseJson.lengthBytesCaptured -eq 16 -and
+        $errorResponseJson.error -match 'QEMU memsave reported a failure') 'R16 rejects an HMP-reported memsave failure even when a same-sized host file exists'
 }
 $r13LoopStart=$runner.IndexOf('if ($isManagedGcRootProbe) {',$runner.IndexOf('$deadline = (Get-Date).AddSeconds($BootTimeoutSeconds)',[StringComparison]::Ordinal),[StringComparison]::Ordinal)
 $r13LoopGeneric=$runner.IndexOf('} elseif ($isTransitionAttribution) {',$r13LoopStart,[StringComparison]::Ordinal)

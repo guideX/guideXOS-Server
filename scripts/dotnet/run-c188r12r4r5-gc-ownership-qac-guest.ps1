@@ -20,6 +20,10 @@ Import-Module (Join-Path $PSScriptRoot 'c188r12r4r5r4-qac-admission.psm1') -Forc
 function Get-Sha256([string]$Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant()
 }
+function Hash-IfPresent([string]$Path) {
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    return Get-Sha256 $Path
+}
 function Require-Hash([string]$Path,[string]$Expected,[string]$Name) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "$Name is missing: $Path" }
     $actual = Get-Sha256 $Path
@@ -902,6 +906,175 @@ function Capture-R13TimeoutCpuState([string]$CandidateManifestHash,[string]$Seri
         [System.Text.UTF8Encoding]::new($false))
     return [pscustomobject]@{ Status='captured'; Path=$capturePath; RegistersPath=$registerPath; Rip=$capture.rip; Error=$null }
 }
+function Get-R16StackBoundsObservation([string]$SerialText) {
+    $validLines = @($SerialText -split "`r?`n" | Where-Object {
+        $_ -match '^\[C188R12R4R5R2R3_HANDOFF\]' -and
+        $_ -match '\bstatus=00000000\b' -and
+        $_ -match '\bstackReady=00000001\b' -and
+        $_ -match '\bstackInBounds=00000001\b'
+    })
+    for ($lineIndex=$validLines.Count-1; $lineIndex -ge 0; $lineIndex--) {
+        $line = [string]$validLines[$lineIndex]
+        $match = [regex]::Match($line,'\bstackLow=([0-9A-Fa-f]{16})\b.*\bstackHigh=([0-9A-Fa-f]{16})\b')
+        if ($match.Success) {
+            $low = [Convert]::ToUInt64($match.Groups[1].Value,16)
+            $high = [Convert]::ToUInt64($match.Groups[2].Value,16)
+            if ($low -lt $high -and ($high - $low) -le 65536 -and
+                ($low % 4096) -eq 0 -and ($high % 4096) -eq 0) {
+                return [pscustomobject]@{
+                    Valid=$true; Low=$low; High=$high; Marker=$line
+                    Error=$null
+                }
+            }
+        }
+    }
+    return [pscustomobject]@{ Valid=$false; Low=$null; High=$null; Marker=$null; Error='No valid passing ThreadStore handoff stack-bounds marker was retained.' }
+}
+function Capture-R16TimeoutStackWindow([string]$CandidateManifestHash,[string]$RegistersPath,[string]$SerialText) {
+    $capturePath = Join-Path $runRoot 'guest-stack-state-timeout.json'
+    $stackPath = Join-Path $runRoot 'guest-stack-state-timeout.bin'
+    $capture = [ordered]@{
+        schema='C188R16_GUEST_STACK_TIMEOUT_CAPTURE_V1'
+        status='unavailable'
+        capturedAtUtc=(Get-Date).ToUniversalTime().ToString('o')
+        trigger='bounded-managed-gc-wait-expired-without-terminal-evidence'
+        candidateManifestSha256=$CandidateManifestHash
+        guestCpuIndex=0
+        addressKind='guest-virtual'
+        captureMethod='QMP human-monitor-command memsave while guest is paused'
+        registersPath=$RegistersPath
+        registersSha256=$null
+        guestRsp=$null
+        reportedStackLow=$null
+        reportedStackHigh=$null
+        stackBoundsMarker=$null
+        startAddress=$null
+        lengthBytesRequested=0
+        lengthBytesCaptured=0
+        stackPath=$stackPath
+        stackSha256=$null
+        serialHashStatus='deferred-until-qemu-exit'
+        serialSha256=$null
+        serialHashError=$null
+        qemuStatusAfterPause=$null
+        qmpMemsaveResponse=$null
+        error=$null
+    }
+    try {
+        $statusResponse = Invoke-Qmp 'query-status'
+        $status = ConvertFrom-QmpQueryStatusResponse -Text $statusResponse
+        $capture.qemuStatusAfterPause = $status
+        if (-not $status.Valid -or [bool]$status.Running -or [string]$status.Status -cne 'paused') {
+            $capture.status='unavailable-not-paused'
+            $capture.error='Guest was not verified paused before the stack memory read.'
+        } elseif (-not (Test-Path -LiteralPath $RegistersPath -PathType Leaf)) {
+            $capture.status='unavailable-register-file-missing'
+            $capture.error='CPU register file was not available for the bounded stack memory read.'
+        } else {
+            $registerText = Get-Content -LiteralPath $RegistersPath -Raw
+            $cpuMatch = [regex]::Match($registerText,'(?ms)^CPU#0\s*\r?\n(?<body>.*?)(?=^CPU#\d+\s*$|\z)')
+            $rspMatch = if ($cpuMatch.Success) { [regex]::Match($cpuMatch.Groups['body'].Value,'(?im)\bRSP=([0-9A-F]{16})\b') } else { [regex]::Match($registerText,'(?im)\bRSP=([0-9A-F]{16})\b') }
+            if (-not $rspMatch.Success) {
+                $capture.status='unavailable-rsp-missing'
+                $capture.error='CPU#0 RSP was not present in the captured register text.'
+            } else {
+                $rsp = [Convert]::ToUInt64($rspMatch.Groups[1].Value,16)
+                $capture.guestRsp=('{0:X16}' -f $rsp)
+                $capture.registersSha256=Get-Sha256 $RegistersPath
+                $bounds = Get-R16StackBoundsObservation $SerialText
+                if (-not $bounds.Valid) {
+                    $capture.status='unavailable-stack-bounds-missing'
+                    $capture.error=$bounds.Error
+                } else {
+                    $capture.reportedStackLow=('{0:X16}' -f $bounds.Low)
+                    $capture.reportedStackHigh=('{0:X16}' -f $bounds.High)
+                    $capture.stackBoundsMarker=$bounds.Marker
+                    if ($rsp -lt $bounds.Low -or $rsp -ge $bounds.High) {
+                        $capture.status='unavailable-rsp-outside-reported-stack'
+                        $capture.error='CPU#0 RSP was outside the last passing ThreadStore handoff stack bounds.'
+                    } else {
+                        $remaining = [uint64]($bounds.High - $rsp)
+                        $length = [uint64][Math]::Min([double]$remaining,8192.0)
+                        if ($length -lt 8) {
+                            $capture.status='unavailable-empty-stack-window'
+                            $capture.error='Fewer than eight bounded stack bytes remained above RSP.'
+                        } else {
+                            $capture.startAddress=('{0:X16}' -f $rsp)
+                            $capture.lengthBytesRequested=[int]$length
+                            $status = ConvertFrom-QmpQueryStatusResponse -Text (Invoke-Qmp 'query-status')
+                            if (-not $status.Valid -or [bool]$status.Running -or [string]$status.Status -cne 'paused') {
+                                $capture.status='unavailable-pause-lost'
+                                $capture.error='Guest was no longer verified paused immediately before memsave.'
+                            } else {
+                                $hmpPath = [System.IO.Path]::GetFullPath($stackPath).Replace('\','/')
+                                $hmpPath = $hmpPath.Replace('"','\"')
+                                $hmpCommand = 'memsave 0x{0:X} 0x{1:X} "{2}"' -f $rsp,$length,$hmpPath
+                                $response = Invoke-Qmp -Command 'human-monitor-command' `
+                                    -QmpArguments ([ordered]@{ 'command-line'=$hmpCommand })
+                                $envelope = $response | ConvertFrom-Json -ErrorAction Stop
+                                $capture.qmpMemsaveResponse = [string]$envelope.return
+                                $memsaveReportedFailure = $capture.qmpMemsaveResponse -match '(?im)^\s*(?:error|could not|failed|cannot)\b'
+                                if (Test-Path -LiteralPath $stackPath -PathType Leaf) {
+                                    $capturedLength = [int64](Get-Item -LiteralPath $stackPath).Length
+                                    $capture.lengthBytesCaptured=$capturedLength
+                                    $capture.stackSha256=Get-Sha256 $stackPath
+                                    if ($memsaveReportedFailure) {
+                                        $capture.status='failed'
+                                        $capture.error='QEMU memsave reported a failure: ' + $capture.qmpMemsaveResponse
+                                    } elseif ($capturedLength -eq [int64]$length) {
+                                        $capture.status='captured'
+                                    } else {
+                                        $capture.status='incomplete'
+                                        $capture.error='QEMU memsave output length did not match the bounded request.'
+                                    }
+                                } elseif ($memsaveReportedFailure) {
+                                    $capture.status='failed'
+                                    $capture.error='QEMU memsave reported a failure: ' + $capture.qmpMemsaveResponse
+                                } else {
+                                    $capture.status='unavailable-memsave-file-missing'
+                                    $capture.error='QEMU memsave did not create the requested bounded stack file.'
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } catch {
+        $capture.status='failed'
+        $capture.error=$_.Exception.Message
+        if (Test-Path -LiteralPath $stackPath -PathType Leaf) {
+            $capture.lengthBytesCaptured=[int64](Get-Item -LiteralPath $stackPath).Length
+            $capture.stackSha256=Get-Sha256 $stackPath
+        }
+    }
+    [System.IO.File]::WriteAllText($capturePath,($capture | ConvertTo-Json -Depth 8),
+        [System.Text.UTF8Encoding]::new($false))
+    return [pscustomobject]@{
+        Status=[string]$capture.status; Path=$capturePath; StackPath=$stackPath
+        StartAddress=$capture.startAddress; LengthBytes=[int]$capture.lengthBytesCaptured
+        Sha256=$capture.stackSha256; Error=$capture.error
+    }
+}
+function Complete-R16TimeoutStackSerialHash([string]$CapturePath,[string]$HashStatus,[string]$SerialSha256) {
+    if ([string]::IsNullOrWhiteSpace($CapturePath) -or
+        -not (Test-Path -LiteralPath $CapturePath -PathType Leaf)) {
+        return [pscustomobject]@{ Status='unavailable-capture-metadata-missing'; Error='Stack capture metadata was not present after QAC exit.' }
+    }
+    $capture = Get-Content -LiteralPath $CapturePath -Raw | ConvertFrom-Json -ErrorAction Stop
+    if ($HashStatus -ceq 'verified-after-qemu-exit' -and $SerialSha256 -match '^[0-9A-Fa-f]{64}$') {
+        $capture.serialHashStatus='verified-after-qemu-exit'
+        $capture.serialSha256=$SerialSha256.ToUpperInvariant()
+        $capture.serialHashError=$null
+    } else {
+        $capture.serialHashStatus='unavailable-after-qemu-exit'
+        $capture.serialSha256=$null
+        $capture.serialHashError='Serial hash was unavailable after QAC-owned QEMU exit.'
+    }
+    [System.IO.File]::WriteAllText($CapturePath,($capture | ConvertTo-Json -Depth 8),
+        [System.Text.UTF8Encoding]::new($false))
+    return [pscustomobject]@{ Status=[string]$capture.serialHashStatus; Error=$capture.serialHashError }
+}
 function Complete-R13TimeoutCpuStateSerialHash([string]$CapturePath,[string]$SerialPath) {
     $capture = Get-Content -LiteralPath $CapturePath -Raw | ConvertFrom-Json -ErrorAction Stop
     try {
@@ -1037,6 +1210,16 @@ $managedGcTimeoutCpuStateRip = $null
 $managedGcTimeoutCpuStateError = $null
 $managedGcTimeoutCpuStateSerialHashStatus = 'not-attempted'
 $managedGcTimeoutCpuStateSerialHashError = $null
+$managedGcTimeoutStackCaptureStatus = 'not-attempted'
+$managedGcTimeoutStackCapturePath = $null
+$managedGcTimeoutStackBinaryPath = $null
+$managedGcTimeoutStackStartAddress = $null
+$managedGcTimeoutStackLengthBytes = 0
+$managedGcTimeoutStackSha256 = $null
+$managedGcTimeoutStackError = $null
+$managedGcTimeoutStackSerialHashStatus = 'not-attempted'
+$managedGcTimeoutStackSerialHashError = $null
+$serialHashResult = $null
 $runError = $null
 $serialText = ''
 $guestPass = $false
@@ -1325,6 +1508,29 @@ if ($isManagedGcRootProbe) {
                 $managedGcTimeoutCpuStateRegistersPath = [string]$cpuCapture.RegistersPath
                 $managedGcTimeoutCpuStateRip = [string]$cpuCapture.Rip
                 $managedGcTimeoutCpuStateSerialHashStatus = 'deferred-until-qemu-exit'
+                try {
+                    $stackCapture = Capture-R16TimeoutStackWindow -CandidateManifestHash $candidateManifestSha256 `
+                        -RegistersPath $cpuCapture.RegistersPath -SerialText $serialText
+                    $managedGcTimeoutStackCaptureStatus = [string]$stackCapture.Status
+                    $managedGcTimeoutStackCapturePath = [string]$stackCapture.Path
+                    $managedGcTimeoutStackBinaryPath = [string]$stackCapture.StackPath
+                    $managedGcTimeoutStackStartAddress = [string]$stackCapture.StartAddress
+                    $managedGcTimeoutStackLengthBytes = [int]$stackCapture.LengthBytes
+                    $managedGcTimeoutStackSha256 = [string]$stackCapture.Sha256
+                    $managedGcTimeoutStackError = [string]$stackCapture.Error
+                } catch {
+                    $managedGcTimeoutStackCaptureStatus = 'failed'
+                    $managedGcTimeoutStackError = $_.Exception.Message
+                    $managedGcTimeoutStackCapturePath = Join-Path $runRoot 'guest-stack-state-timeout.json'
+                    [ordered]@{
+                        schema='C188R16_GUEST_STACK_TIMEOUT_CAPTURE_V1'; status='failed'
+                        capturedAtUtc=(Get-Date).ToUniversalTime().ToString('o')
+                        trigger='bounded-managed-gc-wait-expired-without-terminal-evidence'
+                        candidateManifestSha256=$candidateManifestSha256; guestCpuIndex=0
+                        registersPath=$cpuCapture.RegistersPath; error=$managedGcTimeoutStackError
+                        serialHashStatus='deferred-until-qemu-exit'; serialSha256=$null; serialHashError=$null
+                    } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $managedGcTimeoutStackCapturePath -Encoding utf8
+                }
             } catch {
                 $managedGcTimeoutCpuStateStatus = 'failed'
                 $managedGcTimeoutCpuStateError = $_.Exception.Message
@@ -1357,6 +1563,22 @@ if ($isManagedGcRootProbe) {
         } catch {
             $managedGcTimeoutCpuStateSerialHashStatus = 'unavailable-after-qemu-exit'
             $managedGcTimeoutCpuStateSerialHashError = $_.Exception.Message
+        }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($managedGcTimeoutStackCapturePath)) {
+        try {
+            $stackSerialHash = if ($null -ne $serialHashResult) { [string]$serialHashResult.Sha256 } else { $null }
+            $stackHashResult = Complete-R16TimeoutStackSerialHash -CapturePath $managedGcTimeoutStackCapturePath `
+                -HashStatus $managedGcTimeoutCpuStateSerialHashStatus `
+                -SerialSha256 $stackSerialHash
+            $managedGcTimeoutStackSerialHashStatus = [string]$stackHashResult.Status
+            $managedGcTimeoutStackSerialHashError = [string]$stackHashResult.Error
+        } catch {
+            $managedGcTimeoutStackSerialHashStatus = 'unavailable-after-qemu-exit'
+            $managedGcTimeoutStackSerialHashError = $_.Exception.Message
+            if ([string]::IsNullOrWhiteSpace($managedGcTimeoutStackError)) {
+                $managedGcTimeoutStackError = $_.Exception.Message
+            }
         }
     }
 } catch {
@@ -1982,6 +2204,16 @@ $manifest = [ordered]@{
     managedGcTimeoutCpuStateError=$managedGcTimeoutCpuStateError
     managedGcTimeoutCpuStateSerialHashStatus=$managedGcTimeoutCpuStateSerialHashStatus
     managedGcTimeoutCpuStateSerialHashError=$managedGcTimeoutCpuStateSerialHashError
+    managedGcTimeoutStackCaptureStatus=$managedGcTimeoutStackCaptureStatus
+    managedGcTimeoutStackCapturePath=$managedGcTimeoutStackCapturePath
+    managedGcTimeoutStackBinaryPath=$managedGcTimeoutStackBinaryPath
+    managedGcTimeoutStackStartAddress=$managedGcTimeoutStackStartAddress
+    managedGcTimeoutStackLengthBytes=$managedGcTimeoutStackLengthBytes
+    managedGcTimeoutStackSha256=$managedGcTimeoutStackSha256
+    managedGcTimeoutStackError=$managedGcTimeoutStackError
+    managedGcTimeoutStackCaptureMetadataSha256=Hash-IfPresent $managedGcTimeoutStackCapturePath
+    managedGcTimeoutStackSerialHashStatus=$managedGcTimeoutStackSerialHashStatus
+    managedGcTimeoutStackSerialHashError=$managedGcTimeoutStackSerialHashError
     qacOwnerUser=if ($null -ne $qacProcess) { [System.Security.Principal.WindowsIdentity]::GetCurrent().Name } else { $null }
     qacReservationInspection=$duringInspectionPath;qacSnapshotRecords=@($qacSnapshotRecords)
     localQemuChildIdentity=$localGuestIdentity
