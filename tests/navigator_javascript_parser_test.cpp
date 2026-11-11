@@ -4,11 +4,13 @@
 #include <functional>
 #include <iostream>
 #include <string>
+#include <utility>
 
 using gxos::javascript::Ast;
 using gxos::javascript::AstAssignmentOperator;
 using gxos::javascript::AstBinaryOperator;
 using gxos::javascript::AstLogicalOperator;
+using gxos::javascript::AstNode;
 using gxos::javascript::AstNodeId;
 using gxos::javascript::AstNodeKind;
 using gxos::javascript::AstUpdateOperator;
@@ -124,6 +126,102 @@ void testVariableDeclaration()
             ast.node(ast.node(declarator).initializer).location.offset == 8,
             "variable declaration: child locations propagate");
     });
+}
+
+void testAstCopyAndMoveOwnership()
+{
+    const std::string source = "let copy = [1, 2];";
+    const ParseResult parsed = parse(source);
+    expect(parsed.succeeded(), "AST ownership: source parses");
+    if (!parsed.succeeded()) return;
+
+    Ast copied(parsed.ast);
+    expect(copied.root() == parsed.ast.root() &&
+        copied.nodeCount() == parsed.ast.nodeCount(),
+        "AST ownership: copy preserves root and node count");
+    const AstNodeId declaration = copied.childAt(copied.root(), 0u);
+    const AstNodeId declarator = copied.childAt(declaration, 0u);
+    expect(text(copied, copied.node(declarator).name) == "copy",
+        "AST ownership: copy owns stable nodes and source spans");
+
+    Ast assigned;
+    assigned = parsed.ast;
+    Ast moved(std::move(assigned));
+    expect(moved.root() == parsed.ast.root() &&
+        moved.nodeCount() == parsed.ast.nodeCount(),
+        "AST ownership: move preserves root and node storage");
+    const AstNodeId movedDeclaration = moved.childAt(moved.root(), 0u);
+    const AstNodeId movedDeclarator = moved.childAt(movedDeclaration, 0u);
+    expect(text(moved, moved.node(movedDeclarator).name) == "copy",
+        "AST ownership: moved storage remains readable");
+}
+
+void testParserAgainstBoundedAstFixture()
+{
+    const std::string source = "var x=1;";
+    const ParseResult parsed = parse(source);
+    expect(parsed.succeeded(), "bounded AST differential: source parses");
+    if (!parsed.succeeded()) return;
+
+    AstNode fixedNodes[5] = {};
+    AstNodeId fixedChildren[2] = {};
+    Ast fixed(SourceView(source.data(), source.size()),
+        gxos::javascript::AstStorageView{fixedNodes, 5u, fixedChildren, 2u});
+
+    AstNode identifier;
+    identifier.kind = AstNodeKind::Identifier;
+    identifier.location = {4u, 1u, 1u, 5u};
+    AstNode numeric;
+    numeric.kind = AstNodeKind::NumericLiteral;
+    numeric.location = {6u, 1u, 1u, 7u};
+    AstNode declarator;
+    declarator.kind = AstNodeKind::VariableDeclarator;
+    declarator.location = {4u, 3u, 1u, 5u};
+    declarator.name = 0u;
+    declarator.initializer = 1u;
+    AstNode declaration;
+    declaration.kind = AstNodeKind::VariableDeclaration;
+    declaration.location = {0u, 8u, 1u, 1u};
+    declaration.declarationKind = gxos::javascript::AstDeclarationKind::Var;
+    AstNode program;
+    program.kind = AstNodeKind::Program;
+    program.location = {0u, 8u, 1u, 1u};
+
+    if (fixed.addNode(identifier) != 0u || fixed.addNode(numeric) != 1u ||
+        fixed.addNode(declarator) != 2u || fixed.addNode(declaration) != 3u ||
+        fixed.addNode(program) != 4u) {
+        expect(false, "bounded AST differential: stable construction IDs");
+        return;
+    }
+    const AstNodeId declarationChildren[] = {2u};
+    const AstNodeId programChildren[] = {3u};
+    expect(fixed.setChildren(3u, declarationChildren, 1u) &&
+        fixed.setChildren(4u, programChildren, 1u) && fixed.setRoot(4u),
+        "bounded AST differential: child lists and root install");
+
+    expect(parsed.ast.nodeCount() == fixed.nodeCount() &&
+        parsed.ast.root() == fixed.root(),
+        "bounded AST differential: node count and root match");
+    for (AstNodeId id = 0; id < fixed.nodeCount(); ++id) {
+        const auto& hosted = parsed.ast.node(id);
+        const auto& bounded = fixed.node(id);
+        expect(hosted.kind == bounded.kind &&
+            hosted.location.offset == bounded.location.offset &&
+            hosted.location.length == bounded.location.length &&
+            hosted.location.line == bounded.location.line &&
+            hosted.location.column == bounded.location.column &&
+            hosted.name == bounded.name &&
+            hosted.initializer == bounded.initializer &&
+            hosted.declarationKind == bounded.declarationKind &&
+            parsed.ast.childCount(id) == fixed.childCount(id),
+            "bounded AST differential: canonical node fields match");
+        for (std::size_t child = 0; child < fixed.childCount(id); ++child) {
+            expect(parsed.ast.childAt(id, child) == fixed.childAt(id, child),
+                "bounded AST differential: child IDs match");
+        }
+        expect(text(parsed.ast, id) == text(fixed, id),
+            "bounded AST differential: source slices match");
+    }
 }
 
 void testFunctionDeclaration()
@@ -575,6 +673,8 @@ void testLocationsAndLexerPropagation()
 int main()
 {
     testVariableDeclaration();
+    testAstCopyAndMoveOwnership();
+    testParserAgainstBoundedAstFixture();
     testFunctionDeclaration();
     testCallAndAssignment();
     testControlFlow();

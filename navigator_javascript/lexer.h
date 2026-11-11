@@ -4,7 +4,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#if !defined(GXOS_NAVIGATOR_FRONTEND_FREESTANDING)
 #include <vector>
+#endif
 
 namespace gxos {
 namespace javascript {
@@ -96,6 +98,9 @@ enum class LexerErrorCode : std::uint8_t {
     UnterminatedString,
     UnterminatedBlockComment,
     MalformedNumericLiteral,
+    TokenCapacityExceeded,
+    InvalidTokenStorage,
+    AllocationFailure,
 };
 
 struct LexerError {
@@ -103,6 +108,21 @@ struct LexerError {
     SourceLocation location;
     std::uint8_t offendingByte = 0;
     bool hasOffendingByte = false;
+};
+
+// Caller-owned, fixed-capacity token storage for the shared freestanding
+// lexer. The lexer resets count before each call and publishes a non-zero
+// count only when tokenization succeeds.
+struct TokenBuffer {
+    Token* data = nullptr;
+    std::size_t capacity = 0;
+    std::size_t count = 0;
+};
+
+struct LexerResult {
+    LexerError error;
+
+    bool succeeded() const { return error.code == LexerErrorCode::None; }
 };
 
 constexpr std::size_t kDefaultMaxJavaScriptSourceBytes = 1024u * 1024u;
@@ -116,18 +136,26 @@ struct LexerLimits {
     std::size_t maxTokenBytes = kDefaultMaxJavaScriptTokenBytes;
 };
 
+#if !defined(GXOS_NAVIGATOR_FRONTEND_FREESTANDING)
 struct LexResult {
     std::vector<Token> tokens;
     LexerError error;
 
     bool succeeded() const { return error.code == LexerErrorCode::None; }
 };
+#endif
 
 class Lexer {
 public:
     explicit Lexer(LexerLimits limits = LexerLimits()) : limits_(limits) {}
 
+    LexerResult tokenizeInto(SourceView source, TokenBuffer& output) const;
+
+#if !defined(GXOS_NAVIGATOR_FRONTEND_FREESTANDING)
+    // Hosted convenience adapter. It calls the same scanner as tokenizeInto
+    // and translates allocation failure into an explicit lexer error.
     LexResult tokenize(SourceView source) const;
+#endif
 
 private:
     LexerLimits limits_;

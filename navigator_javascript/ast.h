@@ -4,7 +4,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#if !defined(GXOS_NAVIGATOR_FRONTEND_FREESTANDING)
 #include <vector>
+#endif
 
 namespace gxos {
 namespace javascript {
@@ -12,6 +14,7 @@ namespace javascript {
 using AstNodeId = std::uint32_t;
 
 constexpr AstNodeId kInvalidAstNodeId = 0xffffffffu;
+constexpr std::size_t kDefaultMaxJavaScriptAstNodes = 16384u;
 
 enum class AstNodeKind : std::uint8_t {
     Invalid = 0,
@@ -142,14 +145,26 @@ struct AstNode {
     bool immutableBinding = false;
 };
 
+struct AstStorageView {
+    AstNode* nodes = nullptr;
+    std::size_t nodeCapacity = 0;
+    AstNodeId* children = nullptr;
+    std::size_t childCapacity = 0;
+};
+
 class Ast {
 public:
-    explicit Ast(SourceView source = SourceView()) : source_(source) {}
-
-    Ast(const Ast&) = default;
-    Ast(Ast&&) noexcept = default;
-    Ast& operator=(const Ast&) = default;
-    Ast& operator=(Ast&&) noexcept = default;
+    explicit Ast(SourceView source = SourceView());
+    Ast(SourceView source, AstStorageView storage);
+#if !defined(GXOS_NAVIGATOR_FRONTEND_FREESTANDING)
+    Ast(const Ast& other);
+    Ast& operator=(const Ast& other);
+#else
+    Ast(const Ast&) = delete;
+    Ast& operator=(const Ast&) = delete;
+#endif
+    Ast(Ast&& other) noexcept;
+    Ast& operator=(Ast&& other) noexcept;
 
     void reset(SourceView source = SourceView());
     void setSource(SourceView source) { source_ = source; }
@@ -166,7 +181,7 @@ public:
     bool setRoot(AstNodeId root);
     AstNodeId root() const { return root_; }
 
-    std::size_t nodeCount() const { return nodes_.size(); }
+    std::size_t nodeCount() const { return nodeCount_; }
     const AstNode& node(AstNodeId id) const;
     AstNode& node(AstNodeId id);
 
@@ -178,10 +193,23 @@ public:
     SourceView nodeText(AstNodeId id) const;
 
 private:
+#if !defined(GXOS_NAVIGATOR_FRONTEND_FREESTANDING)
+    void syncOwnedStorage();
+#endif
+
     SourceView source_;
     AstNodeId root_ = kInvalidAstNodeId;
-    std::vector<AstNode> nodes_;
-    std::vector<AstNodeId> children_;
+    AstNode* nodes_ = nullptr;
+    std::size_t nodeCount_ = 0;
+    std::size_t nodeCapacity_ = 0;
+    AstNodeId* children_ = nullptr;
+    std::size_t childCount_ = 0;
+    std::size_t childCapacity_ = 0;
+    bool ownsStorage_ = false;
+#if !defined(GXOS_NAVIGATOR_FRONTEND_FREESTANDING)
+    std::vector<AstNode> ownedNodes_;
+    std::vector<AstNodeId> ownedChildren_;
+#endif
 };
 
 const char* astNodeKindName(AstNodeKind kind);

@@ -13,6 +13,7 @@ using gxos::javascript::LexerErrorCode;
 using gxos::javascript::LexerLimits;
 using gxos::javascript::SourceView;
 using gxos::javascript::Token;
+using gxos::javascript::TokenBuffer;
 using gxos::javascript::TokenType;
 
 int failures = 0;
@@ -38,11 +39,57 @@ std::string tokenText(const Token& token)
     return std::string(token.lexeme.data, token.lexeme.length);
 }
 
+void expectPortableParity(const std::string& source, LexerLimits limits,
+    const LexResult& hosted, const std::string& label)
+{
+    const std::size_t tokenBound = source.size() ==
+        static_cast<std::size_t>(-1) ? source.size() : source.size() + 1u;
+    const std::size_t requestedCapacity = source.size() > limits.maxSourceBytes
+        ? 0u : tokenBound;
+    const std::size_t capacity = requestedCapacity < limits.maxTokenCount
+        ? requestedCapacity : limits.maxTokenCount;
+    std::vector<Token> storage(capacity);
+    TokenBuffer output{storage.data(), storage.size(), 0u};
+    const Lexer lexer(limits);
+    const auto portable = lexer.tokenizeInto(
+        SourceView(source.data(), source.size()), output);
+    expect(portable.error.code == hosted.error.code &&
+        portable.error.location.offset == hosted.error.location.offset &&
+        portable.error.location.length == hosted.error.location.length &&
+        portable.error.location.line == hosted.error.location.line &&
+        portable.error.location.column == hosted.error.location.column &&
+        portable.error.offendingByte == hosted.error.offendingByte &&
+        portable.error.hasOffendingByte == hosted.error.hasOffendingByte,
+        label + ": hosted adapter and bounded lexer errors match");
+    if (!hosted.succeeded() || !portable.succeeded()) {
+        expect(output.count == 0u,
+            label + ": failed bounded tokenization publishes no tokens");
+        return;
+    }
+
+    expect(output.count == hosted.tokens.size(),
+        label + ": hosted adapter and bounded token counts match");
+    const std::size_t commonCount = output.count < hosted.tokens.size()
+        ? output.count : hosted.tokens.size();
+    for (std::size_t index = 0; index < commonCount; ++index) {
+        const Token& actual = storage[index];
+        const Token& expected = hosted.tokens[index];
+        expect(actual.type == expected.type &&
+            actual.location.offset == expected.location.offset &&
+            actual.location.length == expected.location.length &&
+            actual.location.line == expected.location.line &&
+            actual.location.column == expected.location.column &&
+            tokenText(actual) == tokenText(expected),
+            label + ": hosted adapter and bounded token spans match");
+    }
+}
+
 void expectExactStream(const std::string& source,
     const std::vector<ExpectedToken>& expected, const std::string& label)
 {
     const Lexer lexer;
     const LexResult result = lexer.tokenize(SourceView(source.data(), source.size()));
+    expectPortableParity(source, LexerLimits(), result, label);
     expect(result.succeeded(), label + ": tokenization succeeded");
     if (!result.succeeded()) return;
     expect(result.tokens.size() == expected.size(), label + ": token count matches");
@@ -68,6 +115,7 @@ void expectTypesAndLexemes(const std::string& source,
 {
     const Lexer lexer;
     const LexResult result = lexer.tokenize(SourceView(source.data(), source.size()));
+    expectPortableParity(source, LexerLimits(), result, label);
     expect(result.succeeded(), label + ": tokenization succeeded");
     if (!result.succeeded()) return;
     expect(result.tokens.size() == types.size(), label + ": type count matches");
@@ -88,6 +136,7 @@ void expectError(const std::string& source, LexerErrorCode code,
 {
     const Lexer lexer(limits);
     const LexResult result = lexer.tokenize(SourceView(source.data(), source.size()));
+    expectPortableParity(source, limits, result, label);
     expect(!result.succeeded(), label + ": tokenization fails");
     expect(result.error.code == code, label + ": error code matches");
     expect(result.error.location.offset == offset, label + ": error offset matches");

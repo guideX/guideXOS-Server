@@ -650,6 +650,31 @@ void testFunctionClosureAndResetLifetime()
         "functions: old closure binding does not survive reset");
 }
 
+void testRetainedClosureAcrossSameRealmSourceReplacement()
+{
+    RuntimeContext context;
+    const ScriptResult initial = execute(context,
+        "function makeRetained() { var captured = 41;"
+        " return function() { return captured; }; }"
+        "var retainedClosure = makeRetained();");
+    expect(initial.succeeded(),
+        "source lifetime: retained closure setup succeeds");
+
+    const std::string laterScript = "var replacementMarker = 1;";
+    const ScriptResult replacement = context.executeInSameRealm(
+        SourceView(laterScript.data(), laterScript.size()));
+    expect(replacement.succeeded(),
+        "source lifetime: later same-realm script succeeds");
+
+    const std::string callScript = "var retainedResult = retainedClosure();";
+    const ScriptResult call = context.executeInSameRealm(
+        SourceView(callScript.data(), callScript.size()));
+    expect(call.succeeded(),
+        "source lifetime: old closure runs after source replacement");
+    expectNumber(context, "retainedResult", 41.0,
+        "source lifetime: retained AST identifier remains readable");
+}
+
 void testLimitsAndBudget()
 {
     RuntimeLimits bindingLimits;
@@ -715,6 +740,7 @@ int main()
     testFunctionsAndLexicalScope();
     testFunctionLimitsAndFailures();
     testFunctionClosureAndResetLifetime();
+    testRetainedClosureAcrossSameRealmSourceReplacement();
     testObjectsAndProperties();
     testArrays();
     testObjectFunctionInteraction();

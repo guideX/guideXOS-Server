@@ -1,8 +1,10 @@
 #include "lexer.h"
 
-#include <algorithm>
 #include <cstddef>
-#include <limits>
+#if !defined(GXOS_NAVIGATOR_FRONTEND_FREESTANDING)
+#include <new>
+#include <vector>
+#endif
 
 namespace gxos {
 namespace javascript {
@@ -88,7 +90,8 @@ TokenType keywordType(SourceView source, std::size_t offset, std::size_t length)
 struct Scanner {
     SourceView source;
     LexerLimits limits;
-    LexResult result;
+    TokenBuffer* output = nullptr;
+    LexerResult result;
     std::size_t offset = 0;
     std::size_t line = 1;
     std::size_t column = 1;
@@ -124,7 +127,7 @@ struct Scanner {
         bool hasOffendingByte = false, char offendingByte = '\0')
     {
         if (result.error.code != LexerErrorCode::None) return;
-        result.tokens.clear();
+        output->count = 0;
         result.error.code = code;
         result.error.location = location;
         result.error.hasOffendingByte = hasOffendingByte;
@@ -144,8 +147,12 @@ struct Scanner {
             fail(LexerErrorCode::TokenTooLong, start);
             return false;
         }
-        if (result.tokens.size() >= limits.maxTokenCount) {
+        if (output->count >= limits.maxTokenCount) {
             fail(LexerErrorCode::TooManyTokens, start);
+            return false;
+        }
+        if (output->count >= output->capacity) {
+            fail(LexerErrorCode::TokenCapacityExceeded, start);
             return false;
         }
         return true;
@@ -160,7 +167,8 @@ struct Scanner {
         location.length = tokenLength;
         const char* tokenData = source.data == nullptr
             ? nullptr : source.data + start.offset;
-        result.tokens.push_back(Token{type, location, SourceView(tokenData, tokenLength)});
+        output->data[output->count++] =
+            Token{type, location, SourceView(tokenData, tokenLength)};
         return true;
     }
 
@@ -436,7 +444,7 @@ struct Scanner {
         return false;
     }
 
-    LexResult run()
+    LexerResult run()
     {
         if (source.length > limits.maxSourceBytes) {
             fail(LexerErrorCode::SourceTooLarge, currentLocation());
@@ -446,11 +454,10 @@ struct Scanner {
             fail(LexerErrorCode::InvalidSource, currentLocation());
             return result;
         }
-
-        const std::size_t maxReservableTokens = source.length ==
-            std::numeric_limits<std::size_t>::max()
-            ? source.length : source.length + 1;
-        result.tokens.reserve(std::min(limits.maxTokenCount, maxReservableTokens));
+        if (output->data == nullptr && output->capacity != 0) {
+            fail(LexerErrorCode::InvalidTokenStorage, currentLocation());
+            return result;
+        }
 
         while (true) {
             if (!skipWhitespaceAndComments()) return result;
@@ -480,13 +487,55 @@ struct Scanner {
 
 } // namespace
 
-LexResult Lexer::tokenize(SourceView source) const
+LexerResult Lexer::tokenizeInto(SourceView source, TokenBuffer& output) const
 {
+    output.count = 0;
     Scanner scanner;
     scanner.source = source;
     scanner.limits = limits_;
+    scanner.output = &output;
     return scanner.run();
 }
+
+#if !defined(GXOS_NAVIGATOR_FRONTEND_FREESTANDING)
+LexResult Lexer::tokenize(SourceView source) const
+{
+    LexResult result;
+    if (source.length > limits_.maxSourceBytes) {
+        result.error.code = LexerErrorCode::SourceTooLarge;
+        return result;
+    }
+    if (source.length != 0 && source.data == nullptr) {
+        result.error.code = LexerErrorCode::InvalidSource;
+        return result;
+    }
+
+    const std::size_t sizeMax = static_cast<std::size_t>(-1);
+    const std::size_t sourceTokenBound = source.length == sizeMax
+        ? source.length : source.length + 1;
+    const std::size_t tokenCapacity = limits_.maxTokenCount < sourceTokenBound
+        ? limits_.maxTokenCount : sourceTokenBound;
+    try {
+        result.tokens.resize(tokenCapacity);
+    } catch (const std::bad_alloc&) {
+        result.error.code = LexerErrorCode::AllocationFailure;
+        return result;
+    } catch (...) {
+        result.error.code = LexerErrorCode::AllocationFailure;
+        return result;
+    }
+
+    TokenBuffer output{result.tokens.data(), result.tokens.size(), 0};
+    const LexerResult scan = tokenizeInto(source, output);
+    result.error = scan.error;
+    if (scan.succeeded()) {
+        result.tokens.resize(output.count);
+    } else {
+        result.tokens.clear();
+    }
+    return result;
+}
+#endif
 
 const char* tokenTypeName(TokenType type)
 {
@@ -565,6 +614,9 @@ const char* lexerErrorCodeName(LexerErrorCode code)
     case LexerErrorCode::UnterminatedString: return "UnterminatedString";
     case LexerErrorCode::UnterminatedBlockComment: return "UnterminatedBlockComment";
     case LexerErrorCode::MalformedNumericLiteral: return "MalformedNumericLiteral";
+    case LexerErrorCode::TokenCapacityExceeded: return "TokenCapacityExceeded";
+    case LexerErrorCode::InvalidTokenStorage: return "InvalidTokenStorage";
+    case LexerErrorCode::AllocationFailure: return "AllocationFailure";
     }
     return "UnknownLexerError";
 }

@@ -14059,3 +14059,33 @@ was no source-matched guest candidate to admit. No reservation or QEMU launch
 was made. A separate managed acceptance session appeared in the final QAC
 census and was left untouched. The full qualification evidence and hosted
 regression details are in [the JS111 qualification report](NAVIGATOR_JAVASCRIPT_JS111_QUALIFICATION.md).
+
+### JS115 shared portable frontend — partial
+
+JS115 is **Outcome B — `JS115_PORTABLE_FRONTEND_PARTIAL`**, with P3 as the
+highest verified milestone. The existing scanner now writes to caller-owned
+fixed token storage, and the existing AST supports caller-owned node and child
+arrays. Hosted adapters continue using those same scanner and AST operations.
+Both actual translation units compile for the AMD64 freestanding target with
+exceptions, RTTI, standard C++ containers, and runtime libraries disabled.
+
+The parser remains hosted-only. Its accepted grammar still uses many local
+`std::vector` work lists, `std::vector<bool>`, `std::char_traits`, and an
+exception-based allocation boundary. The target compiler rejects the real
+`parser.cpp`; no parser object, closed frontend component, guest application,
+or guest execution is claimed. JS116 should port this parser against bounded
+token, AST, child, and scratch storage while keeping the existing parser as
+the single hosted/guest grammar implementation.
+
+Hosted qualification passed the full 111/111 JavaScript lanes with
+17,656/17,656 reported assertions across 70 assertion-reporting lanes. JS104
+passed 31/31, JS105 32/32, JS109 86/86, and JS110 28/28. The fresh production
+binary loaded the JS109 and JS110 pages with HTTP 200 and no JavaScript error.
+The full hosted Navigator aggregate matched its prior result: 767/774 checks,
+with only the seven established CSS failures in phases 3C, 3G, 6A, 6B (three
+checks), and 6C. The original 8,398,274-byte executable was restored and
+verified against its pre-build SHA-256; all 42 generated fixtures matched the
+saved snapshot, and `.phase` remained absent. No QEMU or QAC work was done.
+
+The detailed storage, source-lifetime, P0–P6, compiler, stack, memory, and
+regression evidence is in [the JS115 portable frontend report](NAVIGATOR_JAVASCRIPT_JS115_PORTABLE_FRONTEND.md).

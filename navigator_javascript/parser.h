@@ -38,7 +38,6 @@ struct ParserError {
     bool hasExpected = false;
 };
 
-constexpr std::size_t kDefaultMaxJavaScriptAstNodes = 16384u;
 constexpr std::size_t kDefaultMaxJavaScriptParserDepth = 256u;
 constexpr std::size_t kDefaultMaxJavaScriptStatements = 4096u;
 constexpr std::size_t kDefaultMaxJavaScriptFunctionParameters = 64u;
