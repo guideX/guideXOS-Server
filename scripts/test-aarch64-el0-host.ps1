@@ -52,8 +52,20 @@ foreach ($required in @('kApReadOnlyUser', 'kApReadWriteUser', 'kPxn', 'kUxn',
         'GXOS_AARCH64_EL0_PAGE_STACK', 'GXOS_AARCH64_EL0_FAULT_DATA_ABORT',
         'GXOS_AARCH64_EL0_FAULT_INSTRUCTION_ABORT',
         'GXOS_AARCH64_EL0_PROBE_DEVICE_MMIO', '0xf9400020',
-        'phase2_el0_run_negative_probe')) {
+        'phase2_el0_run_negative_probe', 'g_kernel_data_probe_sentinel',
+        '(UINT64_C(3) << 6)', 'fault_spsr == kExpectedUserPstate')) {
     if (!$el0.Contains($required)) { throw "EL0 permission or fault contract is missing: $required" }
+}
+$phase4 = [IO.File]::ReadAllText((Join-Path $repoRoot 'kernel\arch\arm64\phase4_main.cpp'))
+foreach ($required in @('AARCH64_EL0_PROBE_RECORD',
+        'AARCH64_EL0_CRITICAL_ISOLATION_FAILURE',
+        'subsequent-probes=stopped')) {
+    if (!$phase4.Contains($required)) { throw "EL0 negative qualification contract is missing: $required" }
+}
+$kernelProbeFailure = $phase4.IndexOf('if (!kernel_memory_denied)', [StringComparison]::Ordinal)
+$mmioProbeStart = $phase4.IndexOf('GXOS_AARCH64_EL0_PROBE_DEVICE_MMIO', [StringComparison]::Ordinal)
+if ($kernelProbeFailure -lt 0 -or $mmioProbeStart -lt 0 -or $kernelProbeFailure -gt $mmioProbeStart) {
+    throw 'Kernel-data negative failure no longer gates the later MMIO child probe.'
 }
 foreach ($required in @('.Lsync_el0', '.Lirq_el0', 'eret',
         'GXOS_AARCH64_EL0_CONTEXT_KERNEL_SP_OFFSET',

@@ -603,6 +603,55 @@ static void completion_task(void*)
     kernel::scheduler::return_to_bootstrap();
 }
 
+#if defined(GXOS_AARCH64_EL0_NEGATIVE_QUALIFICATION)
+static void print_el0_negative_probe_record(
+    const char* probe,
+    const gxos_aarch64_el0_negative_probe_result& result)
+{
+    print("[guideXOS] AARCH64_EL0_PROBE_RECORD probe=");
+    print(probe);
+    print(" target=");
+    phase3_serial_hex(result.target_address);
+    print(" descriptor=");
+    phase3_serial_hex(result.kernel_descriptor);
+    print(" child=");
+    phase3_serial_hex(result.child_identity);
+    print(" owner=");
+    phase3_serial_hex(result.owner_id);
+    print(" state=");
+    if (result.context_state == GXOS_AARCH64_EL0_CONTEXT_FAULTED) print("faulted");
+    else if (result.context_state == GXOS_AARCH64_EL0_CONTEXT_EXITED) print("exited");
+    else print("not-entered");
+    print(" access=");
+    print(result.target_access_succeeded ? "read-succeeded" : "denied-or-not-entered");
+    print(" read-value=");
+    phase3_serial_hex(result.read_value);
+    print(" ESR=");
+    phase3_serial_hex(result.esr);
+    print(" EC=");
+    phase3_serial_hex((result.esr >> 26) & UINT64_C(0x3f));
+    print(" DFSC=");
+    phase3_serial_hex(result.esr & UINT64_C(0x3f));
+    print(" WnR=");
+    phase3_serial_hex((result.esr >> 6) & UINT64_C(1));
+    print(" ELR=");
+    phase3_serial_hex(result.elr);
+    print(" SPSR=");
+    phase3_serial_hex(result.spsr);
+    print(" FAR=");
+    phase3_serial_hex(result.far);
+    print(" kernel-root=");
+    print(result.kernel_root_restored ? "restored" : "not-restored");
+    print(" cleanup=");
+    print(result.cleanup_succeeded ? "PASS" : "FAIL");
+    print(" released-data-pages=");
+    phase3_serial_dec(result.data_pages_before_cleanup);
+    print(" released-table-pages=");
+    phase3_serial_dec(result.table_pages_before_cleanup);
+    print("\n");
+}
+#endif
+
 #if defined(GXOS_AARCH64_PHASE9)
 #if defined(GXOS_AARCH64_PHASE12)
 static void phase12_app_task(void*)
@@ -633,35 +682,49 @@ static void phase12_app_task(void*)
     }
     print("[guideXOS] AARCH64_EL0_QUALIFICATION_PASS observed-exit=2a cleanup=PASS kernel=EL1 scheduler=active vfs=active graphics=ready\n");
 #if defined(GXOS_AARCH64_EL0_NEGATIVE_QUALIFICATION)
-    uint64_t kernel_probe_esr = 0;
-    uint64_t kernel_probe_far = 0;
+    gxos_aarch64_el0_negative_probe_result kernel_probe{};
     const bool kernel_memory_denied = phase2_el0_run_negative_probe(
         GXOS_AARCH64_EL0_PROBE_KERNEL_DATA, 0,
-        &kernel_probe_esr, &kernel_probe_far) != 0;
+        &kernel_probe) != 0;
+    print_el0_negative_probe_record("kernel-data", kernel_probe);
     print(kernel_memory_denied
         ? "[guideXOS] AARCH64_EL0_NEGATIVE_KERNEL_DATA_PASS ESR="
         : "[guideXOS] AARCH64_EL0_NEGATIVE_KERNEL_DATA_FAIL ESR=");
-    phase3_serial_hex(kernel_probe_esr);
+    phase3_serial_hex(kernel_probe.esr);
     print(" FAR=");
-    phase3_serial_hex(kernel_probe_far);
+    phase3_serial_hex(kernel_probe.far);
     print(" cleanup=");
     print(kernel_memory_denied ? "PASS\n" : "FAIL\n");
+    if (!kernel_memory_denied) {
+        if (kernel_probe.target_access_succeeded) {
+            print("[guideXOS] AARCH64_EL0_CRITICAL_ISOLATION_FAILURE probe=kernel-data access=EL0-read-succeeded subsequent-probes=stopped\n");
+        } else {
+            print("[guideXOS] AARCH64_EL0_NEGATIVE_KERNEL_DATA_ERROR subsequent-probes=stopped\n");
+        }
+        g_phase12_failure = 1;
+        g_phase12_complete = 1;
+        g_app_complete = 1;
+        for (;;) kernel::scheduler::note_execution();
+    }
 
-    uint64_t mmio_probe_esr = 0;
-    uint64_t mmio_probe_far = 0;
+    gxos_aarch64_el0_negative_probe_result mmio_probe{};
     const uint64_t gicd_base = g_platform_for_tasks ? g_platform_for_tasks->gicd_base : 0;
     const bool mmio_denied = phase2_el0_run_negative_probe(
         GXOS_AARCH64_EL0_PROBE_DEVICE_MMIO, gicd_base,
-        &mmio_probe_esr, &mmio_probe_far) != 0;
+        &mmio_probe) != 0;
+    print_el0_negative_probe_record("gicd-mmio", mmio_probe);
     print(mmio_denied
         ? "[guideXOS] AARCH64_EL0_NEGATIVE_GICD_PASS ESR="
         : "[guideXOS] AARCH64_EL0_NEGATIVE_GICD_FAIL ESR=");
-    phase3_serial_hex(mmio_probe_esr);
+    phase3_serial_hex(mmio_probe.esr);
     print(" FAR=");
-    phase3_serial_hex(mmio_probe_far);
+    phase3_serial_hex(mmio_probe.far);
     print(" cleanup=");
     print(mmio_denied ? "PASS\n" : "FAIL\n");
-    if (!kernel_memory_denied || !mmio_denied) {
+    if (!mmio_denied) {
+        if (mmio_probe.target_access_succeeded) {
+            print("[guideXOS] AARCH64_EL0_CRITICAL_ISOLATION_FAILURE probe=gicd-mmio access=EL0-read-succeeded\n");
+        }
         g_phase12_failure = 1;
         g_phase12_complete = 1;
         g_app_complete = 1;

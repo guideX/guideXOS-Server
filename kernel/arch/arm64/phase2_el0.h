@@ -56,6 +56,25 @@ enum gxos_aarch64_el0_negative_probe {
     GXOS_AARCH64_EL0_PROBE_DEVICE_MMIO = 2
 };
 
+struct gxos_aarch64_el0_negative_probe_result {
+    uint64_t target_address;
+    uint64_t kernel_descriptor;
+    uint64_t child_identity;
+    uint64_t owner_id;
+    uint64_t context_state;
+    uint64_t fault_reason;
+    uint64_t esr;
+    uint64_t elr;
+    uint64_t spsr;
+    uint64_t far;
+    uint64_t read_value;
+    uint64_t data_pages_before_cleanup;
+    uint64_t table_pages_before_cleanup;
+    uint8_t target_access_succeeded;
+    uint8_t kernel_root_restored;
+    uint8_t cleanup_succeeded;
+};
+
 struct gxos_aarch64_el0_mapping {
     uint64_t virtual_address;
     uint64_t physical_address;
@@ -138,8 +157,7 @@ uint8_t phase2_el0_run_qualification(uint64_t* observed_exit_value,
                                       uint64_t* fault_reason);
 uint8_t phase2_el0_run_negative_probe(uint64_t probe_kind,
                                       uint64_t device_address,
-                                      uint64_t* observed_esr,
-                                      uint64_t* observed_far);
+                                      gxos_aarch64_el0_negative_probe_result* result);
 
 #ifdef __cplusplus
 }

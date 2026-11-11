@@ -369,33 +369,55 @@ static void test_kernel_and_mmio_negative_probes()
 {
     reset_fake_memory();
     const uint64_t initial_free = kernel::memory::free_pages();
-    uint64_t esr = 0;
-    uint64_t far = 0;
+    gxos_aarch64_el0_negative_probe_result kernel_result{};
     expect(phase2_el0_run_negative_probe(GXOS_AARCH64_EL0_PROBE_KERNEL_DATA,
-                                         0, &esr, &far),
+                                         0, &kernel_result),
            "kernel-data probe observes the simulated lower-EL permission fault");
-    expect(far == UINT64_C(0x00300000),
+    expect(kernel_result.far == UINT64_C(0x00300000),
            "kernel-data negative probe records its protected address");
-    expect(((esr >> 26) & UINT64_C(0x3f)) == UINT64_C(0x24) &&
-           (esr & UINT64_C(0x3f)) == UINT64_C(0x0f),
-           "kernel-data probe requires a level-3 data permission fault");
-    expect(phase2_mmu_current_root() == phase2_mmu_root() &&
+    expect(((kernel_result.esr >> 26) & UINT64_C(0x3f)) == UINT64_C(0x24) &&
+           (kernel_result.esr & UINT64_C(0x7f)) == UINT64_C(0x0f) &&
+           kernel_result.elr == GXOS_AARCH64_EL0_USER_BASE + 16 &&
+           kernel_result.spsr == UINT64_C(0x3c0),
+           "kernel-data probe requires an EL0 read permission fault at the L3 leaf");
+    expect(kernel_result.context_state == GXOS_AARCH64_EL0_CONTEXT_FAULTED &&
+           kernel_result.fault_reason == GXOS_AARCH64_EL0_FAULT_DATA_ABORT &&
+           kernel_result.child_identity != 0 && kernel_result.owner_id != 0 &&
+           !kernel_result.target_access_succeeded,
+           "kernel-data fault is attributed to the actual child and terminal fault state");
+    expect(((kernel_result.kernel_descriptor >> 6) & UINT64_C(3)) == 2 &&
+           ((kernel_result.kernel_descriptor >> 2) & UINT64_C(7)) == 1 &&
+           (kernel_result.kernel_descriptor & (UINT64_C(1) << 10)) != 0 &&
+           (kernel_result.kernel_descriptor & (UINT64_C(1) << 54)) != 0,
+           "kernel-data target is present, accessible EL1-only normal read-only memory");
+    expect(kernel_result.kernel_root_restored && kernel_result.cleanup_succeeded &&
+           kernel_result.data_pages_before_cleanup == 2 &&
+           kernel_result.table_pages_before_cleanup > 0 &&
+           phase2_mmu_current_root() == phase2_mmu_root() &&
            kernel::memory::free_pages() == initial_free,
            "kernel-data probe restores the kernel root and releases every page");
 
     reset_fake_memory();
     const uint64_t mmio_free = kernel::memory::free_pages();
-    esr = 0;
-    far = 0;
+    gxos_aarch64_el0_negative_probe_result mmio_result{};
     expect(phase2_el0_run_negative_probe(GXOS_AARCH64_EL0_PROBE_DEVICE_MMIO,
-                                         UINT64_C(0x08000000), &esr, &far),
+                                         UINT64_C(0x08000000), &mmio_result),
            "GIC-distributor probe observes the simulated lower-EL permission fault");
-    expect(far == UINT64_C(0x08000000),
+    expect(mmio_result.far == UINT64_C(0x08000000),
            "MMIO negative probe records the protected device address");
-    expect(((esr >> 26) & UINT64_C(0x3f)) == UINT64_C(0x24) &&
-           (esr & UINT64_C(0x3f)) == UINT64_C(0x0f),
-           "MMIO probe requires a level-3 data permission fault");
-    expect(phase2_mmu_current_root() == phase2_mmu_root() &&
+    expect(((mmio_result.esr >> 26) & UINT64_C(0x3f)) == UINT64_C(0x24) &&
+           (mmio_result.esr & UINT64_C(0x7f)) == UINT64_C(0x0f) &&
+           mmio_result.elr == GXOS_AARCH64_EL0_USER_BASE + 16 &&
+           mmio_result.spsr == UINT64_C(0x3c0),
+           "MMIO probe requires an EL0 read permission fault at the L3 leaf");
+    expect(((mmio_result.kernel_descriptor >> 6) & UINT64_C(3)) == 0 &&
+           ((mmio_result.kernel_descriptor >> 2) & UINT64_C(7)) == 0 &&
+           (mmio_result.kernel_descriptor & (UINT64_C(1) << 10)) != 0 &&
+           (mmio_result.kernel_descriptor & (UINT64_C(1) << 54)) != 0,
+           "MMIO target is present, accessible EL1-only device memory");
+    expect(mmio_result.kernel_root_restored && mmio_result.cleanup_succeeded &&
+           !mmio_result.target_access_succeeded &&
+           phase2_mmu_current_root() == phase2_mmu_root() &&
            kernel::memory::free_pages() == mmio_free,
            "MMIO probe restores the kernel root and releases every page");
 }
@@ -460,7 +482,8 @@ uint64_t phase2_mmu_descriptor_for(uint64_t virtual_address)
 {
     const uint64_t physical = virtual_address & UINT64_C(0x000000fffffff000);
     const uint64_t attribute = virtual_address == UINT64_C(0x08000000) ? 0 : 1;
-    return physical | UINT64_C(3) | (attribute << 2) | (UINT64_C(3) << 8) |
+    const uint64_t ap = virtual_address == UINT64_C(0x00300000) ? (UINT64_C(2) << 6) : 0;
+    return physical | UINT64_C(3) | (attribute << 2) | ap | (UINT64_C(3) << 8) |
            (UINT64_C(1) << 10) | (UINT64_C(1) << 53) | (UINT64_C(1) << 54);
 }
 uint8_t phase2_mmu_activate_root(uint64_t root)

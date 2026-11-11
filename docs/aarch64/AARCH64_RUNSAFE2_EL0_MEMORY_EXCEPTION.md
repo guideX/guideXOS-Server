@@ -4,7 +4,7 @@
 - **Branch:** `AARCH64_SUPPORT`
 - **Scope:** trusted, internally constructed EL0 qualification payload only
 - **Studio Run:** disabled
-- **Outcome:** `EL0_QAC_PENDING` — positive guest passed; isolated access-denial probes await an exclusive QAC grant
+- **Outcome:** `EL0_NATIVE_ISOLATION_DENIAL_VERIFIED` — both native denial probes passed under QAC; the run's shutdown monitor exceeded its intended 300-second bound
 
 ## Status
 
@@ -15,32 +15,34 @@ package. Hosted controls execute the production address-space and exception
 logic against structural MMU and allocator stand-ins. They do not execute an
 EL0 instruction or prove hardware permission enforcement.
 
-The diagnostic guest candidate is built with the existing `virt`, GICv2,
-`cortex-a53` configuration. The positive guest run used QAC acceptance
-reservation `57d93f568f5843c0b64d06a1ac02b8cf` and direct QEMU child PID 27520.
-The guest emitted the actual `exit=0x2a`, `cleanup=PASS`,
-`AARCH64_EL0_QUALIFICATION_PASS`, scheduler continuation, Phase 12 service,
-and `AARCH64_PHASE12_PASS` markers. QMP requested shutdown; QAC verified QEMU
-exit code 0 and released the reservation. No QEMU launch was made outside QAC.
-This verifies actual EL0 execution, SVC return, cleanup, and continued EL1
-service operation. It does not verify denial of kernel RAM or MMIO, so this
-work remains Outcome E (`EL0_QAC_PENDING`) until the isolated access-denial
-probes receive an exclusive QAC grant and pass.
+The diagnostic guest uses the existing `virt`, GICv2, `cortex-a53`
+configuration. The earlier positive guest used QAC acceptance reservation
+`57d93f568f5843c0b64d06a1ac02b8cf` and direct QEMU child PID 27520; its actual
+SVC result was 42, followed by cleanup, scheduler continuation, Phase 12
+service, and QAC-verified exit/release. The new negative candidate also ran
+that positive SVC control before testing kernel RAM and GIC Distributor MMIO.
+
+The negative run was granted QAC acceptance reservation
+`ce4e86b32a8a4cd5880c514486a0f22d` and launched QEMU as managed child PID
+16576. Both accesses produced exact lower-EL level-3 permission faults, both
+children restored the kernel root and cleaned their pages, and timer-driven
+scheduler service continued. QAC logged QEMU exit code 0 and reservation
+release. The evidence and its monitor timing deviation are recorded in
+[AARCH64_RUNSAFE2_EL0_NEGATIVE_QUALIFICATION.md](AARCH64_RUNSAFE2_EL0_NEGATIVE_QUALIFICATION.md).
+No QEMU launch was made outside QAC.
 
 The preserved positive candidate is
 `out/aarch64-runsafe2-phase12-candidate-r4` (kernel SHA-256
 `29dc680d7831c6b4fc0b193be2a4e76492ba2789185516baedd7624c096ee4f3`, EFI
 SHA-256 `1605c55a4d7c0c7b0589bd181e28d2e32f7ef9da31a6aeb23695c237ff7bfe42`).
 
-The separate negative-control candidate was built and hash-verified with both
-kernel-data and GIC-distributor probes enabled. Its QAC acceptance request
-`57aa930b7dc2422eb7c59be08b0ce5e1` waited at queue position 1 behind another
-managed acceptance reservation. No negative guest was launched. The queued
-request was canceled cleanly after the QAC slot remained occupied; the r5
-candidate and serial-log destination are preserved for a later authorized
-run. The r5 negative-profile kernel SHA-256 is
-`de8eb65c5cbaf439fce375433bf13ebafa704d83eae30451023c6427e87a2733`; its EFI
-SHA-256 matches the positive candidate above.
+The earlier r5 negative candidate and its canceled queued request remain
+preserved. Source review found that r5 targeted a live mutable address-space
+counter and could continue to the MMIO child after a kernel-data probe failed.
+The r6 candidate replaced that target with an inert kernel rodata sentinel,
+validated both exact EL1-only descriptor policies before entry, recorded the
+full child/fault/cleanup evidence, and stopped after any kernel-data failure.
+Its candidate identity and native evidence are in the focused report.
 
 ## Existing MMU and extension
 
@@ -165,7 +167,7 @@ execution.
 ## Hosted evidence and limits
 
 The production address-space and exception module is compiled into a hosted
-control program with test-only allocator and MMU seams. Its 166 assertions cover
+control program with test-only allocator and MMU seams. Its 169 assertions cover
 separate roots, retained kernel mappings, child ownership, code/data/stack
 permissions, W^X, guard pages, unauthorized kernel/MMIO pages, invalid ranges
 and descriptors, context identity, entry and stack validation, SVC ownership
@@ -190,16 +192,14 @@ assertions, and the native filesystem contract test. Phase 2, 3, 4, 9, 11, and
 the Phase 12 diagnostic ARM64 EFI/kernel build completed. The separate R1e,
 R2A, and R2B1 qualification artifacts were not overwritten.
 
-Hosted tests do not prove ARM64 permission enforcement. The positive native run
-does prove that this QEMU ARM64 guest entered EL0, executed the embedded payload,
-returned actual x0=42 through SVC, cleaned its pages, resumed the scheduler, and
-continued VFS/graphics/framebuffer service with zero exceptions. It does not
-prove denial of kernel or device memory. Two negative diagnostic payload
-variants each read one kernel-owned data address or the discovered GIC
-distributor base. Their native guest run is pending because the exclusive QAC
-slot was unavailable. A pass requires an EL0 data-abort permission fault at
-the exact FAR, restoration of the kernel root, and cleanup before the kernel
-continues.
+Hosted tests do not prove ARM64 permission enforcement. The positive native
+guest proved actual EL0 execution and SVC return of x0=42. In the separately
+identified r6 negative guest, the same positive control passed before the
+kernel-data and discovered GIC Distributor read probes. Both produced exact
+EL0 permission faults at their target FAR, restored the kernel root, and
+released their owned pages. The two expected lower-EL data aborts are distinct
+from the kernel's fatal/unexpected exception counter, which remained zero; the
+post-probe scheduler log also reported zero unexpected IRQs.
 
 ## Scheduler, Build identity, and existing execution paths
 
@@ -229,10 +229,13 @@ v0.5 layout remain separate and unchanged.
 
 ## Next milestone
 
-Acquire an exclusive QAC acceptance reservation and boot the preserved
-negative-control diagnostic candidate. Capture separate kernel-data and
-GIC-distributor permission-fault markers with their ESR/FAR values, page
-cleanup, and continued EL1 service operation. If both pass, classify this
-foundation as guest verified.
-General task scheduling, cancellation/deadlines, immutable Build-to-Run binding,
-and any Studio Run enablement remain later milestones.
+The negative isolation milestone is guest verified for the tested QEMU
+configuration. A later QAC run should verify the corrected monitor's bounded
+shutdown behavior when the slot is available; this run's fault evidence was
+captured within 24 seconds, but its managed QEMU child exited after 365.984
+seconds because the first monitor treated the transient `Starting` state as a
+terminal state and stopped supervising it. A subsequent invocation correctly
+refused admission while another unrelated managed QEMU was active and launched
+no guest. General task scheduling, cancellation/deadlines, physical-hardware
+qualification, immutable Build-to-Run binding, and any Studio Run enablement
+remain later milestones.

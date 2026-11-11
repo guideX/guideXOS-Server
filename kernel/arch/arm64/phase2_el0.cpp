@@ -49,6 +49,13 @@ static const uint64_t kExpectedUserPstate = UINT64_C(0x3c0); // EL0t, D/A/I/F ma
 static const uint64_t kQualificationOwner = UINT64_C(0x454c305155414c31); // "EL0QUAL1"
 
 static uint64_t g_next_space_identity = 1;
+#if !defined(GXOS_AARCH64_EL0_HOST_TEST)
+// A dedicated, immutable kernel-owned sentinel.  The negative test reads this
+// inert rodata location so it proves a present EL1-only mapping without
+// sampling mutable address-space control state.
+static const volatile uint64_t g_kernel_data_probe_sentinel =
+    UINT64_C(0x47584f53454c3030); // "GXOSEL00"
+#endif
 static gxos_aarch64_el0_address_space* g_active_space = nullptr;
 static gxos_aarch64_el0_context* g_active_context = nullptr;
 static gxos_aarch64_el0_address_space g_qualification_space{};
@@ -696,10 +703,10 @@ static uint32_t make_movk_x1(uint16_t immediate, uint32_t shift)
 
 extern "C" uint8_t phase2_el0_run_negative_probe(
     uint64_t probe_kind, uint64_t device_address,
-    uint64_t* observed_esr, uint64_t* observed_far)
+    gxos_aarch64_el0_negative_probe_result* result)
 {
-    if (observed_esr) *observed_esr = 0;
-    if (observed_far) *observed_far = 0;
+    if (!result) return 0;
+    zero_bytes(result, sizeof(*result));
     if (g_active_space || g_active_context) return 0;
 
     uint64_t target_address = 0;
@@ -708,7 +715,7 @@ extern "C" uint8_t phase2_el0_run_negative_probe(
         target_address = UINT64_C(0x00300000);
 #else
         target_address = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(
-            &g_next_space_identity)) & ~UINT64_C(7);
+            &g_kernel_data_probe_sentinel)) & ~UINT64_C(7);
 #endif
     } else if (probe_kind == GXOS_AARCH64_EL0_PROBE_DEVICE_MMIO) {
         target_address = device_address;
@@ -722,11 +729,16 @@ extern "C" uint8_t phase2_el0_run_negative_probe(
     const uint64_t kernel_descriptor = phase2_mmu_descriptor_for(target_address);
     const uint64_t expected_attribute =
         probe_kind == GXOS_AARCH64_EL0_PROBE_DEVICE_MMIO ? 0 : 1;
+    const uint64_t expected_ap =
+        probe_kind == GXOS_AARCH64_EL0_PROBE_DEVICE_MMIO ? 0 : (UINT64_C(2) << 6);
     if ((kernel_descriptor & 3) != kPageDescriptor ||
         (kernel_descriptor & kPhysicalMask) != (target_address & ~kPageMask) ||
         ((kernel_descriptor >> 2) & 7) != expected_attribute ||
-        (kernel_descriptor & (UINT64_C(1) << 6)) != 0 ||
+        (kernel_descriptor & (UINT64_C(3) << 6)) != expected_ap ||
+        (kernel_descriptor & kAccessFlag) == 0 ||
         (kernel_descriptor & (kPxn | kUxn)) != (kPxn | kUxn)) return 0;
+    result->target_address = target_address;
+    result->kernel_descriptor = kernel_descriptor;
 
     if (g_qualification_space.state != GXOS_AARCH64_EL0_SPACE_EMPTY) {
         if (g_qualification_space.state != GXOS_AARCH64_EL0_SPACE_CLEANED &&
@@ -735,6 +747,8 @@ extern "C" uint8_t phase2_el0_run_negative_probe(
     }
     const uint64_t owner = kQualificationOwner;
     if (!phase2_el0_address_space_create(&g_qualification_space, owner)) return 0;
+    result->child_identity = g_qualification_space.identity;
+    result->owner_id = owner;
 
     const uint64_t code_va = GXOS_AARCH64_EL0_USER_BASE;
     const uint64_t stack_va = GXOS_AARCH64_EL0_USER_BASE + 0x4000;
@@ -811,7 +825,7 @@ extern "C" uint8_t phase2_el0_run_negative_probe(
     const uint64_t simulated_esr = (UINT64_C(0x24) << 26) | UINT64_C(0x0f);
     if (!phase2_el0_dispatch_exception(simulated_frame,
                                        GXOS_AARCH64_EL0_VECTOR_LOWER_SYNC_A64,
-                                       simulated_esr, code_va + 16, 0,
+                                       simulated_esr, code_va + 16, kExpectedUserPstate,
                                        target_address, &simulated_return)) {
         phase2_el0_deactivate(&g_qualification_space);
         if (phase2_el0_cleanup(&g_qualification_space))
@@ -829,14 +843,27 @@ extern "C" uint8_t phase2_el0_run_negative_probe(
         g_qualification_context.state == GXOS_AARCH64_EL0_CONTEXT_FAULTED &&
         g_qualification_context.fault_reason == GXOS_AARCH64_EL0_FAULT_DATA_ABORT &&
         ((g_qualification_context.fault_esr >> 26) & UINT64_C(0x3f)) == UINT64_C(0x24) &&
-        (g_qualification_context.fault_esr & UINT64_C(0x3f)) == UINT64_C(0x0f) &&
+        (g_qualification_context.fault_esr & UINT64_C(0x7f)) == UINT64_C(0x0f) &&
         g_qualification_context.fault_elr == code_va + 16 &&
+        g_qualification_context.fault_spsr == kExpectedUserPstate &&
         g_qualification_context.fault_far == target_address && returned == 0 &&
         phase2_mmu_current_root() == g_qualification_space.kernel_root;
-    if (observed_esr) *observed_esr = g_qualification_context.fault_esr;
-    if (observed_far) *observed_far = g_qualification_context.fault_far;
+    result->context_state = g_qualification_context.state;
+    result->fault_reason = g_qualification_context.fault_reason;
+    result->esr = g_qualification_context.fault_esr;
+    result->elr = g_qualification_context.fault_elr;
+    result->spsr = g_qualification_context.fault_spsr;
+    result->far = g_qualification_context.fault_far;
+    result->target_access_succeeded =
+        g_qualification_context.state == GXOS_AARCH64_EL0_CONTEXT_EXITED;
+    result->read_value = g_qualification_context.exit_value;
+    result->kernel_root_restored =
+        phase2_mmu_current_root() == g_qualification_space.kernel_root;
+    result->data_pages_before_cleanup = g_qualification_space.page_count;
+    result->table_pages_before_cleanup = g_qualification_space.table_count;
     g_qualification_space.state = GXOS_AARCH64_EL0_SPACE_TERMINAL;
     const bool cleaned = phase2_el0_cleanup(&g_qualification_space) != 0;
+    result->cleanup_succeeded = cleaned;
     if (expected_fault && cleaned) {
         phase3_serial_print("[guideXOS] EL0 negative permission fault ESR=");
         phase3_serial_hex(g_qualification_context.fault_esr);
