@@ -1,0 +1,2 @@
+# Hosted RFC 10049 verifier. Keep Ed25519 verification in a maintained library.
+cryptography==50.0.2
