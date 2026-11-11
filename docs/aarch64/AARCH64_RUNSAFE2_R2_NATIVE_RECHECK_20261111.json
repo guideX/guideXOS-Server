@@ -1,0 +1,97 @@
+{
+  "schema_version": "guidexos.aarch64.runsafe2-qac-native-review.v1",
+  "reviewed_outcome": "EL0_QAC_SUPERVISION_PARTIAL",
+  "runner_recorded_outcome": "EL0_QAC_SUPERVISION_INCOMPLETE",
+  "outcome_reason": "The corrected socket fallback validated the exact QAC child endpoint and QMP quit was written, but no quit acknowledgement was observed. QAC later verified child exit and reservation release within the cleanup budgets.",
+  "native_attempts": 1,
+  "another_guest_started": false,
+  "repository": {
+    "branch": "AARCH64_SUPPORT",
+    "qualification_start_head": "5d29d173129271e285c68d4344f686d693514a97"
+  },
+  "candidate": {
+    "directory": "out/aarch64-runsafe2-phase12-negative-candidate-r6",
+    "manifest_sha256": "49a761874a25016f20a58c99f2b29932cd25e79193e5c7835a5478b240eaf1c7",
+    "kernel_sha256": "dc6ddd44161e399e8f2342f7bfbc5b4702610465205a35d82b9b03a6601372bb",
+    "efi_sha256": "1605c55a4d7c0c7b0589bd181e28d2e32f7ef9da31a6aeb23695c237ff7bfe42",
+    "ramdisk_sha256": "c06043cc48e8600b017325847827f564591335b5ce600e52bd394556997597a4"
+  },
+  "source_session": {
+    "directory": "out/aarch64-runsafe2-r2-qac-qualification-20261111/el0-negative-20261111-114126-169",
+    "session_json_sha256": "2da994c5f6e36fdbce9251dea206a4fd8db21904ee84185522253597dafc25a6",
+    "guest_log_sha256": "8c9d5bb6b1bf4c0b1c61e33c8aded034a830ac99e6bc57bbb2365d1eec4b6555",
+    "qac_stderr_sha256": "9a58aa6875d17ac0114f6a868635a17583d56943c3c28d4b1dc4c2a53b534be8"
+  },
+  "qac": {
+    "preflight_online": true,
+    "preflight_reservations": 0,
+    "preflight_qemu_processes": 0,
+    "exclusive_grant": true,
+    "reservation_id": "6f3c8aa0f49d442b801d7e484fad313d",
+    "project": "guideXOSServer-AARCH64-RUNSAFE2-EL0-Negative",
+    "mode": "acceptance",
+    "qac_cli_pid": 28948,
+    "qemu_child_pid": 31372,
+    "qemu_child_parent_pid": 28948,
+    "qemu_executable": "C:\\Program Files\\qemu\\qemu-system-aarch64.exe",
+    "qemu_child_start_utc": "2026-11-11T19:41:30.6868455Z",
+    "qemu_exit_code": 0,
+    "reservation_release": "ReleasedVerified",
+    "final_status_online": true,
+    "final_managed_qemu_processes": 0,
+    "final_reservations": 0,
+    "final_owned_qemu_processes": 0
+  },
+  "qmp": {
+    "port": 52007,
+    "instance_name": "el0-negative-20261111-114126-169",
+    "greeting": "QEMU 11.0.0 (v11.0.0-12122-ga4bb4b10c9)",
+    "socket_table_query": "No matching MSFT_NetTCPConnection objects for local port 52007 in Listen state",
+    "discovery_method": "ExactChildCommandLineAndQmpInstanceName",
+    "exact_child_identity_and_configured_endpoint_matched": true,
+    "valid_qmp_greeting": true,
+    "query_name_matched_session": true,
+    "quit_attempts": 1,
+    "quit_write_completed": true,
+    "quit_write_timestamp_captured_by_runner": false,
+    "quit_attempt_interval_utc": [
+      "2026-11-11T19:41:56.6347935Z",
+      "2026-11-11T19:41:58.4631874Z"
+    ],
+    "quit_acknowledgement_observed": false,
+    "first_failed_operation": "Waiting for the QMP quit response; StreamReader.ReadLine timed out after the command write and endpoint validation",
+    "child_exit_timestamp_utc": "2026-11-11T19:42:03.0492010Z"
+  },
+  "timings": {
+    "guest_runtime_budget_seconds": 300,
+    "runtime_to_cleanup_start_seconds": 22.603,
+    "child_cleanup_budget_seconds": 45,
+    "child_cleanup_elapsed_seconds": 12.078,
+    "reservation_cleanup_budget_seconds": 20,
+    "reservation_cleanup_elapsed_seconds": 1.446,
+    "child_lifetime_from_qac_timestamps_seconds": 32.362,
+    "raw_runner_managed_child_lifetime_seconds": 34.807,
+    "raw_runner_lifetime_note": "The runner sampled its monotonic stopwatch during finalization, after QAC had recorded child exit. The corrected runner derives child lifetime from exact QAC start and exit timestamps."
+  },
+  "guest": {
+    "positive_svc_exit_code": 42,
+    "kernel_data_far": "0x40066170",
+    "kernel_data_esr": "0x9200000f",
+    "kernel_data_child_state": "FAULTED",
+    "gicd_far": "0x08000000",
+    "gicd_esr": "0x9200000f",
+    "gicd_child_state": "FAULTED",
+    "kernel_root_restored_for_both_children": true,
+    "released_data_pages_per_child": 2,
+    "released_table_pages_per_child": 4,
+    "phase12_pass_markers": 2,
+    "timer_ticks": 1001,
+    "preemptions": 1000,
+    "unexpected_irqs": 0,
+    "unexpected_exceptions": 0
+  },
+  "acceptance_gaps": [
+    "No QMP quit acknowledgement was observed, so Outcome A is not claimed.",
+    "No exact quit-write timestamp was present in the raw session record; the corrected runner now records it separately from acknowledgement."
+  ]
+}

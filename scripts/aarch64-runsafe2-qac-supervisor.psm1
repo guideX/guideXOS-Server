@@ -14,6 +14,8 @@ function New-QacSupervisorState {
         guest_pass = $false
         runtime_timed_out = $false
         stop_requested = $false
+        qmp_shutdown_requested = $false
+        qmp_shutdown_acknowledged = $false
         child_exit_verified = $false
         reservation_release_verified = $false
         qac_exit_verified = $false
@@ -48,7 +50,7 @@ function Get-QacQmpEndpointVerification {
         [Parameter(Mandatory = $true)] [int] $QmpPort,
         [Parameter(Mandatory = $true)] [bool] $ListenerQueryReliable,
         [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [int[]] $ListenerOwnerPids,
-        [Parameter(Mandatory = $true)] [object] $Greeting,
+        [Parameter(Mandatory = $true)] [AllowNull()] [object] $Greeting,
         [Parameter(Mandatory = $true)] [string] $ExpectedQemuName,
         [Parameter(Mandatory = $true)] [AllowEmptyString()] [string] $ObservedQemuName
     )
@@ -109,6 +111,19 @@ function Step-QacSupervisor {
     $action = 'ContinueSupervision'
     $reservationState = [string]$Observation.ReservationState
     $childStatus = [string]$Observation.ChildStatus
+
+    if ($Observation.Contains('QmpShutdownRequested') -and $Observation.QmpShutdownRequested) {
+        if (!$Session.qmp_shutdown_requested) {
+            Add-QacTransition $Session 'QmpShutdownRequested' 'The validated QMP endpoint received the graceful quit command.' $now
+        }
+        $Session.qmp_shutdown_requested = $true
+    }
+    if ($Observation.Contains('QmpShutdownAcknowledged') -and $Observation.QmpShutdownAcknowledged) {
+        if (!$Session.qmp_shutdown_acknowledged) {
+            Add-QacTransition $Session 'QmpShutdownAcknowledged' 'QMP acknowledged the graceful quit command.' $now
+        }
+        $Session.qmp_shutdown_acknowledged = $true
+    }
 
     if ($Observation.QacCommunicationOk -ne $true) {
         if ($Session.phase -ne 'QacCommunicationUncertain') {
@@ -339,7 +354,7 @@ function Step-QacSupervisor {
 
     if ($Session.child_exit_verified -and $Session.reservation_release_verified -and
         $Session.qac_exit_verified -and $Session.qac_exit_code -eq 0 -and
-        $Session.guest_pass -and !$Session.runtime_timed_out -and
+        $Session.guest_pass -and $Session.qmp_shutdown_requested -and $Session.qmp_shutdown_acknowledged -and !$Session.runtime_timed_out -and
         !$Session.identity_ambiguous -and
         $Observation.FinalNoOwnedChild -and $Observation.FinalQacStateVerified -and
         $Observation.LogFinalizationOk -and !$Observation.CleanupExpired -and
@@ -353,4 +368,39 @@ function Step-QacSupervisor {
     return $action
 }
 
-Export-ModuleMember -Function New-QacSupervisorState, Add-QacTransition, Get-QacQmpEndpointVerification, Step-QacSupervisor
+function Test-QacSupervisorPartial {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [System.Collections.IDictionary] $Session,
+        [Parameter(Mandatory = $true)] [bool] $GuestPass,
+        [Parameter(Mandatory = $true)] [bool] $FinalQacStateVerified,
+        [Parameter(Mandatory = $true)] [bool] $RuntimeExpired,
+        [Parameter(Mandatory = $true)] [bool] $ChildCleanupExpired,
+        [Parameter(Mandatory = $true)] [bool] $ReservationCleanupExpired
+    )
+
+    return [bool](!$Session.qualifying -and
+        $Session.qmp_shutdown_requested -and !$Session.qmp_shutdown_acknowledged -and
+        $GuestPass -and $Session.child_exit_verified -and
+        $Session.reservation_release_verified -and $Session.qac_exit_verified -and
+        $Session.qac_exit_code -eq 0 -and $FinalQacStateVerified -and
+        !$RuntimeExpired -and !$ChildCleanupExpired -and !$ReservationCleanupExpired)
+}
+
+function Get-QacManagedChildLifetimeSeconds {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [string] $ChildStartUtc,
+        [Parameter(Mandatory = $true)] [string] $ChildExitUtc
+    )
+
+    $start = [DateTimeOffset]::MinValue
+    $exit = [DateTimeOffset]::MinValue
+    if (![DateTimeOffset]::TryParse($ChildStartUtc, [ref]$start) -or
+        ![DateTimeOffset]::TryParse($ChildExitUtc, [ref]$exit) -or $exit -lt $start) {
+        return $null
+    }
+    return [Math]::Round(($exit.ToUniversalTime() - $start.ToUniversalTime()).TotalSeconds, 3)
+}
+
+Export-ModuleMember -Function New-QacSupervisorState, Add-QacTransition, Get-QacQmpEndpointVerification, Step-QacSupervisor, Test-QacSupervisorPartial, Get-QacManagedChildLifetimeSeconds

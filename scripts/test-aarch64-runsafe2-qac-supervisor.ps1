@@ -25,6 +25,8 @@ function New-Observation {
         ChildStartUtc = ''
         GuestPass = $false
         StopRequested = $false
+        QmpShutdownRequested = $false
+        QmpShutdownAcknowledged = $false
         RuntimeExpired = $false
         CleanupExpired = $false
         ReleaseDeadlineExpired = $false
@@ -48,6 +50,8 @@ function Step([System.Collections.IDictionary]$Session, [hashtable]$Values = @{}
 $session = New-QacSupervisorState
 $action = Step $session @{ ReservationState = 'Starting' }
 Assert-Case ($session.phase -eq 'ChildStarting' -and $action -eq 'WaitForChildRegistration') 'Starting remains supervised while registration is pending'
+$action = Step $session @{ ReservationState = 'Starting' }
+Assert-Case ($session.phase -eq 'ChildStarting' -and $action -eq 'WaitForChildRegistration') 'Repeated Starting observations retain supervision'
 $action = Step $session @{ ReservationState = 'Running'; ChildStatus = 'OwnedActive'; ChildPid = 321; ChildStartUtc = '2026-11-11T11:59:59Z' }
 Assert-Case ($session.phase -eq 'ChildRunning' -and $action -eq 'MonitorChild') 'Starting transitions to Running with the exact child identity'
 
@@ -95,6 +99,8 @@ Assert-Case ($session.phase -eq 'ReservationOwnershipUncertain' -and !$session.q
 $session = New-QacSupervisorState
 $action = Step $session @{ QacCommunicationOk = $false; QacDiagnostic = 'simulated pipe failure'; ChildStatus = 'OwnedActive'; ChildPid = 329; ChildStartUtc = '2026-11-11T11:59:59Z'; RuntimeExpired = $true }
 Assert-Case ($session.phase -eq 'QacCommunicationUncertain' -and $action -eq 'RequestGracefulStop' -and !$session.qualifying) 'QAC communication failure retains supervision and timeout cleanup'
+$action = Step $session @{ ReservationState = 'Running'; ChildStatus = 'OwnedActive'; ChildPid = 329; ChildStartUtc = '2026-11-11T11:59:59Z'; RuntimeExpired = $true }
+Assert-Case ($session.child_pid -eq 329 -and $action -eq 'RequestGracefulStop' -and !$session.qualifying) 'Temporary QAC communication loss does not replace child identity'
 
 $session = New-QacSupervisorState
 $action = Step $session @{ ReservationState = 'Running'; ChildStatus = 'Unexpected'; ChildPid = 330 }
@@ -134,6 +140,18 @@ $verification = Get-QacQmpEndpointVerification -ExpectedChildPid 554 -ObservedCh
     -QmpPort 55496 -ListenerQueryReliable $false -ListenerOwnerPids @() -Greeting ([pscustomobject]@{ greeting = 'not QMP' }) `
     -ExpectedQemuName 'session-r2' -ObservedQemuName 'session-r2'
 Assert-Case (!$verification.ReadyForIdentityCheck) 'An invalid endpoint greeting cannot receive QMP commands'
+$verification = Get-QacQmpEndpointVerification -ExpectedChildPid 554 -ObservedChildPid 554 -CommandLine $qmpCommand `
+    -QmpPort 55496 -ListenerQueryReliable $false -ListenerOwnerPids @() -Greeting $null `
+    -ExpectedQemuName 'session-r2' -ObservedQemuName 'session-r2'
+Assert-Case (!$verification.ReadyForIdentityCheck -and !$verification.Verified) 'A missing QMP endpoint greeting is rejected'
+$verification = Get-QacQmpEndpointVerification -ExpectedChildPid 554 -ObservedChildPid 554 -CommandLine $qmpCommand `
+    -QmpPort 55497 -ListenerQueryReliable $false -ListenerOwnerPids @() -Greeting $qmpGreeting `
+    -ExpectedQemuName 'session-r2' -ObservedQemuName 'session-r2'
+Assert-Case (!$verification.ReadyForIdentityCheck -and !$verification.Verified) 'A command line without the exact session endpoint is rejected'
+$verification = Get-QacQmpEndpointVerification -ExpectedChildPid 554 -ObservedChildPid 554 -CommandLine $qmpCommand `
+    -QmpPort 55496 -ListenerQueryReliable $true -ListenerOwnerPids @(554, 555) -Greeting $qmpGreeting `
+    -ExpectedQemuName 'session-r2' -ObservedQemuName 'session-r2'
+Assert-Case (!$verification.Verified) 'Ambiguous socket ownership is rejected even when one owner is the expected child'
 
 $session = New-QacSupervisorState
 $action = Step $session @{ ReservationState = 'Running'; ChildStatus = 'OwnedActive'; ChildPid = 331; ChildStartUtc = '2026-11-11T11:59:59Z'; QacCommunicationOk = $false }
@@ -178,12 +196,39 @@ Assert-Case (!$session.qualifying -and $action -eq 'PreserveReleaseUnverified') 
 $session = New-QacSupervisorState
 $null = Step $session @{ ReservationState = 'Running'; ChildStatus = 'OwnedActive'; ChildPid = 337; ChildStartUtc = '2026-11-11T11:59:59Z'; GuestPass = $true }
 $null = Step $session @{ ReservationState = 'Running'; ChildStatus = 'Exited'; QacChildExitVerified = $true }
-$action = Step $session @{ ReservationState = 'Released'; ChildStatus = 'Exited'; QacChildExitVerified = $true; QacReleaseVerified = $true; QacProcessExited = $true; QacExitCode = 0; FinalNoOwnedChild = $true; FinalQacStateVerified = $true; LogFinalizationOk = $true }
+$action = Step $session @{ ReservationState = 'Released'; ChildStatus = 'Exited'; QacChildExitVerified = $true; QacReleaseVerified = $true; QacProcessExited = $true; QacExitCode = 0; QmpShutdownRequested = $true; QmpShutdownAcknowledged = $true; FinalNoOwnedChild = $true; FinalQacStateVerified = $true; LogFinalizationOk = $true }
 Assert-Case ($session.qualifying -and $session.phase -eq 'Qualified' -and $action -eq 'Complete') 'Only complete child exit and reservation release can qualify a session'
+
+$session = New-QacSupervisorState
+$null = Step $session @{ ReservationState = 'Running'; ChildStatus = 'OwnedActive'; ChildPid = 339; ChildStartUtc = '2026-11-11T11:59:59Z'; GuestPass = $true; QmpShutdownRequested = $true; QmpShutdownAcknowledged = $true }
+Assert-Case ($session.qmp_shutdown_requested -and $session.qmp_shutdown_acknowledged -and !$session.child_exit_verified -and !$session.qualifying) 'QMP quit acknowledgement is recorded while the live child remains supervised'
+
+$session = New-QacSupervisorState
+$null = Step $session @{ ReservationState = 'Running'; ChildStatus = 'OwnedActive'; ChildPid = 340; ChildStartUtc = '2026-11-11T11:59:59Z'; GuestPass = $true; QmpShutdownRequested = $true }
+$null = Step $session @{ ReservationState = 'Running'; ChildStatus = 'Exited'; QacChildExitVerified = $true; QmpShutdownRequested = $true }
+$action = Step $session @{ ReservationState = 'Released'; ChildStatus = 'Exited'; QacChildExitVerified = $true; QacReleaseVerified = $true; QacProcessExited = $true; QacExitCode = 0; QmpShutdownRequested = $true; FinalNoOwnedChild = $true; FinalQacStateVerified = $true; LogFinalizationOk = $true }
+Assert-Case ($session.qmp_shutdown_requested -and !$session.qmp_shutdown_acknowledged -and !$session.qualifying -and $action -ne 'Complete') 'A sent quit without a response cannot qualify despite verified child exit and release'
+Assert-Case (Test-QacSupervisorPartial -Session $session -GuestPass $true -FinalQacStateVerified $true -RuntimeExpired $false -ChildCleanupExpired $false -ReservationCleanupExpired $false) 'A fully released run without a QMP acknowledgement is classified as partial'
+Assert-Case (!(Test-QacSupervisorPartial -Session $session -GuestPass $true -FinalQacStateVerified $false -RuntimeExpired $false -ChildCleanupExpired $false -ReservationCleanupExpired $false)) 'An unresolved QAC final state cannot be classified as partial cleanup success'
+Assert-Case ((Get-QacManagedChildLifetimeSeconds -ChildStartUtc '2026-11-11T19:41:30.6868455Z' -ChildExitUtc '2026-11-11T19:42:03.0492010Z') -eq 32.362) 'Managed child lifetime uses exact QAC launch and exit timestamps'
+$invalidLifetime = Get-QacManagedChildLifetimeSeconds -ChildStartUtc '2026-11-11T19:42:03Z' -ChildExitUtc '2026-11-11T19:41:30Z'
+Assert-Case ($null -eq $invalidLifetime) 'Invalid or reversed child timestamps do not produce a lifetime claim'
+
+$session = New-QacSupervisorState
+$null = Step $session @{ ReservationState = 'Running'; ChildStatus = 'OwnedActive'; ChildPid = 341; ChildStartUtc = '2026-11-11T11:59:59Z'; GuestPass = $true }
+$null = Step $session @{ ReservationState = 'Running'; ChildStatus = 'Exited'; QacChildExitVerified = $true }
+$action = Step $session @{ ReservationState = 'Released'; ChildStatus = 'Exited'; QacChildExitVerified = $true; QacReleaseVerified = $true; QacProcessExited = $true; QacExitCode = 0; FinalNoOwnedChild = $true; FinalQacStateVerified = $true; LogFinalizationOk = $true }
+Assert-Case (!$session.qualifying -and $action -ne 'Complete') 'A child that exits before QMP acknowledgement cannot qualify'
 
 $session = New-QacSupervisorState
 $null = Step $session @{ ReservationState = 'Running'; ChildStatus = 'OwnedActive'; ChildPid = 338; ChildStartUtc = '2026-11-11T11:59:59Z'; GuestPass = $true }
 $action = Step $session @{ ReservationState = 'Released'; ChildStatus = 'OwnedActive'; ChildPid = 338; ChildStartUtc = '2026-11-11T11:59:59Z'; GuestPass = $true; QacChildExitVerified = $true; QacReleaseVerified = $true; QacProcessExited = $true; QacExitCode = 0; FinalNoOwnedChild = $false; FinalQacStateVerified = $true; LogFinalizationOk = $true }
 Assert-Case (!$session.qualifying -and $action -eq 'RetainQacOwnership') 'QAC release cannot qualify while the owned QEMU process is still active'
+
+$runnerSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'run-aarch64-runsafe2-qac.ps1'))
+Assert-Case ($runnerSource.Contains("`$sessionPath + '.partial.json'") -and $runnerSource.Contains('partial_log_finalization_error')) 'A failed session save has a partial evidence preservation path'
+Assert-Case ($runnerSource.Contains('$script:qmpQuitSent = $true') -and
+    $runnerSource.Contains('$script:qmpQuitAcknowledged = $true') -and
+    $runnerSource.Contains('SentWithoutAcknowledgement')) 'Runner records QMP quit write separately from its acknowledgement'
 
 Write-Host "QAC supervision state-machine regressions: PASS ($script:assertions assertions)" -ForegroundColor Green

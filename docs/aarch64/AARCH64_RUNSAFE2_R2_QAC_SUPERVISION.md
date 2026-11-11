@@ -2,55 +2,90 @@
 
 - **Repository:** `guideXOSServer_AARCH64`
 - **Branch:** `AARCH64_SUPPORT`
-- **Starting HEAD:** `b8983fb34395d246f628a51bdd6f9057cab04e11` (two commits ahead of `origin/AARCH64_SUPPORT`)
-- **Outcome:** `QAC_SUPERVISION_DEFECT_LOCALIZED`
+- **Qualification starting HEAD:** `5d29d173129271e285c68d4344f686d693514a97` (three commits ahead of `origin/AARCH64_SUPPORT`)
+- **Latest native outcome:** `EL0_QAC_SUPERVISION_PARTIAL`
+- **Earlier pre-fix outcome:** `QAC_SUPERVISION_DEFECT_LOCALIZED` (preserved unchanged)
 - **Studio Run:** remains disabled
 - **Scope:** QAC-owned launch supervision for the preserved trusted r6 EL0 diagnostic; not process scheduling
 
-## Closeout
+## Native recheck (2026-11-11)
 
-The R2 supervisor and deterministic host regressions are implemented. The host
-state-machine suite passes 32 assertions, and the existing production-backed
-EL0 hosted suite passes all 169 assertions plus its source-contract checks. The
-preserved candidate's manifest, kernel, EFI, and ramdisk hashes match their
-recorded r6 identities, and each source file listed by its manifest still
-matches the captured hash.
+One genuine QAC acceptance run used the corrected socket fallback and the
+preserved R6 candidate. QAC was online and clear at preflight. The exact
+reservation was `6f3c8aa0f49d442b801d7e484fad313d`, project
+`guideXOSServer-AARCH64-RUNSAFE2-EL0-Negative`, mode `acceptance`. QAC CLI PID
+`28948` was the exact parent of QEMU child PID `31372` at
+`C:\Program Files\qemu\qemu-system-aarch64.exe`, created at
+`2026-11-11T19:41:30.6868455Z`. The child used the per-session QEMU name
+`el0-negative-20261111-114126-169` and QMP port `52007`.
 
-At 2026-11-11 16:43:14 UTC, QAC was occupied by reservation
-`72ff13635458464baec7a8b523629494` (`guideXOSUEFI-FONTS7R1`), QEMU PID `33000`.
-No R2 request was made at that time. Once the exclusive lane became free, the
-single authorized rerun received reservation `78b4fbd69662483586e6898f50ab31f2`
-and launched the exact QAC child PID `21912` at `2026-11-11T16:48:08.3014738Z`
-on QMP port `55496`.
+The primary `Get-NetTCPConnection` lookup returned a no-match CIM error. The
+corrected fallback then validated the active QAC child PID and command line,
+received a valid QMP v11 greeting, and matched `query-name` to the exact unique
+session name. The recorded discovery method is
+`ExactChildCommandLineAndQmpInstanceName`; no other QEMU endpoint was adopted.
+This run directly exercised the fallback.
 
-The guest produced the positive SVC result (`observed-exit=2a`), kernel-data FAR
-`0x40066170` and GICD FAR `0x08000000` permission faults (both ESR
-`0x9200000f`), kernel-root restoration and page cleanup for each child, scheduler
-continuation, two `AARCH64_PHASE12_PASS` markers, 1,000 timer ticks and
-preemptions, and zero unexpected IRQs or exceptions. The monitor started cleanup about 29.5 seconds
-after launch, but `Get-NetTCPConnection` returned a no-match CIM error despite
-the exact child command line and a live QMP endpoint. The runner treated that
-socket-table query as a hard gate, sent no QMP commands, and reached its 45-second
-cleanup deadline with the child still under QAC ownership. The child lifetime
-was 154.018 seconds, so bounded lifecycle acceptance was not met.
+After endpoint validation, the runner wrote QMP `quit`, then timed out waiting
+for its response at `2026-11-11T19:41:58.4631874Z`. The recorded exception is
+from `StreamReader.ReadLine`, after the write and the exact endpoint/name
+validation. The earlier runner did not persist the write timestamp or mark the
+command sent until a response arrived, so the raw session's `qmp_quit_sent`
+field is false. The fallback and failed-read transitions bound the attempt to
+`19:41:56.6347935Z`–`19:41:58.4631874Z`; an exact send timestamp is unavailable.
+The corrected runner now records request-write and acknowledgement separately.
 
-After that deadline, exact QAC inspect data, child PID/parent/executable/profile,
-the configured QMP port, and the QMP v11 greeting were checked. One graceful
-QMP `qmp_capabilities` / `quit` sequence was acknowledged at
-`2026-11-11T16:50:42.2614467Z`. QAC logged child exit code 0 at
-`16:50:42.3192901Z` and reservation release. A subsequent QAC status/list
-reported zero managed QEMU processes and zero reservations. The original
-session record remains unmodified and retains the failed cleanup observation;
-`qmp-fallback.json` records the later graceful stop.
+QEMU's QMP reference says `quit` requests graceful process termination but
+does not guarantee that its response is sent before termination; premature EOF
+is expected in some cases ([QEMU QMP `quit` command](https://www.qemu.org/docs/master/interop/qemu-qmp-ref.html#command-quit)).
+That protocol behavior is consistent with the missing response, but this run
+does not establish that the request caused the exit. It also does not satisfy
+this acceptance contract's explicit acknowledgement requirement. The child
+exit does not substitute for a QMP acknowledgement.
 
-Outcome C applies because the only authorized guest run exposed a concrete
-cleanup defect and exceeded its cleanup bound. The QMP path now uses the exact
-child command line and a valid QMP greeting when the OS socket table is
-unavailable, then checks a per-session QEMU name through QMP `query-name` before
-sending `quit`. It still rejects a reported foreign owner. This fix passes
-deterministic host regressions, but the one authorized guest run used the
-pre-fix version. No second guest was launched, so bounded supervision is not
-qualified and Outcome A is not claimed.
+QAC subsequently recorded exit code 0 at `2026-11-11T19:42:03.0492010Z` and
+released the reservation. Final status/list showed zero reservations and zero
+managed QEMU processes. The runner's monotonic measurements were 22.603 seconds
+to guest completion/cleanup start, 12.078 seconds for child cleanup against the
+45-second limit, and 1.446 seconds for reservation release against the
+20-second limit. The exact QAC child start-to-exit interval is 32.362 seconds;
+the old record's `managed_child_lifetime_seconds=34.807` included finalizer
+time after exit. The runner now calculates that field from the verified QAC
+launch and exit timestamps and leaves it unavailable when QAC exit time is not
+verified.
+
+Guest evidence passed: SVC returned 42; the kernel-data read at FAR
+`0x40066170` and GICD read at FAR `0x08000000` each raised the expected
+`0x9200000f` lower-EL permission fault; both children entered `FAULTED`,
+restored the kernel root, and released two data and four table pages. Scheduler
+continuation and both Phase 12 pass markers were present; the guest recorded
+1,001 timer ticks, 1,000 preemptions, and zero unexpected IRQs or exceptions.
+
+The native result is **Outcome B — `EL0_QAC_SUPERVISION_PARTIAL`**. The fallback
+was exercised and validated, child exit and reservation release were bounded
+and verified, but the QMP `quit` acknowledgement was not observed. No second
+guest was launched. The raw run is preserved under
+`out/aarch64-runsafe2-r2-qac-qualification-20261111/el0-negative-20261111-114126-169/`;
+the committed [review addendum](AARCH64_RUNSAFE2_R2_NATIVE_RECHECK_20261111.json)
+records its hashes and outcome analysis. The raw `session.json` is not rewritten
+to change the outcome emitted by the runner version that executed it.
+
+## Earlier pre-fix native failure (preserved unchanged)
+
+The earlier authorized session received reservation
+`78b4fbd69662483586e6898f50ab31f2` and launched child PID `21912` at
+`2026-11-11T16:48:08.3014738Z` on port `55496`. Its guest diagnostics completed
+29.513 seconds after launch. The runner's socket-table query failed and was
+treated as a hard gate, so no QMP command was sent before the 45-second cleanup
+deadline. The child lifetime reached 154.018 seconds. This was the original
+confirmed supervision defect, not an ARM64 kernel failure.
+
+After the deadline, a separate evidence reconciliation verified the exact QAC
+child and a graceful QMP `qmp_capabilities` / `quit` sequence, then observed
+child exit code 0 and reservation release. The raw session record retains the
+missed deadline; `qmp-fallback.json` and `r2-reconciliation.json` preserve the
+later stop and ownership evidence. That post-deadline cleanup does not turn the
+run into a bounded pass.
 
 ## R1 deviation reconstruction
 
@@ -97,6 +132,14 @@ blocked. QAC's `run` command launches QEMU directly, waits for that child, and
 reports its exit and release; the runner does not kill the QAC client or use a
 process-tree termination fallback.
 
+QAC 2.0 exposes no coordinator command to terminate an active `qac run` child.
+The CLI documents Ctrl+C delivery to its inherited console process group and
+continues waiting until child termination is observable. This unattended runner
+starts QAC with redirected output and no attached interactive QAC console, so
+it uses the validated QMP path and preserves QAC ownership if that path misses
+its deadline. `cancel` applies to pending requests; `release` is not requested
+while the child is active or ambiguous.
+
 ## R2 supervisor correction
 
 [`run-aarch64-runsafe2-qac.ps1`](../../scripts/run-aarch64-runsafe2-qac.ps1)
@@ -125,6 +168,11 @@ uses the shared state machine in
   `query-name` response are required before `quit`. Any socket-table row naming
   another or ambiguous owner blocks the command. Shutdown is retried while the
   child remains active, with a 45-second exit deadline.
+- The state machine records the QMP `quit` write and its response as separate
+  stages. Acceptance requires both the request and an observed acknowledgement,
+  followed by verified child exit and QAC release. A child exit after an
+  unacknowledged request is recorded as partial when all ownership and cleanup
+  checks pass; it cannot be promoted to a lifecycle pass.
 - After child exit, QAC release has a separate 20-second deadline. If the QAC
   run client has exited but the exact child is verified gone and the reservation
   remains admitted, the runner may request QAC's documented `release` operation.
@@ -138,6 +186,9 @@ uses the shared state machine in
   runtime deadline, QMP attempts, separate runtime and cleanup durations, QAC
   and child exit codes, release status, final status/list, and partial log-write
   failures. Raw QAC and guest logs are written directly to the session folder.
+- Managed-child lifetime is calculated from the exact QAC child-start and
+  child-exit timestamps. It is left unavailable if QAC did not verify an exit
+  timestamp, rather than sampling the stopwatch during later finalization.
 
 The `Starting` → `Running` sequence follows QAC's implementation. The
 `Running` → `Starting` regression is defensive: current QAC does not permit that
@@ -147,20 +198,24 @@ not drop active child supervision.
 ## Host regressions and preserved EL0 result
 
 [`test-aarch64-runsafe2-qac-supervisor.ps1`](../../scripts/test-aarch64-runsafe2-qac-supervisor.ps1)
-passes **32 deterministic assertions** covering startup and registration,
+passes **46 deterministic assertions** covering startup and registration,
 temporary states, normal child exit, PASS with pending shutdown, runtime and
 cleanup deadlines, ambiguous child status, lost reservation ownership, QAC
 communication failure, unexpected and unrelated process identities, repeated
 QMP requests, queued cancellation, `Recovery Required`, failed log
 finalization, missing terminal status, and the rule that a live owned child can
-never qualify. Seven assertions also cover QMP endpoint identity and the socket
-table fallback.
+never qualify. The expanded assertions also cover missing and ambiguous
+endpoints, transient `Starting` and QAC communication, separate QMP request and
+acknowledgement states, partial-outcome gates, and exact child lifetime
+calculation.
 
 `scripts/test-aarch64-el0-host.ps1` was rerun and passed **169 assertions** plus
 `AARCH64_EL0_SOURCE_CONTRACT_PASS`. It verifies the same production address-space
 and exception code against structural host seams; it is not hardware permission
-evidence. No kernel or exception source changed in R2, so ABI, Studio Run,
-GICv3, DTB, and ARM64 build checks were not repeated.
+evidence. The Studio Run fail-closed controls passed, and PowerShell parsing
+passed for the runner, supervisor module, and relevant regression scripts. No
+kernel or exception source changed, so the full Studio package was not rebuilt;
+the preserved candidate was hash-checked and used unchanged in the native run.
 
 The prior native EL0 result remains intact: positive SVC returned 42; kernel
 data and GIC Distributor reads produced lower-EL level-3 permission faults with
@@ -182,27 +237,30 @@ The preserved r6 candidate remains at
 
 The manifest is based on source HEAD `65f0a0d5e79b08ba6d74aa49971635bb0321f071`
 with five captured source files. Those five file hashes match the current
-`AARCH64_SUPPORT` tree at `b8983fb34395d246f628a51bdd6f9057cab04e11`; the
-new runner checks those source hashes instead of incorrectly requiring the
-current HEAD to equal the manifest's pre-commit base.
+`AARCH64_SUPPORT` tree at qualification starting HEAD
+`5d29d173129271e285c68d4344f686d693514a97`; the runner checks those source
+hashes instead of incorrectly requiring the current HEAD to equal the
+manifest's pre-commit base.
 
 R2 guest evidence is in
 `out/aarch64-runsafe2-r2-qac-20261111/el0-negative-20261111-084757-043`.
 The QAC grant, child identity, diagnostics, and eventual graceful exit/release
-are recorded there, including supplemental `r2-reconciliation.json`. The run
-does not prove bounded cleanup: the monitor missed
-its 45-second shutdown deadline before the fallback QMP stop. The runner is
-configured for one attempt and does not requeue after an occupied-lane refusal;
-the authorized guest attempt has been used.
+are recorded there, including supplemental `r2-reconciliation.json`. That
+earlier run does not prove bounded cleanup: the monitor missed its 45-second
+shutdown deadline before the fallback QMP stop. The separate native recheck
+above proves that fallback discovery can be exercised, but does not verify the
+`quit` acknowledgement. The authorized run for this task has been used; another
+native attempt requires a distinct justification and fresh QAC grant.
 
 ## RUNSAFE3 readiness
 
-The host harness contains the localized QMP correction and passes its
-regressions. RUNSAFE3 may proceed with design work, but process scheduling and
-cancellation qualification must remain separate. R2 adds no per-task TTBR
-ownership, preemptive EL0 execution, or Studio Run path. Treat QAC lifecycle
-qualification as incomplete until a separately authorized run exercises the
-corrected QMP path within its cleanup deadline.
+The host harness passes 46 deterministic assertions, and the native fallback
+path was exercised under a genuine exclusive grant. RUNSAFE3 design work may
+proceed, but process scheduling, cancellation, and native supervision must
+remain separate acceptance gates. R2 adds no per-task TTBR ownership,
+preemptive EL0 execution, or Studio Run path. RUNSAFE3 readiness is **design
+only**; native QMP shutdown remains partially qualified because this run did
+not observe a `quit` acknowledgement. A second native run was not launched.
 
 The runner's `try/catch/finally` preserves partial evidence and performs bounded
 cleanup for handled PowerShell errors and cancellation paths. An external
