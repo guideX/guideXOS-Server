@@ -2419,7 +2419,7 @@ bool NotepadApp::updateMenuHover(int x, int y) {
 // ============================================================
 
 DisplayOptionsApp::DisplayOptionsApp()
-    : m_selectedIndex(0), m_appliedIndex(0), m_selectedBackgroundIndex(0), m_appliedBackgroundIndex(0), m_selectedGradientIndex(0), m_appliedGradientIndex(0), m_activeTab(0), m_windowW(720), m_windowH(460), m_backgroundGalleryScrollOffset(0), m_gradientGalleryScrollOffset(0), m_galleryScrollbarDragging(false), m_galleryScrollbarDragStartY(0), m_galleryScrollbarDragStartOffset(0), m_selectButtonId(-1), m_desktopIconVisibility{true, true, true, false}, m_selectedDisplayMode(gxos::display::DisplayConfigurationMode::Extend), m_appliedDisplayMode(gxos::display::DisplayConfigurationMode::Extend), m_selectedPrimaryOutput(0), m_appliedPrimaryOutput(0), m_activeDisplayConfiguration{}, m_requestedDisplayConfiguration{}, m_pendingTopologyChange{}, m_activeConfigurationGeneration(1), m_displayLocalEdits(false), m_displayStatus{}, m_windowGeneration(0), m_displayRequestId(0), m_displayRequestPending(false) {
+    : m_selectedIndex(0), m_appliedIndex(0), m_selectedBackgroundIndex(0), m_appliedBackgroundIndex(0), m_selectedGradientIndex(0), m_appliedGradientIndex(0), m_activeTab(0), m_windowW(720), m_windowH(460), m_backgroundGalleryScrollOffset(0), m_gradientGalleryScrollOffset(0), m_galleryScrollbarDragging(false), m_galleryScrollbarDragStartY(0), m_galleryScrollbarDragStartOffset(0), m_selectButtonId(-1), m_desktopIconVisibility{true, true, true, false}, m_selectedDisplayMode(gxos::display::DisplayConfigurationMode::Extend), m_appliedDisplayMode(gxos::display::DisplayConfigurationMode::Extend), m_selectedPrimaryOutput(0), m_appliedPrimaryOutput(0), m_activeDisplayConfiguration{}, m_requestedDisplayConfiguration{}, m_displayConfigurationAvailability(display_options::ConfigurationAvailability::BackendUnavailable), m_pendingTopologyChange{}, m_activeConfigurationGeneration(1), m_displayLocalEdits(false), m_displayStatus{}, m_windowGeneration(0), m_displayRequestId(0), m_displayRequestPending(false) {
     strcopy(m_name, "DisplayOptions", app::MAX_APP_NAME);
     m_displayStatus[0] = '\0';
 }
@@ -2724,6 +2724,15 @@ static bool qemu_logical_resolution_ui_enabled(const gxos::display::DisplayConfi
     return strcmp(snapshot.backend, "virtio-gpu") == 0 && snapshot.qemuOnly != 0u;
 }
 
+static constexpr bool public_preview_display_configuration()
+{
+#if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
+    return true;
+#else
+    return false;
+#endif
+}
+
 static void format_qemu_logical_resolution(const gxos::display::DisplayConfigurationOutput& output,
                                            char* destination,
                                            uint32_t capacity)
@@ -2747,13 +2756,28 @@ void DisplayOptionsApp::drawDisplayTab(uint32_t x, uint32_t y, uint32_t w, uint3
     framebuffer::fill_rect(panelX, panelY, panelW, panelH, rgb(22, 22, 24));
 
     appDrawText(x + 18u, y + 58u, "Display configuration", rgb(230, 230, 238));
-    appDrawText(x + 28u, y + 92u, "Mode", rgb(190, 195, 205));
 
     const auto button = [&](uint32_t bx, uint32_t by, uint32_t bw, const char* label, bool selected) {
         framebuffer::fill_rect(bx, by, bw, 28u, selected ? rgb(62, 96, 150) : rgb(38, 39, 46));
         appDrawRect(bx, by, bw, 28u, rgb(112, 120, 140));
         appDrawText(bx + 10u, by + 9u, label, rgb(235, 238, 246));
     };
+
+    if (!display_options::isConfigurationActionEnabled(
+            m_displayConfigurationAvailability,
+            display_options::ConfigurationAction::Apply)) {
+        appDrawText(x + 28u, y + 100u,
+            display_options::configurationUnavailableMessage(m_displayConfigurationAvailability),
+            rgb(235, 190, 132));
+        appDrawText(x + 28u, y + 128u,
+            "This page is read-only until a supported display backend is qualified.",
+            rgb(178, 185, 198));
+        const uint32_t actionY = y + h - 38u;
+        button(x + 492u, actionY, 88u, "Close", false);
+        return;
+    }
+
+    appDrawText(x + 28u, y + 92u, "Mode", rgb(190, 195, 205));
     button(x + 88u, y + 86u, 92u, "Extend", m_selectedDisplayMode == gxos::display::DisplayConfigurationMode::Extend);
     button(x + 188u, y + 86u, 92u, "Mirror", m_selectedDisplayMode == gxos::display::DisplayConfigurationMode::Mirror);
 
@@ -2849,6 +2873,15 @@ void DisplayOptionsApp::drawDisplayTab(uint32_t x, uint32_t y, uint32_t w, uint3
 
 bool DisplayOptionsApp::queryDisplayConfiguration()
 {
+    if (!display_options::shouldQueryConfigurationBackend(public_preview_display_configuration())) {
+        m_displayConfigurationAvailability = display_options::resolveConfigurationAvailability(
+            true, false, false);
+        strcopy(m_displayStatus,
+            display_options::configurationUnavailableMessage(m_displayConfigurationAvailability),
+            sizeof(m_displayStatus));
+        return false;
+    }
+
     gxos::display::DisplayConfigurationCommand command{};
     command.version = gxos::display::kDisplayConfigurationContractVersion;
     command.structureSize = sizeof(command);
@@ -2858,8 +2891,20 @@ bool DisplayOptionsApp::queryDisplayConfiguration()
     const uint64_t generation = m_windowGeneration;
     const bool submitted = gxos::display::DisplayConfigurationService::submit(command, response);
     if (generation != m_windowGeneration || response.requestId != command.requestId || response.commandType != command.commandType) return false;
-    if (!submitted || response.success == 0u) {
-        strcopy(m_displayStatus, "Display query failed", sizeof(m_displayStatus));
+    const bool hasOutput = response.activeConfiguration.outputCount > 0u &&
+        response.activeConfiguration.outputCount <= gxos::display::kDisplayConfigurationMaxOutputs;
+    m_displayConfigurationAvailability = display_options::resolveConfigurationAvailability(
+        false, submitted && response.success != 0u, hasOutput);
+    if (!display_options::isConfigurationActionEnabled(
+            m_displayConfigurationAvailability,
+            display_options::ConfigurationAction::Apply)) {
+        m_activeDisplayConfiguration = {};
+        m_requestedDisplayConfiguration = {};
+        m_pendingTopologyChange = {};
+        m_displayLocalEdits = false;
+        strcopy(m_displayStatus,
+            display_options::configurationUnavailableMessage(m_displayConfigurationAvailability),
+            sizeof(m_displayStatus));
         return false;
     }
     m_activeDisplayConfiguration = response.activeConfiguration;
@@ -3041,6 +3086,17 @@ bool DisplayOptionsApp::injectPendingTopologyForTest(uint32_t kind)
 
 bool DisplayOptionsApp::submitDisplayConfiguration(bool closeOnSuccess)
 {
+    if (!display_options::isConfigurationActionEnabled(
+            m_displayConfigurationAvailability,
+            closeOnSuccess ? display_options::ConfigurationAction::Confirm
+                           : display_options::ConfigurationAction::Apply)) {
+        strcopy(m_displayStatus,
+            display_options::configurationUnavailableMessage(m_displayConfigurationAvailability),
+            sizeof(m_displayStatus));
+        invalidate();
+        return false;
+    }
+
     if (m_displayRequestPending) {
         strcopy(m_displayStatus, "Display configuration is busy", sizeof(m_displayStatus));
         invalidate();
@@ -3119,7 +3175,11 @@ bool DisplayOptionsApp::submitDisplayConfiguration(bool closeOnSuccess)
 
 void DisplayOptionsApp::cancelDisplayConfiguration()
 {
-    if (!m_displayRequestPending) queryDisplayConfiguration();
+    if (!m_displayRequestPending && display_options::isConfigurationActionEnabled(
+            m_displayConfigurationAvailability,
+            display_options::ConfigurationAction::Apply)) {
+        queryDisplayConfiguration();
+    }
     m_selectedDisplayMode = m_appliedDisplayMode;
     m_selectedPrimaryOutput = m_appliedPrimaryOutput;
     m_requestedDisplayConfiguration = m_activeDisplayConfiguration;
@@ -3422,7 +3482,11 @@ bool DisplayOptionsApp::handleGalleryKey(uint32_t key) {
 void DisplayOptionsApp::onKeyDown(uint32_t key) {
     if (m_activeTab == 3) {
         if (key == '\r' || key == '\n') {
-            submitDisplayConfiguration(false);
+            if (display_options::isConfigurationActionEnabled(
+                    m_displayConfigurationAvailability,
+                    display_options::ConfigurationAction::Apply)) {
+                submitDisplayConfiguration(false);
+            }
             return;
         }
         if (key == 0x1Bu) {
@@ -3476,6 +3540,19 @@ void DisplayOptionsApp::onMouseDown(int x, int y, uint8_t) {
     }
 
     if (m_activeTab == 3) {
+        if (!display_options::isConfigurationActionEnabled(
+                m_displayConfigurationAvailability,
+                display_options::ConfigurationAction::Apply)) {
+            const int closeActionY = m_windowH - 38;
+            if (y >= closeActionY && y < closeActionY + 28 && x >= 492 && x < 580 &&
+                display_options::isConfigurationActionEnabled(
+                    m_displayConfigurationAvailability,
+                    display_options::ConfigurationAction::Close)) {
+                cancelDisplayConfiguration();
+            }
+            return;
+        }
+
         if (m_pendingTopologyChange.pending != 0u) {
             if (y >= 350 && y < 378 && x >= 430 && x < 506) {
                 previewPendingTopologyChange();
