@@ -36,6 +36,7 @@
 #if defined(ARCH_IA64)
 #include "arch/cpu_state_checkpoint.h"
 #include "arch/break_exception.h"
+#include "arch/general_exception.h"
 #endif
 
 // Storage subsystem
@@ -1640,7 +1641,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     kernel::arch::ia64::ski_console::puts("Interrupts masked; scheduler and threads unavailable\r\n");
     const bool break_exception_qualified =
         kernel::arch::ia64::run_break_exception_qualification();
-    if (!break_exception_qualified) {
+    const bool general_exception_qualified = break_exception_qualified &&
+        kernel::arch::ia64::run_general_exception_qualification();
+    if (!break_exception_qualified || !general_exception_qualified) {
         kernel::arch::ia64::ski_console::puts(
             "Early exception qualification failed; stopping before all other startup paths\r\n");
     }

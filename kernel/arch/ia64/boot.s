@@ -92,6 +92,26 @@ ia64_ivt:
     .endif
 .endm
 
+/* Only the early-exec probe owns this single General Exception vector. */
+.macro IVT_ENTRY_GENERAL_EXCEPTION name, offset, slot_bytes
+    .if (\offset + \slot_bytes) > IVT_BYTES
+        .error "IA-64 General Exception slot extends beyond 0x8000 bytes"
+    .endif
+    .org ia64_ivt + \offset
+    .global \name
+    .global \name\()_end
+    .type \name, @function
+    .proc \name
+\name:
+    br.sptk.many ia64_general_exception_entry ;;
+\name\()_end:
+    .endp \name
+    .size \name, \name\()_end - \name
+    .if (\name\()_end - \name) > \slot_bytes
+        .error "IA-64 General Exception stub exceeds its assigned slot"
+    .endif
+.endm
+
 /* First 20 long vectors: 0x0000 through 0x4c00 in 0x400-byte steps. */
 IVT_ENTRY_HALT ivt_vhpt_translation,           0x0000, IVT_LONG_SLOT_BYTES
 IVT_ENTRY_HALT ivt_itlb_miss,                  0x0400, IVT_LONG_SLOT_BYTES
@@ -123,7 +143,11 @@ IVT_ENTRY_HALT ivt_page_not_present,            0x5000, IVT_SHORT_SLOT_BYTES
 IVT_ENTRY_HALT ivt_key_permission,              0x5100, IVT_SHORT_SLOT_BYTES
 IVT_ENTRY_HALT ivt_ia_rights,                   0x5200, IVT_SHORT_SLOT_BYTES
 IVT_ENTRY_HALT ivt_da_rights,                   0x5300, IVT_SHORT_SLOT_BYTES
+.ifdef GXOS_IA64_EARLY_EXEC_PROFILE
+IVT_ENTRY_GENERAL_EXCEPTION ivt_general_exception, 0x5400, IVT_SHORT_SLOT_BYTES
+.else
 IVT_ENTRY_HALT ivt_general_exception,           0x5400, IVT_SHORT_SLOT_BYTES
+.endif
 IVT_ENTRY_HALT ivt_disabled_fp,                 0x5500, IVT_SHORT_SLOT_BYTES
 IVT_ENTRY_HALT ivt_nat_consumption,             0x5600, IVT_SHORT_SLOT_BYTES
 IVT_ENTRY_HALT ivt_speculation,                 0x5700, IVT_SHORT_SLOT_BYTES

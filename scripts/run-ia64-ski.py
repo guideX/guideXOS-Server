@@ -70,6 +70,19 @@ def load_cpu_state_validator() -> Any:
 CPU_STATE_VALIDATOR = load_cpu_state_validator()
 
 
+def load_general_exception_validator() -> Any:
+    path = ROOT / "scripts" / "validate-ia64-general-exception.py"
+    spec = importlib.util.spec_from_file_location("ia64_general_exception_validator", path)
+    if spec is None or spec.loader is None:
+        raise GateError(f"cannot load General Exception validator: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+GENERAL_EXCEPTION_VALIDATOR = load_general_exception_validator()
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -382,7 +395,9 @@ def validate_break_output(stdout_text: str, contract: dict[str, Any]) -> list[st
     # must expose the exact count; marker text by itself is insufficient.
     generic_fault_lines = []
     for line in (stdout_text + "\n" + contract.get("stderr_text", "")).splitlines():
-        if line.startswith("IA64_BREAK_"):
+        if line.startswith("IA64_BREAK_") or \
+                (contract.get("general_exception_contract") is not None and
+                 line.startswith("IA64_GENERAL_EXCEPTION_")):
             continue
         lowered = line.lower()
         if any(marker in lowered for marker in FAULT_MARKERS):
@@ -472,7 +487,8 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
                   label: str, success_marker: str | None = None,
                   artifact_hash: str | None = None,
                   checkpoint_expectations: dict[str, int] | None = None,
-                  break_exception_contract: dict[str, Any] | None = None) -> int:
+                  break_exception_contract: dict[str, Any] | None = None,
+                  general_exception_contract: dict[str, Any] | None = None) -> int:
     if timeout <= 0 or timeout > 300:
         raise GateError("timeout must be greater than zero and no more than 300 seconds")
     if capture_dir.exists():
@@ -504,29 +520,79 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
     return_code = process.returncode
     fault_count, instruction_count = extract_ski_counts(stdout_text, stderr_text, counts_path)
     break_evidence_errors: list[str] = []
+    general_evidence_errors: list[str] = []
+    general_record_fields: dict[str, int] | None = None
+    expected_exception_faults = (
+        (break_exception_contract["expected_faults"] if break_exception_contract else 0) +
+        (general_exception_contract["expected_faults"] if general_exception_contract else 0))
 
     if timed_out:
         classification = "TIMEOUT"
-    elif break_exception_contract is not None:
-        output_contract = dict(break_exception_contract)
-        output_contract["stderr_text"] = stderr_text
-        break_evidence_errors = validate_break_output(stdout_text, output_contract)
+    elif break_exception_contract is not None or general_exception_contract is not None:
+        if break_exception_contract is not None:
+            output_contract = dict(break_exception_contract)
+            output_contract["stderr_text"] = stderr_text
+            output_contract["general_exception_contract"] = general_exception_contract
+            break_evidence_errors = validate_break_output(stdout_text, output_contract)
+        if general_exception_contract is not None:
+            general_record_fields, general_evidence_errors = \
+                GENERAL_EXCEPTION_VALIDATOR.validate_output(
+                    stdout_text, general_exception_contract["symbols"],
+                    probe=general_exception_contract["probe"])
+            generic_fault_lines = []
+            for line in (stdout_text + "\n" + stderr_text).splitlines():
+                if line.startswith("IA64_GENERAL_EXCEPTION_") or \
+                        (break_exception_contract is not None and line.startswith("IA64_BREAK_")):
+                    continue
+                lowered = line.lower()
+                if any(marker in lowered for marker in FAULT_MARKERS):
+                    generic_fault_lines.append(line)
+            if generic_fault_lines:
+                general_evidence_errors.append(
+                    "unexpected Ski fault/exception diagnostic: " + generic_fault_lines[0][:180])
+            if general_exception_contract.get("require_intentional_exit") and \
+                    "kernel exited with status 0" not in combined and \
+                    "processor 0 exited with status 0" not in combined:
+                general_evidence_errors.append(
+                    "Ski did not report the intentional SSC exit after the General Exception test")
         if return_code != 0:
             classification = "SIMULATOR_ERROR"
-        elif fault_count != break_exception_contract["expected_faults"]:
-            break_evidence_errors.append(
-                f"Ski fault count={fault_count!r}, expected {break_exception_contract['expected_faults']}")
-            classification = "BREAK_EXCEPTION_QUALIFICATION_FAIL"
+        elif fault_count != expected_exception_faults:
+            message = f"Ski fault count={fault_count!r}, expected {expected_exception_faults}"
+            if break_exception_contract is not None:
+                break_evidence_errors.append(message)
+            if general_exception_contract is not None:
+                general_evidence_errors.append(message)
+            classification = ("GENERAL_EXCEPTION_QUALIFICATION_FAIL"
+                              if general_exception_contract is not None else
+                              "BREAK_EXCEPTION_QUALIFICATION_FAIL")
         elif instruction_count is None:
-            break_evidence_errors.append("Ski instruction count was not present in captured statistics")
-            classification = "BREAK_EXCEPTION_QUALIFICATION_FAIL"
+            message = "Ski instruction count was not present in captured statistics"
+            if break_exception_contract is not None:
+                break_evidence_errors.append(message)
+            if general_exception_contract is not None:
+                general_evidence_errors.append(message)
+            classification = ("GENERAL_EXCEPTION_QUALIFICATION_FAIL"
+                              if general_exception_contract is not None else
+                              "BREAK_EXCEPTION_QUALIFICATION_FAIL")
         elif process.poll() is None:
-            break_evidence_errors.append("simulator process group was not reaped")
-            classification = "BREAK_EXCEPTION_QUALIFICATION_FAIL"
-        elif break_evidence_errors:
-            classification = "BREAK_EXCEPTION_QUALIFICATION_FAIL"
+            message = "simulator process group was not reaped"
+            if break_exception_contract is not None:
+                break_evidence_errors.append(message)
+            if general_exception_contract is not None:
+                general_evidence_errors.append(message)
+            classification = ("GENERAL_EXCEPTION_QUALIFICATION_FAIL"
+                              if general_exception_contract is not None else
+                              "BREAK_EXCEPTION_QUALIFICATION_FAIL")
+        elif break_evidence_errors or general_evidence_errors:
+            classification = ("GENERAL_EXCEPTION_QUALIFICATION_FAIL"
+                              if general_exception_contract is not None else
+                              "BREAK_EXCEPTION_QUALIFICATION_FAIL")
         else:
-            classification = break_exception_contract["success_classification"]
+            classification = (
+                general_exception_contract["success_classification"]
+                if general_exception_contract is not None else
+                break_exception_contract["success_classification"])
     elif any(marker in combined for marker in FAULT_MARKERS):
         classification = "GUEST_FAULT"
     elif return_code != 0:
@@ -549,7 +615,8 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
             rse_base=checkpoint_expectations["rse_base"],
             rse_top=checkpoint_expectations["rse_top"],
         )
-        if classification in ("GUEST_EXIT_ZERO", "BREAK_EXCEPTION_KERNEL_PASS") and checkpoint_errors:
+        if classification in ("GUEST_EXIT_ZERO", "BREAK_EXCEPTION_KERNEL_PASS",
+                              "GENERAL_EXCEPTION_KERNEL_PASS") and checkpoint_errors:
             classification = "CPU_STATE_CHECKPOINT_FAIL"
 
     record = {
@@ -578,12 +645,23 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
             parse_break_post_rfi_psr_observations(
                 stdout_text, break_exception_contract)[0]
             if break_exception_contract else None),
+        "expected_exception_faults": expected_exception_faults or None,
+        "general_exception_evidence_errors": general_evidence_errors,
+        "general_exception_expected_faults": (
+            general_exception_contract["expected_faults"]
+            if general_exception_contract else None),
+        "general_exception_record_fields": general_record_fields,
+        "general_exception_ssc_exit_function": (
+            general_exception_contract.get("ssc_exit_function")
+            if general_exception_contract else None),
     }
     (capture_dir / "run-result.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     print(f"[{classification}] exit={return_code} elapsed={elapsed:.3f}s capture={capture_dir}")
     return 0 if classification in ("SMOKE_PASS", "GUEST_EXIT_ZERO",
                                     "BREAK_EXCEPTION_PROBE_PASS",
-                                    "BREAK_EXCEPTION_KERNEL_PASS") else 1
+                                    "BREAK_EXCEPTION_KERNEL_PASS",
+                                    "GENERAL_EXCEPTION_PROBE_PASS",
+                                    "GENERAL_EXCEPTION_KERNEL_PASS") else 1
 
 
 def require_linux() -> None:
@@ -615,6 +693,20 @@ def setup_parser() -> argparse.ArgumentParser:
     probe.add_argument("--timeout", type=float, default=60)
     probe.add_argument("--mode", choices=("system",), default="system")
     probe.add_argument("--objdump", default="/home/guidex/src/ia64-2-toolchain-shim/ia64-linux-objdump")
+
+    general_probe = subparsers.add_parser(
+        "general-exception-probe", help="qualify the isolated General Exception return ELF")
+    general_probe.add_argument("--artifact", type=Path, required=True)
+    general_probe.add_argument("--manifest", type=Path, required=True)
+    general_probe.add_argument("--expected-sha256", required=True)
+    general_probe.add_argument("--simulator-sha256", required=True)
+    general_probe.add_argument("--ski-prefix", type=Path, default=DEFAULT_SKI_PREFIX)
+    general_probe.add_argument("--capture-dir", type=Path)
+    general_probe.add_argument("--timeout", type=float, default=60)
+    general_probe.add_argument("--mode", choices=("system",), default="system")
+    general_probe.add_argument("--objdump", default="/home/guidex/src/ia64-2-toolchain-shim/ia64-linux-objdump")
+    general_probe.add_argument("--ski-init-file", type=Path,
+                               help="optional pinned-Ski debugger command file for failed probe diagnosis")
 
     kernel = subparsers.add_parser("kernel", help="run a kernel only after separate authorization")
     kernel.add_argument("--artifact", type=Path, required=True)
@@ -752,6 +844,68 @@ def run_break_probe(args: argparse.Namespace) -> int:
     return status
 
 
+def run_general_exception_probe(args: argparse.Namespace) -> int:
+    require_linux()
+    if not args.artifact.is_file():
+        raise GateError(f"selected General Exception probe ELF does not exist: {args.artifact}")
+    GENERAL_EXCEPTION_VALIDATOR.validate_manifest_identity(
+        args.artifact, args.manifest, args.expected_sha256)
+    symbols = GENERAL_EXCEPTION_VALIDATOR.exception_symbols(args.artifact)
+    validate_direct_system_elf(args.artifact)
+
+    validation_env = os.environ.copy()
+    validation_env["PYTHONDONTWRITEBYTECODE"] = "1"
+    gate_cmd = [sys.executable, str(ROOT / "scripts" / "validate-ia64-general-exception.py"),
+                "--repo-root", str(ROOT), "--elf", str(args.artifact),
+                "--objdump", args.objdump, "--manifest", str(args.manifest),
+                "--expected-sha256", args.expected_sha256]
+    result = subprocess.run(gate_cmd, capture_output=True, text=True,
+                            check=False, env=validation_env)
+    print(result.stdout, end="")
+    if result.returncode:
+        print(result.stderr, file=sys.stderr, end="")
+        raise GateError("General Exception probe source/disassembly/identity gates failed")
+
+    simulator = verify_ski(args.ski_prefix, args.simulator_sha256)
+    capture_dir = args.capture_dir or Path(tempfile.mkdtemp(
+        prefix="guidexos-ia64-general-exception-probe-"))
+    contract = {
+        "expected_faults": 1,
+        "symbols": symbols,
+        "probe": True,
+        "success_classification": "GENERAL_EXCEPTION_PROBE_PASS",
+        "require_intentional_exit": True,
+        "ssc_exit_function": 66,
+    }
+    with verified_snapshot(args.artifact, args.expected_sha256) as snapshot:
+        validate_direct_system_elf(snapshot)
+        command = [str(simulator)]
+        if args.ski_init_file is not None:
+            if not args.ski_init_file.is_file():
+                raise GateError(f"selected Ski debugger init file does not exist: {args.ski_init_file}")
+            command.extend(("-i", str(args.ski_init_file)))
+        command.extend(("-forcesystem", str(snapshot)))
+        status = run_simulator(
+            command, args.timeout, capture_dir, "ia64-general-exception-probe",
+            artifact_hash=args.expected_sha256, general_exception_contract=contract)
+
+    result_path = capture_dir / "run-result.json"
+    run_record = read_json(result_path, "General Exception probe run result")
+    run_record.update({
+        "artifact_manifest": str(args.manifest.resolve()),
+        "artifact_manifest_sha256": sha256(args.manifest),
+        "simulator_sha256": args.simulator_sha256,
+        "ski_source_commit": QUALIFIED_SKI_COMMIT,
+        "ski_version": QUALIFIED_SKI_VERSION,
+        "execution_mode": "-forcesystem",
+        "cpu_count": 1,
+        "load_ranges": validate_direct_system_elf(args.artifact),
+        "general_exception_symbols": symbols,
+    })
+    result_path.write_text(json.dumps(run_record, indent=2) + "\n", encoding="utf-8")
+    return status
+
+
 def verify_break_probe_evidence(manifest: dict[str, Any]) -> dict[str, Any]:
     evidence = manifest.get("break_exception_probe")
     if not isinstance(evidence, dict) or \
@@ -842,6 +996,89 @@ def verify_break_probe_evidence(manifest: dict[str, Any]) -> dict[str, Any]:
             "simulator_sha256": run_record.get("simulator_sha256")}
 
 
+def verify_general_exception_probe_evidence(manifest: dict[str, Any]) -> dict[str, Any]:
+    evidence = manifest.get("general_exception_probe")
+    if not isinstance(evidence, dict) or \
+            evidence.get("schema") != "guidexos-ia64-general-exception-probe-evidence-v1" or \
+            evidence.get("qualified") is not True or evidence.get("expected_faults") != 1 or \
+            evidence.get("expected_continuations") != 1:
+        raise GateError("candidate manifest lacks a passing independent General Exception probe")
+
+    try:
+        probe_elf = Path(evidence["artifact"]).resolve(strict=True)
+        probe_manifest_path = Path(evidence["manifest"]).resolve(strict=True)
+        run_result_path = Path(evidence["run_result"]).resolve(strict=True)
+        stdout_path = Path(evidence["stdout"]).resolve(strict=True)
+        stderr_path = Path(evidence["stderr"]).resolve(strict=True)
+        counts_path = Path(evidence["instruction_counts"]).resolve(strict=True)
+    except (KeyError, OSError, TypeError) as exc:
+        raise GateError(f"independent General Exception probe paths are invalid: {exc}") from exc
+
+    for path, key, label in (
+            (probe_elf, "artifact_sha256", "ELF"),
+            (probe_manifest_path, "manifest_sha256", "manifest"),
+            (run_result_path, "run_result_sha256", "run-result"),
+            (stdout_path, "stdout_sha256", "stdout"),
+            (stderr_path, "stderr_sha256", "stderr"),
+            (counts_path, "instruction_counts_sha256", "instruction statistics")):
+        if sha256(path) != evidence.get(key):
+            raise GateError(f"General Exception probe {label} changed after its qualifying run")
+
+    try:
+        GENERAL_EXCEPTION_VALIDATOR.validate_manifest_identity(
+            probe_elf, probe_manifest_path, evidence["artifact_sha256"])
+        probe_symbols = GENERAL_EXCEPTION_VALIDATOR.exception_symbols(probe_elf)
+    except (KeyError, GENERAL_EXCEPTION_VALIDATOR.GateError) as exc:
+        raise GateError(f"General Exception probe artifact/manifest no longer qualifies: {exc}") from exc
+    run_record = read_json(run_result_path, "General Exception probe run result")
+    if run_record.get("classification") != "GENERAL_EXCEPTION_PROBE_PASS" or \
+            run_record.get("artifact_sha256") != evidence["artifact_sha256"] or \
+            run_record.get("artifact_manifest_sha256") != evidence["manifest_sha256"] or \
+            run_record.get("ski_fault_count") != 1 or \
+            run_record.get("general_exception_expected_faults") != 1 or \
+            run_record.get("expected_exception_faults") != 1 or \
+            run_record.get("ski_instruction_count") is None or \
+            run_record.get("exit_code") != 0 or run_record.get("timed_out") is not False or \
+            run_record.get("cleanup_complete") is not True or \
+            run_record.get("execution_mode") != "-forcesystem" or \
+            run_record.get("cpu_count") != 1 or \
+            run_record.get("simulator_sha256") != QUALIFIED_SKI_SHA256 or \
+            run_record.get("ski_source_commit") != QUALIFIED_SKI_COMMIT or \
+            run_record.get("ski_version") != QUALIFIED_SKI_VERSION or \
+            run_record.get("general_exception_ssc_exit_function") != 66 or \
+            run_record.get("general_exception_evidence_errors") != []:
+        raise GateError("independent General Exception probe run result is incomplete or did not qualify")
+    if Path(run_record.get("stdout", "")).resolve() != stdout_path or \
+            Path(run_record.get("stderr", "")).resolve() != stderr_path or \
+            Path(run_record.get("instruction_counts", "")).resolve() != counts_path or \
+            run_record.get("stdout_sha256") != evidence["stdout_sha256"] or \
+            run_record.get("stderr_sha256") != evidence["stderr_sha256"] or \
+            run_record.get("instruction_counts_sha256") != evidence["instruction_counts_sha256"]:
+        raise GateError("General Exception probe run-result does not bind its capture files")
+    stdout_text = stdout_path.read_text(encoding="utf-8", errors="replace")
+    stderr_text = stderr_path.read_text(encoding="utf-8", errors="replace")
+    _, output_errors = GENERAL_EXCEPTION_VALIDATOR.validate_output(
+        stdout_text, probe_symbols, probe=True)
+    unexpected_faults = [line for line in (stdout_text + "\n" + stderr_text).splitlines()
+                         if not line.startswith("IA64_GENERAL_EXCEPTION_") and
+                         any(marker in line.lower() for marker in FAULT_MARKERS)]
+    if unexpected_faults:
+        output_errors.append("unexpected Ski fault/exception diagnostic: " + unexpected_faults[0][:180])
+    if output_errors:
+        raise GateError("independent General Exception probe output failed revalidation: " +
+                        "; ".join(output_errors))
+    if run_record.get("general_exception_record_fields") is None:
+        raise GateError("General Exception probe did not retain its parsed interruption frame")
+    if validate_direct_system_elf(probe_elf) != run_record.get("load_ranges"):
+        raise GateError("General Exception probe result does not bind its current system-mode PT_LOAD ranges")
+    if run_record.get("general_exception_symbols") != probe_symbols:
+        raise GateError("General Exception probe result does not bind its frame/continuation/RSE symbols")
+    return {"artifact": probe_elf, "artifact_sha256": evidence["artifact_sha256"],
+            "manifest": probe_manifest_path, "run_result": run_result_path,
+            "symbols": probe_symbols, "simulator_sha256": run_record.get("simulator_sha256"),
+            "record_fields": run_record["general_exception_record_fields"]}
+
+
 def verify_kernel_resource_limits(timeout: float) -> dict[str, int | float]:
     if timeout <= 0 or timeout > 60:
         raise GateError("kernel execution requires a wall-clock timeout no greater than 60 seconds")
@@ -894,12 +1131,17 @@ def run_kernel(args: argparse.Namespace) -> int:
                 manifest.get("cpu_state_checkpoint_schema") != "guidexos-ia64-cpu-state-checkpoints-v1" or \
                 manifest.get("cpu_state_static_gates") != "PASS" or \
                 manifest.get("break_exception_static_gates") != "PASS" or \
+                manifest.get("general_exception_static_gates") != "PASS" or \
                 manifest.get("post_rfi_static_gates") != "PASS" or \
+                manifest.get("expected_exception_faults") != 3 or \
+                manifest.get("general_exception_expected_faults") != 1 or \
                 manifest.get("guest_execution_authorized") is not False:
             raise GateError("early-exec manifest or static gates are incomplete")
         probe_evidence = verify_break_probe_evidence(manifest)
-        if probe_evidence["simulator_sha256"] != simulator_hash:
-            raise GateError("kernel and independent Break probe must use the same qualified Ski binary")
+        general_probe_evidence = verify_general_exception_probe_evidence(manifest)
+        if probe_evidence["simulator_sha256"] != simulator_hash or \
+                general_probe_evidence["simulator_sha256"] != simulator_hash:
+            raise GateError("kernel and both independent exception probes must use the same qualified Ski binary")
         validator_cmd = [sys.executable, str(ROOT / "scripts" / "validate-ia64-elf.py"),
                          "--elf", str(args.artifact), "--repo-root", str(ROOT),
                          "--profile", args.profile, "--manifest", str(args.manifest)]
@@ -929,6 +1171,16 @@ def run_kernel(args: argparse.Namespace) -> int:
         if result.returncode:
             print(result.stderr, file=sys.stderr, end="")
             raise GateError("Break exception static source/disassembly gates failed")
+        general_exception_gate_cmd = [
+            sys.executable, str(ROOT / "scripts" / "validate-ia64-general-exception.py"),
+            "--repo-root", str(ROOT), "--elf", str(args.artifact), "--objdump", args.objdump,
+            "--manifest", str(args.manifest), "--expected-sha256", args.expected_sha256]
+        result = subprocess.run(general_exception_gate_cmd, capture_output=True, text=True,
+                                check=False, env=validation_env)
+        print(result.stdout, end="")
+        if result.returncode:
+            print(result.stderr, file=sys.stderr, end="")
+            raise GateError("General Exception static source/disassembly/identity gates failed")
         cpu_state_cmd = [sys.executable, str(ROOT / "scripts" / "validate-ia64-cpu-state.py"),
                          "--repo-root", str(ROOT), "--elf", str(args.artifact), "--objdump", args.objdump]
         result = subprocess.run(cpu_state_cmd, capture_output=True, text=True,
@@ -948,12 +1200,15 @@ def run_kernel(args: argparse.Namespace) -> int:
     candidate_load_ranges = validate_direct_system_elf(args.artifact)
     checkpoint_expectations = None
     break_exception_contract = None
+    general_exception_contract = None
     if args.profile == "early-exec":
         candidate_elf = ELF_VALIDATOR.Elf64(args.artifact)
         required_symbols = ("ia64_ivt", "rse_backing_store_base", "rse_backing_store_top",
                             "ia64_break_slot1_bundle", "ia64_break_slot2_bundle",
                             "ia64_break_slot1_post_rfi_capture",
-                            "ia64_break_slot2_continuation")
+                            "ia64_break_slot2_continuation",
+                            "ia64_general_exception_fault_site",
+                            "ia64_general_exception_continuation")
         if any(name not in candidate_elf.symbols for name in required_symbols):
             raise GateError("candidate ELF lacks CPU-state checkpoint expectation symbols")
         checkpoint_expectations = {
@@ -973,13 +1228,30 @@ def run_kernel(args: argparse.Namespace) -> int:
             "BREAK_EXCEPTION_KERNEL_PASS", "IA64_BREAK_RECORD",
             "IA64_BREAK_EXCEPTION_RESULT=PASS", "IA64_BREAK_EXCEPTION_RESULT=FAIL",
             "IA64_BREAK_EXCEPTION_VALIDATION")
+        general_exception_contract = {
+            "expected_faults": 1,
+            "symbols": {
+                "ivt": candidate_elf.symbols["ia64_ivt"]["value"],
+                "fault_site": candidate_elf.symbols[
+                    "ia64_general_exception_fault_site"]["value"],
+                "continuation": candidate_elf.symbols[
+                    "ia64_general_exception_continuation"]["value"],
+                "rse_base": candidate_elf.symbols["rse_backing_store_base"]["value"],
+                "rse_top": candidate_elf.symbols["rse_backing_store_top"]["value"],
+            },
+            "probe": False,
+            "success_classification": "GENERAL_EXCEPTION_KERNEL_PASS",
+            "require_intentional_exit": True,
+            "ssc_exit_function": 66,
+        }
     with verified_snapshot(args.artifact, args.expected_sha256) as snapshot:
         validate_direct_system_elf(snapshot)
         command = [str(simulator), "-forcesystem", str(snapshot)]
         status = run_simulator(command, args.timeout, capture_dir,
                                "guideXOS-kernel", artifact_hash=args.expected_sha256,
                                checkpoint_expectations=checkpoint_expectations,
-                               break_exception_contract=break_exception_contract)
+                               break_exception_contract=break_exception_contract,
+                               general_exception_contract=general_exception_contract)
 
     result_path = capture_dir / "run-result.json"
     run_record = read_json(result_path, "kernel run result")
@@ -1007,6 +1279,13 @@ def run_kernel(args: argparse.Namespace) -> int:
         run_record["break_probe_artifact_sha256"] = probe_evidence["artifact_sha256"]
         run_record["break_probe_run_result"] = str(probe_evidence["run_result"])
         run_record["break_probe_simulator_sha256"] = probe_evidence["simulator_sha256"]
+        run_record["general_exception_probe_artifact_sha256"] = \
+            general_probe_evidence["artifact_sha256"]
+        run_record["general_exception_probe_run_result"] = \
+            str(general_probe_evidence["run_result"])
+        run_record["general_exception_probe_simulator_sha256"] = \
+            general_probe_evidence["simulator_sha256"]
+        run_record["general_exception_expected_faults"] = 1
     result_path.write_text(json.dumps(run_record, indent=2) + "\n", encoding="utf-8")
     return status
 
@@ -1021,6 +1300,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_smoke(args)
         if args.operation == "break-probe":
             return run_break_probe(args)
+        if args.operation == "general-exception-probe":
+            return run_general_exception_probe(args)
         return run_kernel(args)
     except GateError as exc:
         print(f"[RUN_BLOCKED] {exc}", file=sys.stderr)

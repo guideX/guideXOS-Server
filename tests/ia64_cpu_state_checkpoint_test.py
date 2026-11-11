@@ -70,6 +70,41 @@ def valid_post_rfi_output() -> str:
         "return_slot=0x0 order=0x2 valid=0xbeefc0de4b505232 PSR=0x2000\n")
 
 
+GE_SITE = 0x102000
+GE_CONTINUATION = 0x102010
+GE_HANDLER_BSP = RSE_BASE + 0x40
+GE_UNAT = 0x123456789ABCDEF0
+GE_LIVE_GR_CHECKSUM = 0xAABBCCDDEEFF0011
+
+
+def valid_general_exception_output() -> tuple[str, dict[str, int]]:
+    fields = {
+        "valid": 0xBEEFC0DE47455631, "version": 1, "size": 0x100,
+        "vector": 0x5400, "subtype": 0, "IIP": GE_SITE, "slot": 0,
+        "IPSR": 0x2000, "IFS": 0, "IFS.valid": 0, "ISR": 0,
+        "handler.PSR": 0, "handler.RSC": 3, "handler.BSP": GE_HANDLER_BSP,
+        "PR": 0x401, "site": GE_SITE, "target": GE_CONTINUATION,
+        "handler.status": 0xBEEFC0DE47454831, "pre.BSP": GE_HANDLER_BSP,
+        "pre.RSC": 3, "pre.UNAT": GE_UNAT, "pre.GR": GE_LIVE_GR_CHECKSUM,
+        "completion": 0xBEEFC0DE47454331, "count": 1,
+        "return": 0xBEEFC0DE47455231, "post.PSR": 0x2000,
+        "post.RSC": 3, "post.BSP": GE_HANDLER_BSP, "post.IVA": IVT,
+        "post.UNAT": GE_UNAT, "post.GR": GE_LIVE_GR_CHECKSUM,
+        "post.valid": 0xBEEFC0DE47505331,
+    }
+    record = "IA64_GENERAL_EXCEPTION_RECORD " + " ".join(
+        f"{key}=0x{value:X}" for key, value in fields.items())
+    output = "\n".join((
+        f"IA64_GENERAL_EXCEPTION_PRE_FAULT vector=0x5400 subtype=illegal-operation "
+        f"site=0x{GE_SITE:X} target=0x{GE_CONTINUATION:X} expected_faults=1",
+        record,
+        f"IA64_GENERAL_EXCEPTION_POST_RETURN target=0x{GE_CONTINUATION:X} count=0x1 PSR=0x2000",
+        "IA64_GENERAL_EXCEPTION_VALIDATION errors=0x0 test=0x0",
+        "IA64_GENERAL_EXCEPTION_RESULT=PASS",
+    )) + "\n"
+    return output, fields
+
+
 class CpuStateCheckpointTests(unittest.TestCase):
     def test_current_source_obeys_mode_and_frame_contracts(self) -> None:
         self.assertEqual(validator.validate_checkpoint_sources(ROOT), [])
@@ -232,6 +267,16 @@ class CpuStateCheckpointTests(unittest.TestCase):
             ivt=IVT, rse_base=RSE_BASE, rse_top=RSE_TOP)
         self.assertTrue(any("unexpected fault" in error for error in fault_errors), fault_errors)
 
+        spurious_exception_marker = stdout.replace(
+            "kernel exited with status 0", "IA64_GENERAL_EXCEPTION_RESULT=PASS\n"
+            "kernel exited with status 0")
+        _, spurious_marker_errors = validator.validate_runtime_evidence(
+            spurious_exception_marker, "kernel exited with status 0\n100 insts (0 faults), 0.01 sec",
+            "per-instruction counts captured", run_result, "a" * 64,
+            ivt=IVT, rse_base=RSE_BASE, rse_top=RSE_TOP)
+        self.assertTrue(any("fault marker" in error for error in spurious_marker_errors),
+                        spurious_marker_errors)
+
         mismatched_runner_records = dict(run_result, cpu_state_checkpoints={})
         _, synthesis_errors = validator.validate_runtime_evidence(
             stdout, "kernel exited with status 0\n100 insts (0 faults), 0.01 sec",
@@ -289,7 +334,7 @@ class CpuStateCheckpointTests(unittest.TestCase):
             stdout, "kernel exited with status 0\n100 insts (2 faults), 0.01 sec",
             "per-instruction counts captured", wrong_expected_count, "a" * 64,
             ivt=IVT, rse_base=RSE_BASE, rse_top=RSE_TOP)
-        self.assertTrue(any("exactly two validated Break" in error
+        self.assertTrue(any("expected Break Instruction" in error
                             for error in wrong_count_errors), wrong_count_errors)
 
         _, unexpected_fault_errors = validator.validate_runtime_evidence(
@@ -298,6 +343,69 @@ class CpuStateCheckpointTests(unittest.TestCase):
             ivt=IVT, rse_base=RSE_BASE, rse_top=RSE_TOP)
         self.assertTrue(any("expected 2" in error for error in unexpected_fault_errors),
                         unexpected_fault_errors)
+
+    def test_runtime_evidence_accepts_exactly_two_break_and_one_general_fault(self) -> None:
+        general_output, general_fields = valid_general_exception_output()
+        stdout = valid_guest_output() + (
+            "IA64_BREAK_RECORD slot1 valid=0xbeefc0de4b56414c\n"
+            "IA64_BREAK_RECORD slot2 valid=0xbeefc0de4b56414c\n"
+            + valid_post_rfi_output() +
+            "IA64_BREAK_EXCEPTION_RESULT=PASS\n"
+            + general_output +
+            "kernel exited with status 0\n")
+        parsed, parse_errors = validator.validate_checkpoint_output(
+            valid_guest_output(), ivt=IVT, rse_base=RSE_BASE, rse_top=RSE_TOP)
+        self.assertEqual(parse_errors, [])
+        run_result = {
+            "label": "guideXOS-kernel",
+            "command": ["/qualified/bskinc", "-stats", "-icnt", "counts.txt",
+                        "-forcesystem", "/tmp/selected.elf"],
+            "artifact_sha256": "a" * 64,
+            "classification": "GENERAL_EXCEPTION_KERNEL_PASS",
+            "exit_code": 0,
+            "timed_out": False,
+            "cleanup_complete": True,
+            "ski_fault_count": 3,
+            "expected_exception_faults": 3,
+            "break_exception_expected_faults": 2,
+            "break_exception_evidence_errors": [],
+            "break_exception_post_rfi_observations": valid_post_rfi_records(),
+            "general_exception_expected_faults": 1,
+            "general_exception_evidence_errors": [],
+            "general_exception_record_fields": general_fields,
+            "cpu_state_checkpoints": parsed,
+            "cpu_state_checkpoint_errors": [],
+        }
+        kwargs = dict(ivt=IVT, rse_base=RSE_BASE, rse_top=RSE_TOP,
+                      general_fault_site=GE_SITE, general_continuation=GE_CONTINUATION)
+        _, errors = validator.validate_runtime_evidence(
+            stdout, "kernel exited with status 0\n100 insts (3 faults), 0.01 sec",
+            "per-instruction counts captured", run_result, "a" * 64, **kwargs)
+        self.assertEqual(errors, [])
+
+        bad_record_output = stdout.replace(
+            f"target=0x{GE_CONTINUATION:X} count=0x1 PSR=0x2000",
+            f"target=0x{GE_CONTINUATION + 0x10:X} count=0x1 PSR=0x2000")
+        _, bad_record_errors = validator.validate_runtime_evidence(
+            bad_record_output, "kernel exited with status 0\n100 insts (3 faults), 0.01 sec",
+            "per-instruction counts captured", run_result, "a" * 64, **kwargs)
+        self.assertTrue(any("General Exception evidence" in error for error in bad_record_errors),
+                        bad_record_errors)
+
+        _, wrong_fault_count_errors = validator.validate_runtime_evidence(
+            stdout, "kernel exited with status 0\n100 insts (2 faults), 0.01 sec",
+            "per-instruction counts captured", run_result, "a" * 64, **kwargs)
+        self.assertTrue(any("expected 3" in error for error in wrong_fault_count_errors),
+                        wrong_fault_count_errors)
+
+        mismatched_runner_record = dict(
+            run_result,
+            general_exception_record_fields={**general_fields, "post.PSR": 0x6000})
+        _, mismatch_errors = validator.validate_runtime_evidence(
+            stdout, "kernel exited with status 0\n100 insts (3 faults), 0.01 sec",
+            "per-instruction counts captured", mismatched_runner_record, "a" * 64, **kwargs)
+        self.assertTrue(any("runner General Exception frame differs" in error
+                            for error in mismatch_errors), mismatch_errors)
 
 
 if __name__ == "__main__":

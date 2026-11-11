@@ -125,7 +125,9 @@ ASM_SOURCES := $(wildcard arch/$(ARCH)/*.asm) $(wildcard arch/$(ARCH)/*.s)
 ifeq ($(ARCH),ia64)
 ifneq ($(IA64_FP_PROFILE),early-exec)
 ARCH_SOURCES := $(filter-out arch/ia64/break_exception.cpp,$(ARCH_SOURCES))
-    ASM_SOURCES := $(filter-out arch/ia64/break_exception_entry.s,$(ASM_SOURCES))
+ARCH_SOURCES := $(filter-out arch/ia64/general_exception.cpp,$(ARCH_SOURCES))
+ASM_SOURCES := $(filter-out arch/ia64/break_exception_entry.s,$(ASM_SOURCES))
+ASM_SOURCES := $(filter-out arch/ia64/general_exception_entry.s,$(ASM_SOURCES))
 endif
 endif
 MBEDTLS_C_SOURCES := $(if $(filter 1,$(MBEDTLS_GUIDEXOS_LINK_ENABLED)),$(MBEDTLS_GUIDEXOS_C_SOURCES))
