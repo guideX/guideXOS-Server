@@ -14089,3 +14089,35 @@ saved snapshot, and `.phase` remained absent. No QEMU or QAC work was done.
 
 The detailed storage, source-lifetime, P0–P6, compiler, stack, memory, and
 regression evidence is in [the JS115 portable frontend report](NAVIGATOR_JAVASCRIPT_JS115_PORTABLE_FRONTEND.md).
+
+### JS116 shared portable parser — verified
+
+JS116 is **Outcome A — `JS116_PORTABLE_PARSER_VERIFIED`**. The existing shared
+parser now consumes a generation-checked token view and writes into caller-owned
+AST node and child arrays. Parser-owned statement, parameter, argument,
+property, Array-element, and scope-validation work lists use bounded scratch
+storage. Parser failures are explicit records with error category, token index,
+and source location; failed parses clear the AST root and release parser
+scratch. Hosted adapters and the freestanding entry point use the same parser
+state and grammar.
+
+MinGW GCC 15.2.0 compiled the real lexer, AST, and parser units for
+`x86_64-w64-mingw32` with exceptions, RTTI, implicit C++ header discovery and
+runtime libraries disabled. Their relocatable COFF component has no undefined
+symbols. P4 passed; P6 dependency closure passed for this COFF profile. This
+does not claim NativeElf compatibility, kernel guest integration or guest
+execution.
+
+The focused C++17 warning-clean portable harnesses passed. The complete
+JavaScript matrix passed 111/111 lanes and 17,656/17,656 assertions. JS104,
+JS105, JS109, JS110 and JS106–JS108 regressions passed. The hosted Navigator
+aggregate retained its established result of 767/774, with only the seven CSS
+failures from phases 3C, 3G, 6A, 6B (three checks), and 6C. The 9,217,119-byte
+production candidate used for hosted checks is preserved outside the checkout;
+the original executable and all 42 generated fixtures were restored and
+verified, and `.phase` remained absent.
+
+The parser storage, error, target-link, stack and hosted regression details are
+in [the JS116 portable parser report](NAVIGATOR_JAVASCRIPT_JS116_PORTABLE_PARSER.md).
+Runtime values and execution, JSON, DOM and Navigator guest integration remain
+later work. JS116 did not run QEMU or request QAC admission.

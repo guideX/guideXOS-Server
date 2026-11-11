@@ -490,6 +490,8 @@ struct Scanner {
 LexerResult Lexer::tokenizeInto(SourceView source, TokenBuffer& output) const
 {
     output.count = 0;
+    ++output.generation;
+    if (output.generation == 0) ++output.generation;
     Scanner scanner;
     scanner.source = source;
     scanner.limits = limits_;

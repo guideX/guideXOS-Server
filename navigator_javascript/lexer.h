@@ -117,6 +117,8 @@ struct TokenBuffer {
     Token* data = nullptr;
     std::size_t capacity = 0;
     std::size_t count = 0;
+    // Incremented by tokenizeInto so a TokenView can reject stale storage.
+    std::uint64_t generation = 0;
 };
 
 struct LexerResult {

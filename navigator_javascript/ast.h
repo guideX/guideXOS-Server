@@ -182,6 +182,9 @@ public:
     AstNodeId root() const { return root_; }
 
     std::size_t nodeCount() const { return nodeCount_; }
+    std::size_t nodeCapacity() const { return nodeCapacity_; }
+    std::size_t childStorageUsed() const { return childCount_; }
+    std::size_t childStorageCapacity() const { return childCapacity_; }
     const AstNode& node(AstNodeId id) const;
     AstNode& node(AstNodeId id);
 

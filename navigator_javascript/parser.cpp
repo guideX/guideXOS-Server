@@ -1,14 +1,113 @@
 #include "parser.h"
 
 #include <cstddef>
-#include <limits>
 #include <new>
-#include <string>
-#include <utility>
+#if !defined(GXOS_NAVIGATOR_FRONTEND_FREESTANDING)
+#include <vector>
+#endif
 
 namespace gxos {
 namespace javascript {
 namespace {
+
+// Keep recursive grammar edges visible to the target stack-usage report.
+// Without this, GCC can inline several mutually recursive statement and
+// literal paths into a single large frame whose cost is multiplied by the
+// configured parser nesting limit.
+#if defined(__GNUC__) && !defined(__clang__)
+#define GXOS_NAVIGATOR_PARSER_NOINLINE \
+    __attribute__((noinline, noclone))
+#define GXOS_NAVIGATOR_PARSER_FORCEINLINE \
+    inline __attribute__((always_inline))
+#elif defined(__clang__)
+#define GXOS_NAVIGATOR_PARSER_NOINLINE __attribute__((noinline))
+#define GXOS_NAVIGATOR_PARSER_FORCEINLINE \
+    inline __attribute__((always_inline))
+#elif defined(_MSC_VER)
+#define GXOS_NAVIGATOR_PARSER_NOINLINE __declspec(noinline)
+#define GXOS_NAVIGATOR_PARSER_FORCEINLINE __forceinline
+#else
+#define GXOS_NAVIGATOR_PARSER_NOINLINE
+#define GXOS_NAVIGATOR_PARSER_FORCEINLINE inline
+#endif
+
+template <typename T>
+class ScratchVector {
+public:
+    ScratchVector(FrontendArena& arena, std::size_t maximum)
+        : arena_(arena), mark_(arena.mark()), maximum_(maximum)
+    {
+    }
+
+    ScratchVector(const ScratchVector&) = delete;
+    ScratchVector& operator=(const ScratchVector&) = delete;
+
+    ~ScratchVector()
+    {
+        FrontendStorageError ignored = FrontendStorageError::None;
+        arena_.restore(mark_, ignored);
+    }
+
+    bool push_back(const T& value)
+    {
+        if (size_ >= maximum_) return false;
+        if (size_ == capacity_ && !grow()) return false;
+        ::new (static_cast<void*>(data_ + size_)) T(value);
+        ++size_;
+        return true;
+    }
+
+    T* data() { return data_; }
+    const T* data() const { return data_; }
+    std::size_t size() const { return size_; }
+    bool empty() const { return size_ == 0u; }
+    T& operator[](std::size_t index) { return data_[index]; }
+    const T& operator[](std::size_t index) const { return data_[index]; }
+    T& front() { return data_[0]; }
+    const T& front() const { return data_[0]; }
+    T& back() { return data_[size_ - 1u]; }
+    const T& back() const { return data_[size_ - 1u]; }
+    T* begin() { return data_; }
+    T* end() { return size_ == 0u ? data_ : data_ + size_; }
+    const T* begin() const { return data_; }
+    const T* end() const { return size_ == 0u ? data_ : data_ + size_; }
+
+private:
+    bool grow()
+    {
+        if (capacity_ >= maximum_) return false;
+        std::size_t nextCapacity = capacity_ == 0u ? 1u : capacity_ * 2u;
+        if (nextCapacity < capacity_ || nextCapacity > maximum_)
+            nextCapacity = maximum_;
+        if (nextCapacity == 0u || nextCapacity >
+                static_cast<std::size_t>(-1) / sizeof(T)) return false;
+
+        void* storage = nullptr;
+        FrontendStorageError error = FrontendStorageError::None;
+        if (!arena_.allocate(nextCapacity * sizeof(T), alignof(T), storage,
+                error)) return false;
+        T* replacement = static_cast<T*>(storage);
+        for (std::size_t index = 0; index < size_; ++index)
+            ::new (static_cast<void*>(replacement + index)) T(data_[index]);
+        data_ = replacement;
+        capacity_ = nextCapacity;
+        return true;
+    }
+
+    FrontendArena& arena_;
+    FrontendArenaMark mark_;
+    std::size_t maximum_ = 0;
+    T* data_ = nullptr;
+    std::size_t size_ = 0;
+    std::size_t capacity_ = 0;
+};
+
+bool equalBytes(const char* left, const char* right, std::size_t length)
+{
+    for (std::size_t index = 0; index < length; ++index)
+        if (left[index] != right[index]) return false;
+    return true;
+}
 
 SourceLocation spanLocation(SourceLocation first, SourceLocation last)
 {
@@ -19,28 +118,84 @@ SourceLocation spanLocation(SourceLocation first, SourceLocation last)
     return first;
 }
 
+constexpr std::size_t parserStackFrameBudget(std::size_t measuredBytes)
+{
+    return measuredBytes + 32u;
+}
+
 class ParserState {
 public:
-    ParserState(SourceView source, const std::vector<Token>& tokens,
-        ParserLimits limits)
-        : source_(source), tokens_(tokens), limits_(limits), ast_(source)
+    ParserState(const TokenView& tokens, ParserLimits limits, Ast& ast,
+        FrontendArena& scratch)
+        : source_(tokens.source), tokens_(tokens), limits_(limits), ast_(ast),
+          scratch_(scratch)
     {
         eofToken_.type = TokenType::EndOfInput;
-        eofToken_.location.offset = source.length;
+        eofToken_.location.offset = source_.length;
         eofToken_.location.line = 1;
         eofToken_.location.column = 1;
     }
 
-    ParseResult run()
+    bool run(ParserError& outputError)
     {
-        if (tokens_.empty() || tokens_.back().type != TokenType::EndOfInput) {
+        outputError = ParserError();
+        parserStackBytes_ = kJavaScriptParserStackEntryReserveBytes;
+        if (parserStackBytes_ > limits_.maxParserStackBytes) {
+            fail(ParserErrorCode::ParserStackBudgetExceeded,
+                eofToken_.location, TokenType::EndOfInput, false);
+        }
+        scratch_.reset();
+        if (!scratch_.valid()) {
+            fail(ParserErrorCode::ScratchStorageLimitExceeded,
+                eofToken_.location, TokenType::EndOfInput, false);
+        }
+        ast_.reset(source_);
+        if (source_.data == nullptr && source_.length != 0u) {
+            fail(ParserErrorCode::SourceLifetimeInvalidation,
+                eofToken_.location, TokenType::EndOfInput, false);
+        } else if (source_.length > kDefaultMaxJavaScriptSourceBytes) {
+            fail(ParserErrorCode::SourceTooLarge, eofToken_.location,
+                TokenType::EndOfInput, false);
+        } else if (!tokens_.validGeneration()) {
+            fail(ParserErrorCode::SourceLifetimeInvalidation,
+                eofToken_.location, TokenType::EndOfInput, false);
+        } else if (tokens_.count > kDefaultMaxJavaScriptTokens) {
+            fail(ParserErrorCode::TokenCapacityExceeded,
+                eofToken_.location, TokenType::EndOfInput, false);
+        } else if (tokens_.count != 0u && tokens_.data == nullptr) {
+            fail(ParserErrorCode::InvalidTokenInput,
+                eofToken_.location, TokenType::EndOfInput, false);
+        } else if (tokens_.empty() || tokens_.back().type != TokenType::EndOfInput) {
             fail(ParserErrorCode::UnexpectedEndOfInput, eofToken_.location,
                 TokenType::EndOfInput, true);
-            return result();
         }
 
-        std::vector<AstNodeId> statements;
-        while (!at(TokenType::EndOfInput)) {
+        if (!failed() && !validateTokenRecords()) {}
+        if (!failed() && !parseProgram()) {}
+        if (!failed() && pos_ != tokens_.size() - 1u)
+            fail(ParserErrorCode::UnexpectedToken, current().location,
+                TokenType::EndOfInput, true);
+        if (!failed()) {
+            scratch_.reset();
+            if (!scratch_.valid())
+                fail(ParserErrorCode::ScratchStorageLimitExceeded,
+                    current().location, TokenType::EndOfInput, false);
+        }
+        if (!failed() && !validateLexicalSemantics()) {}
+
+        if (failed()) {
+            ast_.reset(source_);
+            outputError = error_;
+            return false;
+        }
+        return true;
+    }
+
+private:
+    bool parseProgram()
+    {
+        ScratchVector<AstNodeId> statements(scratch_, limits_.maxStatements);
+        while (!failed() && !at(TokenType::EndOfInput)) {
             if (pos_ >= tokens_.size()) {
                 fail(ParserErrorCode::UnexpectedEndOfInput,
                     eofToken_.location, TokenType::EndOfInput, true);
@@ -48,38 +203,76 @@ public:
             }
             const AstNodeId statement = parseStatement();
             if (statement == kInvalidAstNodeId) break;
-            statements.push_back(statement);
+            if (!append(statements, statement)) break;
         }
+        if (failed()) return false;
 
-        if (!failed() && pos_ != tokens_.size() - 1) {
-            fail(ParserErrorCode::UnexpectedToken, current().location,
-                TokenType::EndOfInput, true);
+        SourceLocation programLocation = current().location;
+        if (!statements.empty()) {
+            programLocation = spanLocation(
+                ast_.node(statements.front()).location,
+                ast_.node(statements.back()).location);
         }
-
-        if (!failed()) {
-            SourceLocation programLocation = current().location;
-            if (!statements.empty()) {
-                programLocation = spanLocation(
-                    ast_.node(statements.front()).location,
-                    ast_.node(statements.back()).location);
-            }
-            const AstNodeId program = makeNode(AstNodeKind::Program,
-                programLocation);
-            if (program != kInvalidAstNodeId && !setChildren(program, statements)) {
-                fail(ParserErrorCode::AstNodeLimitExceeded, current().location,
-                    TokenType::EndOfInput, false);
-            } else if (program != kInvalidAstNodeId && !ast_.setRoot(program)) {
-                fail(ParserErrorCode::AstNodeLimitExceeded, current().location,
-                    TokenType::EndOfInput, false);
-            }
+        const AstNodeId program = makeNode(AstNodeKind::Program,
+            programLocation);
+        if (program == kInvalidAstNodeId) return false;
+        if (!setChildren(program, statements)) {
+            fail(ParserErrorCode::AstChildStorageExhausted,
+                current().location, TokenType::EndOfInput, false);
+            return false;
         }
-
-        if (!failed() && !validateLexicalSemantics()) return result();
-
-        return result();
+        if (!ast_.setRoot(program)) {
+            fail(ParserErrorCode::InternalInvariantFailure,
+                current().location, TokenType::EndOfInput, false);
+            return false;
+        }
+        return true;
     }
 
-private:
+    bool validateTokenRecords()
+    {
+        for (std::size_t index = 0; index < tokens_.size(); ++index) {
+            const Token& token = tokens_[index];
+            if (static_cast<std::uint8_t>(token.type) >
+                    static_cast<std::uint8_t>(TokenType::PercentAssign) ||
+                token.location.offset > source_.length ||
+                token.location.length > source_.length - token.location.offset ||
+                token.location.line == 0u || token.location.column == 0u) {
+                pos_ = index;
+                fail(ParserErrorCode::InvalidTokenInput,
+                    token.location, TokenType::EndOfInput, false);
+                return false;
+            }
+            if (token.location.length != token.lexeme.length ||
+                (token.location.length != 0u &&
+                 (source_.data == nullptr || token.lexeme.data == nullptr ||
+                  token.lexeme.data != source_.data + token.location.offset))) {
+                pos_ = index;
+                fail(ParserErrorCode::SourceLifetimeInvalidation,
+                    token.location, TokenType::EndOfInput, false);
+                return false;
+            }
+        }
+        if (tokens_.back().location.offset != source_.length ||
+            tokens_.back().location.length != 0u) {
+            pos_ = tokens_.size() - 1u;
+            fail(ParserErrorCode::InvalidTokenInput,
+                tokens_.back().location, TokenType::EndOfInput, false);
+            return false;
+        }
+        pos_ = 0u;
+        return true;
+    }
+
+    template <typename T>
+    bool append(ScratchVector<T>& list, const T& value)
+    {
+        if (list.push_back(value)) return true;
+        fail(ParserErrorCode::ScratchStorageLimitExceeded,
+            current().location, TokenType::EndOfInput, false);
+        return false;
+    }
+
     class DepthGuard {
     public:
         DepthGuard(ParserState& state, SourceLocation location)
@@ -103,6 +296,36 @@ private:
 
     private:
         ParserState& state_;
+        bool active_;
+    };
+
+    class StackGuard {
+    public:
+        StackGuard(ParserState& state, SourceLocation location,
+            std::size_t estimatedBytes)
+            : state_(state), estimatedBytes_(estimatedBytes), active_(false)
+        {
+            const std::size_t limit = state_.limits_.maxParserStackBytes;
+            if (estimatedBytes_ > limit ||
+                state_.parserStackBytes_ > limit - estimatedBytes_) {
+                state_.fail(ParserErrorCode::ParserStackBudgetExceeded,
+                    location, TokenType::EndOfInput, false);
+                return;
+            }
+            state_.parserStackBytes_ += estimatedBytes_;
+            active_ = true;
+        }
+
+        ~StackGuard()
+        {
+            if (active_) state_.parserStackBytes_ -= estimatedBytes_;
+        }
+
+        bool entered() const { return active_; }
+
+    private:
+        ParserState& state_;
+        std::size_t estimatedBytes_;
         bool active_;
     };
 
@@ -132,6 +355,20 @@ private:
         bool active_;
     };
 
+    class ExpressionDepthRestore {
+    public:
+        explicit ExpressionDepthRestore(ParserState& state)
+            : state_(state), depth_(state.expressionDepth_)
+        {
+        }
+
+        ~ExpressionDepthRestore() { state_.expressionDepth_ = depth_; }
+
+    private:
+        ParserState& state_;
+        std::size_t depth_;
+    };
+
     class BlockGuard {
     public:
         BlockGuard(ParserState& state, SourceLocation location)
@@ -157,15 +394,6 @@ private:
         ParserState& state_;
         bool active_;
     };
-
-    ParseResult result()
-    {
-        if (failed()) ast_.reset(source_);
-        ParseResult output;
-        output.ast = std::move(ast_);
-        output.error = error_;
-        return output;
-    }
 
     bool failed() const { return error_.code != ParserErrorCode::None; }
 
@@ -206,6 +434,7 @@ private:
         error_.actual = current().type;
         error_.expected = expected;
         error_.hasExpected = hasExpected;
+        error_.tokenIndex = pos_;
     }
 
     bool expect(TokenType type)
@@ -264,16 +493,32 @@ private:
         node.location = location;
         const AstNodeId id = ast_.addNode(node);
         if (id == kInvalidAstNodeId) {
-            fail(ParserErrorCode::AstNodeLimitExceeded, location,
+            const ParserErrorCode code = ast_.nodeCapacity() <= ast_.nodeCount()
+                ? ParserErrorCode::AstStorageExhausted
+                : ParserErrorCode::InternalInvariantFailure;
+            fail(code, location,
                 TokenType::EndOfInput, false);
         }
         return id;
     }
 
-    bool setChildren(AstNodeId parent, const std::vector<AstNodeId>& children)
+    bool setChildren(AstNodeId parent,
+        const ScratchVector<AstNodeId>& children)
     {
-        if (children.size() > limits_.maxAstNodes) return false;
-        return ast_.setChildren(parent, children.data(), children.size());
+        if (children.size() > limits_.maxAstNodes) {
+            fail(ParserErrorCode::AstNodeLimitExceeded,
+                current().location, TokenType::EndOfInput, false);
+            return false;
+        }
+        if (ast_.setChildren(parent, children.data(), children.size()))
+            return true;
+        const ParserErrorCode code =
+            ast_.childStorageCapacity() - ast_.childStorageUsed() <
+                children.size()
+            ? ParserErrorCode::AstChildStorageExhausted
+            : ParserErrorCode::InternalInvariantFailure;
+        fail(code, current().location, TokenType::EndOfInput, false);
+        return false;
     }
 
     AstNodeId makeLeaf(AstNodeKind kind, const Token& token)
@@ -291,8 +536,11 @@ private:
         return id;
     }
 
-    AstNodeId parseStatement()
+    GXOS_NAVIGATOR_PARSER_NOINLINE AstNodeId parseStatement()
     {
+        StackGuard stack(*this, current().location,
+            parserStackFrameBudget(64u));
+        if (!stack.entered()) return kInvalidAstNodeId;
         DepthGuard depth(*this, current().location);
         if (!depth.entered()) return kInvalidAstNodeId;
         if (statementCount_ >= limits_.maxStatements) {
@@ -307,10 +555,7 @@ private:
                 TokenType::EndOfInput, false);
             return kInvalidAstNodeId;
         }
-        if (at(TokenType::Semicolon)) {
-            const Token semicolon = advance();
-            return makeLeaf(AstNodeKind::EmptyStatement, semicolon);
-        }
+        if (at(TokenType::Semicolon)) return parseEmptyStatement();
         if (at(TokenType::LeftBrace)) return parseBlock();
         if (at(TokenType::KeywordVar) || at(TokenType::KeywordLet) ||
             at(TokenType::KeywordConst)) return parseVariableDeclaration(true);
@@ -322,6 +567,23 @@ private:
         if (at(TokenType::KeywordBreak)) return parseBreakOrContinue(false);
         if (at(TokenType::KeywordContinue)) return parseBreakOrContinue(true);
 
+        return parseExpressionStatement();
+    }
+
+    GXOS_NAVIGATOR_PARSER_NOINLINE AstNodeId parseEmptyStatement()
+    {
+        StackGuard stack(*this, current().location,
+            parserStackFrameBudget(144u));
+        if (!stack.entered()) return kInvalidAstNodeId;
+        const Token semicolon = advance();
+        return makeLeaf(AstNodeKind::EmptyStatement, semicolon);
+    }
+
+    GXOS_NAVIGATOR_PARSER_NOINLINE AstNodeId parseExpressionStatement()
+    {
+        StackGuard stack(*this, current().location,
+            parserStackFrameBudget(208u));
+        if (!stack.entered()) return kInvalidAstNodeId;
         const SourceLocation start = current().location;
         const AstNodeId expression = parseExpression();
         if (expression == kInvalidAstNodeId) return kInvalidAstNodeId;
@@ -333,19 +595,22 @@ private:
         return statement;
     }
 
-    AstNodeId parseBlock()
+    GXOS_NAVIGATOR_PARSER_NOINLINE AstNodeId parseBlock()
     {
+        StackGuard stack(*this, current().location,
+            parserStackFrameBudget(432u));
+        if (!stack.entered()) return kInvalidAstNodeId;
         DepthGuard depth(*this, current().location);
         if (!depth.entered()) return kInvalidAstNodeId;
         const Token open = advance();
         BlockGuard block(*this, open.location);
         if (!block.entered()) return kInvalidAstNodeId;
 
-        std::vector<AstNodeId> statements;
+        ScratchVector<AstNodeId> statements(scratch_, limits_.maxStatements);
         while (!at(TokenType::RightBrace) && !at(TokenType::EndOfInput)) {
             const AstNodeId statement = parseStatement();
             if (statement == kInvalidAstNodeId) return kInvalidAstNodeId;
-            statements.push_back(statement);
+            if (!append(statements, statement)) return kInvalidAstNodeId;
         }
         if (!expect(TokenType::RightBrace)) return kInvalidAstNodeId;
         const Token close = tokens_[pos_ - 1];
@@ -361,13 +626,16 @@ private:
 
     AstNodeId parseVariableDeclaration(bool requireSemicolon)
     {
+        StackGuard stack(*this, current().location,
+            parserStackFrameBudget(432u));
+        if (!stack.entered()) return kInvalidAstNodeId;
         const Token keyword = advance();
         AstDeclarationKind declarationKind = AstDeclarationKind::Var;
         if (keyword.type == TokenType::KeywordLet)
             declarationKind = AstDeclarationKind::Let;
         else if (keyword.type == TokenType::KeywordConst)
             declarationKind = AstDeclarationKind::Const;
-        std::vector<AstNodeId> declarators;
+        ScratchVector<AstNodeId> declarators(scratch_, limits_.maxAstNodes);
         while (true) {
             Token nameToken;
             if (!expectIdentifier(nameToken)) return kInvalidAstNodeId;
@@ -392,7 +660,7 @@ private:
             if (declarator == kInvalidAstNodeId) return kInvalidAstNodeId;
             ast_.node(declarator).name = name;
             ast_.node(declarator).initializer = initializer;
-            declarators.push_back(declarator);
+            if (!append(declarators, declarator)) return kInvalidAstNodeId;
 
             if (!at(TokenType::Comma)) break;
             advance();
@@ -416,10 +684,13 @@ private:
         return declaration;
     }
 
-    bool parseFormalParameters(std::vector<AstNodeId>& parameters,
+    bool parseFormalParameters(ScratchVector<AstNodeId>& parameters,
         bool arrowParameters, bool allowTrailingComma,
         bool& hasNonSimpleParameters)
     {
+        StackGuard stack(*this, current().location,
+            parserStackFrameBudget(352u));
+        if (!stack.entered()) return false;
         bool hasDuplicate = false;
         SourceLocation duplicateLocation;
         while (!at(TokenType::RightParen)) {
@@ -467,7 +738,7 @@ private:
                 hasNonSimpleParameters = true;
             }
 
-            parameters.push_back(parameter);
+            if (!append(parameters, parameter)) return false;
             if (rest) {
                 if (at(TokenType::Comma)) {
                     fail(ParserErrorCode::InvalidLexicalDeclaration,
@@ -501,8 +772,11 @@ private:
         return true;
     }
 
-    AstNodeId parseFunctionDeclaration()
+    GXOS_NAVIGATOR_PARSER_NOINLINE AstNodeId parseFunctionDeclaration()
     {
+        StackGuard stack(*this, current().location,
+            parserStackFrameBudget(400u));
+        if (!stack.entered()) return kInvalidAstNodeId;
         const Token keyword = advance();
         Token nameToken;
         if (!expectIdentifier(nameToken)) return kInvalidAstNodeId;
@@ -510,7 +784,8 @@ private:
         if (name == kInvalidAstNodeId) return kInvalidAstNodeId;
         if (!expect(TokenType::LeftParen)) return kInvalidAstNodeId;
 
-        std::vector<AstNodeId> parameters;
+        ScratchVector<AstNodeId> parameters(scratch_,
+            limits_.maxFunctionParameters);
         bool hasNonSimpleParameters = false;
         if (!parseFormalParameters(parameters, false, true,
                 hasNonSimpleParameters)) return kInvalidAstNodeId;
@@ -534,12 +809,16 @@ private:
     // JS9 only needs anonymous function expressions for direct onclick
     // assignment. Keep the existing declaration grammar and bounds, without
     // adding named expressions or broader function syntax.
-    AstNodeId parseFunctionExpression()
+    GXOS_NAVIGATOR_PARSER_NOINLINE AstNodeId parseFunctionExpression()
     {
+        StackGuard stack(*this, current().location,
+            parserStackFrameBudget(336u));
+        if (!stack.entered()) return kInvalidAstNodeId;
         const Token keyword = advance();
         if (!expect(TokenType::LeftParen)) return kInvalidAstNodeId;
 
-        std::vector<AstNodeId> parameters;
+        ScratchVector<AstNodeId> parameters(scratch_,
+            limits_.maxFunctionParameters);
         bool hasNonSimpleParameters = false;
         if (!parseFormalParameters(parameters, false, true,
                 hasNonSimpleParameters)) return kInvalidAstNodeId;
@@ -559,8 +838,11 @@ private:
         return function;
     }
 
-    AstNodeId parseReturnStatement()
+    GXOS_NAVIGATOR_PARSER_NOINLINE AstNodeId parseReturnStatement()
     {
+        StackGuard stack(*this, current().location,
+            parserStackFrameBudget(256u));
+        if (!stack.entered()) return kInvalidAstNodeId;
         const Token keyword = advance();
         AstNodeId expression = kInvalidAstNodeId;
         if (!at(TokenType::Semicolon)) {
@@ -575,8 +857,11 @@ private:
         return statement;
     }
 
-    AstNodeId parseIfStatement()
+    GXOS_NAVIGATOR_PARSER_NOINLINE AstNodeId parseIfStatement()
     {
+        StackGuard stack(*this, current().location,
+            parserStackFrameBudget(224u));
+        if (!stack.entered()) return kInvalidAstNodeId;
         const Token keyword = advance();
         if (!expect(TokenType::LeftParen)) return kInvalidAstNodeId;
         const AstNodeId test = parseExpression();
@@ -604,8 +889,11 @@ private:
         return statement;
     }
 
-    AstNodeId parseWhileStatement()
+    GXOS_NAVIGATOR_PARSER_NOINLINE AstNodeId parseWhileStatement()
     {
+        StackGuard stack(*this, current().location,
+            parserStackFrameBudget(208u));
+        if (!stack.entered()) return kInvalidAstNodeId;
         const Token keyword = advance();
         if (!expect(TokenType::LeftParen)) return kInvalidAstNodeId;
         const AstNodeId test = parseExpression();
@@ -623,8 +911,11 @@ private:
         return statement;
     }
 
-    AstNodeId parseForStatement()
+    GXOS_NAVIGATOR_PARSER_NOINLINE AstNodeId parseForStatement()
     {
+        StackGuard stack(*this, current().location,
+            parserStackFrameBudget(288u));
+        if (!stack.entered()) return kInvalidAstNodeId;
         const Token keyword = advance();
         if (!expect(TokenType::LeftParen)) return kInvalidAstNodeId;
 
@@ -702,8 +993,12 @@ private:
         return statement;
     }
 
-    AstNodeId parseBreakOrContinue(bool continueStatement)
+    GXOS_NAVIGATOR_PARSER_NOINLINE AstNodeId parseBreakOrContinue(
+        bool continueStatement)
     {
+        StackGuard stack(*this, current().location,
+            parserStackFrameBudget(240u));
+        if (!stack.entered()) return kInvalidAstNodeId;
         const Token keyword = advance();
         if (!expect(TokenType::Semicolon)) return kInvalidAstNodeId;
         const Token semicolon = tokens_[pos_ - 1];
@@ -714,6 +1009,9 @@ private:
 
     AstNodeId parseExpression()
     {
+        StackGuard stack(*this, current().location,
+            parserStackFrameBudget(64u));
+        if (!stack.entered()) return kInvalidAstNodeId;
         DepthGuard depth(*this, current().location);
         if (!depth.entered()) return kInvalidAstNodeId;
         ExpressionGuard expressionDepth(*this, current().location);
@@ -723,6 +1021,9 @@ private:
 
     AstNodeId parseAssignmentExpression()
     {
+        StackGuard stack(*this, current().location,
+            parserStackFrameBudget(1344u));
+        if (!stack.entered()) return kInvalidAstNodeId;
         DepthGuard depth(*this, current().location);
         if (!depth.entered()) return kInvalidAstNodeId;
         if (arrowAhead()) return parseArrowFunction();
@@ -800,8 +1101,8 @@ private:
         if (left.lexeme.length != right.lexeme.length) return false;
         if (left.lexeme.length == 0u) return true;
         return left.lexeme.data != nullptr && right.lexeme.data != nullptr &&
-            std::char_traits<char>::compare(left.lexeme.data,
-                right.lexeme.data, left.lexeme.length) == 0;
+            equalBytes(left.lexeme.data, right.lexeme.data,
+                left.lexeme.length);
     }
 
     bool sameNodeName(AstNodeId left, AstNodeId right) const
@@ -811,8 +1112,7 @@ private:
         if (leftName.length != rightName.length) return false;
         if (leftName.length == 0u) return true;
         return leftName.data != nullptr && rightName.data != nullptr &&
-            std::char_traits<char>::compare(leftName.data, rightName.data,
-                leftName.length) == 0;
+            equalBytes(leftName.data, rightName.data, leftName.length);
     }
 
     struct ScopeVisit {
@@ -822,25 +1122,74 @@ private:
 
     struct BindingNameRef {
         AstNodeId name = kInvalidAstNodeId;
-        SourceLocation location;
     };
 
-    bool addName(std::vector<BindingNameRef>& names, AstNodeId name,
-        SourceLocation location, bool rejectDuplicate)
+    struct ValidationWorkspace {
+        std::size_t capacity = 0;
+        BindingNameRef* varNames = nullptr;
+        std::size_t varCount = 0;
+        BindingNameRef* directLexicalNames = nullptr;
+        std::size_t directLexicalCount = 0;
+        BindingNameRef* temporaryNamesA = nullptr;
+        std::size_t temporaryNameACount = 0;
+        BindingNameRef* temporaryNamesB = nullptr;
+        std::size_t temporaryNameBCount = 0;
+        ScopeVisit* scopePending = nullptr;
+        std::size_t scopePendingCount = 0;
+        AstNodeId* regionPending = nullptr;
+        std::size_t regionPendingCount = 0;
+        std::uint8_t* scopeVisited = nullptr;
+        std::uint8_t* regionVisited = nullptr;
+    };
+
+    template <typename T>
+    bool allocateScratchArray(T*& result, std::size_t count)
     {
-        for (const BindingNameRef& prior : names) {
+        result = nullptr;
+        if (count == 0u) return true;
+        if (count > static_cast<std::size_t>(-1) / sizeof(T)) {
+            fail(ParserErrorCode::ScratchStorageLimitExceeded,
+                current().location, TokenType::EndOfInput, false);
+            return false;
+        }
+        void* storage = nullptr;
+        FrontendStorageError storageError = FrontendStorageError::None;
+        if (!scratch_.allocate(count * sizeof(T), alignof(T), storage,
+                storageError)) {
+            fail(ParserErrorCode::ScratchStorageLimitExceeded,
+                current().location, TokenType::EndOfInput, false);
+            return false;
+        }
+        result = static_cast<T*>(storage);
+        for (std::size_t index = 0; index < count; ++index)
+            ::new (static_cast<void*>(result + index)) T();
+        return true;
+    }
+
+    bool addName(BindingNameRef* names, std::size_t& count,
+        std::size_t capacity, AstNodeId name, bool rejectDuplicate)
+    {
+        for (std::size_t index = 0; index < count; ++index) {
+            const BindingNameRef& prior = names[index];
             if (sameNodeName(prior.name, name) && rejectDuplicate) {
-                fail(ParserErrorCode::DuplicateBinding, location,
+                fail(ParserErrorCode::DuplicateBinding,
+                    ast_.node(name).location,
                     TokenType::Identifier, false);
                 return false;
             }
         }
-        names.push_back({name, location});
+        if (count >= capacity) {
+            fail(ParserErrorCode::ScratchStorageLimitExceeded,
+                ast_.node(name).location, TokenType::EndOfInput, false);
+            return false;
+        }
+        names[count++].name = name;
         return true;
     }
 
     bool collectDeclarationNames(AstNodeId declaration,
-        std::vector<BindingNameRef>& names, bool rejectDuplicate)
+        BindingNameRef* names, std::size_t& count, std::size_t capacity,
+        bool rejectDuplicate)
     {
         const AstNode& node = ast_.node(declaration);
         for (std::size_t index = 0; index < node.childCount; ++index) {
@@ -852,24 +1201,32 @@ private:
                     declarator.location, TokenType::Identifier, true);
                 return false;
             }
-            if (!addName(names, declarator.name,
-                    ast_.node(declarator.name).location, rejectDuplicate))
+            if (!addName(names, count, capacity, declarator.name,
+                    rejectDuplicate))
                 return false;
         }
         return true;
     }
 
     bool collectVarNamesInRegion(AstNodeId region,
-        std::vector<BindingNameRef>& names)
+        BindingNameRef* names, std::size_t& nameCount,
+        ValidationWorkspace& workspace)
     {
-        std::vector<AstNodeId> pending;
-        std::vector<bool> visited(ast_.nodeCount(), false);
-        pending.push_back(region);
-        while (!pending.empty()) {
-            const AstNodeId id = pending.back();
-            pending.pop_back();
-            if (id >= ast_.nodeCount() || visited[id]) continue;
-            visited[id] = true;
+        nameCount = 0u;
+        workspace.regionPendingCount = 0u;
+        for (std::size_t index = 0; index < workspace.capacity; ++index)
+            workspace.regionVisited[index] = 0u;
+        if (workspace.regionPendingCount >= workspace.capacity) {
+            fail(ParserErrorCode::ScratchStorageLimitExceeded,
+                ast_.node(region).location, TokenType::EndOfInput, false);
+            return false;
+        }
+        workspace.regionPending[workspace.regionPendingCount++] = region;
+        while (workspace.regionPendingCount != 0u) {
+            const AstNodeId id =
+                workspace.regionPending[--workspace.regionPendingCount];
+            if (id >= ast_.nodeCount() || workspace.regionVisited[id]) continue;
+            workspace.regionVisited[id] = 1u;
             const AstNode& node = ast_.node(id);
             if (id != region &&
                 (node.kind == AstNodeKind::FunctionDeclaration ||
@@ -877,28 +1234,44 @@ private:
                  node.kind == AstNodeKind::ArrowFunctionExpression)) continue;
             if (node.kind == AstNodeKind::VariableDeclaration &&
                 node.declarationKind == AstDeclarationKind::Var &&
-                !collectDeclarationNames(id, names, false)) return false;
-            for (std::size_t index = 0; index < node.childCount; ++index)
-                pending.push_back(ast_.childAt(id, index));
+                !collectDeclarationNames(id, names, nameCount,
+                    workspace.capacity, false)) return false;
+            for (std::size_t index = 0; index < node.childCount; ++index) {
+                if (workspace.regionPendingCount >= workspace.capacity) {
+                    fail(ParserErrorCode::ScratchStorageLimitExceeded,
+                        node.location, TokenType::EndOfInput, false);
+                    return false;
+                }
+                workspace.regionPending[workspace.regionPendingCount++] =
+                    ast_.childAt(id, index);
+            }
             const AstNodeId scalarChildren[] = {
                 node.name, node.initializer, node.expression, node.argument,
                 node.left, node.right, node.test, node.consequent,
                 node.alternate, node.init, node.update, node.body, node.callee,
                 node.object, node.property, node.key
             };
-            for (AstNodeId child : scalarChildren)
-                if (child != kInvalidAstNodeId) pending.push_back(child);
+            for (AstNodeId child : scalarChildren) {
+                if (child == kInvalidAstNodeId) continue;
+                if (workspace.regionPendingCount >= workspace.capacity) {
+                    fail(ParserErrorCode::ScratchStorageLimitExceeded,
+                        node.location, TokenType::EndOfInput, false);
+                    return false;
+                }
+                workspace.regionPending[workspace.regionPendingCount++] = child;
+            }
         }
         return true;
     }
 
-    bool validateScope(AstNodeId scope, const AstNodeId* parameters,
-        std::size_t parameterCount)
+    bool validateScope(AstNodeId scope, AstNodeId parameterOwner,
+        ValidationWorkspace& workspace)
     {
-        std::vector<BindingNameRef> varNames;
-        std::vector<BindingNameRef> directLexicalNames;
-        std::vector<ScopeVisit> pending;
-        std::vector<bool> visited(ast_.nodeCount(), false);
+        workspace.varCount = 0u;
+        workspace.directLexicalCount = 0u;
+        workspace.scopePendingCount = 0u;
+        for (std::size_t index = 0; index < workspace.capacity; ++index)
+            workspace.scopeVisited[index] = 0u;
         const AstNode& scopeNode = ast_.node(scope);
         if (scopeNode.kind != AstNodeKind::Program &&
             scopeNode.kind != AstNodeKind::BlockStatement) {
@@ -912,17 +1285,26 @@ private:
             const AstNode& declaration = ast_.node(child);
             if (declaration.kind == AstNodeKind::VariableDeclaration &&
                 declaration.declarationKind != AstDeclarationKind::Var) {
-                if (!collectDeclarationNames(child, directLexicalNames, true))
+                if (!collectDeclarationNames(child,
+                        workspace.directLexicalNames,
+                        workspace.directLexicalCount, workspace.capacity, true))
                     return false;
             }
         }
 
-        pending.push_back({scope, kInvalidAstNodeId});
-        while (!pending.empty()) {
-            const ScopeVisit visit = pending.back();
-            pending.pop_back();
-            if (visit.id >= ast_.nodeCount() || visited[visit.id]) continue;
-            visited[visit.id] = true;
+        if (workspace.scopePendingCount >= workspace.capacity) {
+            fail(ParserErrorCode::ScratchStorageLimitExceeded,
+                scopeNode.location, TokenType::EndOfInput, false);
+            return false;
+        }
+        workspace.scopePending[workspace.scopePendingCount++] =
+            ScopeVisit{scope, kInvalidAstNodeId};
+        while (workspace.scopePendingCount != 0u) {
+            const ScopeVisit visit =
+                workspace.scopePending[--workspace.scopePendingCount];
+            if (visit.id >= ast_.nodeCount() ||
+                workspace.scopeVisited[visit.id]) continue;
+            workspace.scopeVisited[visit.id] = 1u;
             const AstNode& node = ast_.node(visit.id);
 
             if (visit.id != scope &&
@@ -932,15 +1314,17 @@ private:
                 if (node.kind == AstNodeKind::FunctionDeclaration &&
                     visit.parent == scope) {
                     if (node.name == kInvalidAstNodeId ||
-                        !addName(varNames, node.name,
-                            ast_.node(node.name).location, false)) return false;
+                        !addName(workspace.varNames, workspace.varCount,
+                            workspace.capacity, node.name, false)) return false;
                 }
                 continue;
             }
 
             if (node.kind == AstNodeKind::VariableDeclaration) {
                 if (node.declarationKind == AstDeclarationKind::Var) {
-                    if (!collectDeclarationNames(visit.id, varNames, false))
+                    if (!collectDeclarationNames(visit.id,
+                            workspace.varNames, workspace.varCount,
+                            workspace.capacity, false))
                         return false;
                 } else {
                     const AstNodeKind parentKind = visit.parent < ast_.nodeCount()
@@ -956,24 +1340,37 @@ private:
                 }
             }
             if (node.kind == AstNodeKind::BlockStatement && visit.id != scope) {
-                std::vector<BindingNameRef> blockLexicalNames;
-                std::vector<BindingNameRef> blockVarNames;
+                workspace.temporaryNameACount = 0u;
+                workspace.temporaryNameBCount = 0u;
                 for (std::size_t index = 0; index < node.childCount; ++index) {
                     const AstNodeId child = ast_.childAt(visit.id, index);
                     const AstNode& declaration = ast_.node(child);
                     if (declaration.kind == AstNodeKind::VariableDeclaration &&
                         declaration.declarationKind != AstDeclarationKind::Var) {
-                        if (!collectDeclarationNames(child, blockLexicalNames,
-                                true)) return false;
+                        if (!collectDeclarationNames(child,
+                                workspace.temporaryNamesA,
+                                workspace.temporaryNameACount,
+                                workspace.capacity, true)) return false;
                     }
                 }
-                if (!collectVarNamesInRegion(visit.id, blockVarNames))
+                if (!collectVarNamesInRegion(visit.id,
+                        workspace.temporaryNamesB,
+                        workspace.temporaryNameBCount, workspace))
                     return false;
-                for (const BindingNameRef& lexical : blockLexicalNames) {
-                    for (const BindingNameRef& variable : blockVarNames) {
+                for (std::size_t lexicalIndex = 0;
+                    lexicalIndex < workspace.temporaryNameACount;
+                    ++lexicalIndex) {
+                    const BindingNameRef& lexical =
+                        workspace.temporaryNamesA[lexicalIndex];
+                    for (std::size_t variableIndex = 0;
+                        variableIndex < workspace.temporaryNameBCount;
+                        ++variableIndex) {
+                        const BindingNameRef& variable =
+                            workspace.temporaryNamesB[variableIndex];
                         if (sameNodeName(lexical.name, variable.name)) {
                             fail(ParserErrorCode::DuplicateBinding,
-                                lexical.location, TokenType::Identifier, false);
+                                ast_.node(lexical.name).location,
+                                TokenType::Identifier, false);
                             return false;
                         }
                     }
@@ -985,10 +1382,15 @@ private:
                         node.location, TokenType::Identifier, true);
                     return false;
                 }
-                std::vector<BindingNameRef> bodyVarNames;
-                if (!collectVarNamesInRegion(node.body, bodyVarNames))
+                workspace.temporaryNameACount = 0u;
+                if (!collectVarNamesInRegion(node.body,
+                        workspace.temporaryNamesA,
+                        workspace.temporaryNameACount, workspace))
                     return false;
-                for (const BindingNameRef& variable : bodyVarNames) {
+                for (std::size_t index = 0;
+                    index < workspace.temporaryNameACount; ++index) {
+                    const BindingNameRef& variable =
+                        workspace.temporaryNamesA[index];
                     if (sameNodeName(node.name, variable.name)) {
                         fail(ParserErrorCode::DuplicateBinding,
                             ast_.node(node.name).location,
@@ -1007,7 +1409,13 @@ private:
 
             for (std::size_t index = 0; index < node.childCount; ++index) {
                 const AstNodeId child = ast_.childAt(visit.id, index);
-                pending.push_back({child, visit.id});
+                if (workspace.scopePendingCount >= workspace.capacity) {
+                    fail(ParserErrorCode::ScratchStorageLimitExceeded,
+                        node.location, TokenType::EndOfInput, false);
+                    return false;
+                }
+                workspace.scopePending[workspace.scopePendingCount++] =
+                    ScopeVisit{child, visit.id};
             }
             const AstNodeId scalarChildren[] = {
                 node.name, node.initializer, node.expression, node.argument,
@@ -1017,24 +1425,47 @@ private:
             };
             for (AstNodeId child : scalarChildren) {
                 if (child != kInvalidAstNodeId)
-                    pending.push_back({child, visit.id});
+                {
+                    if (workspace.scopePendingCount >= workspace.capacity) {
+                        fail(ParserErrorCode::ScratchStorageLimitExceeded,
+                            node.location, TokenType::EndOfInput, false);
+                        return false;
+                    }
+                    workspace.scopePending[workspace.scopePendingCount++] =
+                        ScopeVisit{child, visit.id};
+                }
             }
         }
 
-        for (const BindingNameRef& lexical : directLexicalNames) {
-            for (const BindingNameRef& variable : varNames) {
+        for (std::size_t lexicalIndex = 0;
+            lexicalIndex < workspace.directLexicalCount; ++lexicalIndex) {
+            const BindingNameRef& lexical =
+                workspace.directLexicalNames[lexicalIndex];
+            for (std::size_t variableIndex = 0;
+                variableIndex < workspace.varCount; ++variableIndex) {
+                const BindingNameRef& variable =
+                    workspace.varNames[variableIndex];
                 if (sameNodeName(lexical.name, variable.name)) {
                     fail(ParserErrorCode::DuplicateBinding,
-                        lexical.location, TokenType::Identifier, false);
+                        ast_.node(lexical.name).location,
+                        TokenType::Identifier, false);
                     return false;
                 }
             }
         }
+        const std::size_t parameterCount =
+            parameterOwner == kInvalidAstNodeId ? 0u :
+                ast_.childCount(parameterOwner);
         for (std::size_t index = 0; index < parameterCount; ++index) {
-            for (const BindingNameRef& lexical : directLexicalNames) {
-                if (sameNodeName(parameters[index], lexical.name)) {
+            const AstNodeId parameter = ast_.childAt(parameterOwner, index);
+            for (std::size_t lexicalIndex = 0;
+                lexicalIndex < workspace.directLexicalCount; ++lexicalIndex) {
+                const BindingNameRef& lexical =
+                    workspace.directLexicalNames[lexicalIndex];
+                if (sameNodeName(parameter, lexical.name)) {
                     fail(ParserErrorCode::DuplicateBinding,
-                        lexical.location, TokenType::Identifier, false);
+                        ast_.node(lexical.name).location,
+                        TokenType::Identifier, false);
                     return false;
                 }
             }
@@ -1044,7 +1475,26 @@ private:
 
     bool validateLexicalSemantics()
     {
-        if (!validateScope(ast_.root(), nullptr, 0u)) return false;
+        ValidationWorkspace workspace;
+        workspace.capacity = ast_.nodeCount();
+        if (!allocateScratchArray(workspace.varNames, workspace.capacity) ||
+            !allocateScratchArray(workspace.directLexicalNames,
+                workspace.capacity) ||
+            !allocateScratchArray(workspace.temporaryNamesA,
+                workspace.capacity) ||
+            !allocateScratchArray(workspace.temporaryNamesB,
+                workspace.capacity) ||
+            !allocateScratchArray(workspace.scopePending,
+                workspace.capacity) ||
+            !allocateScratchArray(workspace.regionPending,
+                workspace.capacity) ||
+            !allocateScratchArray(workspace.scopeVisited,
+                workspace.capacity) ||
+            !allocateScratchArray(workspace.regionVisited,
+                workspace.capacity)) return false;
+
+        if (!validateScope(ast_.root(), kInvalidAstNodeId, workspace))
+            return false;
         for (AstNodeId id = 0; id < ast_.nodeCount(); ++id) {
             const AstNode& node = ast_.node(id);
             if (node.kind != AstNodeKind::FunctionDeclaration &&
@@ -1065,26 +1515,27 @@ private:
                 }
             }
             if (node.body != kInvalidAstNodeId) {
-                std::vector<AstNodeId> parameters;
-                parameters.reserve(node.childCount);
-                for (std::size_t index = 0; index < node.childCount; ++index)
-                    parameters.push_back(ast_.childAt(id, index));
-                if (!validateScope(node.body, parameters.data(),
-                        parameters.size())) return false;
+                if (!validateScope(node.body, id, workspace)) return false;
             }
         }
         return true;
     }
 
-    AstNodeId parseArrowFunction()
+    GXOS_NAVIGATOR_PARSER_NOINLINE AstNodeId parseArrowFunction()
     {
+        StackGuard stack(*this, current().location,
+            parserStackFrameBudget(384u));
+        if (!stack.entered()) return kInvalidAstNodeId;
         const Token start = current();
-        std::vector<AstNodeId> parameters;
+        ScratchVector<AstNodeId> parameters(scratch_,
+            limits_.maxFunctionParameters);
         bool hasNonSimpleParameters = false;
         if (at(TokenType::Identifier)) {
             const Token parameterToken = advance();
-            parameters.push_back(makeLeaf(AstNodeKind::Identifier,
-                parameterToken));
+            const AstNodeId parameter = makeLeaf(AstNodeKind::Identifier,
+                parameterToken);
+            if (parameter == kInvalidAstNodeId ||
+                !append(parameters, parameter)) return kInvalidAstNodeId;
         } else {
             expect(TokenType::LeftParen);
             if (!parseFormalParameters(parameters, true, false,
@@ -1107,15 +1558,11 @@ private:
         if (function == kInvalidAstNodeId) return function;
         ast_.node(function).body = body;
         ast_.node(function).expression = expression;
-        if (!setChildren(function, parameters)) {
-            fail(ParserErrorCode::AstNodeLimitExceeded, start.location,
-                TokenType::EndOfInput, false);
-            return kInvalidAstNodeId;
-        }
+        if (!setChildren(function, parameters)) return kInvalidAstNodeId;
         return function;
     }
 
-    AstNodeId parseLogicalOrExpression()
+    GXOS_NAVIGATOR_PARSER_FORCEINLINE AstNodeId parseLogicalOrExpression()
     {
         AstNodeId left = parseLogicalAndExpression();
         while (!failed() && at(TokenType::LogicalOr)) {
@@ -1132,7 +1579,7 @@ private:
         return left;
     }
 
-    AstNodeId parseLogicalAndExpression()
+    GXOS_NAVIGATOR_PARSER_FORCEINLINE AstNodeId parseLogicalAndExpression()
     {
         AstNodeId left = parseEqualityExpression();
         while (!failed() && at(TokenType::LogicalAnd)) {
@@ -1149,7 +1596,7 @@ private:
         return left;
     }
 
-    AstNodeId parseEqualityExpression()
+    GXOS_NAVIGATOR_PARSER_FORCEINLINE AstNodeId parseEqualityExpression()
     {
         AstNodeId left = parseRelationalExpression();
         while (!failed() && isEqualityToken(current().type)) {
@@ -1166,7 +1613,7 @@ private:
         return left;
     }
 
-    AstNodeId parseRelationalExpression()
+    GXOS_NAVIGATOR_PARSER_FORCEINLINE AstNodeId parseRelationalExpression()
     {
         AstNodeId left = parseAdditiveExpression();
         while (!failed() && isRelationalToken(current().type)) {
@@ -1183,7 +1630,7 @@ private:
         return left;
     }
 
-    AstNodeId parseAdditiveExpression()
+    GXOS_NAVIGATOR_PARSER_FORCEINLINE AstNodeId parseAdditiveExpression()
     {
         AstNodeId left = parseMultiplicativeExpression();
         while (!failed() &&
@@ -1201,7 +1648,7 @@ private:
         return left;
     }
 
-    AstNodeId parseMultiplicativeExpression()
+    GXOS_NAVIGATOR_PARSER_FORCEINLINE AstNodeId parseMultiplicativeExpression()
     {
         AstNodeId left = parseUnaryExpression();
         while (!failed() && (at(TokenType::Star) || at(TokenType::Slash) ||
@@ -1221,6 +1668,9 @@ private:
 
     AstNodeId parseUnaryExpression()
     {
+        StackGuard stack(*this, current().location,
+            parserStackFrameBudget(320u));
+        if (!stack.entered()) return kInvalidAstNodeId;
         DepthGuard depth(*this, current().location);
         if (!depth.entered()) return kInvalidAstNodeId;
 
@@ -1273,6 +1723,9 @@ private:
 
     AstNodeId parsePostfixTail(AstNodeId expression)
     {
+        StackGuard stack(*this, current().location,
+            parserStackFrameBudget(352u));
+        if (!stack.entered()) return kInvalidAstNodeId;
         bool allowUpdate = true;
         while (!failed()) {
             if (at(TokenType::Dot) || at(TokenType::LeftBracket)) {
@@ -1311,6 +1764,9 @@ private:
 
     AstNodeId parseMemberTail(AstNodeId object)
     {
+        StackGuard stack(*this, current().location,
+            parserStackFrameBudget(272u));
+        if (!stack.entered()) return kInvalidAstNodeId;
         if (at(TokenType::Dot)) {
             advance();
             Token propertyToken;
@@ -1345,9 +1801,13 @@ private:
         return member;
     }
 
-    bool parseArgumentList(std::vector<AstNodeId>& arguments,
+    GXOS_NAVIGATOR_PARSER_NOINLINE bool parseArgumentList(
+        ScratchVector<AstNodeId>& arguments,
         SourceLocation& closeLocation)
     {
+        StackGuard stack(*this, current().location,
+            parserStackFrameBudget(112u));
+        if (!stack.entered()) return false;
         if (!expect(TokenType::LeftParen)) return false;
         while (!at(TokenType::RightParen)) {
             if (at(TokenType::EndOfInput)) {
@@ -1362,7 +1822,7 @@ private:
             }
             const AstNodeId argument = parseExpression();
             if (argument == kInvalidAstNodeId) return false;
-            arguments.push_back(argument);
+            if (!append(arguments, argument)) return false;
             if (!at(TokenType::Comma)) break;
             advance();
         }
@@ -1373,18 +1833,14 @@ private:
 
     AstNodeId parseCallExpression(AstNodeId callee)
     {
-        std::vector<AstNodeId> arguments;
+        ScratchVector<AstNodeId> arguments(scratch_, limits_.maxCallArguments);
         SourceLocation closeLocation;
         if (!parseArgumentList(arguments, closeLocation)) return kInvalidAstNodeId;
         const AstNodeId call = makeNode(AstNodeKind::CallExpression,
             spanLocation(ast_.node(callee).location, closeLocation));
         if (call == kInvalidAstNodeId) return kInvalidAstNodeId;
         ast_.node(call).callee = callee;
-        if (!setChildren(call, arguments)) {
-            fail(ParserErrorCode::AstNodeLimitExceeded, closeLocation,
-                TokenType::EndOfInput, false);
-            return kInvalidAstNodeId;
-        }
+        if (!setChildren(call, arguments)) return kInvalidAstNodeId;
         return call;
     }
 
@@ -1398,7 +1854,7 @@ private:
             if (callee == kInvalidAstNodeId) return kInvalidAstNodeId;
         }
 
-        std::vector<AstNodeId> arguments;
+        ScratchVector<AstNodeId> arguments(scratch_, limits_.maxCallArguments);
         SourceLocation end = ast_.node(callee).location;
         if (at(TokenType::LeftParen)) {
             if (!parseArgumentList(arguments, end)) return kInvalidAstNodeId;
@@ -1407,16 +1863,15 @@ private:
             spanLocation(keyword.location, end));
         if (expression == kInvalidAstNodeId) return kInvalidAstNodeId;
         ast_.node(expression).callee = callee;
-        if (!setChildren(expression, arguments)) {
-            fail(ParserErrorCode::AstNodeLimitExceeded, end,
-                TokenType::EndOfInput, false);
-            return kInvalidAstNodeId;
-        }
+        if (!setChildren(expression, arguments)) return kInvalidAstNodeId;
         return expression;
     }
 
-    AstNodeId parsePrimaryExpression()
+    GXOS_NAVIGATOR_PARSER_NOINLINE AstNodeId parsePrimaryExpression()
     {
+        StackGuard stack(*this, current().location,
+            parserStackFrameBudget(256u));
+        if (!stack.entered()) return kInvalidAstNodeId;
         if (at(TokenType::KeywordFunction)) return parseFunctionExpression();
         if (at(TokenType::Identifier)) return makeLeaf(AstNodeKind::Identifier, advance());
         if (at(TokenType::NumericLiteral)) return makeLeaf(AstNodeKind::NumericLiteral, advance());
@@ -1430,10 +1885,60 @@ private:
         if (at(TokenType::LeftBracket)) return parseArrayLiteral();
         if (at(TokenType::LeftParen)) {
             const Token open = advance();
+            ExpressionDepthRestore depthRestore(*this);
+            std::size_t groupingDepth = 1u;
+            if (!arrowAhead()) {
+                std::size_t openingChain = 1u;
+                while (tokenAt(pos_ + openingChain - 1u).type ==
+                        TokenType::LeftParen)
+                    ++openingChain;
+
+                std::size_t nestedDepth = 1u;
+                std::size_t closingPosition = tokens_.size();
+                std::size_t scan = pos_ + openingChain - 1u;
+                while (scan < tokens_.size() &&
+                    tokenAt(scan).type != TokenType::EndOfInput) {
+                    if (tokenAt(scan).type == TokenType::LeftParen) {
+                        ++nestedDepth;
+                    } else if (tokenAt(scan).type == TokenType::RightParen) {
+                        --nestedDepth;
+                        if (nestedDepth == 0u) {
+                            closingPosition = scan;
+                            break;
+                        }
+                    }
+                    ++scan;
+                }
+
+                if (closingPosition < tokens_.size()) {
+                    std::size_t closingChain = 0u;
+                    while (closingPosition + closingChain < tokens_.size() &&
+                        tokenAt(closingPosition + closingChain).type ==
+                            TokenType::RightParen) {
+                        ++closingChain;
+                    }
+                    groupingDepth = closingChain < openingChain
+                        ? closingChain : openingChain;
+                }
+            }
+
+            const std::size_t closingDepth = groupingDepth;
+            while (groupingDepth > 1u) {
+                if (expressionDepth_ >= limits_.maxExpressionNesting) {
+                    fail(ParserErrorCode::NestingLimitExceeded,
+                        current().location, TokenType::EndOfInput, false);
+                    return kInvalidAstNodeId;
+                }
+                ++expressionDepth_;
+                advance();
+                --groupingDepth;
+            }
             const AstNodeId expression = parseExpression();
             if (expression == kInvalidAstNodeId) return kInvalidAstNodeId;
-            if (!expect(TokenType::RightParen)) return kInvalidAstNodeId;
-            const Token close = tokens_[pos_ - 1];
+            for (std::size_t index = 0; index < closingDepth; ++index)
+                if (!expect(TokenType::RightParen))
+                    return kInvalidAstNodeId;
+            const Token close = tokens_[pos_ - 1u];
             ast_.node(expression).location = spanLocation(open.location,
                 close.location);
             return expression;
@@ -1449,10 +1954,14 @@ private:
         return kInvalidAstNodeId;
     }
 
-    AstNodeId parseObjectLiteral()
+    GXOS_NAVIGATOR_PARSER_NOINLINE AstNodeId parseObjectLiteral()
     {
+        StackGuard stack(*this, current().location,
+            parserStackFrameBudget(448u));
+        if (!stack.entered()) return kInvalidAstNodeId;
         const Token open = advance();
-        std::vector<AstNodeId> properties;
+        ScratchVector<AstNodeId> properties(scratch_,
+            limits_.maxObjectLiteralProperties);
         while (!at(TokenType::RightBrace)) {
             if (at(TokenType::EndOfInput)) {
                 // Preserve the parser's established invalid-expression
@@ -1490,7 +1999,7 @@ private:
             if (property == kInvalidAstNodeId) return property;
             ast_.node(property).key = key;
             ast_.node(property).initializer = initializer;
-            properties.push_back(property);
+            if (!append(properties, property)) return kInvalidAstNodeId;
 
             if (!at(TokenType::Comma)) break;
             advance();
@@ -1500,18 +2009,19 @@ private:
         const Token close = tokens_[pos_ - 1];
         const AstNodeId object = makeNode(AstNodeKind::ObjectLiteral,
             spanLocation(open.location, close.location));
-        if (object != kInvalidAstNodeId && !setChildren(object, properties)) {
-            fail(ParserErrorCode::AstNodeLimitExceeded, close.location,
-                TokenType::EndOfInput, false);
+        if (object != kInvalidAstNodeId && !setChildren(object, properties))
             return kInvalidAstNodeId;
-        }
         return object;
     }
 
-    AstNodeId parseArrayLiteral()
+    GXOS_NAVIGATOR_PARSER_NOINLINE AstNodeId parseArrayLiteral()
     {
+        StackGuard stack(*this, current().location,
+            parserStackFrameBudget(384u));
+        if (!stack.entered()) return kInvalidAstNodeId;
         const Token open = advance();
-        std::vector<AstNodeId> elements;
+        ScratchVector<AstNodeId> elements(scratch_,
+            limits_.maxArrayLiteralElements);
         while (!at(TokenType::RightBracket)) {
             if (at(TokenType::EndOfInput)) {
                 fail(ParserErrorCode::UnexpectedEndOfInput, current().location,
@@ -1528,12 +2038,12 @@ private:
                 const AstNodeId elision = makeNode(AstNodeKind::ArrayElision,
                     comma.location);
                 if (elision == kInvalidAstNodeId) return elision;
-                elements.push_back(elision);
+                if (!append(elements, elision)) return kInvalidAstNodeId;
                 continue;
             }
             const AstNodeId element = parseExpression();
             if (element == kInvalidAstNodeId) return kInvalidAstNodeId;
-            elements.push_back(element);
+            if (!append(elements, element)) return kInvalidAstNodeId;
             if (!at(TokenType::Comma)) break;
             advance();
             if (at(TokenType::RightBracket)) break;
@@ -1542,11 +2052,8 @@ private:
         const Token close = tokens_[pos_ - 1];
         const AstNodeId array = makeNode(AstNodeKind::ArrayLiteral,
             spanLocation(open.location, close.location));
-        if (array != kInvalidAstNodeId && !setChildren(array, elements)) {
-            fail(ParserErrorCode::AstNodeLimitExceeded, close.location,
-                TokenType::EndOfInput, false);
+        if (array != kInvalidAstNodeId && !setChildren(array, elements))
             return kInvalidAstNodeId;
-        }
         return array;
     }
 
@@ -1626,25 +2133,38 @@ private:
     }
 
     SourceView source_;
-    const std::vector<Token>& tokens_;
+    TokenView tokens_;
     ParserLimits limits_;
     std::size_t pos_ = 0;
     std::size_t parserDepth_ = 0;
     std::size_t expressionDepth_ = 0;
     std::size_t blockNesting_ = 0;
     std::size_t statementCount_ = 0;
-    Ast ast_;
+    std::size_t parserStackBytes_ =
+        kJavaScriptParserStackEntryReserveBytes;
+    Ast& ast_;
+    FrontendArena& scratch_;
     ParserError error_;
     Token eofToken_;
 };
 
+#undef GXOS_NAVIGATOR_PARSER_NOINLINE
+#undef GXOS_NAVIGATOR_PARSER_FORCEINLINE
+
 } // namespace
 
+#if !defined(GXOS_NAVIGATOR_FRONTEND_FREESTANDING)
 ParseResult Parser::parse(SourceView source, const std::vector<Token>& tokens) const
 {
     try {
-        ParserState state(source, tokens, limits_);
-        return state.run();
+        std::vector<unsigned char> scratchStorage(
+            parserScratchBytesForTokenCount(tokens.size()));
+        FrontendArena scratch(scratchStorage.data(), scratchStorage.size());
+        ParseResult result;
+        result.ast.reset(source);
+        const TokenView view{tokens.data(), tokens.size(), source, 0u, nullptr};
+        parseInto(view, result.ast, scratch, result.error);
+        return result;
     } catch (const std::bad_alloc&) {
         ParseResult result;
         result.ast.reset(source);
@@ -1669,6 +2189,14 @@ ParseResult Parser::parse(SourceView source, const LexResult& lexed) const
     }
     return parse(source, lexed.tokens);
 }
+#endif
+
+bool Parser::parseInto(const TokenView& tokens, Ast& output,
+    FrontendArena& scratch, ParserError& error) const
+{
+    ParserState state(tokens, limits_, output, scratch);
+    return state.run(error);
+}
 
 const char* parserErrorCodeName(ParserErrorCode code)
 {
@@ -1689,6 +2217,24 @@ const char* parserErrorCodeName(ParserErrorCode code)
         return "TooManyObjectProperties";
     case ParserErrorCode::TooManyArrayElements:
         return "TooManyArrayElements";
+    case ParserErrorCode::TokenCapacityExceeded:
+        return "TokenCapacityExceeded";
+    case ParserErrorCode::SourceTooLarge:
+        return "SourceTooLarge";
+    case ParserErrorCode::InvalidTokenInput:
+        return "InvalidTokenInput";
+    case ParserErrorCode::AstStorageExhausted:
+        return "AstStorageExhausted";
+    case ParserErrorCode::AstChildStorageExhausted:
+        return "AstChildStorageExhausted";
+    case ParserErrorCode::ScratchStorageLimitExceeded:
+        return "ScratchStorageLimitExceeded";
+    case ParserErrorCode::SourceLifetimeInvalidation:
+        return "SourceLifetimeInvalidation";
+    case ParserErrorCode::InternalInvariantFailure:
+        return "InternalInvariantFailure";
+    case ParserErrorCode::ParserStackBudgetExceeded:
+        return "ParserStackBudgetExceeded";
     case ParserErrorCode::DuplicateParameter: return "DuplicateParameter";
     case ParserErrorCode::DuplicateBinding: return "DuplicateBinding";
     case ParserErrorCode::InvalidLexicalDeclaration:
