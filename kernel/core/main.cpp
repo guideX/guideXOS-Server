@@ -38,6 +38,7 @@
 #include "arch/break_exception.h"
 #include "arch/general_exception.h"
 #include "arch/unaligned_reference.h"
+#include "arch/nat_consumption.h"
 #endif
 
 // Storage subsystem
@@ -1646,8 +1647,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::arch::ia64::run_general_exception_qualification();
     const bool unaligned_reference_qualified = general_exception_qualified &&
         kernel::arch::ia64::run_unaligned_reference_qualification();
+    const bool nat_consumption_qualified = unaligned_reference_qualified &&
+        kernel::arch::ia64::run_nat_consumption_qualification();
     if (!break_exception_qualified || !general_exception_qualified ||
-        !unaligned_reference_qualified) {
+        !unaligned_reference_qualified || !nat_consumption_qualified) {
         kernel::arch::ia64::ski_console::puts(
             "Early exception qualification failed; stopping before all other startup paths\r\n");
     }

@@ -127,6 +127,7 @@ class Ia64FoundationContractTests(unittest.TestCase):
         boot = read_text(ROOT / "kernel" / "arch" / "ia64" / "boot.s")
         self.assertIn(".equ SSC_CONSOLE_INIT,", boot)
         self.assertIn(".macro IVT_ENTRY_HALT name, offset, slot_bytes", boot)
+        self.assertIn(".macro IVT_ENTRY_NAT_CONSUMPTION name, offset, slot_bytes", boot)
         self.assertIn(".endm", boot)
         self.assertNotRegex(boot, r"(?m)^\s*#\s*define\b")
         calls = re.findall(

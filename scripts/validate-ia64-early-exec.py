@@ -29,10 +29,11 @@ def validate_early_entry_source(main_text: str) -> list[str]:
         errors.append("early-exec entry reaches forbidden runtime paths: " + ", ".join(forbidden))
     tests = ("run_break_exception_qualification()",
              "run_general_exception_qualification()",
-             "run_unaligned_reference_qualification()")
+             "run_unaligned_reference_qualification()",
+             "run_nat_consumption_qualification()")
     positions = [body.find(token) for token in tests]
     if any(position < 0 for position in positions) or positions != sorted(positions):
-        errors.append("early-exec entry must preserve Break, General, then Unaligned tests")
+        errors.append("early-exec entry must preserve Break, General, Unaligned, then NaT tests")
     if "ski_console::stop()" not in body or "kernel::arch::halt()" not in body:
         errors.append("early-exec entry must stop through the qualified Ski path")
     if re.search(r"\bssm\s+psr\.i\b", body):
@@ -112,7 +113,7 @@ def validate(repo_root: Path, elf: Path, objdump: str) -> list[str]:
     early_errors = validate_early_entry_source(main)
     check(not early_errors, "EARLY_ENTRY_ISOLATION",
           "; ".join(early_errors) if early_errors else
-          "Break, General, then Unaligned tests; no interrupt, device, or scheduler path")
+          "Break, General, Unaligned, then NaT tests; no interrupt, device, or scheduler path")
 
     arch = (repo_root / "kernel/arch/ia64/arch.cpp").read_text(encoding="utf-8")
     init_start = arch.find("void init()")

@@ -96,6 +96,19 @@ def load_unaligned_reference_validator() -> Any:
 UNALIGNED_REFERENCE_VALIDATOR = load_unaligned_reference_validator()
 
 
+def load_nat_consumption_validator() -> Any:
+    path = ROOT / "scripts" / "validate-ia64-nat-consumption.py"
+    spec = importlib.util.spec_from_file_location("ia64_nat_consumption_validator", path)
+    if spec is None or spec.loader is None:
+        raise GateError(f"cannot load Register NaT Consumption validator: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+NAT_CONSUMPTION_VALIDATOR = load_nat_consumption_validator()
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -412,7 +425,9 @@ def validate_break_output(stdout_text: str, contract: dict[str, Any]) -> list[st
                 (contract.get("general_exception_contract") is not None and
                  line.startswith("IA64_GENERAL_EXCEPTION_")) or \
                 (contract.get("unaligned_reference_contract") is not None and
-                 line.startswith("IA64_UNALIGNED_REFERENCE_")):
+                 line.startswith("IA64_UNALIGNED_REFERENCE_")) or \
+                (contract.get("nat_consumption_contract") is not None and
+                 line.startswith("IA64_NAT_CONSUMPTION_")):
             continue
         lowered = line.lower()
         if any(marker in lowered for marker in FAULT_MARKERS):
@@ -504,7 +519,8 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
                   checkpoint_expectations: dict[str, int] | None = None,
                   break_exception_contract: dict[str, Any] | None = None,
                   general_exception_contract: dict[str, Any] | None = None,
-                  unaligned_reference_contract: dict[str, Any] | None = None) -> int:
+                  unaligned_reference_contract: dict[str, Any] | None = None,
+                  nat_consumption_contract: dict[str, Any] | None = None) -> int:
     if timeout <= 0 or timeout > 300:
         raise GateError("timeout must be greater than zero and no more than 300 seconds")
     if capture_dir.exists():
@@ -540,21 +556,26 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
     general_record_fields: dict[str, int] | None = None
     unaligned_reference_evidence_errors: list[str] = []
     unaligned_reference_record_fields: dict[str, int] | None = None
+    nat_consumption_evidence_errors: list[str] = []
+    nat_consumption_record_fields: dict[str, int] | None = None
     expected_exception_faults = (
         (break_exception_contract["expected_faults"] if break_exception_contract else 0) +
         (general_exception_contract["expected_faults"] if general_exception_contract else 0) +
         (unaligned_reference_contract["expected_faults"]
-         if unaligned_reference_contract else 0))
+         if unaligned_reference_contract else 0) +
+        (nat_consumption_contract["expected_faults"]
+         if nat_consumption_contract else 0))
 
     if timed_out:
         classification = "TIMEOUT"
     elif break_exception_contract is not None or general_exception_contract is not None or \
-            unaligned_reference_contract is not None:
+            unaligned_reference_contract is not None or nat_consumption_contract is not None:
         if break_exception_contract is not None:
             output_contract = dict(break_exception_contract)
             output_contract["stderr_text"] = stderr_text
             output_contract["general_exception_contract"] = general_exception_contract
             output_contract["unaligned_reference_contract"] = unaligned_reference_contract
+            output_contract["nat_consumption_contract"] = nat_consumption_contract
             break_evidence_errors = validate_break_output(stdout_text, output_contract)
         if general_exception_contract is not None:
             general_record_fields, general_evidence_errors = \
@@ -565,6 +586,7 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
             for line in (stdout_text + "\n" + stderr_text).splitlines():
                 if line.startswith("IA64_GENERAL_EXCEPTION_") or \
                         line.startswith("IA64_UNALIGNED_REFERENCE_") or \
+                    line.startswith("IA64_NAT_CONSUMPTION_") or \
                         (break_exception_contract is not None and line.startswith("IA64_BREAK_")):
                     continue
                 lowered = line.lower()
@@ -586,6 +608,7 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
             generic_fault_lines = []
             for line in (stdout_text + "\n" + stderr_text).splitlines():
                 if line.startswith("IA64_UNALIGNED_REFERENCE_") or \
+                        line.startswith("IA64_NAT_CONSUMPTION_") or \
                         (break_exception_contract is not None and line.startswith("IA64_BREAK_")) or \
                         (general_exception_contract is not None and
                          line.startswith("IA64_GENERAL_EXCEPTION_")):
@@ -601,7 +624,33 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
                     "processor 0 exited with status 0" not in combined:
                 unaligned_reference_evidence_errors.append(
                     "Ski did not report the intentional SSC exit after the Unaligned Reference test")
+        if nat_consumption_contract is not None:
+            nat_consumption_record_fields, nat_consumption_evidence_errors = \
+                NAT_CONSUMPTION_VALIDATOR.validate_output(
+                    stdout_text, nat_consumption_contract["symbols"],
+                    probe=nat_consumption_contract["probe"])
+            generic_fault_lines = []
+            for line in (stdout_text + "\n" + stderr_text).splitlines():
+                if line.startswith("IA64_NAT_CONSUMPTION_") or \
+                        line.startswith("IA64_UNALIGNED_REFERENCE_") or \
+                        (break_exception_contract is not None and line.startswith("IA64_BREAK_")) or \
+                        (general_exception_contract is not None and
+                         line.startswith("IA64_GENERAL_EXCEPTION_")):
+                    continue
+                lowered = line.lower()
+                if any(marker in lowered for marker in FAULT_MARKERS):
+                    generic_fault_lines.append(line)
+            if generic_fault_lines:
+                nat_consumption_evidence_errors.append(
+                    "unexpected Ski fault/exception diagnostic: " + generic_fault_lines[0][:180])
+            if nat_consumption_contract.get("require_intentional_exit") and \
+                    "kernel exited with status 0" not in combined and \
+                    "processor 0 exited with status 0" not in combined:
+                nat_consumption_evidence_errors.append(
+                    "Ski did not report the intentional SSC exit after the Register NaT test")
         failure_classification = (
+            "NAT_CONSUMPTION_QUALIFICATION_FAIL"
+            if nat_consumption_contract is not None else
             "UNALIGNED_REFERENCE_QUALIFICATION_FAIL"
             if unaligned_reference_contract is not None else
             "GENERAL_EXCEPTION_QUALIFICATION_FAIL"
@@ -619,6 +668,10 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
                 unaligned_reference_evidence_errors.extend(
                     UNALIGNED_REFERENCE_VALIDATOR.validate_expected_fault_count(
                         fault_count, expected_exception_faults))
+            if nat_consumption_contract is not None:
+                nat_consumption_evidence_errors.extend(
+                    NAT_CONSUMPTION_VALIDATOR.validate_expected_fault_count(
+                        fault_count, expected_exception_faults))
             classification = failure_classification
         elif instruction_count is None:
             message = "Ski instruction count was not present in captured statistics"
@@ -628,6 +681,8 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
                 general_evidence_errors.append(message)
             if unaligned_reference_contract is not None:
                 unaligned_reference_evidence_errors.append(message)
+            if nat_consumption_contract is not None:
+                nat_consumption_evidence_errors.append(message)
             classification = failure_classification
         elif process.poll() is None:
             message = "simulator process group was not reaped"
@@ -637,11 +692,16 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
                 general_evidence_errors.append(message)
             if unaligned_reference_contract is not None:
                 unaligned_reference_evidence_errors.append(message)
+            if nat_consumption_contract is not None:
+                nat_consumption_evidence_errors.append(message)
             classification = failure_classification
-        elif break_evidence_errors or general_evidence_errors or unaligned_reference_evidence_errors:
+        elif (break_evidence_errors or general_evidence_errors or
+              unaligned_reference_evidence_errors or nat_consumption_evidence_errors):
             classification = failure_classification
         else:
             classification = (
+                nat_consumption_contract["success_classification"]
+                if nat_consumption_contract is not None else
                 unaligned_reference_contract["success_classification"]
                 if unaligned_reference_contract is not None else
                 general_exception_contract["success_classification"]
@@ -671,7 +731,8 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
         )
         if classification in ("GUEST_EXIT_ZERO", "BREAK_EXCEPTION_KERNEL_PASS",
                               "GENERAL_EXCEPTION_KERNEL_PASS",
-                              "UNALIGNED_REFERENCE_KERNEL_PASS") and checkpoint_errors:
+                              "UNALIGNED_REFERENCE_KERNEL_PASS",
+                              "NAT_CONSUMPTION_KERNEL_PASS") and checkpoint_errors:
             classification = "CPU_STATE_CHECKPOINT_FAIL"
 
     record = {
@@ -717,6 +778,14 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
         "unaligned_reference_ssc_exit_function": (
             unaligned_reference_contract.get("ssc_exit_function")
             if unaligned_reference_contract else None),
+        "nat_consumption_evidence_errors": nat_consumption_evidence_errors,
+        "nat_consumption_expected_faults": (
+            nat_consumption_contract["expected_faults"]
+            if nat_consumption_contract else None),
+        "nat_consumption_record_fields": nat_consumption_record_fields,
+        "nat_consumption_ssc_exit_function": (
+            nat_consumption_contract.get("ssc_exit_function")
+            if nat_consumption_contract else None),
     }
     (capture_dir / "run-result.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     print(f"[{classification}] exit={return_code} elapsed={elapsed:.3f}s capture={capture_dir}")
@@ -726,7 +795,9 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
                                     "GENERAL_EXCEPTION_PROBE_PASS",
                                     "GENERAL_EXCEPTION_KERNEL_PASS",
                                     "UNALIGNED_REFERENCE_PROBE_PASS",
-                                    "UNALIGNED_REFERENCE_KERNEL_PASS") else 1
+                                    "UNALIGNED_REFERENCE_KERNEL_PASS",
+                                    "NAT_CONSUMPTION_PROBE_PASS",
+                                    "NAT_CONSUMPTION_KERNEL_PASS") else 1
 
 
 def require_linux() -> None:
@@ -785,6 +856,21 @@ def setup_parser() -> argparse.ArgumentParser:
     unaligned_probe.add_argument("--mode", choices=("system",), default="system")
     unaligned_probe.add_argument(
         "--objdump", default="/home/guidex/src/ia64-2-toolchain-shim/ia64-linux-objdump")
+
+    nat_probe = subparsers.add_parser(
+        "nat-consumption-probe", help="qualify the isolated Register NaT Consumption ELF")
+    nat_probe.add_argument("--artifact", type=Path, required=True)
+    nat_probe.add_argument("--manifest", type=Path, required=True)
+    nat_probe.add_argument("--expected-sha256", required=True)
+    nat_probe.add_argument("--simulator-sha256", required=True)
+    nat_probe.add_argument("--ski-prefix", type=Path, default=DEFAULT_SKI_PREFIX)
+    nat_probe.add_argument("--capture-dir", type=Path)
+    nat_probe.add_argument("--timeout", type=float, default=60)
+    nat_probe.add_argument("--mode", choices=("system",), default="system")
+    nat_probe.add_argument(
+        "--objdump", default="/home/guidex/src/ia64-2-toolchain-shim/ia64-linux-objdump")
+    nat_probe.add_argument("--ski-init-file", type=Path,
+                           help="optional pinned-Ski debugger command file for probe diagnosis")
 
     kernel = subparsers.add_parser("kernel", help="run a kernel only after separate authorization")
     kernel.add_argument("--artifact", type=Path, required=True)
@@ -1038,6 +1124,94 @@ def run_unaligned_reference_probe(args: argparse.Namespace) -> int:
         "cpu_count": 1,
         "load_ranges": validate_direct_system_elf(args.artifact),
         "unaligned_reference_symbols": symbols,
+    })
+    result_path.write_text(json.dumps(run_record, indent=2) + "\n", encoding="utf-8")
+    return status
+
+
+def nat_consumption_symbols(elf: Any) -> dict[str, int]:
+    required = (
+        "ia64_ivt", "ivt_nat_consumption", "ia64_nat_consumption_entry",
+        "ia64_nat_consumption_record", "ia64_nat_consumption_spec_load_site",
+        "ia64_nat_consumption_fault_site", "ia64_nat_consumption_continuation",
+        "ia64_nat_consumption_target", "rse_backing_store_base", "rse_backing_store_top",
+    )
+    missing = [name for name in required if name not in elf.symbols]
+    if missing:
+        raise GateError("NaT Consumption ELF lacks required symbols: " + ", ".join(missing))
+    return {
+        "ivt": elf.symbols["ia64_ivt"]["value"],
+        "vector": elf.symbols["ivt_nat_consumption"]["value"],
+        "entry": elf.symbols["ia64_nat_consumption_entry"]["value"],
+        "record": elf.symbols["ia64_nat_consumption_record"]["value"],
+        "spec_site": elf.symbols["ia64_nat_consumption_spec_load_site"]["value"],
+        "fault_site": elf.symbols["ia64_nat_consumption_fault_site"]["value"],
+        "continuation": elf.symbols["ia64_nat_consumption_continuation"]["value"],
+        "target": elf.symbols["ia64_nat_consumption_target"]["value"],
+        "rse_base": elf.symbols["rse_backing_store_base"]["value"],
+        "rse_top": elf.symbols["rse_backing_store_top"]["value"],
+    }
+
+
+def run_nat_consumption_probe(args: argparse.Namespace) -> int:
+    require_linux()
+    if not args.artifact.is_file():
+        raise GateError(f"selected Register NaT Consumption probe ELF does not exist: {args.artifact}")
+    NAT_CONSUMPTION_VALIDATOR.validate_probe_manifest(
+        args.artifact, args.manifest, args.expected_sha256)
+    probe_elf = ELF_VALIDATOR.Elf64(args.artifact)
+    symbols = nat_consumption_symbols(probe_elf)
+    load_ranges = validate_direct_system_elf(args.artifact)
+
+    validation_env = os.environ.copy()
+    validation_env["PYTHONDONTWRITEBYTECODE"] = "1"
+    gate_cmd = [
+        sys.executable, str(ROOT / "scripts" / "validate-ia64-nat-consumption.py"),
+        "--repo-root", str(ROOT), "--elf", str(args.artifact), "--objdump", args.objdump,
+        "--probe", "--manifest", str(args.manifest), "--expected-sha256", args.expected_sha256,
+    ]
+    result = subprocess.run(gate_cmd, capture_output=True, text=True,
+                            check=False, env=validation_env)
+    print(result.stdout, end="")
+    if result.returncode:
+        print(result.stderr, file=sys.stderr, end="")
+        raise GateError("Register NaT Consumption probe static gates failed")
+
+    simulator = verify_ski(args.ski_prefix, args.simulator_sha256)
+    capture_dir = args.capture_dir or Path(tempfile.mkdtemp(
+        prefix="guidexos-ia64-nat-consumption-probe-"))
+    contract = {
+        "expected_faults": 1,
+        "symbols": symbols,
+        "probe": True,
+        "success_classification": "NAT_CONSUMPTION_PROBE_PASS",
+        "require_intentional_exit": True,
+        "ssc_exit_function": 66,
+    }
+    with verified_snapshot(args.artifact, args.expected_sha256) as snapshot:
+        validate_direct_system_elf(snapshot)
+        command = [str(simulator)]
+        if args.ski_init_file is not None:
+            if not args.ski_init_file.is_file():
+                raise GateError(f"selected Ski debugger init file does not exist: {args.ski_init_file}")
+            command.extend(("-i", str(args.ski_init_file)))
+        command.extend(("-forcesystem", str(snapshot)))
+        status = run_simulator(
+            command, args.timeout, capture_dir, "ia64-register-nat-consumption-probe",
+            artifact_hash=args.expected_sha256, nat_consumption_contract=contract)
+
+    result_path = capture_dir / "run-result.json"
+    run_record = read_json(result_path, "Register NaT Consumption probe run result")
+    run_record.update({
+        "artifact_manifest": str(args.manifest.resolve()),
+        "artifact_manifest_sha256": sha256(args.manifest),
+        "simulator_sha256": args.simulator_sha256,
+        "ski_source_commit": QUALIFIED_SKI_COMMIT,
+        "ski_version": QUALIFIED_SKI_VERSION,
+        "execution_mode": "-forcesystem",
+        "cpu_count": 1,
+        "load_ranges": load_ranges,
+        "nat_consumption_symbols": symbols,
     })
     result_path.write_text(json.dumps(run_record, indent=2) + "\n", encoding="utf-8")
     return status
@@ -1308,6 +1482,96 @@ def verify_unaligned_reference_probe_evidence(manifest: dict[str, Any],
             "record_fields": fields}
 
 
+def verify_nat_consumption_probe_evidence(manifest: dict[str, Any],
+                                          objdump: str) -> dict[str, Any]:
+    evidence = manifest.get("nat_consumption_probe")
+    if not isinstance(evidence, dict) or \
+            evidence.get("schema") != "guidexos-ia64-nat-consumption-probe-evidence-v1" or \
+            evidence.get("qualified") is not True or evidence.get("expected_faults") != 1 or \
+            evidence.get("expected_continuations") != 1:
+        raise GateError("candidate manifest lacks a passing independent Register NaT Consumption probe")
+    try:
+        probe_elf = Path(evidence["artifact"]).resolve(strict=True)
+        probe_manifest_path = Path(evidence["manifest"]).resolve(strict=True)
+        run_result_path = Path(evidence["run_result"]).resolve(strict=True)
+        stdout_path = Path(evidence["stdout"]).resolve(strict=True)
+        stderr_path = Path(evidence["stderr"]).resolve(strict=True)
+        counts_path = Path(evidence["instruction_counts"]).resolve(strict=True)
+    except (KeyError, OSError, TypeError) as exc:
+        raise GateError(f"independent Register NaT Consumption probe paths are invalid: {exc}") from exc
+
+    for path, key, label in (
+            (probe_elf, "artifact_sha256", "ELF"),
+            (probe_manifest_path, "manifest_sha256", "manifest"),
+            (run_result_path, "run_result_sha256", "run-result"),
+            (stdout_path, "stdout_sha256", "stdout"),
+            (stderr_path, "stderr_sha256", "stderr"),
+            (counts_path, "instruction_counts_sha256", "instruction statistics")):
+        if sha256(path) != evidence.get(key):
+            raise GateError(f"Register NaT Consumption probe {label} changed after its qualifying run")
+    try:
+        NAT_CONSUMPTION_VALIDATOR.validate_probe_manifest(
+            probe_elf, probe_manifest_path, evidence["artifact_sha256"])
+        static_errors = NAT_CONSUMPTION_VALIDATOR.validate_static(
+            ROOT, probe_elf, Path(objdump), probe=True, manifest_path=probe_manifest_path,
+            expected_sha256=evidence["artifact_sha256"])
+        probe_symbols = nat_consumption_symbols(ELF_VALIDATOR.Elf64(probe_elf))
+    except (KeyError, NAT_CONSUMPTION_VALIDATOR.GateError) as exc:
+        raise GateError(f"independent Register NaT Consumption probe no longer qualifies: {exc}") from exc
+    if static_errors:
+        raise GateError("independent Register NaT Consumption probe static gates failed: " +
+                        "; ".join(static_errors))
+
+    run_record = read_json(run_result_path, "Register NaT Consumption probe run result")
+    if run_record.get("classification") != "NAT_CONSUMPTION_PROBE_PASS" or \
+            run_record.get("artifact_sha256") != evidence["artifact_sha256"] or \
+            run_record.get("artifact_manifest_sha256") != evidence["manifest_sha256"] or \
+            run_record.get("ski_fault_count") != 1 or \
+            run_record.get("nat_consumption_expected_faults") != 1 or \
+            run_record.get("expected_exception_faults") != 1 or \
+            run_record.get("ski_instruction_count") is None or \
+            run_record.get("exit_code") != 0 or run_record.get("timed_out") is not False or \
+            run_record.get("cleanup_complete") is not True or \
+            run_record.get("execution_mode") != "-forcesystem" or \
+            run_record.get("cpu_count") != 1 or \
+            run_record.get("simulator_sha256") != QUALIFIED_SKI_SHA256 or \
+            run_record.get("ski_source_commit") != QUALIFIED_SKI_COMMIT or \
+            run_record.get("ski_version") != QUALIFIED_SKI_VERSION or \
+            run_record.get("nat_consumption_ssc_exit_function") != 66 or \
+            run_record.get("nat_consumption_evidence_errors") != []:
+        raise GateError("independent Register NaT Consumption probe result is incomplete or did not qualify")
+    if Path(run_record.get("stdout", "")).resolve() != stdout_path or \
+            Path(run_record.get("stderr", "")).resolve() != stderr_path or \
+            Path(run_record.get("instruction_counts", "")).resolve() != counts_path or \
+            run_record.get("stdout_sha256") != evidence["stdout_sha256"] or \
+            run_record.get("stderr_sha256") != evidence["stderr_sha256"] or \
+            run_record.get("instruction_counts_sha256") != evidence["instruction_counts_sha256"]:
+        raise GateError("Register NaT Consumption probe run-result does not bind its capture files")
+    stdout_text = stdout_path.read_text(encoding="utf-8", errors="replace")
+    stderr_text = stderr_path.read_text(encoding="utf-8", errors="replace")
+    fields, output_errors = NAT_CONSUMPTION_VALIDATOR.validate_output(
+        stdout_text, probe_symbols, probe=True)
+    unexpected_faults = [line for line in (stdout_text + "\n" + stderr_text).splitlines()
+                         if not line.startswith("IA64_NAT_CONSUMPTION_") and
+                         any(marker in line.lower() for marker in FAULT_MARKERS)]
+    if unexpected_faults:
+        output_errors.append("unexpected Ski fault/exception diagnostic: " +
+                             unexpected_faults[0][:180])
+    if output_errors:
+        raise GateError("independent Register NaT Consumption output failed revalidation: " +
+                        "; ".join(output_errors))
+    if run_record.get("nat_consumption_record_fields") != fields:
+        raise GateError("Register NaT Consumption frame differs from its raw guest output")
+    if validate_direct_system_elf(probe_elf) != run_record.get("load_ranges"):
+        raise GateError("probe result does not bind current system-mode PT_LOAD ranges")
+    if run_record.get("nat_consumption_symbols") != probe_symbols:
+        raise GateError("probe result does not bind vector, frame, source, and continuation symbols")
+    return {"artifact": probe_elf, "artifact_sha256": evidence["artifact_sha256"],
+            "manifest": probe_manifest_path, "run_result": run_result_path,
+            "symbols": probe_symbols, "simulator_sha256": run_record.get("simulator_sha256"),
+            "record_fields": fields}
+
+
 def verify_kernel_resource_limits(timeout: float) -> dict[str, int | float]:
     if timeout <= 0 or timeout > 60:
         raise GateError("kernel execution requires a wall-clock timeout no greater than 60 seconds")
@@ -1362,19 +1626,23 @@ def run_kernel(args: argparse.Namespace) -> int:
                 manifest.get("break_exception_static_gates") != "PASS" or \
                 manifest.get("general_exception_static_gates") != "PASS" or \
                 manifest.get("unaligned_reference_static_gates") != "PASS" or \
+                manifest.get("nat_consumption_static_gates") != "PASS" or \
                 manifest.get("post_rfi_static_gates") != "PASS" or \
-                manifest.get("expected_exception_faults") != 4 or \
+                manifest.get("expected_exception_faults") != 5 or \
                 manifest.get("general_exception_expected_faults") != 1 or \
                 manifest.get("unaligned_reference_expected_faults") != 1 or \
+                manifest.get("nat_consumption_expected_faults") != 1 or \
                 manifest.get("guest_execution_authorized") is not False:
             raise GateError("early-exec manifest or static gates are incomplete")
         probe_evidence = verify_break_probe_evidence(manifest)
         general_probe_evidence = verify_general_exception_probe_evidence(manifest)
         unaligned_probe_evidence = verify_unaligned_reference_probe_evidence(
             manifest, args.objdump)
+        nat_probe_evidence = verify_nat_consumption_probe_evidence(manifest, args.objdump)
         if probe_evidence["simulator_sha256"] != simulator_hash or \
                 general_probe_evidence["simulator_sha256"] != simulator_hash or \
-                unaligned_probe_evidence["simulator_sha256"] != simulator_hash:
+                unaligned_probe_evidence["simulator_sha256"] != simulator_hash or \
+                nat_probe_evidence["simulator_sha256"] != simulator_hash:
             raise GateError("kernel and all independent exception probes must use the same qualified Ski binary")
         validator_cmd = [sys.executable, str(ROOT / "scripts" / "validate-ia64-elf.py"),
                          "--elf", str(args.artifact), "--repo-root", str(ROOT),
@@ -1425,6 +1693,16 @@ def run_kernel(args: argparse.Namespace) -> int:
         if result.returncode:
             print(result.stderr, file=sys.stderr, end="")
             raise GateError("Unaligned Reference static source/disassembly/identity gates failed")
+        nat_consumption_gate_cmd = [
+            sys.executable, str(ROOT / "scripts" / "validate-ia64-nat-consumption.py"),
+            "--repo-root", str(ROOT), "--elf", str(args.artifact), "--objdump", args.objdump,
+            "--manifest", str(args.manifest), "--expected-sha256", args.expected_sha256]
+        result = subprocess.run(nat_consumption_gate_cmd, capture_output=True, text=True,
+                                check=False, env=validation_env)
+        print(result.stdout, end="")
+        if result.returncode:
+            print(result.stderr, file=sys.stderr, end="")
+            raise GateError("Register NaT Consumption static source/disassembly/identity gates failed")
         cpu_state_cmd = [sys.executable, str(ROOT / "scripts" / "validate-ia64-cpu-state.py"),
                          "--repo-root", str(ROOT), "--elf", str(args.artifact), "--objdump", args.objdump]
         result = subprocess.run(cpu_state_cmd, capture_output=True, text=True,
@@ -1446,6 +1724,7 @@ def run_kernel(args: argparse.Namespace) -> int:
     break_exception_contract = None
     general_exception_contract = None
     unaligned_reference_contract = None
+    nat_consumption_contract = None
     if args.profile == "early-exec":
         candidate_elf = ELF_VALIDATOR.Elf64(args.artifact)
         required_symbols = ("ia64_ivt", "rse_backing_store_base", "rse_backing_store_top",
@@ -1457,7 +1736,10 @@ def run_kernel(args: argparse.Namespace) -> int:
                             "ia64_unaligned_reference_record",
                             "ia64_unaligned_reference_buffer",
                             "ia64_unaligned_reference_fault_site",
-                            "ia64_unaligned_reference_continuation")
+                            "ia64_unaligned_reference_continuation",
+                            "ia64_nat_consumption_record",
+                            "ia64_nat_consumption_fault_site",
+                            "ia64_nat_consumption_continuation")
         if any(name not in candidate_elf.symbols for name in required_symbols):
             raise GateError("candidate ELF lacks CPU-state checkpoint expectation symbols")
         checkpoint_expectations = {
@@ -1514,6 +1796,14 @@ def run_kernel(args: argparse.Namespace) -> int:
             "require_intentional_exit": True,
             "ssc_exit_function": 66,
         }
+        nat_consumption_contract = {
+            "expected_faults": 1,
+            "symbols": nat_consumption_symbols(candidate_elf),
+            "probe": False,
+            "success_classification": "NAT_CONSUMPTION_KERNEL_PASS",
+            "require_intentional_exit": True,
+            "ssc_exit_function": 66,
+        }
     with verified_snapshot(args.artifact, args.expected_sha256) as snapshot:
         validate_direct_system_elf(snapshot)
         command = [str(simulator), "-forcesystem", str(snapshot)]
@@ -1522,7 +1812,8 @@ def run_kernel(args: argparse.Namespace) -> int:
                                checkpoint_expectations=checkpoint_expectations,
                                break_exception_contract=break_exception_contract,
                                general_exception_contract=general_exception_contract,
-                               unaligned_reference_contract=unaligned_reference_contract)
+                               unaligned_reference_contract=unaligned_reference_contract,
+                               nat_consumption_contract=nat_consumption_contract)
 
     result_path = capture_dir / "run-result.json"
     run_record = read_json(result_path, "kernel run result")
@@ -1564,6 +1855,11 @@ def run_kernel(args: argparse.Namespace) -> int:
         run_record["unaligned_reference_probe_simulator_sha256"] = \
             unaligned_probe_evidence["simulator_sha256"]
         run_record["unaligned_reference_expected_faults"] = 1
+        run_record["nat_consumption_probe_artifact_sha256"] = nat_probe_evidence["artifact_sha256"]
+        run_record["nat_consumption_probe_run_result"] = str(nat_probe_evidence["run_result"])
+        run_record["nat_consumption_probe_simulator_sha256"] = \
+            nat_probe_evidence["simulator_sha256"]
+        run_record["nat_consumption_expected_faults"] = 1
     result_path.write_text(json.dumps(run_record, indent=2) + "\n", encoding="utf-8")
     return status
 
@@ -1582,6 +1878,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_general_exception_probe(args)
         if args.operation == "unaligned-reference-probe":
             return run_unaligned_reference_probe(args)
+        if args.operation == "nat-consumption-probe":
+            return run_nat_consumption_probe(args)
         return run_kernel(args)
     except GateError as exc:
         print(f"[RUN_BLOCKED] {exc}", file=sys.stderr)

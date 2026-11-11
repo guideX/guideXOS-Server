@@ -73,6 +73,16 @@ def load_unaligned_reference_validator(repo_root: Path) -> Any:
     return module
 
 
+def load_nat_consumption_validator(repo_root: Path) -> Any:
+    path = repo_root / "scripts" / "validate-ia64-nat-consumption.py"
+    spec = importlib.util.spec_from_file_location("ia64_cpu_state_nat_validator", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load Register NaT Consumption validator: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def read_sources(repo_root: Path) -> dict[str, str]:
     paths = {
         "boot": repo_root / "kernel/arch/ia64/boot.s",
@@ -296,7 +306,8 @@ def validate_runtime_evidence(stdout: str, stderr: str, instruction_counts: str,
                               ivt: int, rse_base: int, rse_top: int,
                               general_fault_site: int | None = None,
                               general_continuation: int | None = None,
-                              unaligned_symbols: dict[str, int] | None = None) -> tuple[dict[str, Any], list[str]]:
+                              unaligned_symbols: dict[str, int] | None = None,
+                              nat_symbols: dict[str, int] | None = None) -> tuple[dict[str, Any], list[str]]:
     """Validate raw guest records together with the runner's captured result."""
     records, errors = validate_checkpoint_output(
         stdout, ivt=ivt, rse_base=rse_base, rse_top=rse_top)
@@ -310,14 +321,16 @@ def validate_runtime_evidence(stdout: str, stderr: str, instruction_counts: str,
     classification = run_result.get("classification")
     if classification not in ("GUEST_EXIT_ZERO", "BREAK_EXCEPTION_KERNEL_PASS",
                                "GENERAL_EXCEPTION_KERNEL_PASS",
-                               "UNALIGNED_REFERENCE_KERNEL_PASS") or \
+                               "UNALIGNED_REFERENCE_KERNEL_PASS",
+                               "NAT_CONSUMPTION_KERNEL_PASS") or \
             run_result.get("exit_code") != 0 or run_result.get("timed_out") is not False:
         errors.append("runner did not report successful intentional guest termination")
     expected_fault_count = (2 if classification == "BREAK_EXCEPTION_KERNEL_PASS" else
                             3 if classification == "GENERAL_EXCEPTION_KERNEL_PASS" else
-                            4 if classification == "UNALIGNED_REFERENCE_KERNEL_PASS" else 0)
+                            4 if classification == "UNALIGNED_REFERENCE_KERNEL_PASS" else
+                            5 if classification == "NAT_CONSUMPTION_KERNEL_PASS" else 0)
     if classification in ("BREAK_EXCEPTION_KERNEL_PASS", "GENERAL_EXCEPTION_KERNEL_PASS",
-                          "UNALIGNED_REFERENCE_KERNEL_PASS"):
+                          "UNALIGNED_REFERENCE_KERNEL_PASS", "NAT_CONSUMPTION_KERNEL_PASS"):
         if run_result.get("ski_fault_count") != expected_fault_count or \
                 run_result.get("break_exception_expected_faults") != 2 or \
                 run_result.get("break_exception_evidence_errors") != []:
@@ -344,8 +357,10 @@ def validate_runtime_evidence(stdout: str, stderr: str, instruction_counts: str,
                           if line.startswith("IA64_BREAK_POST_RFI_PSR")]
         if len(post_rfi_lines) != 2:
             errors.append("raw guest output lacks exactly two immediate post-rfi PSR records")
-    if classification in ("GENERAL_EXCEPTION_KERNEL_PASS", "UNALIGNED_REFERENCE_KERNEL_PASS"):
-        combined_expected = 4 if classification == "UNALIGNED_REFERENCE_KERNEL_PASS" else 3
+    if classification in ("GENERAL_EXCEPTION_KERNEL_PASS", "UNALIGNED_REFERENCE_KERNEL_PASS",
+                          "NAT_CONSUMPTION_KERNEL_PASS"):
+        combined_expected = (5 if classification == "NAT_CONSUMPTION_KERNEL_PASS" else
+                             4 if classification == "UNALIGNED_REFERENCE_KERNEL_PASS" else 3)
         if run_result.get("ski_fault_count") != combined_expected or \
                 run_result.get("expected_exception_faults") != combined_expected or \
                 run_result.get("break_exception_expected_faults") != 2 or \
@@ -370,7 +385,7 @@ def validate_runtime_evidence(stdout: str, stderr: str, instruction_counts: str,
             if not isinstance(general_record, dict) or \
                     run_result.get("general_exception_record_fields") != general_record:
                 errors.append("runner General Exception frame differs from the raw guest record")
-    if classification == "UNALIGNED_REFERENCE_KERNEL_PASS":
+    if classification in ("UNALIGNED_REFERENCE_KERNEL_PASS", "NAT_CONSUMPTION_KERNEL_PASS"):
         if unaligned_symbols is None or \
                 run_result.get("unaligned_reference_expected_faults") != 1 or \
                 run_result.get("unaligned_reference_evidence_errors") != [] or \
@@ -387,6 +402,21 @@ def validate_runtime_evidence(stdout: str, stderr: str, instruction_counts: str,
             if not isinstance(unaligned_record, dict) or \
                     run_result.get("unaligned_reference_record_fields") != unaligned_record:
                 errors.append("runner Unaligned Reference frame differs from the raw guest record")
+    if classification == "NAT_CONSUMPTION_KERNEL_PASS":
+        if nat_symbols is None or \
+                run_result.get("nat_consumption_expected_faults") != 1 or \
+                run_result.get("nat_consumption_evidence_errors") != [] or \
+                run_result.get("nat_consumption_ssc_exit_function") != 66 or \
+                run_result.get("expected_exception_faults") != 5:
+            errors.append("runner did not bind the Register NaT Consumption fault/return contract")
+        else:
+            nat_validator = load_nat_consumption_validator(Path(__file__).resolve().parents[1])
+            nat_record, nat_errors = nat_validator.validate_output(stdout, nat_symbols, probe=False)
+            if nat_errors:
+                errors.extend(f"Register NaT Consumption evidence: {error}" for error in nat_errors)
+            if not isinstance(nat_record, dict) or \
+                    run_result.get("nat_consumption_record_fields") != nat_record:
+                errors.append("runner Register NaT Consumption frame differs from the raw guest record")
     elif classification == "GUEST_EXIT_ZERO" and run_result.get("ski_fault_count") not in (None, 0):
         errors.append("zero-fault kernel classification reports a simulator fault")
     simulator_output = stdout + "\n" + stderr
@@ -402,12 +432,15 @@ def validate_runtime_evidence(stdout: str, stderr: str, instruction_counts: str,
     # classification. Ignore their structured markers when scanning diagnostics.
     allowed_exception_prefixes = ()
     if classification in ("BREAK_EXCEPTION_KERNEL_PASS", "GENERAL_EXCEPTION_KERNEL_PASS",
-                          "UNALIGNED_REFERENCE_KERNEL_PASS"):
+                          "UNALIGNED_REFERENCE_KERNEL_PASS", "NAT_CONSUMPTION_KERNEL_PASS"):
         allowed_exception_prefixes += ("IA64_BREAK_",)
-    if classification in ("GENERAL_EXCEPTION_KERNEL_PASS", "UNALIGNED_REFERENCE_KERNEL_PASS"):
+    if classification in ("GENERAL_EXCEPTION_KERNEL_PASS", "UNALIGNED_REFERENCE_KERNEL_PASS",
+                          "NAT_CONSUMPTION_KERNEL_PASS"):
         allowed_exception_prefixes += ("IA64_GENERAL_EXCEPTION_",)
-    if classification == "UNALIGNED_REFERENCE_KERNEL_PASS":
+    if classification in ("UNALIGNED_REFERENCE_KERNEL_PASS", "NAT_CONSUMPTION_KERNEL_PASS"):
         allowed_exception_prefixes += ("IA64_UNALIGNED_REFERENCE_",)
+    if classification == "NAT_CONSUMPTION_KERNEL_PASS":
+        allowed_exception_prefixes += ("IA64_NAT_CONSUMPTION_",)
     diagnostic_lines = [line for line in simulator_output.splitlines()
                         if not line.startswith(allowed_exception_prefixes)]
     diagnostic_output = "\n".join(diagnostic_lines)
@@ -581,6 +614,9 @@ def validate_runtime_files(repo_root: Path, elf_path: Path, manifest_path: Path,
             manifest.get("profile") != "early-exec" or manifest.get("sha256") != actual_sha256 or \
             manifest.get("static_gates") != "PASS" or \
             manifest.get("cpu_state_static_gates") != "PASS" or \
+            manifest.get("nat_consumption_static_gates") != "PASS" or \
+            manifest.get("nat_consumption_expected_faults") != 1 or \
+            manifest.get("expected_exception_faults") != 5 or \
             manifest.get("guest_execution_authorized") is not False or \
             manifest.get("runtime_qualified") is not False or \
             manifest.get("scheduler_qualified") is not False or \
@@ -627,18 +663,33 @@ def validate_runtime_files(repo_root: Path, elf_path: Path, manifest_path: Path,
 
     if not isinstance(run_result, dict):
         return {}, errors + ["runner result is not a JSON object"]
-    if run_result.get("classification") == "UNALIGNED_REFERENCE_KERNEL_PASS":
+    if run_result.get("classification") in ("UNALIGNED_REFERENCE_KERNEL_PASS",
+                                               "NAT_CONSUMPTION_KERNEL_PASS"):
         probe = manifest.get("unaligned_reference_probe") if isinstance(manifest, dict) else None
         if not isinstance(manifest, dict) or \
                 manifest.get("unaligned_reference_static_gates") != "PASS" or \
                 manifest.get("unaligned_reference_expected_faults") != 1 or \
-                manifest.get("expected_exception_faults") != 4 or \
+                manifest.get("expected_exception_faults") != 5 or \
+                manifest.get("nat_consumption_static_gates") != "PASS" or \
+                manifest.get("nat_consumption_expected_faults") != 1 or \
                 not isinstance(probe, dict) or probe.get("qualified") is not True or \
                 probe.get("expected_faults") != 1 or probe.get("expected_continuations") != 1 or \
                 run_result.get("unaligned_reference_probe_artifact_sha256") != \
                 probe.get("artifact_sha256") or \
                 run_result.get("unaligned_reference_probe_simulator_sha256") != simulator_sha256:
             errors.append("candidate manifest/run does not bind the qualified Unaligned Reference probe")
+    if run_result.get("classification") == "NAT_CONSUMPTION_KERNEL_PASS":
+        probe = manifest.get("nat_consumption_probe") if isinstance(manifest, dict) else None
+        if not isinstance(manifest, dict) or \
+                manifest.get("nat_consumption_static_gates") != "PASS" or \
+                manifest.get("nat_consumption_expected_faults") != 1 or \
+                manifest.get("expected_exception_faults") != 5 or \
+                not isinstance(probe, dict) or probe.get("qualified") is not True or \
+                probe.get("expected_faults") != 1 or probe.get("expected_continuations") != 1 or \
+                run_result.get("nat_consumption_probe_artifact_sha256") != \
+                probe.get("artifact_sha256") or \
+                run_result.get("nat_consumption_probe_simulator_sha256") != simulator_sha256:
+            errors.append("candidate manifest/run does not bind the qualified Register NaT Consumption probe")
     command = run_result.get("command")
     if isinstance(command, list) and command:
         try:
@@ -683,7 +734,10 @@ def validate_runtime_files(repo_root: Path, elf_path: Path, manifest_path: Path,
     required_symbols = ("ia64_ivt", "rse_backing_store_base", "rse_backing_store_top",
                         "ia64_break_slot1_bundle", "ia64_break_slot2_bundle",
                         "ia64_break_slot1_post_rfi_capture",
-                        "ia64_break_slot2_continuation")
+                        "ia64_break_slot2_continuation",
+                        "ia64_nat_consumption_record",
+                        "ia64_nat_consumption_fault_site",
+                        "ia64_nat_consumption_continuation")
     if any(name not in symbols for name in required_symbols):
         return {}, errors + ["candidate ELF lacks IVT or RSE expectation symbols"]
     gp_symbol = symbols.get("__gp")
@@ -743,11 +797,23 @@ def validate_runtime_files(repo_root: Path, elf_path: Path, manifest_path: Path,
             "rse_base": symbols["rse_backing_store_base"]["value"],
             "rse_top": symbols["rse_backing_store_top"]["value"],
         },
+        nat_symbols={
+            "ivt": symbols.get("ia64_ivt", {}).get("value", 0),
+            "vector": symbols.get("ivt_nat_consumption", {}).get("value", 0),
+            "entry": symbols.get("ia64_nat_consumption_entry", {}).get("value", 0),
+            "record": symbols.get("ia64_nat_consumption_record", {}).get("value", 0),
+            "spec_site": symbols.get("ia64_nat_consumption_spec_load_site", {}).get("value", 0),
+            "fault_site": symbols.get("ia64_nat_consumption_fault_site", {}).get("value", 0),
+            "continuation": symbols.get("ia64_nat_consumption_continuation", {}).get("value", 0),
+            "target": symbols.get("ia64_nat_consumption_target", {}).get("value", 0),
+            "rse_base": symbols["rse_backing_store_base"]["value"],
+            "rse_top": symbols["rse_backing_store_top"]["value"],
+        },
     )
     errors.extend(runtime_errors)
     if run_result.get("classification") in (
             "BREAK_EXCEPTION_KERNEL_PASS", "GENERAL_EXCEPTION_KERNEL_PASS",
-            "UNALIGNED_REFERENCE_KERNEL_PASS"):
+            "UNALIGNED_REFERENCE_KERNEL_PASS", "NAT_CONSUMPTION_KERNEL_PASS"):
         runner_path = repo_root / "scripts" / "run-ia64-ski.py"
         spec = importlib.util.spec_from_file_location("ia64_postflight_ski_runner", runner_path)
         if spec is None or spec.loader is None:
@@ -769,9 +835,11 @@ def validate_runtime_files(repo_root: Path, elf_path: Path, manifest_path: Path,
                 "IA64_BREAK_EXCEPTION_VALIDATION")
             contract["stderr_text"] = stderr
             if run_result.get("classification") in (
-                    "GENERAL_EXCEPTION_KERNEL_PASS", "UNALIGNED_REFERENCE_KERNEL_PASS"):
+                    "GENERAL_EXCEPTION_KERNEL_PASS", "UNALIGNED_REFERENCE_KERNEL_PASS",
+                    "NAT_CONSUMPTION_KERNEL_PASS"):
                 contract["general_exception_contract"] = {"revalidated_by_cpu_postflight": True}
-            if run_result.get("classification") == "UNALIGNED_REFERENCE_KERNEL_PASS":
+            if run_result.get("classification") in (
+                    "UNALIGNED_REFERENCE_KERNEL_PASS", "NAT_CONSUMPTION_KERNEL_PASS"):
                 contract["unaligned_reference_contract"] = {"revalidated_by_cpu_postflight": True}
             break_errors = runner.validate_break_output(stdout, contract)
             if break_errors:
@@ -782,7 +850,8 @@ def validate_runtime_files(repo_root: Path, elf_path: Path, manifest_path: Path,
                 errors.extend(f"Break exception evidence: {error}" for error in observation_errors)
             if run_result.get("break_exception_post_rfi_observations") != observed_psr:
                 errors.append("runner post-rfi capture records differ from raw guest output")
-            if run_result.get("classification") == "UNALIGNED_REFERENCE_KERNEL_PASS":
+            if run_result.get("classification") in (
+                    "UNALIGNED_REFERENCE_KERNEL_PASS", "NAT_CONSUMPTION_KERNEL_PASS"):
                 unaligned_validator = load_unaligned_reference_validator(repo_root)
                 unaligned_record, unaligned_errors = unaligned_validator.validate_output(
                     stdout, {
@@ -803,6 +872,26 @@ def validate_runtime_files(repo_root: Path, elf_path: Path, manifest_path: Path,
                                   for error in unaligned_errors)
                     if run_result.get("unaligned_reference_record_fields") != unaligned_record:
                         errors.append("runner Unaligned Reference capture differs from raw guest output")
+            if run_result.get("classification") == "NAT_CONSUMPTION_KERNEL_PASS":
+                nat_validator = load_nat_consumption_validator(repo_root)
+                nat_record, nat_errors = nat_validator.validate_output(
+                    stdout, {
+                        "ivt": symbols["ia64_ivt"]["value"],
+                        "vector": symbols["ivt_nat_consumption"]["value"],
+                        "entry": symbols["ia64_nat_consumption_entry"]["value"],
+                        "record": symbols["ia64_nat_consumption_record"]["value"],
+                        "spec_site": symbols["ia64_nat_consumption_spec_load_site"]["value"],
+                        "fault_site": symbols["ia64_nat_consumption_fault_site"]["value"],
+                        "continuation": symbols["ia64_nat_consumption_continuation"]["value"],
+                        "target": symbols["ia64_nat_consumption_target"]["value"],
+                        "rse_base": symbols["rse_backing_store_base"]["value"],
+                        "rse_top": symbols["rse_backing_store_top"]["value"],
+                    }, probe=False)
+                if nat_errors or run_result.get("nat_consumption_record_fields") != nat_record:
+                    errors.extend(f"Register NaT Consumption evidence: {error}"
+                                  for error in nat_errors)
+                    if run_result.get("nat_consumption_record_fields") != nat_record:
+                        errors.append("runner Register NaT Consumption capture differs from raw guest output")
     source_errors = validate_checkpoint_sources(repo_root)
     if source_errors:
         errors.extend(f"checkpoint source contract: {error}" for error in source_errors)
@@ -876,6 +965,15 @@ def main() -> int:
                 print("UNALIGNED_REFERENCE_EVIDENCE=PASS vector=0x5a00 exact IFA/ISR and one bounded continuation")
                 print("SIMULATOR_FAULTS=PASS total=4 expected_break=2 expected_general=1 "
                       "expected_unaligned=1 unexpected=0")
+            elif run_record.get("classification") == "NAT_CONSUMPTION_KERNEL_PASS":
+                print("BREAK_EXCEPTION_EVIDENCE=PASS two records, exact vector/immediates/slots, "
+                      "distinct return markers, and one continuation per slot")
+                print("POST_RFI_PSR=PASS two ordered direct captures show PSR.i=0, PSR.ic=1 before cleanup")
+                print("GENERAL_EXCEPTION_EVIDENCE=PASS one exact Illegal Operation site and continuation")
+                print("UNALIGNED_REFERENCE_EVIDENCE=PASS vector=0x5a00 exact IFA/ISR and one bounded continuation")
+                print("NAT_CONSUMPTION_EVIDENCE=PASS vector=0x5600 one exact Register NaT Consumption continuation")
+                print("SIMULATOR_FAULTS=PASS total=5 expected_break=2 expected_general=1 "
+                      "expected_unaligned=1 expected_nat=1 unexpected=0")
             else:
                 print("SIMULATOR_FAULTS=PASS total=0")
             print("CANDIDATE_IDENTITY=PASS ELF, manifest, loader record, invocation, and runner hash agree")

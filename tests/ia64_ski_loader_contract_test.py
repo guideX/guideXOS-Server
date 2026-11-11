@@ -78,6 +78,9 @@ def make_manifest(path: Path, artifact: Path, profile: str = "early-exec") -> di
         "static_gates": "PASS" if profile == "early-exec" else "NOT_APPLICABLE",
         "cpu_state_checkpoint_schema": "guidexos-ia64-cpu-state-checkpoints-v1" if profile == "early-exec" else "none",
         "cpu_state_static_gates": "PASS" if profile == "early-exec" else "NOT_APPLICABLE",
+        "nat_consumption_static_gates": "PASS" if profile == "early-exec" else "NOT_APPLICABLE",
+        "nat_consumption_expected_faults": 1 if profile == "early-exec" else 0,
+        "expected_exception_faults": 5 if profile == "early-exec" else 0,
         "runtime_qualified": False,
         "scheduler_qualified": False,
         "interrupt_fp_preservation": False,
@@ -212,6 +215,7 @@ class SkiLoaderContractTests(unittest.TestCase):
             "invalid hash", "profile mismatch", "unsafe memory map",
             "missing loader evidence", "wrong simulator mode", "absent authorization",
             "compile-only profile", "missing CPU-state checkpoint gate",
+            "missing NaT Consumption static gate",
             "incorrect simulator identity",
         )
         for case in cases:
@@ -227,6 +231,9 @@ class SkiLoaderContractTests(unittest.TestCase):
                 manifest = make_manifest(manifest_path, artifact, profile)
                 if case == "missing CPU-state checkpoint gate":
                     manifest.pop("cpu_state_static_gates")
+                    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+                if case == "missing NaT Consumption static gate":
+                    manifest.pop("nat_consumption_static_gates")
                     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
                 expected_hash = manifest["sha256"]
 

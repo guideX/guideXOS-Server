@@ -61,6 +61,16 @@ class Ia64EarlyExecContractTests(unittest.TestCase):
             self.assertNotIn(forbidden, early)
         self.assertIn("ski_console::stop()", early)
         self.assertIn("kernel::arch::halt()", early)
+        events = ("run_break_exception_qualification()",
+                  "run_general_exception_qualification()",
+                  "run_unaligned_reference_qualification()",
+                  "run_nat_consumption_qualification()")
+        positions = [early.index(event) for event in events]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn("IVT_ENTRY_NAT_CONSUMPTION ivt_nat_consumption,  0x5600", source(BOOT))
+        makefile = source(ROOT / "kernel/Makefile")
+        self.assertIn("filter-out arch/ia64/nat_consumption.cpp", makefile)
+        self.assertIn("filter-out arch/ia64/nat_consumption_entry.s", makefile)
 
     def test_arch_init_only_enables_exception_collection_not_external_interrupts(self) -> None:
         text = source(ARCH)

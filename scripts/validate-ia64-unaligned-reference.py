@@ -160,7 +160,9 @@ def validate_manifest_identity(artifact: Path, manifest_path: Path,
             "guest_execution_authorized": False,
             "unaligned_reference_static_gates": "PASS",
             "unaligned_reference_expected_faults": 1,
-            "expected_exception_faults": 4,
+            "nat_consumption_static_gates": "PASS",
+            "nat_consumption_expected_faults": 1,
+            "expected_exception_faults": 5,
         }
         if any(manifest.get(key) != value for key, value in expected.items()):
             raise GateError("early-exec manifest does not retain the Unaligned Reference contract")
@@ -394,7 +396,7 @@ def validate_static(repo_root: Path, elf_path: Path, objdump: Path, *,
         raw_ivt_text = ivt_text
         ivt_text = early_exec_ivt_source(ivt_text)
         vector_entries = re.findall(
-            r"^IVT_ENTRY_(?:HALT|BREAK|GENERAL_EXCEPTION|UNALIGNED_REFERENCE)\s+\w+,\s*(0x[0-9a-fA-F]+)",
+            r"^IVT_ENTRY_(?:HALT|BREAK|GENERAL_EXCEPTION|UNALIGNED_REFERENCE|NAT_CONSUMPTION)\s+\w+,\s*(0x[0-9a-fA-F]+)",
             ivt_text, re.MULTILINE)
         if len(vector_entries) != 68 or len({int(value, 16) for value in vector_entries}) != 68:
             errors.append("kernel source must retain all 68 distinct architectural IVT slots")
