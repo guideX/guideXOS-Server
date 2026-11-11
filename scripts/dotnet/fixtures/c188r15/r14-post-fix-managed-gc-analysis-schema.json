@@ -1,0 +1,7 @@
+{
+  "analyzer": "C188R13-managed-gc-root-v1",
+  "classification": "MANAGED_GC_ROOT_INCOMPLETE",
+  "recordIntegrity": "1",
+  "transitionParseError": "",
+  "parseError": null
+}

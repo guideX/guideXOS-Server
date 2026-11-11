@@ -1,0 +1,5 @@
+[C188R12R4R5R2R3_TRANSITION] result=initialize_modules_returned managedEntry=probe_follows collection=not_requested
+[C188R13_GC_ROOT_ENTRY] event=attempt abi=UnmanagedCallersOnly-Cdecl seed=0000000E symbol=ManagedMain model=DisplaySettingsProbe collection=one_synchronous_full_request
+[C188R12R4R5R4_THREAD] seq=0000000000000039 event=transition_enter raw0=00000000052B5A48 raw1=0000000003D79360
+[C188R12R4R5R4_THREAD] seq=000000000000003A event=threadstore_publication raw0=0000000003D79360 raw1=0000000000000001
+[C188R12R4R5R4_THREAD] seq=000000000000003B event=transition_attach_complete raw0=0000000003D79360 raw1=0000000000000001

@@ -724,6 +724,42 @@ function Get-R13ManagedGcTerminalObservation([string]$SerialText) {
     }
     return [pscustomobject]@{ terminal=$false; kind='Continuing' }
 }
+function Get-R13ManagedGcAnalysisIntegrityContract([object]$Analysis) {
+    $issues = [System.Collections.Generic.List[string]]::new()
+    if ($null -eq $Analysis) {
+        $issues.Add('analysis-object-missing')
+        return [pscustomobject]@{ Valid=$false; RecordIntegrity=$null; TransitionParseError=$null; ParseError=$null; Issues=@($issues.ToArray()) }
+    }
+    $integrityProperty = $Analysis.PSObject.Properties['recordIntegrity']
+    $transitionErrorProperty = $Analysis.PSObject.Properties['transitionParseError']
+    $parseErrorProperty = $Analysis.PSObject.Properties['parseError']
+    if ($null -eq $integrityProperty) { $issues.Add('top-level-recordIntegrity-missing') }
+    if ($null -eq $transitionErrorProperty) { $issues.Add('top-level-transitionParseError-missing') }
+    if ($null -eq $parseErrorProperty) { $issues.Add('top-level-parseError-missing') }
+    $integrity = if ($null -ne $integrityProperty) { $integrityProperty.Value } else { $null }
+    $transitionError = if ($null -ne $transitionErrorProperty) { $transitionErrorProperty.Value } else { $null }
+    $parseError = if ($null -ne $parseErrorProperty) { $parseErrorProperty.Value } else { $null }
+    if ($null -ne $integrityProperty -and ($integrity -isnot [string] -or $integrity -cnotin @('0','1'))) {
+        $issues.Add('top-level-recordIntegrity-malformed')
+    }
+    if ($null -ne $transitionErrorProperty -and $transitionError -isnot [string]) {
+        $issues.Add('top-level-transitionParseError-malformed')
+    }
+    if ($null -ne $parseErrorProperty -and $null -ne $parseError -and $parseError -isnot [string]) {
+        $issues.Add('top-level-parseError-malformed')
+    }
+    if ($integrity -is [string] -and $integrity -ceq '1' -and
+        $transitionError -is [string] -and -not [string]::IsNullOrWhiteSpace($transitionError)) {
+        $issues.Add('recordIntegrity-contradicts-transitionParseError')
+    }
+    return [pscustomobject]@{
+        Valid=($issues.Count -eq 0)
+        RecordIntegrity=if ($integrity -is [string] -and $integrity -cin @('0','1')) { $integrity } else { $null }
+        TransitionParseError=if ($transitionError -is [string]) { $transitionError } else { $null }
+        ParseError=if ($null -eq $parseError -or $parseError -is [string]) { $parseError } else { $null }
+        Issues=@($issues.ToArray())
+    }
+}
 function Test-NativeAllocationTraceComplete([string]$Text) {
     $marker = 'C188R12R4R5R4R5R2R2_NATIVE_ALLOC'
     $pattern = '\[' + [regex]::Escape($marker) + '\] source=(runtime|backend) invocation=([0-9A-Fa-f]{8}) sequence=([0-9A-Fa-f]{8}) field=([0-9A-Fa-f]{8}) value=([0-9A-Fa-f]{8}) auxiliary=([0-9A-Fa-f]{8})'
@@ -802,7 +838,7 @@ function Read-QmpResponse([System.IO.StreamReader]$Reader,[string]$Command) {
         if ($null -ne $qmpReturnField -or $line -match '"return"\s*:') { return $line }
     }
 }
-function Invoke-Qmp([string]$Command) {
+function Invoke-Qmp([string]$Command,[System.Collections.IDictionary]$QmpArguments=$null) {
     $client = [System.Net.Sockets.TcpClient]::new()
     try {
         $client.Connect('127.0.0.1',$qmpPort)
@@ -819,11 +855,74 @@ function Invoke-Qmp([string]$Command) {
         }
         $writer.WriteLine('{"execute":"qmp_capabilities"}')
         [void](Read-QmpResponse $reader 'qmp_capabilities')
-        $request = '{"execute":"' + $Command + '"}'
+        $requestObject = [ordered]@{ execute=$Command }
+        if ($null -ne $QmpArguments) { $requestObject.arguments=$QmpArguments }
+        $request = $requestObject | ConvertTo-Json -Depth 8 -Compress
         Add-Content -LiteralPath $qmpLog -Value "tx $request" -Encoding utf8
         $writer.WriteLine($request)
         return Read-QmpResponse $reader $Command
     } finally { $client.Dispose() }
+}
+function Capture-R13TimeoutCpuState([string]$CandidateManifestHash,[string]$SerialPath) {
+    $stopResponse = Invoke-Qmp 'stop'
+    $pausedStatusResponse = Invoke-Qmp 'query-status'
+    $pausedStatus = ConvertFrom-QmpQueryStatusResponse -Text $pausedStatusResponse
+    if (-not $pausedStatus.Valid -or [bool]$pausedStatus.Running -or
+        [string]$pausedStatus.Status -cne 'paused') {
+        throw 'QEMU did not enter the paused state before the bounded R13 CPU snapshot.'
+    }
+    $registerResponse = Invoke-Qmp -Command 'human-monitor-command' `
+        -QmpArguments ([ordered]@{ 'command-line'='info registers' })
+    $registerEnvelope = $registerResponse | ConvertFrom-Json -ErrorAction Stop
+    $registerText = [string]$registerEnvelope.return
+    if ([string]::IsNullOrWhiteSpace($registerText) -or $registerText -notmatch '(?im)\bRIP=') {
+        throw 'QMP info registers did not return a readable guest instruction pointer.'
+    }
+    $registerPath = Join-Path $runRoot 'guest-cpu-state-timeout.txt'
+    $capturePath = Join-Path $runRoot 'guest-cpu-state-timeout.json'
+    [System.IO.File]::WriteAllText($registerPath,$registerText,[System.Text.UTF8Encoding]::new($false))
+    $capture = [ordered]@{
+        schema='C188R15_GUEST_CPU_TIMEOUT_STATE_V1'
+        status='captured'
+        capturedAtUtc=(Get-Date).ToUniversalTime().ToString('o')
+        trigger='bounded-managed-gc-wait-expired-without-terminal-evidence'
+        candidateManifestSha256=$CandidateManifestHash
+        serialPath=$SerialPath
+        serialSha256=$null
+        serialHashStatus='deferred-until-qemu-exit'
+        serialHashError=$null
+        qemuStatusAfterStop=$pausedStatus
+        qmpStopResponse=$stopResponse
+        qmpRegistersResponse=$registerResponse
+        registersPath=$registerPath
+        registersSha256=Get-Sha256 $registerPath
+        rip=([regex]::Match($registerText,'(?im)\bRIP=([0-9A-Fa-f]+)').Groups[1].Value.ToUpperInvariant())
+    }
+    [System.IO.File]::WriteAllText($capturePath,($capture | ConvertTo-Json -Depth 8),
+        [System.Text.UTF8Encoding]::new($false))
+    return [pscustomobject]@{ Status='captured'; Path=$capturePath; RegistersPath=$registerPath; Rip=$capture.rip; Error=$null }
+}
+function Complete-R13TimeoutCpuStateSerialHash([string]$CapturePath,[string]$SerialPath) {
+    $capture = Get-Content -LiteralPath $CapturePath -Raw | ConvertFrom-Json -ErrorAction Stop
+    try {
+        if (-not (Test-Path -LiteralPath $SerialPath -PathType Leaf)) {
+            throw 'Serial log was not present after QEMU exit.'
+        }
+        $capture.serialSha256 = Get-Sha256 $SerialPath
+        $capture.serialHashStatus = 'verified-after-qemu-exit'
+        $capture.serialHashError = $null
+    } catch {
+        $capture.serialSha256 = $null
+        $capture.serialHashStatus = 'unavailable-after-qemu-exit'
+        $capture.serialHashError = $_.Exception.Message
+    }
+    [System.IO.File]::WriteAllText($CapturePath,($capture | ConvertTo-Json -Depth 8),
+        [System.Text.UTF8Encoding]::new($false))
+    return [pscustomobject]@{
+        Status=[string]$capture.serialHashStatus
+        Sha256=$capture.serialSha256
+        Error=$capture.serialHashError
+    }
 }
 function Wait-Qmp([int]$Seconds,[System.Diagnostics.Process]$Owner) {
     $deadline = (Get-Date).AddSeconds($Seconds)
@@ -930,6 +1029,14 @@ $qacReservationId = $null
 $qacExitCode = $null
 $qemuStatus = $null
 $qemuStatusResponse = $null
+$managedGcTimeoutObserved = $false
+$managedGcTimeoutCpuStateStatus = 'not-attempted'
+$managedGcTimeoutCpuStatePath = $null
+$managedGcTimeoutCpuStateRegistersPath = $null
+$managedGcTimeoutCpuStateRip = $null
+$managedGcTimeoutCpuStateError = $null
+$managedGcTimeoutCpuStateSerialHashStatus = 'not-attempted'
+$managedGcTimeoutCpuStateSerialHashError = $null
 $runError = $null
 $serialText = ''
 $guestPass = $false
@@ -1207,10 +1314,51 @@ if ($isManagedGcRootProbe) {
                 -QemuPath $qemu -QmpPort $qmpPort)) {
             throw 'Refusing QMP shutdown because the local QEMU child identity is no longer verified.'
         }
+        if ($isManagedGcRootProbe -and -not $transitionTerminalSeen -and
+            $qemuStatus.Valid -and [bool]$qemuStatus.Running) {
+            $managedGcTimeoutObserved = $true
+            try {
+                $cpuCapture = Capture-R13TimeoutCpuState -CandidateManifestHash $candidateManifestSha256 `
+                    -SerialPath $serial
+                $managedGcTimeoutCpuStateStatus = [string]$cpuCapture.Status
+                $managedGcTimeoutCpuStatePath = [string]$cpuCapture.Path
+                $managedGcTimeoutCpuStateRegistersPath = [string]$cpuCapture.RegistersPath
+                $managedGcTimeoutCpuStateRip = [string]$cpuCapture.Rip
+                $managedGcTimeoutCpuStateSerialHashStatus = 'deferred-until-qemu-exit'
+            } catch {
+                $managedGcTimeoutCpuStateStatus = 'failed'
+                $managedGcTimeoutCpuStateError = $_.Exception.Message
+                [ordered]@{
+                    schema='C188R15_GUEST_CPU_TIMEOUT_STATE_V1'
+                    capturedAtUtc=(Get-Date).ToUniversalTime().ToString('o')
+                    trigger='bounded-managed-gc-wait-expired-without-terminal-evidence'
+                    candidateManifestSha256=$candidateManifestSha256
+                    serialPath=$serial
+                    serialSha256=$null
+                    serialHashStatus='deferred-until-qemu-exit'
+                    serialHashError=$null
+                    status='failed'
+                    error=$managedGcTimeoutCpuStateError
+                } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $runRoot 'guest-cpu-state-timeout.json') -Encoding utf8
+                $managedGcTimeoutCpuStatePath = Join-Path $runRoot 'guest-cpu-state-timeout.json'
+            }
+        }
         [void](Invoke-Qmp 'quit')
     }
     if (-not $qacProcess.WaitForExit(90000)) { throw 'QAC did not exit after the owned QMP quit request.' }
     $qacExitCode = $qacProcess.ExitCode
+    if ($managedGcTimeoutCpuStateStatus -eq 'captured' -and
+        -not [string]::IsNullOrWhiteSpace($managedGcTimeoutCpuStatePath)) {
+        try {
+            $serialHashResult = Complete-R13TimeoutCpuStateSerialHash -CapturePath $managedGcTimeoutCpuStatePath `
+                -SerialPath $serial
+            $managedGcTimeoutCpuStateSerialHashStatus = [string]$serialHashResult.Status
+            $managedGcTimeoutCpuStateSerialHashError = [string]$serialHashResult.Error
+        } catch {
+            $managedGcTimeoutCpuStateSerialHashStatus = 'unavailable-after-qemu-exit'
+            $managedGcTimeoutCpuStateSerialHashError = $_.Exception.Message
+        }
+    }
 } catch {
     $runError = $_.Exception.Message
     if ($null -ne $qacProcess -and -not $qacProcess.HasExited) {
@@ -1303,6 +1451,7 @@ $serialSha256BeforeAnalysis = if (Test-Path -LiteralPath $serial) { Get-Sha256 $
 $serialAnalysis = $null
 $transitionAttributionAnalysisPath = if ($isManagedGcRootProbe) { Join-Path $runRoot 'managed-gc-root-analysis.json' } elseif ($isManagedSettingsObjectProbe) { Join-Path $runRoot 'managed-settings-object-analysis.json' } elseif ($isManagedEntryProbe) { Join-Path $runRoot 'managed-entry-probe-analysis.json' } elseif ($isTransitionAttribution) { Join-Path $runRoot 'transition-attribution-analysis.json' } else { $null }
 $transitionAttributionAnalysis = $null
+$managedGcAnalysisIntegrityContract = $null
 $transitionAttributionAnalysisExitCode = $null
 $transitionAttributionAnalysisError = $null
 $threadStoreAnalysisPath = $null
@@ -1358,6 +1507,13 @@ if (Test-Path -LiteralPath $serial -PathType Leaf) {
             if ($transitionAttributionAnalysisExitCode -eq 0 -and
                 (Test-Path -LiteralPath $transitionAttributionAnalysisPath -PathType Leaf)) {
                 $transitionAttributionAnalysis = Get-Content -LiteralPath $transitionAttributionAnalysisPath -Raw | ConvertFrom-Json
+                if ($isManagedGcRootProbe) {
+                    $managedGcAnalysisIntegrityContract = Get-R13ManagedGcAnalysisIntegrityContract $transitionAttributionAnalysis
+                    if (-not $managedGcAnalysisIntegrityContract.Valid) {
+                        $transitionAttributionAnalysisError = 'R13 analyzer schema rejected: ' +
+                            (@($managedGcAnalysisIntegrityContract.Issues) -join ',')
+                    }
+                }
             } else {
                 $transitionAttributionAnalysisError = "Transition analyzer exited $transitionAttributionAnalysisExitCode."
             }
@@ -1474,10 +1630,14 @@ if ($isTransitionAttribution) {
             'RUNTIME_FAIL_FAST_CALLSITE_UNRESOLVED','INITIALIZEMODULES_RETURNED_MANAGED_ENTRY_NOT_REQUESTED')
     }
     $transitionAttributionCaptureComplete = $recognizedTransitionClass -and
-        [string]$transitionAttributionAnalysis.recordIntegrity -ceq '1' -and
+        (-not $isManagedGcRootProbe -or
+            ($null -ne $managedGcAnalysisIntegrityContract -and $managedGcAnalysisIntegrityContract.Valid -and
+             [string]$managedGcAnalysisIntegrityContract.RecordIntegrity -ceq '1')) -and
+        (-not $isManagedGcRootProbe -or
+            [string]$managedGcAnalysisIntegrityContract.ParseError -eq [string]$transitionAttributionAnalysis.parseError) -and
         [string]::IsNullOrWhiteSpace([string]$transitionAttributionAnalysis.parseError) -and
         (-not $isManagedGcRootProbe -or
-            [string]::IsNullOrWhiteSpace([string]$transitionAttributionAnalysis.transitionParseError)) -and
+            [string]::IsNullOrWhiteSpace([string]$managedGcAnalysisIntegrityContract.TransitionParseError)) -and
         [bool]$transitionAttributionAnalysis.evidencePreserved -and
         [string]$transitionAttributionAnalysis.callSiteMap.sha256 -ceq [string]$candidateManifest.transitionCallSiteMapSha256 -and
         [bool]$rawSerialPreservedByAnalysis
@@ -1803,6 +1963,25 @@ $manifest = [ordered]@{
     qacExitCode=$qacExitCode;qacReleaseVerified=$releaseVerified;qacGuestBootLimit=1;automaticRetry=$false
     threadStoreAttempt=$ThreadStoreAttempt;attemptGuardPath=$attemptPath
     qemuStatus=$qemuStatus;qemuQueryStatusResponse=$qemuStatusResponse;qmpPort=$qmpPort;qemuArguments=$qemuArgs;guestPass=$guestPass
+    managedGcStopCause=if ($isManagedGcRootProbe) {
+        if ($serialText -match '(?m)^\[nativeaot-pal-qemu-test\] FAIL_FAST\b') { 'runtime-fatal' }
+        elseif ($serialText -match '(?m)^\[C188R12R4R5R2R3_ENTRY_STATE\].* result=(?:PASS|FAIL)\s*$') { 'managed-return-observed' }
+        elseif ($managedGcTimeoutObserved) { 'bounded-timeout-guest-was-running' }
+        elseif ($null -ne $qemuStatus -and [bool]$qemuStatus.Valid -and -not [bool]$qemuStatus.Running) { 'guest-stopped-before-managed-completion' }
+        elseif ($null -ne $qacExitCode) { 'qac-or-qemu-exited-before-managed-completion' }
+        else { 'incomplete-terminal-state' }
+    } else { $null }
+    managedGcAnalyzerSchemaValid=if ($isManagedGcRootProbe -and $null -ne $managedGcAnalysisIntegrityContract) { [bool]$managedGcAnalysisIntegrityContract.Valid } else { $false }
+    managedGcAnalyzerSchemaIssues=if ($isManagedGcRootProbe -and $null -ne $managedGcAnalysisIntegrityContract) { @($managedGcAnalysisIntegrityContract.Issues) } else { @() }
+    managedGcRecordIntegrity=if ($isManagedGcRootProbe -and $null -ne $managedGcAnalysisIntegrityContract) { $managedGcAnalysisIntegrityContract.RecordIntegrity } else { $null }
+    managedGcTimeoutObserved=$managedGcTimeoutObserved
+    managedGcTimeoutCpuStateStatus=$managedGcTimeoutCpuStateStatus
+    managedGcTimeoutCpuStatePath=$managedGcTimeoutCpuStatePath
+    managedGcTimeoutCpuStateRegistersPath=$managedGcTimeoutCpuStateRegistersPath
+    managedGcTimeoutCpuStateRip=$managedGcTimeoutCpuStateRip
+    managedGcTimeoutCpuStateError=$managedGcTimeoutCpuStateError
+    managedGcTimeoutCpuStateSerialHashStatus=$managedGcTimeoutCpuStateSerialHashStatus
+    managedGcTimeoutCpuStateSerialHashError=$managedGcTimeoutCpuStateSerialHashError
     qacOwnerUser=if ($null -ne $qacProcess) { [System.Security.Principal.WindowsIdentity]::GetCurrent().Name } else { $null }
     qacReservationInspection=$duringInspectionPath;qacSnapshotRecords=@($qacSnapshotRecords)
     localQemuChildIdentity=$localGuestIdentity

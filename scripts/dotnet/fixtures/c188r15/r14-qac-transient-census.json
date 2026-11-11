@@ -1,0 +1,29 @@
+{
+  "schema": "C188R15_QAC_CENSUS_SEQUENCE_V1",
+  "observations": [
+    {
+      "phase": "during-001",
+      "coordinatorState": "Running",
+      "qemuProcessCount": null,
+      "censusComplete": false,
+      "degraded": true,
+      "reason": "Exclusive conditions compromised: QEMU process census is incomplete."
+    },
+    {
+      "phase": "during-002",
+      "coordinatorState": "Running",
+      "qemuProcessCount": 1,
+      "censusComplete": true,
+      "degraded": false,
+      "reason": null
+    },
+    {
+      "phase": "after-001",
+      "coordinatorState": "Released",
+      "qemuProcessCount": 0,
+      "censusComplete": true,
+      "degraded": false,
+      "reason": null
+    }
+  ]
+}

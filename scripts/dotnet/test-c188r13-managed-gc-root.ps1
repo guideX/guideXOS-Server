@@ -61,6 +61,8 @@ $r11=Get-Content -LiteralPath $R11HostedTestResults -Raw | ConvertFrom-Json
 $rhCollectMapMatch=[regex]::Match($map,'(?m)^\s*0001:[0-9A-Fa-f]{8}\s+S_P_CoreLib_System_Runtime_InternalCalls__RhCollect\s+(?<address>[0-9A-Fa-f]{16})\b')
 $rhpCollectMapMatch=[regex]::Match($map,'(?m)^\s*0001:[0-9A-Fa-f]{8}\s+RhpCollect\s+(?<address>[0-9A-Fa-f]{16})\s+f(?:\s|$)')
 $calculateMapMatch=[regex]::Match($map,'(?m)^\s*0001:[0-9A-Fa-f]{8}\s+(?<symbol>\S*DisplaySettingsProbe__Calculate\S*)\s+(?<address>[0-9A-Fa-f]{16})\b')
+$reversePInvokeMapMatch=[regex]::Match($map,'(?m)^\s*0001:[0-9A-Fa-f]{8}\s+RhpReversePInvoke\s+(?<address>[0-9A-Fa-f]{16})\s+f\s+guidexos_nativeaot_platform\.obj\b')
+$newFastMapMatch=[regex]::Match($map,'(?m)^\s*0001:[0-9A-Fa-f]{8}\s+RhpNewFast\s+(?<address>[0-9A-Fa-f]{16})\s+f\s+guidexos_nativeaot_platform\.obj\b')
 
 Assert-R13 ($manifest.runtimeIdentity.sourceCommit -ceq '9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3' -and
     $manifest.runtimeIdentity.gc -ceq 'Workstation' -and [bool]$manifest.c188r12r4r5GcOwnershipProof) 'Pinned NativeAOT Workstation GC identity and ownership profile'
@@ -118,6 +120,32 @@ Assert-R13 ($main -match '52313345' -and $main -match '52313351' -and
     $main -match 'call\s+0x[0-9a-fA-F]+') 'Linked ManagedMain retains the R13 protocol markers and executable calls'
 Assert-R13 ($main -match 'RhpCollect|RhpNewFast|DisplaySettingsProbe' -or
     $main -match 'call\s+0x[0-9a-fA-F]+') 'ManagedMain disassembly retains calls across collection and object access'
+$reversePInvokeCallTarget=[regex]::Replace($reversePInvokeMapMatch.Groups['address'].Value,'^0+','').ToLowerInvariant()
+$newFastCallTarget=[regex]::Replace($newFastMapMatch.Groups['address'].Value,'^0+','').ToLowerInvariant()
+$reversePInvokeCallIndex=$main.IndexOf(('call   0x{0}' -f $reversePInvokeCallTarget),[StringComparison]::OrdinalIgnoreCase)
+$managedEntryStoreIndex=$main.IndexOf('52313345',[StringComparison]::OrdinalIgnoreCase)
+$newFastCallIndex=$main.IndexOf(('call   0x{0}' -f $newFastCallTarget),[StringComparison]::OrdinalIgnoreCase)
+Assert-R13 ($reversePInvokeMapMatch.Success -and $newFastMapMatch.Success -and
+    $reversePInvokeCallIndex -ge 0 -and $managedEntryStoreIndex -gt $reversePInvokeCallIndex -and
+    $newFastCallIndex -gt $managedEntryStoreIndex) 'Generated method calls mapped RhpReversePInvoke before its first body marker and calls mapped RhpNewFast afterward'
+$entryMarkerPosition=$source.IndexOf('record->EntryMarker = EntryMarker',[StringComparison]::Ordinal)
+$allocationPosition=$source.IndexOf('DisplaySettingsProbe settings = new(640, 480, 2)',[StringComparison]::Ordinal)
+$initialReadPosition=$source.IndexOf('int initial = settings.Calculate()',[StringComparison]::Ordinal)
+$initialResultPosition=$source.IndexOf('record->InitialResult',[StringComparison]::Ordinal)
+$counterBeforePosition=$source.IndexOf('int beforeStatus = ReadNativeCounters',[StringComparison]::Ordinal)
+$requestPosition=$source.IndexOf('record->RequestMarker = RequestMarker',[StringComparison]::Ordinal)
+$collectPosition=$source.IndexOf('GC.Collect()',[StringComparison]::Ordinal)
+$counterAfterPosition=$source.IndexOf('int afterStatus = ReadNativeCounters',[StringComparison]::Ordinal)
+$mutatePosition=$source.IndexOf('settings.Scale = 3',[StringComparison]::Ordinal)
+$finalReadPosition=$source.IndexOf('int result = settings.Calculate()',[StringComparison]::Ordinal)
+$keepAlivePosition=$source.IndexOf('GC.KeepAlive(settings)',[StringComparison]::Ordinal)
+$returnPosition=$source.IndexOf('return result',[StringComparison]::Ordinal)
+Assert-R13 ($entryMarkerPosition -ge 0 -and $entryMarkerPosition -lt $allocationPosition -and
+    $allocationPosition -lt $initialReadPosition -and $initialReadPosition -lt $initialResultPosition -and
+    $initialResultPosition -lt $counterBeforePosition -and $counterBeforePosition -lt $requestPosition -and
+    $requestPosition -lt $collectPosition -and $collectPosition -lt $counterAfterPosition -and
+    $counterAfterPosition -lt $mutatePosition -and $mutatePosition -lt $finalReadPosition -and
+    $finalReadPosition -lt $keepAlivePosition -and $keepAlivePosition -lt $returnPosition) 'R13 source order is entry, allocation, initial 1122, pre-count, request, collection, post-count, mutation, final read, KeepAlive, return'
 Assert-R13 ($ctor -match '5231334[fF]' -and $ctor -match '(?m)^\s*[0-9a-fA-F]{8,16}:') 'Constructor machine code stores the R13 construction witness'
 Assert-R13 ($calculate -match '(?m)^\s*[0-9a-fA-F]{8,16}:') 'Field consumer has generated machine instructions'
 Assert-R13 ($kernelLog -match '-DGXOS_NATIVEAOT_C188R13_MANAGED_GC_ROOT_PROBE' -and
@@ -127,14 +155,91 @@ Assert-R13 ($header -match 'sizeof\(GuideXosNativeAotManagedGcRootProbeRecord\) 
 Assert-R13 ($counter -match 'gcInProgress != 0u' -and $counter -match 'guideXosNativeAotC188R12R4R5ReadCounters') 'Native counter API rejects reads during collection and requires initialized heap/thread state'
 Assert-R13 ($runner -match 'CreateNew' -and $runner -match 'automaticRetry=\$false' -and
     $runner -match 'NATIVEAOT_SINGLE_COLLECTION_VERIFIED' -and $runner -match 'gcCollectionCompleted' -and
-    $runner -match 'transitionAttributionAnalysis\.recordIntegrity' -and
-    $runner -match '-not \$isManagedGcRootProbe -or\s+\[string\]::IsNullOrWhiteSpace\(\[string\]\$transitionAttributionAnalysis\.transitionParseError\)' -and
+    $runner -match 'Get-R13ManagedGcAnalysisIntegrityContract' -and
+    $runner -match 'managedGcAnalysisIntegrityContract\.RecordIntegrity' -and
+    $runner -match 'managedGcAnalysisIntegrityContract\.TransitionParseError' -and
     $analyzer -match 'recordIntegrity=\[string\]\$transition\.recordIntegrity' -and
     $analyzer -match 'transitionParseError=\[string\]\$transition\.parseError' -and
     $runner.Contains('if ($isManagedGcRootProbe) {') -and
     $runner.Contains('Join-Path $phaseRoot ("guest-launch-attempt-" + [System.IO.Path]::GetFileName($candidate) + ".json")') -and
     $candidateBuilder.Contains('Join-Path $phaseRoot ("guest-launch-attempt-" + [System.IO.Path]::GetFileName($candidate) + ".json")') -and
     $admissionModule -match '\$expectedGuardPath') 'QAC runner, phase plan, and admission checks bind the candidate-specific one-boot guard path and require native collection completion'
+Assert-R13 ($runner -match 'Capture-R13TimeoutCpuState' -and
+    $runner -match 'Complete-R13TimeoutCpuStateSerialHash' -and
+    $runner -match 'serialHashStatus=''deferred-until-qemu-exit''' -and
+    $runner -match 'verified-after-qemu-exit' -and
+    $runner -match "human-monitor-command" -and $runner -match 'info registers' -and
+    $runner -match "Invoke-Qmp 'stop'" -and
+    $runner -match '\$isManagedGcRootProbe -and -not \$transitionTerminalSeen -and\s+\$qemuStatus\.Valid -and \[bool\]\$qemuStatus\.Running' -and
+    $runner -match 'managedGcTimeoutObserved=\$managedGcTimeoutObserved' -and
+    $runner -match "RIP=\(\[0-9A-Fa-f\]\+\)") 'R15 runner takes a bounded exact-candidate CPU snapshot only after an incomplete R13 timeout'
+$cpuCaptureCallIndex=$runner.IndexOf('Capture-R13TimeoutCpuState -CandidateManifestHash',[StringComparison]::Ordinal)
+$ownedQemuCheckIndex=$runner.LastIndexOf('Test-QacLocalQemuChildIdentity',$cpuCaptureCallIndex,[StringComparison]::Ordinal)
+$qmpQuitAfterCaptureIndex=$runner.IndexOf("Invoke-Qmp 'quit'",$cpuCaptureCallIndex,[StringComparison]::Ordinal)
+$qacExitWaitIndex=$runner.IndexOf('$qacProcess.WaitForExit(90000)',$cpuCaptureCallIndex,[StringComparison]::Ordinal)
+$serialHashFinalizeIndex=$runner.IndexOf('Complete-R13TimeoutCpuStateSerialHash -CapturePath',$cpuCaptureCallIndex,[StringComparison]::Ordinal)
+Assert-R13 ($cpuCaptureCallIndex -ge 0 -and $ownedQemuCheckIndex -ge 0 -and
+    $ownedQemuCheckIndex -lt $cpuCaptureCallIndex -and $qmpQuitAfterCaptureIndex -gt $cpuCaptureCallIndex -and
+    $qacExitWaitIndex -gt $qmpQuitAfterCaptureIndex -and $serialHashFinalizeIndex -gt $qacExitWaitIndex) 'Timeout snapshot is ownership-gated and serial hashing waits for QAC process exit'
+$r13ScriptTokens=$null; $r13ScriptParseErrors=$null
+$runnerAst=[System.Management.Automation.Language.Parser]::ParseFile($runnerPath,[ref]$r13ScriptTokens,[ref]$r13ScriptParseErrors)
+$integrityFunctionAst=$runnerAst.Find({param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -ceq 'Get-R13ManagedGcAnalysisIntegrityContract'
+},$true)
+Assert-R13 ($r13ScriptParseErrors.Count -eq 0 -and $null -ne $integrityFunctionAst) 'R15 QMP and analyzer-schema runner changes parse as PowerShell'
+$captureCpuStateAst=$runnerAst.Find({param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -ceq 'Capture-R13TimeoutCpuState'
+},$true)
+$completeCpuStateAst=$runnerAst.Find({param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -ceq 'Complete-R13TimeoutCpuStateSerialHash'
+},$true)
+Assert-R13 ($null -ne $captureCpuStateAst -and $null -ne $completeCpuStateAst) 'R15 CPU snapshot and post-exit serial finalizer are isolated runner functions'
+if ($null -ne $captureCpuStateAst -and $null -ne $completeCpuStateAst) {
+    . ([scriptblock]::Create($captureCpuStateAst.Extent.Text))
+    . ([scriptblock]::Create($completeCpuStateAst.Extent.Text))
+    function Invoke-Qmp([string]$Command,[System.Collections.IDictionary]$QmpArguments=$null) {
+        switch ($Command) {
+            'stop' { return '{"return":{}}' }
+            'query-status' { return '{"return":{"status":"paused","running":false}}' }
+            'human-monitor-command' { return '{"return":"RIP=0000000100057ecc RSP=00000000052b5200 RBP=00000000052b5360"}' }
+            default { throw "Unexpected mocked QMP command: $Command" }
+        }
+    }
+    function ConvertFrom-QmpQueryStatusResponse([string]$Text) {
+        return [pscustomobject]@{ Valid=$true; Running=$false; Status='paused' }
+    }
+    function Get-Sha256([string]$Path) { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash }
+    $captureMockRoot=Join-Path $OutputDirectory ('r15-cpu-capture-mock-' + [guid]::NewGuid().ToString('N'))
+    [void](New-Item -ItemType Directory -Path $captureMockRoot -Force)
+    $runRoot=$captureMockRoot
+    $serialMockPath=Join-Path $captureMockRoot 'serial.log'
+    $serialMockStream=[System.IO.FileStream]::new($serialMockPath,[System.IO.FileMode]::CreateNew,
+        [System.IO.FileAccess]::ReadWrite,[System.IO.FileShare]::None)
+    try {
+        $serialMockBytes=[System.Text.Encoding]::UTF8.GetBytes('synthetic serial evidence held exclusively')
+        $serialMockStream.Write($serialMockBytes,0,$serialMockBytes.Length)
+        $serialMockStream.Flush()
+        $mockCapture=Capture-R13TimeoutCpuState -CandidateManifestHash ('a'*64) -SerialPath $serialMockPath
+        $mockCaptureJson=Get-Content -LiteralPath $mockCapture.Path -Raw | ConvertFrom-Json
+        Assert-R13 ($mockCapture.Status -ceq 'captured' -and $mockCaptureJson.serialHashStatus -ceq 'deferred-until-qemu-exit' -and
+            $null -eq $mockCaptureJson.serialSha256 -and $mockCaptureJson.rip -ceq '0000000100057ECC') 'Exclusive serial lock does not prevent the paused QMP register snapshot'
+    } finally { $serialMockStream.Dispose() }
+    $mockSerialFinalization=Complete-R13TimeoutCpuStateSerialHash -CapturePath $mockCapture.Path -SerialPath $serialMockPath
+    $mockCaptureFinal=Get-Content -LiteralPath $mockCapture.Path -Raw | ConvertFrom-Json
+    Assert-R13 ($mockSerialFinalization.Status -ceq 'verified-after-qemu-exit' -and
+        $mockCaptureFinal.serialSha256 -ceq (Get-Sha256 $serialMockPath)) 'Serial hash is attached only after the serial file lock is released'
+    $missingSerialCapture=Join-Path $captureMockRoot 'missing-serial-capture.json'
+    Copy-Item -LiteralPath $mockCapture.Path -Destination $missingSerialCapture
+    $missingSerialResult=Complete-R13TimeoutCpuStateSerialHash -CapturePath $missingSerialCapture `
+        -SerialPath (Join-Path $captureMockRoot 'missing-serial.log')
+    $missingSerialCaptureJson=Get-Content -LiteralPath $missingSerialCapture -Raw | ConvertFrom-Json
+    Assert-R13 ($missingSerialResult.Status -ceq 'unavailable-after-qemu-exit' -and
+        $missingSerialCaptureJson.status -ceq 'captured' -and
+        $missingSerialCaptureJson.registersSha256 -ceq (Get-Sha256 $mockCapture.RegistersPath)) 'Serial hash failure preserves the completed CPU register evidence'
+}
 $r13LoopStart=$runner.IndexOf('if ($isManagedGcRootProbe) {',$runner.IndexOf('$deadline = (Get-Date).AddSeconds($BootTimeoutSeconds)',[StringComparison]::Ordinal),[StringComparison]::Ordinal)
 $r13LoopGeneric=$runner.IndexOf('} elseif ($isTransitionAttribution) {',$r13LoopStart,[StringComparison]::Ordinal)
 $r13LoopBlock=if($r13LoopStart -ge 0 -and $r13LoopGeneric -gt $r13LoopStart){$runner.Substring($r13LoopStart,$r13LoopGeneric-$r13LoopStart)}else{''}
@@ -149,6 +254,27 @@ $terminalFunctionAst=$runnerAst.Find({param($node)
 },$true)
 Assert-R13 ($runnerParseErrors.Count -eq 0 -and $null -ne $terminalFunctionAst) 'Corrected R13 terminal classifier parses as an isolated runner function'
 . ([scriptblock]::Create($terminalFunctionAst.Extent.Text))
+$integrityFunctionAst=$runnerAst.Find({param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -ceq 'Get-R13ManagedGcAnalysisIntegrityContract'
+},$true)
+. ([scriptblock]::Create($integrityFunctionAst.Extent.Text))
+$r15FixtureRoot=Join-Path $root 'scripts\dotnet\fixtures\c188r15'
+$r13IntermediateFixture=Get-Content -Raw -LiteralPath (Join-Path $r15FixtureRoot 'r13-initialize-modules-intermediate.serial.log')
+$r14AttachmentFixture=Get-Content -Raw -LiteralPath (Join-Path $r15FixtureRoot 'r14-post-attachment-last-marker.serial.log')
+$r14OldAnalysisFixture=Get-Content -Raw -LiteralPath (Join-Path $r15FixtureRoot 'r14-pre-fix-managed-gc-analysis.json') | ConvertFrom-Json
+$r14OldTransitionFixture=Get-Content -Raw -LiteralPath (Join-Path $r15FixtureRoot 'r14-pre-fix-transition-analysis.json') | ConvertFrom-Json
+$r14PostFixAnalysisFixture=Get-Content -Raw -LiteralPath (Join-Path $r15FixtureRoot 'r14-post-fix-managed-gc-analysis-schema.json') | ConvertFrom-Json
+$r13IntermediateObservation=Get-R13ManagedGcTerminalObservation $r13IntermediateFixture
+$r14AttachmentObservation=Get-R13ManagedGcTerminalObservation $r14AttachmentFixture
+$r14OldSchemaContract=Get-R13ManagedGcAnalysisIntegrityContract $r14OldAnalysisFixture
+Assert-R13 (-not $r13IntermediateObservation.terminal -and $r13IntermediateObservation.kind -ceq 'Continuing') 'R13 regression fixture keeps InitializeModules-return as an intermediate runner event'
+Assert-R13 (-not $r14AttachmentObservation.terminal -and $r14AttachmentObservation.kind -ceq 'Continuing' -and
+    $r14AttachmentFixture.TrimEnd().EndsWith('event=transition_attach_complete raw0=0000000003D79360 raw1=0000000000000001')) 'R14 regression fixture preserves attachment as the last observed event without inventing managed entry'
+Assert-R13 (-not $r14OldSchemaContract.Valid -and $r14OldSchemaContract.RecordIntegrity -eq $null -and
+    $r14OldSchemaContract.Issues -contains 'top-level-recordIntegrity-missing' -and
+    $r14OldSchemaContract.Issues -contains 'top-level-transitionParseError-missing' -and
+    $r14OldTransitionFixture.recordIntegrity -ceq '1') 'R14 pre-fix split-schema fixture is rejected without copying integrity from the separate transition record'
 $r13State='[C188R12R4R5R2R3_ENTRY_STATE] status=00000000 bytes=00000070 membership=00000001 flags=00000001 cooperativeState=00000001 preemptiveFrame=00000001 flsMatch=00000001 threadId=0000000000001234 observedThreadId=0000000000001234 stackReady=00000001 stackInBounds=00000001 modules=00000001 codeManager=00000001 currentThread=0000000000005678 palFlsThread=0000000000005678 frame=FFFFFFFFFFFFFFFF stackLow=0000000000100000 stackHigh=0000000000200000 stackCurrent=0000000000180000 result=PASS'
 $r13Attempt='[C188R13_GC_ROOT_ENTRY] event=attempt abi=UnmanagedCallersOnly-Cdecl seed=0000000E symbol=ManagedMain model=DisplaySettingsProbe collection=one_synchronous_full_request'
 $r13Allocation='[C188R12R4R5R4R5R2R2R4R2R3R12_ALLOC] helper=RhpNewFast stock=guideXosStockRhpNewFast requests=00000001 completed=00000001 objectSize=00000018 contextReadyBefore=00000001 contextReadyAfter=00000001 contextBytesBefore=00001000 contextBytesAfter=00000FE8 contextAdvanced=00000018 methodTable=00000001 gcHeapOwned=00000001 threadAttached=00000001 gcCountBefore=00000000 gcCountAfter=00000000 status=00000000 collectionRequestedByProbe=00000000'
@@ -169,6 +295,13 @@ $fatalBeforeAllocation=Get-R13ManagedGcTerminalObservation ($r13Attempt + "`n" +
 $fatalInCollection=Get-R13ManagedGcTerminalObservation ($r13Attempt + "`n" + $r13Allocation + "`n" + '[C188R13_TEST_CONTEXT] stage=collection' + "`n" + '[nativeaot-pal-qemu-test] FAIL_FAST reason=50414C06 detail=0000000000000000')
 Assert-R13 ($fatalBeforeAllocation.terminal -and $fatalBeforeAllocation.kind -ceq 'FailFast' -and
     $fatalInCollection.terminal -and $fatalInCollection.kind -ceq 'FailFast') 'Explicit fatal before allocation and during the collection context is terminal immediately'
+$allocationFailureSerial=$r13Attempt + "`n" + '[C188R13_TEST_CONTEXT] stage=allocation helper=RhpNewFast' + "`n" +
+    '[nativeaot-pal-qemu-test] FAIL_FAST reason=50414C06 detail=0000000000000000'
+$fatalInAllocation=Get-R13ManagedGcTerminalObservation $allocationFailureSerial
+Assert-R13 ($fatalBeforeAllocation.terminal -and $fatalBeforeAllocation.kind -ceq 'FailFast' -and
+    $fatalInAllocation.terminal -and $fatalInAllocation.kind -ceq 'FailFast' -and
+    $allocationFailureSerial.IndexOf('stage=allocation helper=RhpNewFast',[StringComparison]::Ordinal) -lt
+    $allocationFailureSerial.IndexOf('FAIL_FAST',[StringComparison]::Ordinal)) 'Synthetic pre-allocation and in-allocation fatal contexts remain distinct terminal observations'
 $noTerminalObservation=Get-R13ManagedGcTerminalObservation ($r13Attempt + "`n" + $r13Allocation + "`n" + $r13Returned + "`n" + $r13Native)
 Assert-R13 (-not $noTerminalObservation.terminal -and $noTerminalObservation.kind -ceq 'Continuing' -and
     $runner -match '\$deadline = \(Get-Date\)\.AddSeconds\(\$BootTimeoutSeconds\)' -and
@@ -203,12 +336,30 @@ function Invoke-R13Fixture([string]$Name,[string[]]$Lines) {
     return (Get-Content -LiteralPath $out -Raw | ConvertFrom-Json)
 }
 $valid=Invoke-R13Fixture 'valid-order-marker-only' @($attempt,$alloc,$returned,$native,$state)
+$afterAttachLines=@($r14AttachmentFixture -split "\r?\n" | Where-Object { $_ -ne '' }) +
+    @($alloc,$returned,$native,$state)
+$afterAttach=Invoke-R13Fixture 'synthetic-managed-progression-after-attachment' $afterAttachLines
+$validIntegrityContract=Get-R13ManagedGcAnalysisIntegrityContract $r14PostFixAnalysisFixture
 Assert-R13 ($valid.managedEntryReturned -and $valid.gcCollectionStarted -and
     $valid.gcCollectionCompleted -and $valid.liveObjectSurvived -and
     ($valid.PSObject.Properties.Name -contains 'recordIntegrity') -and
     ($valid.PSObject.Properties.Name -contains 'transitionParseError') -and
     [string]::IsNullOrWhiteSpace([string]$valid.parseError) -and
     $valid.classification -ceq 'MANAGED_GC_ROOT_RETURNED_MISMATCH') 'Positive ordering fixture parses complete collection and liveness markers without claiming a guest pass'
+Assert-R13 ($afterAttach.managedEntryAttempted -and $afterAttach.managedEntryReturned -and
+    $afterAttach.allocationSucceeded -and $afterAttach.gcCollectionStarted -and
+    $afterAttach.gcCollectionCompleted -and $afterAttach.liveObjectSurvived -and
+    $afterAttach.evidencePreserved -and $afterAttach.classification -cne 'MANAGED_GC_ROOT_COLLECTION_VERIFIED') 'Synthetic progression after attachment exercises every analyzer milestone without claiming native qualification'
+Assert-R13 ($validIntegrityContract.Valid -and $validIntegrityContract.RecordIntegrity -ceq '1' -and
+    [string]::IsNullOrWhiteSpace([string]$validIntegrityContract.TransitionParseError)) 'Corrected R14 analyzer schema exposes top-level integrity and transition-parse evidence'
+$malformedSchema=$r14PostFixAnalysisFixture | ConvertTo-Json -Depth 12 | ConvertFrom-Json
+$malformedSchema.recordIntegrity='true'
+$malformedSchemaContract=Get-R13ManagedGcAnalysisIntegrityContract $malformedSchema
+$contradictorySchema=$r14PostFixAnalysisFixture | ConvertTo-Json -Depth 12 | ConvertFrom-Json
+$contradictorySchema.transitionParseError='record parser rejected a malformed row'
+$contradictorySchemaContract=Get-R13ManagedGcAnalysisIntegrityContract $contradictorySchema
+Assert-R13 (-not $malformedSchemaContract.Valid -and $malformedSchemaContract.Issues -contains 'top-level-recordIntegrity-malformed' -and
+    -not $contradictorySchemaContract.Valid -and $contradictorySchemaContract.Issues -contains 'recordIntegrity-contradicts-transitionParseError') 'Malformed and contradictory recordIntegrity schemas are rejected fail-closed'
 $multipleStates=Invoke-R13Fixture 'multiple-valid-post-return-state-snapshots' @($attempt,$alloc,$returned,$native,$state,$state)
 Assert-R13 ($multipleStates.managedRuntimeStateSnapshotCount -eq 2 -and
     $multipleStates.runtimeStateReady -and
@@ -219,6 +370,12 @@ Assert-R13 ($missingState.classification -ceq 'MANAGED_GC_ROOT_INCOMPLETE' -and
 $missingCollectionCompletion=Invoke-R13Fixture 'missing-native-collection-completion' @($attempt,$alloc,$returned,$state)
 Assert-R13 ($missingCollectionCompletion.classification -ceq 'MANAGED_GC_ROOT_INCOMPLETE' -and
     [string]$missingCollectionCompletion.parseError -ceq 'r13_event_order_contract_mismatch') 'Managed result without native collection completion remains incomplete'
+$allocationWithoutReturn=Invoke-R13Fixture 'allocation-record-without-managed-return' @($attempt,$alloc)
+Assert-R13 ($allocationWithoutReturn.managedEntryAttempted -and
+    -not $allocationWithoutReturn.managedEntryReturned -and
+    -not $allocationWithoutReturn.allocationSucceeded -and
+    -not $allocationWithoutReturn.gcCollectionStarted -and
+    $allocationWithoutReturn.classification -ceq 'MANAGED_GC_ROOT_INCOMPLETE') 'Evidence ending after allocation but before managed return or GC remains incomplete'
 $reordered=Invoke-R13Fixture 'allocation-after-return' @($attempt,$returned,$alloc,$native,$state)
 Assert-R13 ($reordered.classification -ceq 'MANAGED_GC_ROOT_INCOMPLETE' -and
     [string]$reordered.parseError -ceq 'r13_event_order_contract_mismatch') 'Negative ordering fixture rejects allocation evidence after managed return'
@@ -227,6 +384,9 @@ $zeroDelta=Invoke-R13Fixture 'no-native-collection-delta' @($attempt,$alloc,
     ($native -replace 'countAfter=00000001','countAfter=00000000' -replace 'delta=00000001','delta=00000000'),$state)
 Assert-R13 (-not $zeroDelta.gcCollectionStarted -and -not $zeroDelta.gcCollectionCompleted -and
     $zeroDelta.classification -ceq 'MANAGED_GC_ROOT_RETURNED_MISMATCH') 'Negative fixture rejects a claimed 1123 result without a native collection-count increase'
+Assert-R13 ($valid.managedEntryReturned -and [string]::IsNullOrWhiteSpace([string]$valid.parseError) -and
+    $missingCollectionCompletion.managedEntryReturned -and
+    $missingCollectionCompletion.classification -ceq 'MANAGED_GC_ROOT_INCOMPLETE') 'A managed return record remains distinct from an incomplete end-to-end collection record'
 $contradictory=Invoke-R13Fixture 'contradictory-runtime-state' @($attempt,$alloc,$returned,$native,
     ($state -replace 'membership=00000001','membership=00000000'))
 Assert-R13 (-not $contradictory.runtimeStateReady -and
@@ -255,6 +415,17 @@ Assert-R13 ($r12Valid.managedEntryReturned -and $r12Valid.allocationSucceeded -a
 $r12Late=Invoke-R12OrderingFixture 'r12-allocation-after-return' @($r12Attempt,$r12Returned,$r12Alloc,$r12State)
 Assert-R13 ($r12Late.classification -ceq 'MANAGED_SETTINGS_OBJECT_INCOMPLETE' -and
     [string]$r12Late.parseError -ceq 'r12_managed_entry_return_contract_mismatch') 'R12 negative ordering regression rejects allocation after method return'
+$r14FrontierAnalysis=Invoke-R13Fixture 'r14-last-observed-attachment-marker' @($r14AttachmentFixture -split "`r?`n")
+Assert-R13 ($r14FrontierAnalysis.managedEntryAttempted -and -not $r14FrontierAnalysis.managedEntryReturned -and
+    -not $r14FrontierAnalysis.allocationSucceeded -and -not $r14FrontierAnalysis.gcCollectionStarted -and
+    $r14FrontierAnalysis.classification -ceq 'MANAGED_GC_ROOT_INCOMPLETE') 'R14 serial fixture contains a pre-call attempt marker but no body, allocation, or collection evidence after attach'
+$qacCensusFixture=Get-Content -Raw -LiteralPath (Join-Path $r15FixtureRoot 'r14-qac-transient-census.json') | ConvertFrom-Json
+Assert-R13 ($qacCensusFixture.observations.Count -eq 3 -and
+    -not $qacCensusFixture.observations[0].censusComplete -and $qacCensusFixture.observations[0].degraded -and
+    $qacCensusFixture.observations[1].censusComplete -and -not $qacCensusFixture.observations[1].degraded -and
+    $qacCensusFixture.observations[2].phase -ceq 'after-001' -and
+    $qacCensusFixture.observations[2].qemuProcessCount -eq 0 -and $qacCensusFixture.observations[2].censusComplete -and
+    $runner.Contains('$qacSnapshotRecords') -and $runner.Contains('$qacAfterWindowsCensusPath')) 'QAC transient in-run census warning and verified final clear census remain separate observations'
 
 $report=[ordered]@{
     schema='C188R13_MANAGED_GC_ROOT_HOSTED_TESTS_V1'

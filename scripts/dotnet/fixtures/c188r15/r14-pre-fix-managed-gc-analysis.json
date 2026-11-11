@@ -1,0 +1,8 @@
+{
+  "analyzer": "C188R13-managed-gc-root-v1",
+  "classification": "MANAGED_GC_ROOT_INCOMPLETE",
+  "evidencePreserved": true,
+  "transitionClassification": "INITIALIZEMODULES_RETURNED_MANAGED_ENTRY_NOT_REQUESTED",
+  "transitionAnalysisPath": "managed-gc-root-analysis.json.transition.json",
+  "parseError": ""
+}
