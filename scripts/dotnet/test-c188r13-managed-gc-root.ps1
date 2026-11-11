@@ -127,6 +127,10 @@ Assert-R13 ($header -match 'sizeof\(GuideXosNativeAotManagedGcRootProbeRecord\) 
 Assert-R13 ($counter -match 'gcInProgress != 0u' -and $counter -match 'guideXosNativeAotC188R12R4R5ReadCounters') 'Native counter API rejects reads during collection and requires initialized heap/thread state'
 Assert-R13 ($runner -match 'CreateNew' -and $runner -match 'automaticRetry=\$false' -and
     $runner -match 'NATIVEAOT_SINGLE_COLLECTION_VERIFIED' -and $runner -match 'gcCollectionCompleted' -and
+    $runner -match 'transitionAttributionAnalysis\.recordIntegrity' -and
+    $runner -match '-not \$isManagedGcRootProbe -or\s+\[string\]::IsNullOrWhiteSpace\(\[string\]\$transitionAttributionAnalysis\.transitionParseError\)' -and
+    $analyzer -match 'recordIntegrity=\[string\]\$transition\.recordIntegrity' -and
+    $analyzer -match 'transitionParseError=\[string\]\$transition\.parseError' -and
     $runner.Contains('if ($isManagedGcRootProbe) {') -and
     $runner.Contains('Join-Path $phaseRoot ("guest-launch-attempt-" + [System.IO.Path]::GetFileName($candidate) + ".json")') -and
     $candidateBuilder.Contains('Join-Path $phaseRoot ("guest-launch-attempt-" + [System.IO.Path]::GetFileName($candidate) + ".json")') -and
@@ -201,6 +205,8 @@ function Invoke-R13Fixture([string]$Name,[string[]]$Lines) {
 $valid=Invoke-R13Fixture 'valid-order-marker-only' @($attempt,$alloc,$returned,$native,$state)
 Assert-R13 ($valid.managedEntryReturned -and $valid.gcCollectionStarted -and
     $valid.gcCollectionCompleted -and $valid.liveObjectSurvived -and
+    ($valid.PSObject.Properties.Name -contains 'recordIntegrity') -and
+    ($valid.PSObject.Properties.Name -contains 'transitionParseError') -and
     [string]::IsNullOrWhiteSpace([string]$valid.parseError) -and
     $valid.classification -ceq 'MANAGED_GC_ROOT_RETURNED_MISMATCH') 'Positive ordering fixture parses complete collection and liveness markers without claiming a guest pass'
 $multipleStates=Invoke-R13Fixture 'multiple-valid-post-return-state-snapshots' @($attempt,$alloc,$returned,$native,$state,$state)

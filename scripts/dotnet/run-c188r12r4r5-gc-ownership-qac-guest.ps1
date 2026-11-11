@@ -1476,6 +1476,8 @@ if ($isTransitionAttribution) {
     $transitionAttributionCaptureComplete = $recognizedTransitionClass -and
         [string]$transitionAttributionAnalysis.recordIntegrity -ceq '1' -and
         [string]::IsNullOrWhiteSpace([string]$transitionAttributionAnalysis.parseError) -and
+        (-not $isManagedGcRootProbe -or
+            [string]::IsNullOrWhiteSpace([string]$transitionAttributionAnalysis.transitionParseError)) -and
         [bool]$transitionAttributionAnalysis.evidencePreserved -and
         [string]$transitionAttributionAnalysis.callSiteMap.sha256 -ceq [string]$candidateManifest.transitionCallSiteMapSha256 -and
         [bool]$rawSerialPreservedByAnalysis
