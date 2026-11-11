@@ -114,4 +114,4 @@ All R4R3 run artifacts are under `E:\CodexArtifacts\guideXOSServer_FONT_SUPPORT\
 | Boot and screenshot integrity | [`Serial log`](file:///E:/CodexArtifacts/guideXOSServer_FONT_SUPPORT/FONT15R4R3/run1/guest/font15r4r3-run1.serial.log) · [`Screenshot integrity`](file:///E:/CodexArtifacts/guideXOSServer_FONT_SUPPORT/FONT15R4R3/run1/guest/screenshot-integrity-font15r4r3.json) |
 | Post-guest regression summary and logs | [`Summary JSON`](file:///E:/CodexArtifacts/guideXOSServer_FONT_SUPPORT/FONT15R4R3/run1/logs/postguest-regression-summary.json) · Logs: `FONT6-postguest.log`, `FONT10-postguest.log`, `FONT11-postguest.log`, `FONT14-postguest.log`, and `font15r2r1-qmp-safety-postguest.log` in the same `logs` directory |
 
-**Documentation commit:** the exact SHA is recorded in the final task handoff.
+**Documentation commit:** this report and the explicitly reviewed R4R2 companion were introduced in `182fdda7d25cbb87f2b3cc5993c080114a38138c`.
