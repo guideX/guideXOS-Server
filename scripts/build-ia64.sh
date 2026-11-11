@@ -198,9 +198,18 @@ if [[ "$FP_PROFILE" == early-exec ]]; then
     python3 "$REPO_ROOT/scripts/validate-ia64-early-exec.py" \
         --elf "$KERNEL" --repo-root "$REPO_ROOT" --objdump "$OBJDUMP" \
         2>&1 | tee "$BUILD_DIR/ia64-early-exec-safety-gates.txt"
+    python3 "$REPO_ROOT/scripts/validate-ia64-break-exception.py" \
+        --elf "$KERNEL" --repo-root "$REPO_ROOT" --objdump "$OBJDUMP" \
+        2>&1 | tee "$BUILD_DIR/ia64-break-exception-safety-gates.txt"
+    python3 "$REPO_ROOT/scripts/validate-ia64-general-exception.py" \
+        --elf "$KERNEL" --repo-root "$REPO_ROOT" --objdump "$OBJDUMP" \
+        2>&1 | tee "$BUILD_DIR/ia64-general-exception-safety-gates.txt"
     python3 "$REPO_ROOT/scripts/validate-ia64-cpu-state.py" \
         --elf "$KERNEL" --repo-root "$REPO_ROOT" --objdump "$OBJDUMP" \
         2>&1 | tee "$BUILD_DIR/ia64-cpu-state-safety-gates.txt"
+    python3 "$REPO_ROOT/scripts/validate-ia64-unaligned-reference.py" \
+        --elf "$KERNEL" --repo-root "$REPO_ROOT" --objdump "$OBJDUMP" \
+        2>&1 | tee "$BUILD_DIR/ia64-unaligned-reference-safety-gates.txt"
     sed -i 's/^EARLY_EXEC_STATIC_GATES=pending$/EARLY_EXEC_STATIC_GATES=pass/' "$PROFILE_FILE"
     sed -i 's/^IA64_CPU_STATE_STATIC_GATES=pending$/IA64_CPU_STATE_STATIC_GATES=pass/' "$PROFILE_FILE"
 else
@@ -233,6 +242,14 @@ manifest = {
     "static_gates": "PASS" if profile == "early-exec" else "NOT_APPLICABLE",
     "cpu_state_checkpoint_schema": "guidexos-ia64-cpu-state-checkpoints-v1" if profile == "early-exec" else "none",
     "cpu_state_static_gates": "PASS" if profile == "early-exec" else "NOT_APPLICABLE",
+    "break_exception_static_gates": "PASS" if profile == "early-exec" else "NOT_APPLICABLE",
+    "general_exception_static_gates": "PASS" if profile == "early-exec" else "NOT_APPLICABLE",
+    "unaligned_reference_static_gates": "PASS" if profile == "early-exec" else "NOT_APPLICABLE",
+    "post_rfi_static_gates": "PASS" if profile == "early-exec" else "NOT_APPLICABLE",
+    "break_exception_expected_faults": 2 if profile == "early-exec" else 0,
+    "general_exception_expected_faults": 1 if profile == "early-exec" else 0,
+    "unaligned_reference_expected_faults": 1 if profile == "early-exec" else 0,
+    "expected_exception_faults": 4 if profile == "early-exec" else 0,
     "runtime_qualified": False,
     "scheduler_qualified": False,
     "interrupt_fp_preservation": False,

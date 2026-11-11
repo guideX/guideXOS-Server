@@ -17,6 +17,29 @@ FORBIDDEN_RUNTIME_CALLS = (
 )
 
 
+def validate_early_entry_source(main_text: str) -> list[str]:
+    start = main_text.find("#if defined(GXOS_IA64_EARLY_EXEC_PROFILE)")
+    end = main_text.find("#else", start)
+    body = main_text[start:end] if start >= 0 and end > start else ""
+    errors: list[str] = []
+    if not body:
+        return ["dedicated early-exec entry branch is missing"]
+    forbidden = [token for token in FORBIDDEN_RUNTIME_CALLS if token in body]
+    if forbidden:
+        errors.append("early-exec entry reaches forbidden runtime paths: " + ", ".join(forbidden))
+    tests = ("run_break_exception_qualification()",
+             "run_general_exception_qualification()",
+             "run_unaligned_reference_qualification()")
+    positions = [body.find(token) for token in tests]
+    if any(position < 0 for position in positions) or positions != sorted(positions):
+        errors.append("early-exec entry must preserve Break, General, then Unaligned tests")
+    if "ski_console::stop()" not in body or "kernel::arch::halt()" not in body:
+        errors.append("early-exec entry must stop through the qualified Ski path")
+    if re.search(r"\bssm\s+psr\.i\b", body):
+        errors.append("early-exec entry must keep external interrupts masked")
+    return errors
+
+
 def run_disassembly(objdump: str, elf: Path, symbol: str) -> str:
     result = subprocess.run(
         [objdump, "-d", "-C", f"--disassemble={symbol}", str(elf)],
@@ -86,15 +109,10 @@ def validate(repo_root: Path, elf: Path, objdump: str) -> list[str]:
           "SKI_SSC_CALL_ABI", "standalone ABI bridge maps r32/r33 to r15/r32 and returns Ski r8")
 
     main = (repo_root / "kernel/core/main.cpp").read_text(encoding="utf-8")
-    early_start = main.find("#if defined(GXOS_IA64_EARLY_EXEC_PROFILE)")
-    early_end = main.find("#else", early_start)
-    early_body = main[early_start:early_end] if early_start >= 0 and early_end > early_start else ""
-    check(bool(early_body), "EARLY_ENTRY_ISOLATION", "dedicated compile-time entry branch exists")
-    bad_source_calls = [token for token in FORBIDDEN_RUNTIME_CALLS if token in early_body]
-    check(not bad_source_calls and "ski_console::stop()" in early_body and
-          "kernel::arch::halt()" in early_body,
-          "EARLY_ENTRY_CALLS", "stop-only path; forbidden calls=" +
-          (",".join(bad_source_calls) if bad_source_calls else "none"))
+    early_errors = validate_early_entry_source(main)
+    check(not early_errors, "EARLY_ENTRY_ISOLATION",
+          "; ".join(early_errors) if early_errors else
+          "Break, General, then Unaligned tests; no interrupt, device, or scheduler path")
 
     arch = (repo_root / "kernel/arch/ia64/arch.cpp").read_text(encoding="utf-8")
     init_start = arch.find("void init()")

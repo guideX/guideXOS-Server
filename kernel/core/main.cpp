@@ -37,6 +37,7 @@
 #include "arch/cpu_state_checkpoint.h"
 #include "arch/break_exception.h"
 #include "arch/general_exception.h"
+#include "arch/unaligned_reference.h"
 #endif
 
 // Storage subsystem
@@ -1643,7 +1644,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::arch::ia64::run_break_exception_qualification();
     const bool general_exception_qualified = break_exception_qualified &&
         kernel::arch::ia64::run_general_exception_qualification();
-    if (!break_exception_qualified || !general_exception_qualified) {
+    const bool unaligned_reference_qualified = general_exception_qualified &&
+        kernel::arch::ia64::run_unaligned_reference_qualification();
+    if (!break_exception_qualified || !general_exception_qualified ||
+        !unaligned_reference_qualified) {
         kernel::arch::ia64::ski_console::puts(
             "Early exception qualification failed; stopping before all other startup paths\r\n");
     }

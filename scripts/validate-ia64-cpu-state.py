@@ -63,6 +63,16 @@ def load_general_exception_validator(repo_root: Path) -> Any:
     return module
 
 
+def load_unaligned_reference_validator(repo_root: Path) -> Any:
+    path = repo_root / "scripts" / "validate-ia64-unaligned-reference.py"
+    spec = importlib.util.spec_from_file_location("ia64_cpu_state_unaligned_validator", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load Unaligned Reference validator: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def read_sources(repo_root: Path) -> dict[str, str]:
     paths = {
         "boot": repo_root / "kernel/arch/ia64/boot.s",
@@ -285,7 +295,8 @@ def validate_runtime_evidence(stdout: str, stderr: str, instruction_counts: str,
                               run_result: dict[str, Any], expected_sha256: str, *,
                               ivt: int, rse_base: int, rse_top: int,
                               general_fault_site: int | None = None,
-                              general_continuation: int | None = None) -> tuple[dict[str, Any], list[str]]:
+                              general_continuation: int | None = None,
+                              unaligned_symbols: dict[str, int] | None = None) -> tuple[dict[str, Any], list[str]]:
     """Validate raw guest records together with the runner's captured result."""
     records, errors = validate_checkpoint_output(
         stdout, ivt=ivt, rse_base=rse_base, rse_top=rse_top)
@@ -298,12 +309,15 @@ def validate_runtime_evidence(stdout: str, stderr: str, instruction_counts: str,
         errors.append("runner did not confirm simulator process cleanup")
     classification = run_result.get("classification")
     if classification not in ("GUEST_EXIT_ZERO", "BREAK_EXCEPTION_KERNEL_PASS",
-                               "GENERAL_EXCEPTION_KERNEL_PASS") or \
+                               "GENERAL_EXCEPTION_KERNEL_PASS",
+                               "UNALIGNED_REFERENCE_KERNEL_PASS") or \
             run_result.get("exit_code") != 0 or run_result.get("timed_out") is not False:
         errors.append("runner did not report successful intentional guest termination")
     expected_fault_count = (2 if classification == "BREAK_EXCEPTION_KERNEL_PASS" else
-                            3 if classification == "GENERAL_EXCEPTION_KERNEL_PASS" else 0)
-    if classification in ("BREAK_EXCEPTION_KERNEL_PASS", "GENERAL_EXCEPTION_KERNEL_PASS"):
+                            3 if classification == "GENERAL_EXCEPTION_KERNEL_PASS" else
+                            4 if classification == "UNALIGNED_REFERENCE_KERNEL_PASS" else 0)
+    if classification in ("BREAK_EXCEPTION_KERNEL_PASS", "GENERAL_EXCEPTION_KERNEL_PASS",
+                          "UNALIGNED_REFERENCE_KERNEL_PASS"):
         if run_result.get("ski_fault_count") != expected_fault_count or \
                 run_result.get("break_exception_expected_faults") != 2 or \
                 run_result.get("break_exception_evidence_errors") != []:
@@ -330,13 +344,14 @@ def validate_runtime_evidence(stdout: str, stderr: str, instruction_counts: str,
                           if line.startswith("IA64_BREAK_POST_RFI_PSR")]
         if len(post_rfi_lines) != 2:
             errors.append("raw guest output lacks exactly two immediate post-rfi PSR records")
-    if classification == "GENERAL_EXCEPTION_KERNEL_PASS":
-        if run_result.get("ski_fault_count") != 3 or \
-                run_result.get("expected_exception_faults") != 3 or \
+    if classification in ("GENERAL_EXCEPTION_KERNEL_PASS", "UNALIGNED_REFERENCE_KERNEL_PASS"):
+        combined_expected = 4 if classification == "UNALIGNED_REFERENCE_KERNEL_PASS" else 3
+        if run_result.get("ski_fault_count") != combined_expected or \
+                run_result.get("expected_exception_faults") != combined_expected or \
                 run_result.get("break_exception_expected_faults") != 2 or \
                 run_result.get("general_exception_expected_faults") != 1 or \
                 run_result.get("general_exception_evidence_errors") != []:
-            errors.append("runner did not bind exactly two Break and one General Exception fault")
+            errors.append("runner did not bind the expected Break and General Exception faults")
         if general_fault_site is None or general_continuation is None:
             errors.append("General Exception output cannot be bound to candidate symbols")
         else:
@@ -355,6 +370,23 @@ def validate_runtime_evidence(stdout: str, stderr: str, instruction_counts: str,
             if not isinstance(general_record, dict) or \
                     run_result.get("general_exception_record_fields") != general_record:
                 errors.append("runner General Exception frame differs from the raw guest record")
+    if classification == "UNALIGNED_REFERENCE_KERNEL_PASS":
+        if unaligned_symbols is None or \
+                run_result.get("unaligned_reference_expected_faults") != 1 or \
+                run_result.get("unaligned_reference_evidence_errors") != [] or \
+                run_result.get("unaligned_reference_ssc_exit_function") != 66:
+            errors.append("runner did not bind the Unaligned Reference fault/continuation contract")
+        else:
+            unaligned_validator = load_unaligned_reference_validator(
+                Path(__file__).resolve().parents[1])
+            unaligned_record, unaligned_errors = unaligned_validator.validate_output(
+                stdout, unaligned_symbols, probe=False)
+            if unaligned_errors:
+                errors.extend(f"Unaligned Reference evidence: {error}"
+                              for error in unaligned_errors)
+            if not isinstance(unaligned_record, dict) or \
+                    run_result.get("unaligned_reference_record_fields") != unaligned_record:
+                errors.append("runner Unaligned Reference frame differs from the raw guest record")
     elif classification == "GUEST_EXIT_ZERO" and run_result.get("ski_fault_count") not in (None, 0):
         errors.append("zero-fault kernel classification reports a simulator fault")
     simulator_output = stdout + "\n" + stderr
@@ -369,10 +401,13 @@ def validate_runtime_evidence(stdout: str, stderr: str, instruction_counts: str,
     # Expected synchronous faults are attested by strict guest records and runner
     # classification. Ignore their structured markers when scanning diagnostics.
     allowed_exception_prefixes = ()
-    if classification in ("BREAK_EXCEPTION_KERNEL_PASS", "GENERAL_EXCEPTION_KERNEL_PASS"):
+    if classification in ("BREAK_EXCEPTION_KERNEL_PASS", "GENERAL_EXCEPTION_KERNEL_PASS",
+                          "UNALIGNED_REFERENCE_KERNEL_PASS"):
         allowed_exception_prefixes += ("IA64_BREAK_",)
-    if classification == "GENERAL_EXCEPTION_KERNEL_PASS":
+    if classification in ("GENERAL_EXCEPTION_KERNEL_PASS", "UNALIGNED_REFERENCE_KERNEL_PASS"):
         allowed_exception_prefixes += ("IA64_GENERAL_EXCEPTION_",)
+    if classification == "UNALIGNED_REFERENCE_KERNEL_PASS":
+        allowed_exception_prefixes += ("IA64_UNALIGNED_REFERENCE_",)
     diagnostic_lines = [line for line in simulator_output.splitlines()
                         if not line.startswith(allowed_exception_prefixes)]
     diagnostic_output = "\n".join(diagnostic_lines)
@@ -592,6 +627,18 @@ def validate_runtime_files(repo_root: Path, elf_path: Path, manifest_path: Path,
 
     if not isinstance(run_result, dict):
         return {}, errors + ["runner result is not a JSON object"]
+    if run_result.get("classification") == "UNALIGNED_REFERENCE_KERNEL_PASS":
+        probe = manifest.get("unaligned_reference_probe") if isinstance(manifest, dict) else None
+        if not isinstance(manifest, dict) or \
+                manifest.get("unaligned_reference_static_gates") != "PASS" or \
+                manifest.get("unaligned_reference_expected_faults") != 1 or \
+                manifest.get("expected_exception_faults") != 4 or \
+                not isinstance(probe, dict) or probe.get("qualified") is not True or \
+                probe.get("expected_faults") != 1 or probe.get("expected_continuations") != 1 or \
+                run_result.get("unaligned_reference_probe_artifact_sha256") != \
+                probe.get("artifact_sha256") or \
+                run_result.get("unaligned_reference_probe_simulator_sha256") != simulator_sha256:
+            errors.append("candidate manifest/run does not bind the qualified Unaligned Reference probe")
     command = run_result.get("command")
     if isinstance(command, list) and command:
         try:
@@ -684,10 +731,23 @@ def validate_runtime_files(repo_root: Path, elf_path: Path, manifest_path: Path,
         rse_top=symbols["rse_backing_store_top"]["value"],
         general_fault_site=symbols.get("ia64_general_exception_fault_site", {}).get("value"),
         general_continuation=symbols.get("ia64_general_exception_continuation", {}).get("value"),
+        unaligned_symbols={
+            "ivt": symbols.get("ia64_ivt", {}).get("value", 0),
+            "vector": symbols.get("ivt_unaligned_ref", {}).get("value", 0),
+            "entry": symbols.get("ia64_unaligned_reference_entry", {}).get("value", 0),
+            "record": symbols.get("ia64_unaligned_reference_record", {}).get("value", 0),
+            "buffer": symbols.get("ia64_unaligned_reference_buffer", {}).get("value", 0),
+            "fault_site": symbols.get("ia64_unaligned_reference_fault_site", {}).get("value", 0),
+            "continuation": symbols.get("ia64_unaligned_reference_continuation", {}).get("value", 0),
+            "test": symbols.get("ia64_unaligned_reference_test", {}).get("value", 0),
+            "rse_base": symbols["rse_backing_store_base"]["value"],
+            "rse_top": symbols["rse_backing_store_top"]["value"],
+        },
     )
     errors.extend(runtime_errors)
     if run_result.get("classification") in (
-            "BREAK_EXCEPTION_KERNEL_PASS", "GENERAL_EXCEPTION_KERNEL_PASS"):
+            "BREAK_EXCEPTION_KERNEL_PASS", "GENERAL_EXCEPTION_KERNEL_PASS",
+            "UNALIGNED_REFERENCE_KERNEL_PASS"):
         runner_path = repo_root / "scripts" / "run-ia64-ski.py"
         spec = importlib.util.spec_from_file_location("ia64_postflight_ski_runner", runner_path)
         if spec is None or spec.loader is None:
@@ -708,8 +768,11 @@ def validate_runtime_files(repo_root: Path, elf_path: Path, manifest_path: Path,
                 "IA64_BREAK_EXCEPTION_RESULT=PASS", "IA64_BREAK_EXCEPTION_RESULT=FAIL",
                 "IA64_BREAK_EXCEPTION_VALIDATION")
             contract["stderr_text"] = stderr
-            if run_result.get("classification") == "GENERAL_EXCEPTION_KERNEL_PASS":
+            if run_result.get("classification") in (
+                    "GENERAL_EXCEPTION_KERNEL_PASS", "UNALIGNED_REFERENCE_KERNEL_PASS"):
                 contract["general_exception_contract"] = {"revalidated_by_cpu_postflight": True}
+            if run_result.get("classification") == "UNALIGNED_REFERENCE_KERNEL_PASS":
+                contract["unaligned_reference_contract"] = {"revalidated_by_cpu_postflight": True}
             break_errors = runner.validate_break_output(stdout, contract)
             if break_errors:
                 errors.extend(f"Break exception evidence: {error}" for error in break_errors)
@@ -719,6 +782,27 @@ def validate_runtime_files(repo_root: Path, elf_path: Path, manifest_path: Path,
                 errors.extend(f"Break exception evidence: {error}" for error in observation_errors)
             if run_result.get("break_exception_post_rfi_observations") != observed_psr:
                 errors.append("runner post-rfi capture records differ from raw guest output")
+            if run_result.get("classification") == "UNALIGNED_REFERENCE_KERNEL_PASS":
+                unaligned_validator = load_unaligned_reference_validator(repo_root)
+                unaligned_record, unaligned_errors = unaligned_validator.validate_output(
+                    stdout, {
+                        "ivt": symbols["ia64_ivt"]["value"],
+                        "vector": symbols["ivt_unaligned_ref"]["value"],
+                        "entry": symbols["ia64_unaligned_reference_entry"]["value"],
+                        "record": symbols["ia64_unaligned_reference_record"]["value"],
+                        "buffer": symbols["ia64_unaligned_reference_buffer"]["value"],
+                        "fault_site": symbols["ia64_unaligned_reference_fault_site"]["value"],
+                        "continuation": symbols["ia64_unaligned_reference_continuation"]["value"],
+                        "test": symbols["ia64_unaligned_reference_test"]["value"],
+                        "rse_base": symbols["rse_backing_store_base"]["value"],
+                        "rse_top": symbols["rse_backing_store_top"]["value"],
+                    }, probe=False)
+                if unaligned_errors or \
+                        run_result.get("unaligned_reference_record_fields") != unaligned_record:
+                    errors.extend(f"Unaligned Reference evidence: {error}"
+                                  for error in unaligned_errors)
+                    if run_result.get("unaligned_reference_record_fields") != unaligned_record:
+                        errors.append("runner Unaligned Reference capture differs from raw guest output")
     source_errors = validate_checkpoint_sources(repo_root)
     if source_errors:
         errors.extend(f"checkpoint source contract: {error}" for error in source_errors)
@@ -784,6 +868,14 @@ def main() -> int:
                 print("POST_RFI_PSR=PASS two ordered direct captures show PSR.i=0, PSR.ic=1 before cleanup")
                 print("GENERAL_EXCEPTION_EVIDENCE=PASS one exact Illegal Operation site and continuation")
                 print("SIMULATOR_FAULTS=PASS total=3 expected_break=2 expected_general=1 unexpected=0")
+            elif run_record.get("classification") == "UNALIGNED_REFERENCE_KERNEL_PASS":
+                print("BREAK_EXCEPTION_EVIDENCE=PASS two records, exact vector/immediates/slots, "
+                      "distinct return markers, and one continuation per slot")
+                print("POST_RFI_PSR=PASS two ordered direct captures show PSR.i=0, PSR.ic=1 before cleanup")
+                print("GENERAL_EXCEPTION_EVIDENCE=PASS one exact Illegal Operation site and continuation")
+                print("UNALIGNED_REFERENCE_EVIDENCE=PASS vector=0x5a00 exact IFA/ISR and one bounded continuation")
+                print("SIMULATOR_FAULTS=PASS total=4 expected_break=2 expected_general=1 "
+                      "expected_unaligned=1 unexpected=0")
             else:
                 print("SIMULATOR_FAULTS=PASS total=0")
             print("CANDIDATE_IDENTITY=PASS ELF, manifest, loader record, invocation, and runner hash agree")

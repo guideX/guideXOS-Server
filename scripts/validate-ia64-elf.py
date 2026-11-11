@@ -311,7 +311,7 @@ def check_kernel(path: Path, object_dir: Path | None, repo_root: Path,
                 active_source = True
             elif in_ivt:
                 macro = re.match(
-                    r"\s*IVT_ENTRY_(HALT|BREAK|GENERAL_EXCEPTION)\s+([A-Za-z_][A-Za-z0-9_]*)\s*,\s*"
+                    r"\s*IVT_ENTRY_(HALT|BREAK|GENERAL_EXCEPTION|UNALIGNED_REFERENCE)\s+([A-Za-z_][A-Za-z0-9_]*)\s*,\s*"
                     r"(0x[0-9a-fA-F]+)\s*,\s*(IVT_(?:LONG|SHORT)_SLOT_BYTES)\s*$",
                     line,
                 )
@@ -364,6 +364,7 @@ def check_kernel(path: Path, object_dir: Path | None, repo_root: Path,
                 expected_kind = (
                     "BREAK" if name == "ivt_break" and profile == "early-exec" else
                     "GENERAL_EXCEPTION" if name == "ivt_general_exception" and profile == "early-exec" else
+                    "UNALIGNED_REFERENCE" if name == "ivt_unaligned_ref" and profile == "early-exec" else
                     "HALT")
                 if source_name != name or source_offset != expected_offset or \
                         source_slot_name != expected_slot_name or source_kind != expected_kind:

@@ -86,7 +86,10 @@ def validate_manifest_identity(artifact: Path, manifest_path: Path,
         if manifest.get("guest_execution_authorized") is not False or \
                 manifest.get("general_exception_static_gates") != "PASS" or \
                 manifest.get("general_exception_expected_faults") != 1 or \
-                manifest.get("expected_exception_faults") != 3:
+                manifest.get("expected_exception_faults") not in (3, 4) or \
+                (manifest.get("expected_exception_faults") == 4 and
+                 (manifest.get("unaligned_reference_static_gates") != "PASS" or
+                  manifest.get("unaligned_reference_expected_faults") != 1)):
             raise GateError("early-exec manifest does not retain the General Exception static/execution contract")
     else:
         raise GateError("manifest schema/profile is not a General Exception probe or early-exec candidate")

@@ -112,6 +112,26 @@ ia64_ivt:
     .endif
 .endm
 
+/* Only the early-exec qualification owns one Unaligned Reference entry. */
+.macro IVT_ENTRY_UNALIGNED_REFERENCE name, offset, slot_bytes
+    .if (\offset + \slot_bytes) > IVT_BYTES
+        .error "IA-64 Unaligned Reference slot extends beyond 0x8000 bytes"
+    .endif
+    .org ia64_ivt + \offset
+    .global \name
+    .global \name\()_end
+    .type \name, @function
+    .proc \name
+\name:
+    br.sptk.many ia64_unaligned_reference_entry ;;
+\name\()_end:
+    .endp \name
+    .size \name, \name\()_end - \name
+    .if (\name\()_end - \name) > \slot_bytes
+        .error "IA-64 Unaligned Reference stub exceeds its assigned slot"
+    .endif
+.endm
+
 /* First 20 long vectors: 0x0000 through 0x4c00 in 0x400-byte steps. */
 IVT_ENTRY_HALT ivt_vhpt_translation,           0x0000, IVT_LONG_SLOT_BYTES
 IVT_ENTRY_HALT ivt_itlb_miss,                  0x0400, IVT_LONG_SLOT_BYTES
@@ -153,7 +173,11 @@ IVT_ENTRY_HALT ivt_nat_consumption,             0x5600, IVT_SHORT_SLOT_BYTES
 IVT_ENTRY_HALT ivt_speculation,                 0x5700, IVT_SHORT_SLOT_BYTES
 IVT_ENTRY_HALT ivt_reserved_1c,                 0x5800, IVT_SHORT_SLOT_BYTES
 IVT_ENTRY_HALT ivt_debug,                       0x5900, IVT_SHORT_SLOT_BYTES
+.ifdef GXOS_IA64_EARLY_EXEC_PROFILE
+IVT_ENTRY_UNALIGNED_REFERENCE ivt_unaligned_ref, 0x5a00, IVT_SHORT_SLOT_BYTES
+.else
 IVT_ENTRY_HALT ivt_unaligned_ref,               0x5a00, IVT_SHORT_SLOT_BYTES
+.endif
 IVT_ENTRY_HALT ivt_unsupported_data_ref,         0x5b00, IVT_SHORT_SLOT_BYTES
 IVT_ENTRY_HALT ivt_fp_fault,                    0x5c00, IVT_SHORT_SLOT_BYTES
 IVT_ENTRY_HALT ivt_fp_trap,                     0x5d00, IVT_SHORT_SLOT_BYTES

@@ -83,6 +83,19 @@ def load_general_exception_validator() -> Any:
 GENERAL_EXCEPTION_VALIDATOR = load_general_exception_validator()
 
 
+def load_unaligned_reference_validator() -> Any:
+    path = ROOT / "scripts" / "validate-ia64-unaligned-reference.py"
+    spec = importlib.util.spec_from_file_location("ia64_unaligned_reference_validator", path)
+    if spec is None or spec.loader is None:
+        raise GateError(f"cannot load Unaligned Reference validator: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+UNALIGNED_REFERENCE_VALIDATOR = load_unaligned_reference_validator()
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -397,7 +410,9 @@ def validate_break_output(stdout_text: str, contract: dict[str, Any]) -> list[st
     for line in (stdout_text + "\n" + contract.get("stderr_text", "")).splitlines():
         if line.startswith("IA64_BREAK_") or \
                 (contract.get("general_exception_contract") is not None and
-                 line.startswith("IA64_GENERAL_EXCEPTION_")):
+                 line.startswith("IA64_GENERAL_EXCEPTION_")) or \
+                (contract.get("unaligned_reference_contract") is not None and
+                 line.startswith("IA64_UNALIGNED_REFERENCE_")):
             continue
         lowered = line.lower()
         if any(marker in lowered for marker in FAULT_MARKERS):
@@ -488,7 +503,8 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
                   artifact_hash: str | None = None,
                   checkpoint_expectations: dict[str, int] | None = None,
                   break_exception_contract: dict[str, Any] | None = None,
-                  general_exception_contract: dict[str, Any] | None = None) -> int:
+                  general_exception_contract: dict[str, Any] | None = None,
+                  unaligned_reference_contract: dict[str, Any] | None = None) -> int:
     if timeout <= 0 or timeout > 300:
         raise GateError("timeout must be greater than zero and no more than 300 seconds")
     if capture_dir.exists():
@@ -522,17 +538,23 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
     break_evidence_errors: list[str] = []
     general_evidence_errors: list[str] = []
     general_record_fields: dict[str, int] | None = None
+    unaligned_reference_evidence_errors: list[str] = []
+    unaligned_reference_record_fields: dict[str, int] | None = None
     expected_exception_faults = (
         (break_exception_contract["expected_faults"] if break_exception_contract else 0) +
-        (general_exception_contract["expected_faults"] if general_exception_contract else 0))
+        (general_exception_contract["expected_faults"] if general_exception_contract else 0) +
+        (unaligned_reference_contract["expected_faults"]
+         if unaligned_reference_contract else 0))
 
     if timed_out:
         classification = "TIMEOUT"
-    elif break_exception_contract is not None or general_exception_contract is not None:
+    elif break_exception_contract is not None or general_exception_contract is not None or \
+            unaligned_reference_contract is not None:
         if break_exception_contract is not None:
             output_contract = dict(break_exception_contract)
             output_contract["stderr_text"] = stderr_text
             output_contract["general_exception_contract"] = general_exception_contract
+            output_contract["unaligned_reference_contract"] = unaligned_reference_contract
             break_evidence_errors = validate_break_output(stdout_text, output_contract)
         if general_exception_contract is not None:
             general_record_fields, general_evidence_errors = \
@@ -542,6 +564,7 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
             generic_fault_lines = []
             for line in (stdout_text + "\n" + stderr_text).splitlines():
                 if line.startswith("IA64_GENERAL_EXCEPTION_") or \
+                        line.startswith("IA64_UNALIGNED_REFERENCE_") or \
                         (break_exception_contract is not None and line.startswith("IA64_BREAK_")):
                     continue
                 lowered = line.lower()
@@ -555,6 +578,35 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
                     "processor 0 exited with status 0" not in combined:
                 general_evidence_errors.append(
                     "Ski did not report the intentional SSC exit after the General Exception test")
+        if unaligned_reference_contract is not None:
+            unaligned_reference_record_fields, unaligned_reference_evidence_errors = \
+                UNALIGNED_REFERENCE_VALIDATOR.validate_output(
+                    stdout_text, unaligned_reference_contract["symbols"],
+                    probe=unaligned_reference_contract["probe"])
+            generic_fault_lines = []
+            for line in (stdout_text + "\n" + stderr_text).splitlines():
+                if line.startswith("IA64_UNALIGNED_REFERENCE_") or \
+                        (break_exception_contract is not None and line.startswith("IA64_BREAK_")) or \
+                        (general_exception_contract is not None and
+                         line.startswith("IA64_GENERAL_EXCEPTION_")):
+                    continue
+                lowered = line.lower()
+                if any(marker in lowered for marker in FAULT_MARKERS):
+                    generic_fault_lines.append(line)
+            if generic_fault_lines:
+                unaligned_reference_evidence_errors.append(
+                    "unexpected Ski fault/exception diagnostic: " + generic_fault_lines[0][:180])
+            if unaligned_reference_contract.get("require_intentional_exit") and \
+                    "kernel exited with status 0" not in combined and \
+                    "processor 0 exited with status 0" not in combined:
+                unaligned_reference_evidence_errors.append(
+                    "Ski did not report the intentional SSC exit after the Unaligned Reference test")
+        failure_classification = (
+            "UNALIGNED_REFERENCE_QUALIFICATION_FAIL"
+            if unaligned_reference_contract is not None else
+            "GENERAL_EXCEPTION_QUALIFICATION_FAIL"
+            if general_exception_contract is not None else
+            "BREAK_EXCEPTION_QUALIFICATION_FAIL")
         if return_code != 0:
             classification = "SIMULATOR_ERROR"
         elif fault_count != expected_exception_faults:
@@ -563,33 +615,35 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
                 break_evidence_errors.append(message)
             if general_exception_contract is not None:
                 general_evidence_errors.append(message)
-            classification = ("GENERAL_EXCEPTION_QUALIFICATION_FAIL"
-                              if general_exception_contract is not None else
-                              "BREAK_EXCEPTION_QUALIFICATION_FAIL")
+            if unaligned_reference_contract is not None:
+                unaligned_reference_evidence_errors.extend(
+                    UNALIGNED_REFERENCE_VALIDATOR.validate_expected_fault_count(
+                        fault_count, expected_exception_faults))
+            classification = failure_classification
         elif instruction_count is None:
             message = "Ski instruction count was not present in captured statistics"
             if break_exception_contract is not None:
                 break_evidence_errors.append(message)
             if general_exception_contract is not None:
                 general_evidence_errors.append(message)
-            classification = ("GENERAL_EXCEPTION_QUALIFICATION_FAIL"
-                              if general_exception_contract is not None else
-                              "BREAK_EXCEPTION_QUALIFICATION_FAIL")
+            if unaligned_reference_contract is not None:
+                unaligned_reference_evidence_errors.append(message)
+            classification = failure_classification
         elif process.poll() is None:
             message = "simulator process group was not reaped"
             if break_exception_contract is not None:
                 break_evidence_errors.append(message)
             if general_exception_contract is not None:
                 general_evidence_errors.append(message)
-            classification = ("GENERAL_EXCEPTION_QUALIFICATION_FAIL"
-                              if general_exception_contract is not None else
-                              "BREAK_EXCEPTION_QUALIFICATION_FAIL")
-        elif break_evidence_errors or general_evidence_errors:
-            classification = ("GENERAL_EXCEPTION_QUALIFICATION_FAIL"
-                              if general_exception_contract is not None else
-                              "BREAK_EXCEPTION_QUALIFICATION_FAIL")
+            if unaligned_reference_contract is not None:
+                unaligned_reference_evidence_errors.append(message)
+            classification = failure_classification
+        elif break_evidence_errors or general_evidence_errors or unaligned_reference_evidence_errors:
+            classification = failure_classification
         else:
             classification = (
+                unaligned_reference_contract["success_classification"]
+                if unaligned_reference_contract is not None else
                 general_exception_contract["success_classification"]
                 if general_exception_contract is not None else
                 break_exception_contract["success_classification"])
@@ -616,7 +670,8 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
             rse_top=checkpoint_expectations["rse_top"],
         )
         if classification in ("GUEST_EXIT_ZERO", "BREAK_EXCEPTION_KERNEL_PASS",
-                              "GENERAL_EXCEPTION_KERNEL_PASS") and checkpoint_errors:
+                              "GENERAL_EXCEPTION_KERNEL_PASS",
+                              "UNALIGNED_REFERENCE_KERNEL_PASS") and checkpoint_errors:
             classification = "CPU_STATE_CHECKPOINT_FAIL"
 
     record = {
@@ -654,6 +709,14 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
         "general_exception_ssc_exit_function": (
             general_exception_contract.get("ssc_exit_function")
             if general_exception_contract else None),
+        "unaligned_reference_evidence_errors": unaligned_reference_evidence_errors,
+        "unaligned_reference_expected_faults": (
+            unaligned_reference_contract["expected_faults"]
+            if unaligned_reference_contract else None),
+        "unaligned_reference_record_fields": unaligned_reference_record_fields,
+        "unaligned_reference_ssc_exit_function": (
+            unaligned_reference_contract.get("ssc_exit_function")
+            if unaligned_reference_contract else None),
     }
     (capture_dir / "run-result.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     print(f"[{classification}] exit={return_code} elapsed={elapsed:.3f}s capture={capture_dir}")
@@ -661,7 +724,9 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
                                     "BREAK_EXCEPTION_PROBE_PASS",
                                     "BREAK_EXCEPTION_KERNEL_PASS",
                                     "GENERAL_EXCEPTION_PROBE_PASS",
-                                    "GENERAL_EXCEPTION_KERNEL_PASS") else 1
+                                    "GENERAL_EXCEPTION_KERNEL_PASS",
+                                    "UNALIGNED_REFERENCE_PROBE_PASS",
+                                    "UNALIGNED_REFERENCE_KERNEL_PASS") else 1
 
 
 def require_linux() -> None:
@@ -707,6 +772,19 @@ def setup_parser() -> argparse.ArgumentParser:
     general_probe.add_argument("--objdump", default="/home/guidex/src/ia64-2-toolchain-shim/ia64-linux-objdump")
     general_probe.add_argument("--ski-init-file", type=Path,
                                help="optional pinned-Ski debugger command file for failed probe diagnosis")
+
+    unaligned_probe = subparsers.add_parser(
+        "unaligned-reference-probe", help="qualify the isolated Unaligned Reference return ELF")
+    unaligned_probe.add_argument("--artifact", type=Path, required=True)
+    unaligned_probe.add_argument("--manifest", type=Path, required=True)
+    unaligned_probe.add_argument("--expected-sha256", required=True)
+    unaligned_probe.add_argument("--simulator-sha256", required=True)
+    unaligned_probe.add_argument("--ski-prefix", type=Path, default=DEFAULT_SKI_PREFIX)
+    unaligned_probe.add_argument("--capture-dir", type=Path)
+    unaligned_probe.add_argument("--timeout", type=float, default=60)
+    unaligned_probe.add_argument("--mode", choices=("system",), default="system")
+    unaligned_probe.add_argument(
+        "--objdump", default="/home/guidex/src/ia64-2-toolchain-shim/ia64-linux-objdump")
 
     kernel = subparsers.add_parser("kernel", help="run a kernel only after separate authorization")
     kernel.add_argument("--artifact", type=Path, required=True)
@@ -906,6 +984,65 @@ def run_general_exception_probe(args: argparse.Namespace) -> int:
     return status
 
 
+def run_unaligned_reference_probe(args: argparse.Namespace) -> int:
+    require_linux()
+    if not args.artifact.is_file():
+        raise GateError(f"selected Unaligned Reference probe ELF does not exist: {args.artifact}")
+    UNALIGNED_REFERENCE_VALIDATOR.validate_manifest_identity(
+        args.artifact, args.manifest, args.expected_sha256)
+    symbols = UNALIGNED_REFERENCE_VALIDATOR.exception_symbols(args.artifact)
+    validate_direct_system_elf(args.artifact)
+
+    validation_env = os.environ.copy()
+    validation_env["PYTHONDONTWRITEBYTECODE"] = "1"
+    gate_cmd = [
+        sys.executable, str(ROOT / "scripts" / "validate-ia64-unaligned-reference.py"),
+        "--repo-root", str(ROOT), "--elf", str(args.artifact), "--objdump", args.objdump,
+        "--probe", "--manifest", str(args.manifest), "--expected-sha256", args.expected_sha256,
+    ]
+    result = subprocess.run(gate_cmd, capture_output=True, text=True,
+                            check=False, env=validation_env)
+    print(result.stdout, end="")
+    if result.returncode:
+        print(result.stderr, file=sys.stderr, end="")
+        raise GateError("Unaligned Reference probe source/disassembly/identity gates failed")
+
+    simulator = verify_ski(args.ski_prefix, args.simulator_sha256)
+    capture_dir = args.capture_dir or Path(tempfile.mkdtemp(
+        prefix="guidexos-ia64-unaligned-reference-probe-"))
+    contract = {
+        "expected_faults": 1,
+        "symbols": symbols,
+        "probe": True,
+        "success_classification": "UNALIGNED_REFERENCE_PROBE_PASS",
+        "require_intentional_exit": True,
+        "ssc_exit_function": 66,
+    }
+    with verified_snapshot(args.artifact, args.expected_sha256) as snapshot:
+        validate_direct_system_elf(snapshot)
+        command = [str(simulator), "-forcesystem", str(snapshot)]
+        status = run_simulator(
+            command, args.timeout, capture_dir, "ia64-unaligned-reference-probe",
+            artifact_hash=args.expected_sha256,
+            unaligned_reference_contract=contract)
+
+    result_path = capture_dir / "run-result.json"
+    run_record = read_json(result_path, "Unaligned Reference probe run result")
+    run_record.update({
+        "artifact_manifest": str(args.manifest.resolve()),
+        "artifact_manifest_sha256": sha256(args.manifest),
+        "simulator_sha256": args.simulator_sha256,
+        "ski_source_commit": QUALIFIED_SKI_COMMIT,
+        "ski_version": QUALIFIED_SKI_VERSION,
+        "execution_mode": "-forcesystem",
+        "cpu_count": 1,
+        "load_ranges": validate_direct_system_elf(args.artifact),
+        "unaligned_reference_symbols": symbols,
+    })
+    result_path.write_text(json.dumps(run_record, indent=2) + "\n", encoding="utf-8")
+    return status
+
+
 def verify_break_probe_evidence(manifest: dict[str, Any]) -> dict[str, Any]:
     evidence = manifest.get("break_exception_probe")
     if not isinstance(evidence, dict) or \
@@ -1079,6 +1216,98 @@ def verify_general_exception_probe_evidence(manifest: dict[str, Any]) -> dict[st
             "record_fields": run_record["general_exception_record_fields"]}
 
 
+def verify_unaligned_reference_probe_evidence(manifest: dict[str, Any],
+                                              objdump: str) -> dict[str, Any]:
+    evidence = manifest.get("unaligned_reference_probe")
+    if not isinstance(evidence, dict) or \
+            evidence.get("schema") != "guidexos-ia64-unaligned-reference-probe-evidence-v1" or \
+            evidence.get("qualified") is not True or evidence.get("expected_faults") != 1 or \
+            evidence.get("expected_continuations") != 1:
+        raise GateError("candidate manifest lacks a passing independent Unaligned Reference probe")
+
+    try:
+        probe_elf = Path(evidence["artifact"]).resolve(strict=True)
+        probe_manifest_path = Path(evidence["manifest"]).resolve(strict=True)
+        run_result_path = Path(evidence["run_result"]).resolve(strict=True)
+        stdout_path = Path(evidence["stdout"]).resolve(strict=True)
+        stderr_path = Path(evidence["stderr"]).resolve(strict=True)
+        counts_path = Path(evidence["instruction_counts"]).resolve(strict=True)
+    except (KeyError, OSError, TypeError) as exc:
+        raise GateError(f"independent Unaligned Reference probe paths are invalid: {exc}") from exc
+
+    for path, key, label in (
+            (probe_elf, "artifact_sha256", "ELF"),
+            (probe_manifest_path, "manifest_sha256", "manifest"),
+            (run_result_path, "run_result_sha256", "run-result"),
+            (stdout_path, "stdout_sha256", "stdout"),
+            (stderr_path, "stderr_sha256", "stderr"),
+            (counts_path, "instruction_counts_sha256", "instruction statistics")):
+        if sha256(path) != evidence.get(key):
+            raise GateError(f"Unaligned Reference probe {label} changed after its qualifying run")
+
+    try:
+        UNALIGNED_REFERENCE_VALIDATOR.validate_manifest_identity(
+            probe_elf, probe_manifest_path, evidence["artifact_sha256"])
+        probe_symbols = UNALIGNED_REFERENCE_VALIDATOR.exception_symbols(probe_elf)
+        static_errors = UNALIGNED_REFERENCE_VALIDATOR.validate_static(
+            ROOT, probe_elf, Path(objdump), probe=True)
+    except (KeyError, UNALIGNED_REFERENCE_VALIDATOR.GateError) as exc:
+        raise GateError(f"Unaligned Reference probe artifact/manifest no longer qualifies: {exc}") from exc
+    if static_errors:
+        raise GateError("independent Unaligned Reference probe static gates failed: " +
+                        "; ".join(static_errors))
+
+    run_record = read_json(run_result_path, "Unaligned Reference probe run result")
+    if run_record.get("classification") != "UNALIGNED_REFERENCE_PROBE_PASS" or \
+            run_record.get("artifact_sha256") != evidence["artifact_sha256"] or \
+            run_record.get("artifact_manifest_sha256") != evidence["manifest_sha256"] or \
+            run_record.get("ski_fault_count") != 1 or \
+            run_record.get("unaligned_reference_expected_faults") != 1 or \
+            run_record.get("expected_exception_faults") != 1 or \
+            run_record.get("ski_instruction_count") is None or \
+            run_record.get("exit_code") != 0 or run_record.get("timed_out") is not False or \
+            run_record.get("cleanup_complete") is not True or \
+            run_record.get("execution_mode") != "-forcesystem" or \
+            run_record.get("cpu_count") != 1 or \
+            run_record.get("simulator_sha256") != QUALIFIED_SKI_SHA256 or \
+            run_record.get("ski_source_commit") != QUALIFIED_SKI_COMMIT or \
+            run_record.get("ski_version") != QUALIFIED_SKI_VERSION or \
+            run_record.get("unaligned_reference_ssc_exit_function") != 66 or \
+            run_record.get("unaligned_reference_evidence_errors") != []:
+        raise GateError("independent Unaligned Reference probe result is incomplete or did not qualify")
+    if Path(run_record.get("stdout", "")).resolve() != stdout_path or \
+            Path(run_record.get("stderr", "")).resolve() != stderr_path or \
+            Path(run_record.get("instruction_counts", "")).resolve() != counts_path or \
+            run_record.get("stdout_sha256") != evidence["stdout_sha256"] or \
+            run_record.get("stderr_sha256") != evidence["stderr_sha256"] or \
+            run_record.get("instruction_counts_sha256") != evidence["instruction_counts_sha256"]:
+        raise GateError("Unaligned Reference probe run-result does not bind its capture files")
+
+    stdout_text = stdout_path.read_text(encoding="utf-8", errors="replace")
+    stderr_text = stderr_path.read_text(encoding="utf-8", errors="replace")
+    fields, output_errors = UNALIGNED_REFERENCE_VALIDATOR.validate_output(
+        stdout_text, probe_symbols, probe=True)
+    unexpected_faults = [line for line in (stdout_text + "\n" + stderr_text).splitlines()
+                         if not line.startswith("IA64_UNALIGNED_REFERENCE_") and
+                         any(marker in line.lower() for marker in FAULT_MARKERS)]
+    if unexpected_faults:
+        output_errors.append("unexpected Ski fault/exception diagnostic: " +
+                             unexpected_faults[0][:180])
+    if output_errors:
+        raise GateError("independent Unaligned Reference probe output failed revalidation: " +
+                        "; ".join(output_errors))
+    if run_record.get("unaligned_reference_record_fields") != fields:
+        raise GateError("Unaligned Reference probe frame differs from its raw guest output")
+    if validate_direct_system_elf(probe_elf) != run_record.get("load_ranges"):
+        raise GateError("Unaligned Reference probe result does not bind current system-mode PT_LOAD ranges")
+    if run_record.get("unaligned_reference_symbols") != probe_symbols:
+        raise GateError("Unaligned Reference probe result does not bind its frame/continuation/RSE symbols")
+    return {"artifact": probe_elf, "artifact_sha256": evidence["artifact_sha256"],
+            "manifest": probe_manifest_path, "run_result": run_result_path,
+            "symbols": probe_symbols, "simulator_sha256": run_record.get("simulator_sha256"),
+            "record_fields": fields}
+
+
 def verify_kernel_resource_limits(timeout: float) -> dict[str, int | float]:
     if timeout <= 0 or timeout > 60:
         raise GateError("kernel execution requires a wall-clock timeout no greater than 60 seconds")
@@ -1132,16 +1361,21 @@ def run_kernel(args: argparse.Namespace) -> int:
                 manifest.get("cpu_state_static_gates") != "PASS" or \
                 manifest.get("break_exception_static_gates") != "PASS" or \
                 manifest.get("general_exception_static_gates") != "PASS" or \
+                manifest.get("unaligned_reference_static_gates") != "PASS" or \
                 manifest.get("post_rfi_static_gates") != "PASS" or \
-                manifest.get("expected_exception_faults") != 3 or \
+                manifest.get("expected_exception_faults") != 4 or \
                 manifest.get("general_exception_expected_faults") != 1 or \
+                manifest.get("unaligned_reference_expected_faults") != 1 or \
                 manifest.get("guest_execution_authorized") is not False:
             raise GateError("early-exec manifest or static gates are incomplete")
         probe_evidence = verify_break_probe_evidence(manifest)
         general_probe_evidence = verify_general_exception_probe_evidence(manifest)
+        unaligned_probe_evidence = verify_unaligned_reference_probe_evidence(
+            manifest, args.objdump)
         if probe_evidence["simulator_sha256"] != simulator_hash or \
-                general_probe_evidence["simulator_sha256"] != simulator_hash:
-            raise GateError("kernel and both independent exception probes must use the same qualified Ski binary")
+                general_probe_evidence["simulator_sha256"] != simulator_hash or \
+                unaligned_probe_evidence["simulator_sha256"] != simulator_hash:
+            raise GateError("kernel and all independent exception probes must use the same qualified Ski binary")
         validator_cmd = [sys.executable, str(ROOT / "scripts" / "validate-ia64-elf.py"),
                          "--elf", str(args.artifact), "--repo-root", str(ROOT),
                          "--profile", args.profile, "--manifest", str(args.manifest)]
@@ -1181,6 +1415,16 @@ def run_kernel(args: argparse.Namespace) -> int:
         if result.returncode:
             print(result.stderr, file=sys.stderr, end="")
             raise GateError("General Exception static source/disassembly/identity gates failed")
+        unaligned_reference_gate_cmd = [
+            sys.executable, str(ROOT / "scripts" / "validate-ia64-unaligned-reference.py"),
+            "--repo-root", str(ROOT), "--elf", str(args.artifact), "--objdump", args.objdump,
+            "--manifest", str(args.manifest), "--expected-sha256", args.expected_sha256]
+        result = subprocess.run(unaligned_reference_gate_cmd, capture_output=True, text=True,
+                                check=False, env=validation_env)
+        print(result.stdout, end="")
+        if result.returncode:
+            print(result.stderr, file=sys.stderr, end="")
+            raise GateError("Unaligned Reference static source/disassembly/identity gates failed")
         cpu_state_cmd = [sys.executable, str(ROOT / "scripts" / "validate-ia64-cpu-state.py"),
                          "--repo-root", str(ROOT), "--elf", str(args.artifact), "--objdump", args.objdump]
         result = subprocess.run(cpu_state_cmd, capture_output=True, text=True,
@@ -1201,6 +1445,7 @@ def run_kernel(args: argparse.Namespace) -> int:
     checkpoint_expectations = None
     break_exception_contract = None
     general_exception_contract = None
+    unaligned_reference_contract = None
     if args.profile == "early-exec":
         candidate_elf = ELF_VALIDATOR.Elf64(args.artifact)
         required_symbols = ("ia64_ivt", "rse_backing_store_base", "rse_backing_store_top",
@@ -1208,7 +1453,11 @@ def run_kernel(args: argparse.Namespace) -> int:
                             "ia64_break_slot1_post_rfi_capture",
                             "ia64_break_slot2_continuation",
                             "ia64_general_exception_fault_site",
-                            "ia64_general_exception_continuation")
+                            "ia64_general_exception_continuation",
+                            "ia64_unaligned_reference_record",
+                            "ia64_unaligned_reference_buffer",
+                            "ia64_unaligned_reference_fault_site",
+                            "ia64_unaligned_reference_continuation")
         if any(name not in candidate_elf.symbols for name in required_symbols):
             raise GateError("candidate ELF lacks CPU-state checkpoint expectation symbols")
         checkpoint_expectations = {
@@ -1244,6 +1493,27 @@ def run_kernel(args: argparse.Namespace) -> int:
             "require_intentional_exit": True,
             "ssc_exit_function": 66,
         }
+        unaligned_reference_contract = {
+            "expected_faults": 1,
+            "symbols": {
+                "ivt": candidate_elf.symbols["ia64_ivt"]["value"],
+                "vector": candidate_elf.symbols["ivt_unaligned_ref"]["value"],
+                "entry": candidate_elf.symbols["ia64_unaligned_reference_entry"]["value"],
+                "record": candidate_elf.symbols["ia64_unaligned_reference_record"]["value"],
+                "buffer": candidate_elf.symbols["ia64_unaligned_reference_buffer"]["value"],
+                "fault_site": candidate_elf.symbols[
+                    "ia64_unaligned_reference_fault_site"]["value"],
+                "continuation": candidate_elf.symbols[
+                    "ia64_unaligned_reference_continuation"]["value"],
+                "test": candidate_elf.symbols["ia64_unaligned_reference_test"]["value"],
+                "rse_base": candidate_elf.symbols["rse_backing_store_base"]["value"],
+                "rse_top": candidate_elf.symbols["rse_backing_store_top"]["value"],
+            },
+            "probe": False,
+            "success_classification": "UNALIGNED_REFERENCE_KERNEL_PASS",
+            "require_intentional_exit": True,
+            "ssc_exit_function": 66,
+        }
     with verified_snapshot(args.artifact, args.expected_sha256) as snapshot:
         validate_direct_system_elf(snapshot)
         command = [str(simulator), "-forcesystem", str(snapshot)]
@@ -1251,7 +1521,8 @@ def run_kernel(args: argparse.Namespace) -> int:
                                "guideXOS-kernel", artifact_hash=args.expected_sha256,
                                checkpoint_expectations=checkpoint_expectations,
                                break_exception_contract=break_exception_contract,
-                               general_exception_contract=general_exception_contract)
+                               general_exception_contract=general_exception_contract,
+                               unaligned_reference_contract=unaligned_reference_contract)
 
     result_path = capture_dir / "run-result.json"
     run_record = read_json(result_path, "kernel run result")
@@ -1286,6 +1557,13 @@ def run_kernel(args: argparse.Namespace) -> int:
         run_record["general_exception_probe_simulator_sha256"] = \
             general_probe_evidence["simulator_sha256"]
         run_record["general_exception_expected_faults"] = 1
+        run_record["unaligned_reference_probe_artifact_sha256"] = \
+            unaligned_probe_evidence["artifact_sha256"]
+        run_record["unaligned_reference_probe_run_result"] = \
+            str(unaligned_probe_evidence["run_result"])
+        run_record["unaligned_reference_probe_simulator_sha256"] = \
+            unaligned_probe_evidence["simulator_sha256"]
+        run_record["unaligned_reference_expected_faults"] = 1
     result_path.write_text(json.dumps(run_record, indent=2) + "\n", encoding="utf-8")
     return status
 
@@ -1302,6 +1580,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_break_probe(args)
         if args.operation == "general-exception-probe":
             return run_general_exception_probe(args)
+        if args.operation == "unaligned-reference-probe":
+            return run_unaligned_reference_probe(args)
         return run_kernel(args)
     except GateError as exc:
         print(f"[RUN_BLOCKED] {exc}", file=sys.stderr)
