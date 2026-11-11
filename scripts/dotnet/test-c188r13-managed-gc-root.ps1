@@ -134,11 +134,47 @@ Assert-R13 ($runner -match 'CreateNew' -and $runner -match 'automaticRetry=\$fal
 $r13LoopStart=$runner.IndexOf('if ($isManagedGcRootProbe) {',$runner.IndexOf('$deadline = (Get-Date).AddSeconds($BootTimeoutSeconds)',[StringComparison]::Ordinal),[StringComparison]::Ordinal)
 $r13LoopGeneric=$runner.IndexOf('} elseif ($isTransitionAttribution) {',$r13LoopStart,[StringComparison]::Ordinal)
 $r13LoopBlock=if($r13LoopStart -ge 0 -and $r13LoopGeneric -gt $r13LoopStart){$runner.Substring($r13LoopStart,$r13LoopGeneric-$r13LoopStart)}else{''}
-Assert-R13 ($r13LoopBlock -match 'C188R12R4R5R2R3_ENTRY_STATE.*result=\(\?:PASS\|FAIL\)' -and
-    $r13LoopBlock -notmatch 'C188R12R4R5R2R3_TRANSITION') 'R13 runner waits for the post-ManagedMain state marker and cannot stop on the earlier InitializeModules-return marker'
+Assert-R13 ($r13LoopBlock -match 'Get-R13ManagedGcTerminalObservation' -and
+    $r13LoopBlock -notmatch 'C188R12R4R5R2R3_TRANSITION' -and
+    $runner -match '(?s)function Get-R13ManagedGcTerminalObservation.*?FAIL_FAST.*?C188R12R4R5R2R3_ENTRY_STATE.*result=\(\?:PASS\|FAIL\)') 'R13 runner waits for the post-ManagedMain state marker and cannot stop on the earlier InitializeModules-return marker'
+$runnerTokens=$null; $runnerParseErrors=$null
+$runnerAst=[System.Management.Automation.Language.Parser]::ParseFile($runnerPath,[ref]$runnerTokens,[ref]$runnerParseErrors)
+$terminalFunctionAst=$runnerAst.Find({param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -ceq 'Get-R13ManagedGcTerminalObservation'
+},$true)
+Assert-R13 ($runnerParseErrors.Count -eq 0 -and $null -ne $terminalFunctionAst) 'Corrected R13 terminal classifier parses as an isolated runner function'
+. ([scriptblock]::Create($terminalFunctionAst.Extent.Text))
+$r13State='[C188R12R4R5R2R3_ENTRY_STATE] status=00000000 bytes=00000070 membership=00000001 flags=00000001 cooperativeState=00000001 preemptiveFrame=00000001 flsMatch=00000001 threadId=0000000000001234 observedThreadId=0000000000001234 stackReady=00000001 stackInBounds=00000001 modules=00000001 codeManager=00000001 currentThread=0000000000005678 palFlsThread=0000000000005678 frame=FFFFFFFFFFFFFFFF stackLow=0000000000100000 stackHigh=0000000000200000 stackCurrent=0000000000180000 result=PASS'
+$r13Attempt='[C188R13_GC_ROOT_ENTRY] event=attempt abi=UnmanagedCallersOnly-Cdecl seed=0000000E symbol=ManagedMain model=DisplaySettingsProbe collection=one_synchronous_full_request'
+$r13Allocation='[C188R12R4R5R4R5R2R2R4R2R3R12_ALLOC] helper=RhpNewFast stock=guideXosStockRhpNewFast requests=00000001 completed=00000001 objectSize=00000018 contextReadyBefore=00000001 contextReadyAfter=00000001 contextBytesBefore=00001000 contextBytesAfter=00000FE8 contextAdvanced=00000018 methodTable=00000001 gcHeapOwned=00000001 threadAttached=00000001 gcCountBefore=00000000 gcCountAfter=00000000 status=00000000 collectionRequestedByProbe=00000000'
+$r13Returned='[C188R13_GC_ROOT_ENTRY] event=returned entry=52313345 input=0000000E initial=00000462 request=52313351 counterStatusBefore=00000000 countBefore=00000000 countAfter=00000001 counterStatusAfter=00000000 completion=52313343 final=00000463 returnMarker=52313352 return=00000463 expected=00000463 record=PASS collection=requested'
+$r13Native='[C188R13_GC_ROOT_NATIVE] request=00000001 counterStatusBefore=00000000 countBefore=00000000 countAfter=00000001 counterStatusAfter=00000000 completed=00000001 delta=00000001 result=PASS'
+$r13MilestoneSnapshots=@(
+    '[nativeaot-pal-qemu-test] runtime_initialized=1',
+    ('[nativeaot-pal-qemu-test] runtime_initialized=1' + "`n" + '[C188R12R4R5R2R3_TRANSITION] result=initialize_modules_returned managedEntry=probe_follows collection=not_requested'),
+    ('[C188R12R4R5R2R3_TRANSITION] result=initialize_modules_returned managedEntry=probe_follows collection=not_requested' + "`n" + $r13Attempt),
+    ($r13Attempt + "`n" + $r13Allocation),
+    ($r13Attempt + "`n" + $r13Allocation + "`n" + $r13Returned + "`n" + $r13Native),
+    ($r13Attempt + "`n" + $r13Allocation + "`n" + $r13Returned + "`n" + $r13Native + "`n" + $r13State)
+)
+$r13Observations=@($r13MilestoneSnapshots | ForEach-Object { Get-R13ManagedGcTerminalObservation $_ })
+Assert-R13 (@($r13Observations | Where-Object { $_.terminal }).Count -eq 1 -and
+    $r13Observations[-1].kind -ceq 'PostReturnRuntimeState') 'Successful initialization continues through managed attempt, allocation, collection, return, and post-return checks'
+$fatalBeforeAllocation=Get-R13ManagedGcTerminalObservation ($r13Attempt + "`n" + '[nativeaot-pal-qemu-test] FAIL_FAST reason=50414C06 detail=0000000000000000')
+$fatalInCollection=Get-R13ManagedGcTerminalObservation ($r13Attempt + "`n" + $r13Allocation + "`n" + '[C188R13_TEST_CONTEXT] stage=collection' + "`n" + '[nativeaot-pal-qemu-test] FAIL_FAST reason=50414C06 detail=0000000000000000')
+Assert-R13 ($fatalBeforeAllocation.terminal -and $fatalBeforeAllocation.kind -ceq 'FailFast' -and
+    $fatalInCollection.terminal -and $fatalInCollection.kind -ceq 'FailFast') 'Explicit fatal before allocation and during the collection context is terminal immediately'
+$noTerminalObservation=Get-R13ManagedGcTerminalObservation ($r13Attempt + "`n" + $r13Allocation + "`n" + $r13Returned + "`n" + $r13Native)
+Assert-R13 (-not $noTerminalObservation.terminal -and $noTerminalObservation.kind -ceq 'Continuing' -and
+    $runner -match '\$deadline = \(Get-Date\)\.AddSeconds\(\$BootTimeoutSeconds\)' -and
+    $runner -match '\[ValidateRange\(60,300\)\]\[int\]\$BootTimeoutSeconds') 'Missing post-return state stays incomplete under a bounded runner timeout'
+Assert-R13 ($runner.IndexOf("[void](Invoke-Qmp 'quit')",[StringComparison]::Ordinal) -gt
+    $runner.IndexOf('$deadline = (Get-Date).AddSeconds($BootTimeoutSeconds)',[StringComparison]::Ordinal) -and
+    $runner -match 'Refusing QMP shutdown because the local QEMU child identity is no longer verified') 'QMP shutdown remains after terminal/timeout polling and behind ownership verification'
 Assert-R13 ($analyzer -match 'attemptOrder -ge \$allocationOrder' -and
     $analyzer -match 'gcCollectionCompleted' -and $analyzer -match 'liveObjectSurvived' -and
-    $analyzer -match 'evidencePreserved') 'R13 analyzer gates on event order, collection, liveness, and immutable raw evidence'
+    $analyzer -match 'evidencePreserved' -and $analyzer -match 'stateRecords') 'R13 analyzer gates on event order, collection, liveness, multiple state snapshots, and immutable raw evidence'
 Assert-R13 ($r11.result -ceq 'PASS' -and -not [bool]$r11.qemuLaunched -and
     -not [bool]$r11.qacReserved) 'Accepted R11 managed-entry hosted regression remains green without QAC use'
 Assert-R13 (-not $map.Contains('g_guideXosManagedHeap') -and
@@ -167,6 +203,16 @@ Assert-R13 ($valid.managedEntryReturned -and $valid.gcCollectionStarted -and
     $valid.gcCollectionCompleted -and $valid.liveObjectSurvived -and
     [string]::IsNullOrWhiteSpace([string]$valid.parseError) -and
     $valid.classification -ceq 'MANAGED_GC_ROOT_RETURNED_MISMATCH') 'Positive ordering fixture parses complete collection and liveness markers without claiming a guest pass'
+$multipleStates=Invoke-R13Fixture 'multiple-valid-post-return-state-snapshots' @($attempt,$alloc,$returned,$native,$state,$state)
+Assert-R13 ($multipleStates.managedRuntimeStateSnapshotCount -eq 2 -and
+    $multipleStates.runtimeStateReady -and
+    $multipleStates.classification -ceq 'MANAGED_GC_ROOT_RETURNED_MISMATCH') 'Multiple legitimate post-return state snapshots are retained and validated'
+$missingState=Invoke-R13Fixture 'missing-post-return-state' @($attempt,$alloc,$returned,$native)
+Assert-R13 ($missingState.classification -ceq 'MANAGED_GC_ROOT_INCOMPLETE' -and
+    [string]$missingState.parseError -ceq 'r13_event_order_contract_mismatch') 'Missing post-return state evidence remains incomplete'
+$missingCollectionCompletion=Invoke-R13Fixture 'missing-native-collection-completion' @($attempt,$alloc,$returned,$state)
+Assert-R13 ($missingCollectionCompletion.classification -ceq 'MANAGED_GC_ROOT_INCOMPLETE' -and
+    [string]$missingCollectionCompletion.parseError -ceq 'r13_event_order_contract_mismatch') 'Managed result without native collection completion remains incomplete'
 $reordered=Invoke-R13Fixture 'allocation-after-return' @($attempt,$returned,$alloc,$native,$state)
 Assert-R13 ($reordered.classification -ceq 'MANAGED_GC_ROOT_INCOMPLETE' -and
     [string]$reordered.parseError -ceq 'r13_event_order_contract_mismatch') 'Negative ordering fixture rejects allocation evidence after managed return'

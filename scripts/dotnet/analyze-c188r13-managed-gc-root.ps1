@@ -44,21 +44,24 @@ $returnedLines = @($entryLines | Where-Object { $_ -match '^\[C188R13_GC_ROOT_EN
 $allocationLines = @([regex]::Matches($raw,'(?m)^\[C188R12R4R5R4R5R2R2R4R2R3R12_ALLOC\] [^\r\n]*') | ForEach-Object { $_.Value })
 $nativeLines = @([regex]::Matches($raw,'(?m)^\[C188R13_GC_ROOT_NATIVE\] [^\r\n]*') | ForEach-Object { $_.Value })
 $stateLines = @([regex]::Matches($raw,'(?m)^\[C188R12R4R5R2R3_ENTRY_STATE\] [^\r\n]*') | ForEach-Object { $_.Value })
+$failFastLines = @([regex]::Matches($raw,'(?m)^\[nativeaot-pal-qemu-test\] FAIL_FAST [^\r\n]*') | ForEach-Object { $_.Value })
 $attempt=$null; $returned=$null; $allocation=$null; $native=$null; $state=$null
+$stateRecords=[System.Collections.Generic.List[object]]::new()
 $parseError=$null; $managedEntryReturned=$false; $runtimeStateReady=$false
 $allocationSucceeded=$false; $gcCollectionStarted=$false; $gcCollectionCompleted=$false
 $liveObjectSurvived=$false; $classification='MANAGED_GC_ROOT_INCOMPLETE'
 
 try {
     if ($attemptLines.Count -gt 1 -or $returnedLines.Count -gt 1 -or
-        $allocationLines.Count -gt 1 -or $nativeLines.Count -gt 1 -or $stateLines.Count -gt 1) {
+        $allocationLines.Count -gt 1 -or $nativeLines.Count -gt 1) {
         throw 'duplicate_r13_probe_marker'
     }
     if ($attemptLines.Count -eq 1) { $attempt=Get-R13Fields $attemptLines[0] $entryPrefix }
     if ($returnedLines.Count -eq 1) { $returned=Get-R13Fields $returnedLines[0] ($entryPrefix+'event=returned') }
     if ($allocationLines.Count -eq 1) { $allocation=Get-R13Fields $allocationLines[0] $allocationPrefix }
     if ($nativeLines.Count -eq 1) { $native=Get-R13Fields $nativeLines[0] $nativePrefix }
-    if ($stateLines.Count -eq 1) { $state=Get-R13Fields $stateLines[0] $statePrefix }
+    foreach ($stateLine in $stateLines) { $stateRecords.Add((Get-R13Fields $stateLine $statePrefix)) }
+    if ($stateRecords.Count -gt 0) { $state=$stateRecords[$stateRecords.Count-1] }
 
     if ($null -ne $attempt -and ($attempt.abi -cne 'UnmanagedCallersOnly-Cdecl' -or
         $attempt.seed -cne '0000000E' -or $attempt.symbol -cne 'ManagedMain' -or
@@ -72,7 +75,7 @@ try {
         $allocationOrder=if ($allocationLines.Count -eq 1) { $raw.IndexOf($allocationLines[0],[StringComparison]::Ordinal) } else { -1 }
         $returnedOrder=$raw.IndexOf($returnedLines[0],[StringComparison]::Ordinal)
         $nativeOrder=if ($nativeLines.Count -eq 1) { $raw.IndexOf($nativeLines[0],[StringComparison]::Ordinal) } else { -1 }
-        $stateOrder=if ($stateLines.Count -eq 1) { $raw.IndexOf($stateLines[0],[StringComparison]::Ordinal) } else { -1 }
+        $stateOrder=if ($stateLines.Count -gt 0) { $raw.IndexOf($stateLines[0],[StringComparison]::Ordinal) } else { -1 }
         if ($attemptOrder -lt 0 -or $attemptOrder -ge $allocationOrder -or
             $allocationOrder -ge $returnedOrder -or $returnedOrder -ge $nativeOrder -or
             $nativeOrder -ge $stateOrder) {
@@ -128,24 +131,33 @@ try {
                 $native.completed -ceq '00000001' -and $native.result -ceq 'PASS' -and $gcCollectionStarted
         }
 
-        if ($null -ne $state) {
-            $thread=[Convert]::ToUInt64([string]$state.currentThread,16)
-            $fls=[Convert]::ToUInt64([string]$state.palFlsThread,16)
-            $threadId=[Convert]::ToUInt64([string]$state.threadId,16)
-            $observedThreadId=[Convert]::ToUInt64([string]$state.observedThreadId,16)
-            $stackLow=[Convert]::ToUInt64([string]$state.stackLow,16)
-            $stackHigh=[Convert]::ToUInt64([string]$state.stackHigh,16)
-            $stackCurrent=[Convert]::ToUInt64([string]$state.stackCurrent,16)
-            $flags=[Convert]::ToUInt32([string]$state.flags,16)
-            $runtimeStateReady=$state.status -ceq '00000000' -and $state.bytes -ceq '00000070' -and
-                $state.membership -ceq '00000001' -and ($flags -band 1u) -ne 0u -and
-                $state.cooperativeState -ceq '00000001' -and $state.preemptiveFrame -ceq '00000001' -and
-                $state.flsMatch -ceq '00000001' -and $thread -ne 0u -and $thread -eq $fls -and
-                $threadId -ne 0u -and $threadId -eq $observedThreadId -and
-                $state.stackReady -ceq '00000001' -and $state.stackInBounds -ceq '00000001' -and
-                $stackLow -lt $stackCurrent -and $stackCurrent -lt $stackHigh -and
-                $state.modules -ceq '00000001' -and $state.codeManager -ceq '00000001' -and
-                $state.frame -ceq 'FFFFFFFFFFFFFFFF' -and $state.result -ceq 'PASS'
+        if ($stateRecords.Count -gt 0) {
+            $runtimeStateReady=$true
+            foreach ($snapshot in $stateRecords) {
+                foreach ($field in @('status','bytes','membership','flags','cooperativeState','preemptiveFrame',
+                    'flsMatch','currentThread','palFlsThread','threadId','observedThreadId','stackReady',
+                    'stackInBounds','stackLow','stackHigh','stackCurrent','modules','codeManager','frame','result')) {
+                    if (-not $snapshot.Contains($field)) { throw "r13_runtime_state_field_missing_$field" }
+                }
+                $thread=[Convert]::ToUInt64([string]$snapshot.currentThread,16)
+                $fls=[Convert]::ToUInt64([string]$snapshot.palFlsThread,16)
+                $threadId=[Convert]::ToUInt64([string]$snapshot.threadId,16)
+                $observedThreadId=[Convert]::ToUInt64([string]$snapshot.observedThreadId,16)
+                $stackLow=[Convert]::ToUInt64([string]$snapshot.stackLow,16)
+                $stackHigh=[Convert]::ToUInt64([string]$snapshot.stackHigh,16)
+                $stackCurrent=[Convert]::ToUInt64([string]$snapshot.stackCurrent,16)
+                $flags=[Convert]::ToUInt32([string]$snapshot.flags,16)
+                $snapshotReady=$snapshot.status -ceq '00000000' -and $snapshot.bytes -ceq '00000070' -and
+                    $snapshot.membership -ceq '00000001' -and ($flags -band 1u) -ne 0u -and
+                    $snapshot.cooperativeState -ceq '00000001' -and $snapshot.preemptiveFrame -ceq '00000001' -and
+                    $snapshot.flsMatch -ceq '00000001' -and $thread -ne 0u -and $thread -eq $fls -and
+                    $threadId -ne 0u -and $threadId -eq $observedThreadId -and
+                    $snapshot.stackReady -ceq '00000001' -and $snapshot.stackInBounds -ceq '00000001' -and
+                    $stackLow -lt $stackCurrent -and $stackCurrent -lt $stackHigh -and
+                    $snapshot.modules -ceq '00000001' -and $snapshot.codeManager -ceq '00000001' -and
+                    $snapshot.frame -ceq 'FFFFFFFFFFFFFFFF' -and $snapshot.result -ceq 'PASS'
+                if (-not $snapshotReady) { $runtimeStateReady=$false }
+            }
         }
 
         $transitionReady=[string]$transition.classification -ceq 'INITIALIZEMODULES_RETURNED_MANAGED_ENTRY_NOT_REQUESTED' -and
@@ -159,6 +171,13 @@ try {
         } else {
             $classification='MANAGED_GC_ROOT_RETURNED_MISMATCH'
         }
+    } elseif ($null -ne $attempt -and $attemptLines.Count -eq 1 -and
+        $failFastLines.Count -eq 1 -and
+        $raw.IndexOf($failFastLines[0],[StringComparison]::Ordinal) -gt
+            $raw.IndexOf($attemptLines[0],[StringComparison]::Ordinal) -and
+        [string]$transition.classification -in @('RUNTIME_FAIL_FAST_ATTRIBUTED','RUNTIME_FAIL_FAST_CALLSITE_UNRESOLVED') -and
+        [string]::IsNullOrWhiteSpace([string]$transition.parseError)) {
+        $classification='MANAGED_GC_ROOT_RUNTIME_FAIL_FAST_AFTER_ENTRY'
     } elseif ([string]$transition.classification -eq 'TRANSITION_GATE_BLOCKED_SAFE_STOP' -and
         [string]$transition.recordIntegrity -ceq '1' -and [string]::IsNullOrWhiteSpace([string]$transition.parseError)) {
         $classification='MANAGED_GC_ROOT_BLOCKED_BEFORE_CALL'
@@ -186,6 +205,7 @@ $report=[ordered]@{
     managedEntryReturned=$managedEntryReturned
     managedEntryReturnValue=if ($null -ne $returned) { $returned.return } else { $null }
     managedEntryRecord=$returned
+    managedRuntimeStateSnapshotCount=$stateRecords.Count
     allocationSucceeded=$allocationSucceeded
     allocationEvidence=$allocation
     gcCollectionRequested=($null -ne $returned -and $returned.request -ceq '52313351')
@@ -197,6 +217,7 @@ $report=[ordered]@{
     postCollectionResult=if ($null -ne $returned) { $returned.final } else { $null }
     runtimeStateReady=$runtimeStateReady
     runtimeState=$state
+    runtimeStateSnapshots=@($stateRecords.ToArray())
     parseError=$parseError
     transitionAnalysisPath=$transitionPath
     qemuLaunched=$false

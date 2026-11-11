@@ -711,6 +711,19 @@ function Read-GuestSerial {
         try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
     } finally { $stream.Dispose() }
 }
+function Get-R13ManagedGcTerminalObservation([string]$SerialText) {
+    # InitializeModules is an intermediate milestone for this profile. The
+    # managed state record is emitted only after ManagedMain returns and its
+    # post-return ThreadStore/FLS/frame checks have run. A PAL fail-fast is a
+    # terminal failure as soon as it appears in the growing serial snapshot.
+    if ($SerialText -match '(?m)^\[nativeaot-pal-qemu-test\] FAIL_FAST\b') {
+        return [pscustomobject]@{ terminal=$true; kind='FailFast' }
+    }
+    if ($SerialText -match '(?m)^\[C188R12R4R5R2R3_ENTRY_STATE\].* result=(?:PASS|FAIL)\s*$') {
+        return [pscustomobject]@{ terminal=$true; kind='PostReturnRuntimeState' }
+    }
+    return [pscustomobject]@{ terminal=$false; kind='Continuing' }
+}
 function Test-NativeAllocationTraceComplete([string]$Text) {
     $marker = 'C188R12R4R5R4R5R2R2_NATIVE_ALLOC'
     $pattern = '\[' + [regex]::Escape($marker) + '\] source=(runtime|backend) invocation=([0-9A-Fa-f]{8}) sequence=([0-9A-Fa-f]{8}) field=([0-9A-Fa-f]{8}) value=([0-9A-Fa-f]{8}) auxiliary=([0-9A-Fa-f]{8})'
@@ -1089,8 +1102,8 @@ try {
     do {
         $serialText = Read-GuestSerial
         if ($isManagedGcRootProbe) {
-            $transitionTerminalSeen = $serialText -match '(?m)^\[C188R12R4R5R2R3_ENTRY_STATE\].* result=(?:PASS|FAIL)\s*$' -or
-                $serialText -match '(?m)^\[nativeaot-pal-qemu-test\] FAIL_FAST\b'
+            $terminalObservation = Get-R13ManagedGcTerminalObservation $serialText
+            $transitionTerminalSeen = [bool]$terminalObservation.terminal
             $guestPass = $transitionTerminalSeen
         } elseif ($isTransitionAttribution) {
             $transitionTerminalSeen = $serialText -match '(?m)^\[C188R12R4R5R2R3_TRANSITION\] ' -or
@@ -1136,8 +1149,8 @@ try {
     $serialText = Read-GuestSerial
 $safeHandoffTerminal = $false
 if ($isManagedGcRootProbe) {
-    $transitionTerminalSeen = $serialText -match '(?m)^\[C188R12R4R5R2R3_ENTRY_STATE\].* result=(?:PASS|FAIL)\s*$' -or
-        $serialText -match '(?m)^\[nativeaot-pal-qemu-test\] FAIL_FAST\b'
+    $terminalObservation = Get-R13ManagedGcTerminalObservation $serialText
+    $transitionTerminalSeen = [bool]$terminalObservation.terminal
     $guestPass = $transitionTerminalSeen
 } elseif ($isTransitionAttribution) {
     $transitionTerminalSeen = $serialText -match '(?m)^\[C188R12R4R5R2R3_TRANSITION\] ' -or
