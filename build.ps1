@@ -23,6 +23,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$PowerShellUtilityModule = Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1'
+Import-Module -Name $PowerShellUtilityModule -ErrorAction Stop
 
 Write-Host "====================================" -ForegroundColor Cyan
 Write-Host "  guideXOS Complete Build System" -ForegroundColor Cyan
