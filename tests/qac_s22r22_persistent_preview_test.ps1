@@ -77,6 +77,17 @@ try {
         ($qemuArgs -contains '-net' -and $qemuArgs -contains 'none' -and $qemuArgs -contains '-monitor' -and
          $qemuArgs -contains 'none' -and ($qemuArgs -join ' ') -notmatch '(?i)virtio-9p|virtiofs|vhost-user|smb=|hostfwd=|fat:rw:')
 
+    $runnerText = [IO.File]::ReadAllText((Join-Path $repoRoot 'scripts\run-qac-s22r10-uefi.ps1'))
+    $preLaunchIdentityIndex = $runnerText.IndexOf('persistent-data-image-prelaunch-identity-verified', [StringComparison]::Ordinal)
+    $qacProcessStartIndex = $runnerText.IndexOf('$script:QacProcess = New-QacExecutionProcess', [StringComparison]::Ordinal)
+    $qmpContinuationIndex = $runnerText.IndexOf("Invoke-QacS22R10Qmp -Client `$script:QmpClient -Execute 'cont'", [StringComparison]::Ordinal)
+    $betweenQacLaunchAndContinuation = if ($qacProcessStartIndex -ge 0 -and $qmpContinuationIndex -gt $qacProcessStartIndex) {
+        $runnerText.Substring($qacProcessStartIndex, $qmpContinuationIndex - $qacProcessStartIndex)
+    } else { '' }
+    Assert-True 'writable image identity is checked before QEMU opens it' `
+        ($preLaunchIdentityIndex -ge 0 -and $preLaunchIdentityIndex -lt $qacProcessStartIndex -and
+         $betweenQacLaunchAndContinuation -notmatch 'Get-QacS22R10ArtifactIdentity -Path \$DataImagePath')
+
     $tampered = $validated.Manifest
     $tampered.launchContract.arguments += @('-drive', 'if=ide,file=extra.img,format=raw')
     Write-TestJson $manifestPath $tampered

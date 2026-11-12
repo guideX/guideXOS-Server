@@ -927,6 +927,16 @@ try {
         Add-ExecutionEvent -Type 'qmp-endpoint-candidate' -Data @{attempt=$attemptNumber;endpoint=$script:Execution.qmp.endpoint;ownership='not-reserved-before-QAC-grant'}
         $attemptLogOffset = if (Test-Path -LiteralPath $script:QacLogPath) { (Get-Item -LiteralPath $script:QacLogPath).Length } else { [int64]0 }
         $qacArguments = @(New-QacS22R10QacArguments -QemuPath $qemu -QemuArguments $script:Execution.qemuArguments)
+        if ($PersistentDataVolume) {
+            $dataBeforeQacLaunch = Get-QacS22R10ArtifactIdentity -Path $DataImagePath -Kind file
+            if ($dataBeforeQacLaunch.Sha256 -ine $ExpectedDataImageSha256.ToLowerInvariant() -or
+                $dataBeforeQacLaunch.TotalBytes -ne [int64]$script:Execution.persistentDataVolume.bytes) {
+                throw 'Persistent data image changed immediately before QAC launch.'
+            }
+            $script:Execution.persistentDataVolume.beforeGuestSha256 = $dataBeforeQacLaunch.Sha256
+            $script:Execution.persistentDataVolume.beforeGuestBytes = [int64]$dataBeforeQacLaunch.TotalBytes
+            Add-ExecutionEvent -Type 'persistent-data-image-prelaunch-identity-verified' -Data @{path=$dataBeforeQacLaunch.Path;sha256=$dataBeforeQacLaunch.Sha256;bytes=$dataBeforeQacLaunch.TotalBytes;guestHadNotRun=$true;checkedBeforeQacOpenedImage=$true}
+        }
         $script:QacProcess = New-QacExecutionProcess -Arguments $qacArguments
         $script:Execution.qacCliProcessId = $script:QacProcess.Id
         $script:StdoutTask = $script:QacProcess.StandardOutput.ReadLineAsync()
@@ -1093,26 +1103,6 @@ try {
                             throw
                         }
                         break
-                    }
-                    if ($PersistentDataVolume) {
-                        $dataBeforeGuest = Get-QacS22R10ArtifactIdentity -Path $DataImagePath -Kind file
-                        if ($dataBeforeGuest.Sha256 -ine $ExpectedDataImageSha256.ToLowerInvariant() -or
-                            $dataBeforeGuest.TotalBytes -ne [int64]$script:Execution.persistentDataVolume.bytes) {
-                            $script:StartupFailure = 'Persistent data image changed after staging and before the paused guest was continued.'
-                            $script:StartupFailureStage = 'persistent-data-image-identity'
-                            Add-ExecutionEvent -Type 'persistent-data-image-preboot-mismatch' -Data @{path=$DataImagePath;expectedSha256=$ExpectedDataImageSha256;observedSha256=$dataBeforeGuest.Sha256;expectedBytes=$script:Execution.persistentDataVolume.bytes;observedBytes=$dataBeforeGuest.TotalBytes;guestHadNotRun=$true}
-                            try { Invoke-QacOwnedChildStartupCleanup -Reason $script:StartupFailure -Stage $script:StartupFailureStage }
-                            catch {
-                                Set-ManifestExecution -Status 'unknown' -ReservationId $script:Execution.reservationId -ChildProcessId $script:Execution.childProcessId
-                                $script:Execution.recoveryRequired = $true
-                                Set-ExecutionState -State 'RecoveryRequired' -Data @{reason=$_.Exception.Message;firstFailure=$script:StartupFailure;stage=$script:StartupFailureStage}
-                                throw
-                            }
-                            break
-                        }
-                        $script:Execution.persistentDataVolume.beforeGuestSha256 = $dataBeforeGuest.Sha256
-                        $script:Execution.persistentDataVolume.beforeGuestBytes = [int64]$dataBeforeGuest.TotalBytes
-                        Add-ExecutionEvent -Type 'persistent-data-image-preboot-identity-verified' -Data @{path=$dataBeforeGuest.Path;sha256=$dataBeforeGuest.Sha256;bytes=$dataBeforeGuest.TotalBytes;guestHadNotRun=$true}
                     }
                     $continuationAuthorized = Test-QacS22R10ContinuationAuthorization -QacOwnerAlive (-not $script:QacProcess.HasExited) -ReservationValid $true -ListenerOwned ([bool]$listenerBeforeContinuation.Owned) -QmpNegotiated ($null -ne $script:QmpClient.Greeting -and $null -ne $qmpIdentity) -QmpStatus ([string]$qmpIdentity.Status)
                     if (-not $continuationAuthorized) { throw 'QMP continuation authorization gate failed; no state-changing command was sent.' }
