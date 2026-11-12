@@ -14121,3 +14121,19 @@ The parser storage, error, target-link, stack and hosted regression details are
 in [the JS116 portable parser report](NAVIGATOR_JAVASCRIPT_JS116_PORTABLE_PARSER.md).
 Runtime values and execution, JSON, DOM and Navigator guest integration remain
 later work. JS116 did not run QEMU or request QAC admission.
+
+### JS117 kernel object format — partial
+
+JS117 is **Outcome B — `JS117_KERNEL_FORMAT_PARTIAL`**. The shared lexer,
+AST, and parser compiled as AMD64 COFF under the kernel profile and were
+retained through the actual kernel PE/COFF link recipe and PE-to-ELF conversion
+using a qualification-only C ABI anchor. The partial candidate has ELF entry
+`0x100000` and two valid, nonoverlapping load segments. The official kernel
+build stops before full link because two existing MbedTLS configuration-check
+translation units fail; the diagnostic candidate omits only those failed
+objects and is not a production image. No frontend runtime or guest execution
+is qualified.
+
+The linker, layout, negative-check, and provenance details are in the
+[JS117 kernel object-format report](NAVIGATOR_JAVASCRIPT_JS117_KERNEL_OBJECT_FORMAT.md).
+JS117 did not run QEMU or request QAC admission.
