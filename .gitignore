@@ -34,6 +34,8 @@
 # The visible stb_image header is also required by the hosted Native
 # ELF/App Model build.
 /third_party/*
+!/third_party/libsodium/
+!/third_party/libsodium/**
 !/third_party/stb/
 /third_party/stb/*
 !/third_party/stb/stb_image.h

@@ -59,6 +59,7 @@ MBEDTLS_GUIDEXOS_COMPILE_PROBE_ENABLED := 0
 MBEDTLS_GUIDEXOS_LINK_ENABLED := 0
 MBEDTLS_GUIDEXOS_REPO_ROOT := $(GUIDEXOS_REPO_ROOT)
 MBEDTLS_GUIDEXOS_MANIFEST := $(GUIDEXOS_REPO_ROOT)/guidexos/mbedtls_sources.mk
+ED25519_GUIDEXOS_MANIFEST := $(GUIDEXOS_REPO_ROOT)/guidexos/libsodium_ed25519_sources.mk
 MBEDTLS_GUIDEXOS_VERSION_HEADER := $(GUIDEXOS_REPO_ROOT)/third_party/mbedtls/include/mbedtls/version.h
 ifeq ($(wildcard $(MBEDTLS_GUIDEXOS_MANIFEST)),)
 $(error guideXOS Mbed TLS profile is missing; run ../scripts/bootstrap-mbedtls.ps1 -Install before building)
@@ -75,6 +76,21 @@ endif
 endif
 ifeq ($(MBEDTLS_GUIDEXOS_LAYOUT_READY),0)
 $(error guideXOS Mbed TLS dependency/profile is incomplete or generated files are missing; run ../scripts/bootstrap-mbedtls.ps1 -Install)
+endif
+
+ifeq ($(wildcard $(ED25519_GUIDEXOS_MANIFEST)),)
+ifeq ($(ARCH),amd64)
+$(error guideXOS Ed25519 verification profile is missing)
+endif
+endif
+ifeq ($(ARCH),amd64)
+include $(ED25519_GUIDEXOS_MANIFEST)
+ifeq ($(GUIDEXOS_ED25519_LAYOUT_READY),0)
+$(error guideXOS Ed25519 dependency/profile is incomplete)
+endif
+else
+GUIDEXOS_ED25519_C_SOURCES :=
+GUIDEXOS_ED25519_CFLAGS :=
 endif
 
 # These prerequisites make kernel objects rebuild if the pinned dependency or
@@ -121,6 +137,7 @@ ARCH_SOURCES := $(wildcard arch/$(ARCH)/*.cpp)
 ASM_SOURCES := $(wildcard arch/$(ARCH)/*.asm) $(wildcard arch/$(ARCH)/*.s)
 MBEDTLS_C_SOURCES := $(if $(filter 1,$(MBEDTLS_GUIDEXOS_LINK_ENABLED)),$(MBEDTLS_GUIDEXOS_C_SOURCES))
 MBEDTLS_COMPILE_PROBE_C_SOURCES := $(if $(filter 1,$(MBEDTLS_GUIDEXOS_COMPILE_PROBE_ENABLED)),$(MBEDTLS_GUIDEXOS_COMPILE_PROBE_C_SOURCES))
+ED25519_C_SOURCES := $(GUIDEXOS_ED25519_C_SOURCES)
 
 # Object files
 CORE_OBJS := $(patsubst core/%.cpp,$(OBJ_DIR)/core/%.o,$(CORE_SOURCES))
@@ -129,17 +146,25 @@ ASM_OBJS := $(patsubst arch/$(ARCH)/%.asm,$(OBJ_DIR)/arch/%.o,$(ASM_SOURCES))
 ASM_OBJS += $(patsubst arch/$(ARCH)/%.s,$(OBJ_DIR)/arch/%.o,$(filter %.s,$(ASM_SOURCES)))
 MBEDTLS_C_OBJS := $(patsubst $(GUIDEXOS_REPO_ROOT)/third_party/%.c,$(OBJ_DIR)/third_party/%.o,$(MBEDTLS_C_SOURCES))
 MBEDTLS_COMPILE_PROBE_C_OBJS := $(patsubst $(GUIDEXOS_REPO_ROOT)/third_party/%.c,$(OBJ_DIR)/third_party/%.o,$(MBEDTLS_COMPILE_PROBE_C_SOURCES))
+ED25519_C_OBJS := $(patsubst $(GUIDEXOS_REPO_ROOT)/third_party/%.c,$(OBJ_DIR)/third_party/%.o,$(ED25519_C_SOURCES))
 
-ALL_OBJS := $(CORE_OBJS) $(ARCH_OBJS) $(ASM_OBJS) $(MBEDTLS_C_OBJS)
-DEPFILES := $(CORE_OBJS:.o=.d) $(ARCH_OBJS:.o=.d) $(MBEDTLS_COMPILE_PROBE_C_OBJS:.o=.d)
+ALL_OBJS := $(CORE_OBJS) $(ARCH_OBJS) $(ASM_OBJS) $(MBEDTLS_C_OBJS) $(ED25519_C_OBJS)
+DEPFILES := $(CORE_OBJS:.o=.d) $(ARCH_OBJS:.o=.d) $(MBEDTLS_COMPILE_PROBE_C_OBJS:.o=.d) $(ED25519_C_OBJS:.o=.d)
 
 # Targets
-.PHONY: all clean info verify-mbedtls-guidexos mbedtls-guidexos-compile-probe
+.PHONY: all clean info verify-mbedtls-guidexos verify-libsodium-ed25519 mbedtls-guidexos-compile-probe
 
-all: verify-mbedtls-guidexos mbedtls-guidexos-compile-probe $(KERNEL)
+all: verify-mbedtls-guidexos verify-libsodium-ed25519 mbedtls-guidexos-compile-probe $(KERNEL)
 
 verify-mbedtls-guidexos:
 	@powershell -NoProfile -ExecutionPolicy Bypass -File "$(GUIDEXOS_REPO_ROOT)/scripts/verify-mbedtls-profile.ps1" -DependencyRoot "$(GUIDEXOS_REPO_ROOT)/third_party/mbedtls" -RepoRoot "$(GUIDEXOS_REPO_ROOT)"
+
+ifeq ($(ARCH),amd64)
+verify-libsodium-ed25519:
+	@powershell -NoProfile -ExecutionPolicy Bypass -File "$(GUIDEXOS_REPO_ROOT)/scripts/verify-libsodium-ed25519-profile.ps1" -RepoRoot "$(GUIDEXOS_REPO_ROOT)"
+else
+verify-libsodium-ed25519:
+endif
 
 ifneq ($(MBEDTLS_GUIDEXOS_COMPILE_PROBE_ENABLED),0)
 mbedtls-guidexos-compile-probe: $(MBEDTLS_COMPILE_PROBE_C_OBJS)
@@ -158,10 +183,10 @@ endif
 ifeq ($(ARCH),amd64)
 
 # Step 1: Link to PE format (amd64 / MinGW)
-$(KERNEL_PE): $(ALL_OBJS)
+$(KERNEL_PE): $(ALL_OBJS) $(ED25519_GUIDEXOS_MANIFEST) $(GUIDEXOS_REPO_ROOT)/guidexos/libsodium_ed25519_sources.sha256
 	@$(call MKDIR,$(BIN_DIR))
 	@echo "Linking $(ARCH) kernel (PE format)..."
-	$(LD) $(LDFLAGS) -o $@ $^ $(LIBS)
+	$(LD) $(LDFLAGS) -o $@ $(ALL_OBJS) $(LIBS)
 
 # Step 2: Convert PE to ELF64 format
 $(KERNEL): $(KERNEL_PE)
@@ -182,7 +207,7 @@ else
 $(KERNEL): $(ALL_OBJS)
 	@$(call MKDIR,$(BIN_DIR))
 	@echo "Linking $(ARCH) kernel..."
-	$(LD) $(LDFLAGS) -o $@ $^ $(LIBS)
+	$(LD) $(LDFLAGS) -o $@ $(ALL_OBJS) $(LIBS)
 	@echo "Built: $@"
 
 endif
@@ -225,6 +250,11 @@ $(OBJ_DIR)/third_party/%.o: $(GUIDEXOS_REPO_ROOT)/third_party/%.c
 	@$(call MKDIR,$(dir $@))
 	@echo "Compiling $<..."
 	$(CXX) -x c $(filter-out -std=c++14 -fno-exceptions -fno-rtti -nostdinc++,$(CFLAGS)) $(DEPFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/third_party/libsodium/src/%.o: $(GUIDEXOS_REPO_ROOT)/third_party/libsodium/src/%.c | verify-libsodium-ed25519
+	@$(call MKDIR,$(dir $@))
+	@echo "Compiling pinned libsodium Ed25519 source $<..."
+	$(CXX) -x c -std=c11 $(filter-out -std=c++14 -fno-exceptions -fno-rtti -nostdinc++,$(CFLAGS)) $(GUIDEXOS_ED25519_CFLAGS) $(DEPFLAGS) -c $< -o $@
 
 clean:
 	@$(call RM,build/$(ARCH))
