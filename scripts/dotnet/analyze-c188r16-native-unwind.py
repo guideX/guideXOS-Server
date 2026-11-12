@@ -677,8 +677,11 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         return result
     stack_meta_path = args.stack_json.resolve()
     stack_meta = read_json(stack_meta_path)
-    if stack_meta.get("schema") != "C188R16_GUEST_STACK_TIMEOUT_CAPTURE_V1":
-        raise EvidenceError("stack metadata schema is not the bounded R16 guest stack capture")
+    stack_schema = str(stack_meta.get("schema", ""))
+    if stack_schema not in ("C188R16_GUEST_STACK_TIMEOUT_CAPTURE_V1", "C188R17_GUEST_STACK_PROGRESS_CAPTURE_V1"):
+        raise EvidenceError("stack metadata schema is not a supported bounded R16/R17 guest stack capture")
+    if "sampleNumber" in capture and "sampleNumber" in stack_meta and int(capture["sampleNumber"]) != int(stack_meta["sampleNumber"]):
+        raise EvidenceError("CPU and stack metadata refer to different time-separated sample numbers")
     if str(stack_meta.get("candidateManifestSha256", "")).upper() != candidate_hash:
         raise EvidenceError("stack capture metadata does not bind the exact candidate manifest")
     if str(stack_meta.get("registersSha256", "")).upper() != register_hash:
@@ -707,6 +710,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         raise EvidenceError(f"captured stack window is invalid: {window_error}")
     memory = StackMemory(stack_path, start)
     result["stackBounds"] = {"low": f"0x{low:016X}", "high": f"0x{high:016X}", "capturedStart": f"0x{start:016X}", "capturedLengthBytes": length}
+    result["stackCaptureSchema"] = stack_schema
+    result["stackSampleNumber"] = stack_meta.get("sampleNumber")
     result["activeIteratorContext"] = decode_iterator_context(registers, image, symbols, memory, low, high)
     context = dict(registers)
     frames: list[dict[str, Any]] = [{"kind": "sampled-rip", "ip": f"0x{registers['RIP']:016X}", "symbol": current_symbol}]

@@ -5,6 +5,7 @@ param(
     [ValidateSet('R1','R2','R3')][string]$ThreadStoreAttempt = 'R1',
     [string]$CandidateIntegrityInventory = '',
     [ValidateSet('R2R2R1','R2R2R2','R2R2R3','R2R2R4')][string]$NativeAllocationGuestAttempt = 'R2R2R1',
+    [ValidateRange(1,30)][int]$ManagedGcProgressSampleDelaySeconds = 5,
     [string]$ArtifactRoot = '',
     [switch]$HostedPreflightOnly
 )
@@ -867,7 +868,8 @@ function Invoke-Qmp([string]$Command,[System.Collections.IDictionary]$QmpArgumen
         return Read-QmpResponse $reader $Command
     } finally { $client.Dispose() }
 }
-function Capture-R13TimeoutCpuState([string]$CandidateManifestHash,[string]$SerialPath) {
+function Capture-R13TimeoutCpuState([string]$CandidateManifestHash,[string]$SerialPath,[int]$SampleNumber = 1) {
+    if ($SampleNumber -lt 1 -or $SampleNumber -gt 2) { throw 'R17 supports one or two bounded CPU samples only.' }
     $stopResponse = Invoke-Qmp 'stop'
     $pausedStatusResponse = Invoke-Qmp 'query-status'
     $pausedStatus = ConvertFrom-QmpQueryStatusResponse -Text $pausedStatusResponse
@@ -882,11 +884,13 @@ function Capture-R13TimeoutCpuState([string]$CandidateManifestHash,[string]$Seri
     if ([string]::IsNullOrWhiteSpace($registerText) -or $registerText -notmatch '(?im)\bRIP=') {
         throw 'QMP info registers did not return a readable guest instruction pointer.'
     }
-    $registerPath = Join-Path $runRoot 'guest-cpu-state-timeout.txt'
-    $capturePath = Join-Path $runRoot 'guest-cpu-state-timeout.json'
+    $sampleSuffix = if ($SampleNumber -eq 1) { '' } else { '-sample-{0:D3}' -f $SampleNumber }
+    $registerPath = Join-Path $runRoot ('guest-cpu-state-timeout' + $sampleSuffix + '.txt')
+    $capturePath = Join-Path $runRoot ('guest-cpu-state-timeout' + $sampleSuffix + '.json')
     [System.IO.File]::WriteAllText($registerPath,$registerText,[System.Text.UTF8Encoding]::new($false))
     $capture = [ordered]@{
-        schema='C188R15_GUEST_CPU_TIMEOUT_STATE_V1'
+        schema=if ($SampleNumber -eq 1) { 'C188R15_GUEST_CPU_TIMEOUT_STATE_V1' } else { 'C188R17_GUEST_CPU_PROGRESS_STATE_V1' }
+        sampleNumber=$SampleNumber
         status='captured'
         capturedAtUtc=(Get-Date).ToUniversalTime().ToString('o')
         trigger='bounded-managed-gc-wait-expired-without-terminal-evidence'
@@ -904,7 +908,7 @@ function Capture-R13TimeoutCpuState([string]$CandidateManifestHash,[string]$Seri
     }
     [System.IO.File]::WriteAllText($capturePath,($capture | ConvertTo-Json -Depth 8),
         [System.Text.UTF8Encoding]::new($false))
-    return [pscustomobject]@{ Status='captured'; Path=$capturePath; RegistersPath=$registerPath; Rip=$capture.rip; Error=$null }
+    return [pscustomobject]@{ Status='captured'; SampleNumber=$SampleNumber; Path=$capturePath; RegistersPath=$registerPath; Rip=$capture.rip; Error=$null }
 }
 function Get-R16StackBoundsObservation([string]$SerialText) {
     $validLines = @($SerialText -split "`r?`n" | Where-Object {
@@ -930,11 +934,14 @@ function Get-R16StackBoundsObservation([string]$SerialText) {
     }
     return [pscustomobject]@{ Valid=$false; Low=$null; High=$null; Marker=$null; Error='No valid passing ThreadStore handoff stack-bounds marker was retained.' }
 }
-function Capture-R16TimeoutStackWindow([string]$CandidateManifestHash,[string]$RegistersPath,[string]$SerialText) {
-    $capturePath = Join-Path $runRoot 'guest-stack-state-timeout.json'
-    $stackPath = Join-Path $runRoot 'guest-stack-state-timeout.bin'
+function Capture-R16TimeoutStackWindow([string]$CandidateManifestHash,[string]$RegistersPath,[string]$SerialText,[int]$SampleNumber = 1) {
+    if ($SampleNumber -lt 1 -or $SampleNumber -gt 2) { throw 'R17 supports one or two bounded stack samples only.' }
+    $sampleSuffix = if ($SampleNumber -eq 1) { '' } else { '-sample-{0:D3}' -f $SampleNumber }
+    $capturePath = Join-Path $runRoot ('guest-stack-state-timeout' + $sampleSuffix + '.json')
+    $stackPath = Join-Path $runRoot ('guest-stack-state-timeout' + $sampleSuffix + '.bin')
     $capture = [ordered]@{
-        schema='C188R16_GUEST_STACK_TIMEOUT_CAPTURE_V1'
+        schema=if ($SampleNumber -eq 1) { 'C188R16_GUEST_STACK_TIMEOUT_CAPTURE_V1' } else { 'C188R17_GUEST_STACK_PROGRESS_CAPTURE_V1' }
+        sampleNumber=$SampleNumber
         status='unavailable'
         capturedAtUtc=(Get-Date).ToUniversalTime().ToString('o')
         trigger='bounded-managed-gc-wait-expired-without-terminal-evidence'
@@ -1051,7 +1058,7 @@ function Capture-R16TimeoutStackWindow([string]$CandidateManifestHash,[string]$R
     [System.IO.File]::WriteAllText($capturePath,($capture | ConvertTo-Json -Depth 8),
         [System.Text.UTF8Encoding]::new($false))
     return [pscustomobject]@{
-        Status=[string]$capture.status; Path=$capturePath; StackPath=$stackPath
+        Status=[string]$capture.status; SampleNumber=$SampleNumber; Path=$capturePath; StackPath=$stackPath
         StartAddress=$capture.startAddress; LengthBytes=[int]$capture.lengthBytesCaptured
         Sha256=$capture.stackSha256; Error=$capture.error
     }
@@ -1095,6 +1102,82 @@ function Complete-R13TimeoutCpuStateSerialHash([string]$CapturePath,[string]$Ser
         Status=[string]$capture.serialHashStatus
         Sha256=$capture.serialSha256
         Error=$capture.serialHashError
+    }
+}
+function Assert-R17OwnedQemuChild([string]$Stage) {
+    if ($null -eq $qacProcess -or $qacProcess.HasExited -or $null -eq $duringInspection) {
+        throw "R17 $Stage requires the still-running admitted QAC owner and its inspected QEMU child."
+    }
+    $currentLocalProcess = Get-CimInstance -ClassName Win32_Process `
+        -Filter ('ProcessId = {0}' -f [int]$duringInspection.processId) -ErrorAction Stop
+    if ($null -eq $currentLocalProcess -or -not (Test-QacLocalQemuChildIdentity `
+            -LocalProcess $currentLocalProcess -Inspection $duringInspection -OwnerPid $qacProcess.Id `
+            -QemuPath $qemu -QmpPort $qmpPort)) {
+        throw "R17 $Stage refused because the QAC-owned QEMU child identity was not verified."
+    }
+    return [pscustomobject]@{
+        verified=$true
+        stage=$Stage
+        qacOwnerPid=[int]$qacProcess.Id
+        qemuChildPid=[int]$duringInspection.processId
+        reservationId=[string]$qacReservationId
+    }
+}
+function Capture-R17ProgressSample([string]$CandidateManifestHash,[string]$SerialPath,[string]$SerialText,[int]$DelaySeconds) {
+    $pairPath = Join-Path $runRoot 'guest-progress-pair.json'
+    $pair = [ordered]@{
+        schema='C188R17_TIME_SEPARATED_GUEST_PROGRESS_PAIR_V1'
+        status='failed'
+        sampleDelaySeconds=$DelaySeconds
+        firstCpuCapturePath=(Join-Path $runRoot 'guest-cpu-state-timeout.json')
+        firstStackCapturePath=(Join-Path $runRoot 'guest-stack-state-timeout.json')
+        resumeResponse=$null
+        runningStatusAfterResume=$null
+        ownershipBeforeResume=$null
+        ownershipBeforeSecondSample=$null
+        secondCpuCapturePath=$null
+        secondStackCapturePath=$null
+        error=$null
+        capturedAtUtc=(Get-Date).ToUniversalTime().ToString('o')
+    }
+    $cpuCapture = $null
+    $stackCapture = $null
+    try {
+        if ($DelaySeconds -lt 1 -or $DelaySeconds -gt 30) { throw 'R17 progress sample delay is outside the bounded 1-30 second range.' }
+        $pair.ownershipBeforeResume = Assert-R17OwnedQemuChild 'before-resume'
+        $pair.resumeResponse = Invoke-Qmp 'cont'
+        $runningResponse = Invoke-Qmp 'query-status'
+        $runningStatus = ConvertFrom-QmpQueryStatusResponse -Text $runningResponse
+        $pair.runningStatusAfterResume = $runningStatus
+        if (-not $runningStatus.Valid -or -not [bool]$runningStatus.Running -or
+            [string]$runningStatus.Status -cne 'running') {
+            throw 'QEMU did not report the owned guest running after the R17 bounded resume.'
+        }
+        Start-Sleep -Seconds $DelaySeconds
+        $pair.ownershipBeforeSecondSample = Assert-R17OwnedQemuChild 'before-second-sample'
+        $cpuCapture = Capture-R13TimeoutCpuState -CandidateManifestHash $CandidateManifestHash `
+            -SerialPath $SerialPath -SampleNumber 2
+        $pair.secondCpuCapturePath = [string]$cpuCapture.Path
+        if ([string]$cpuCapture.Status -eq 'captured') {
+            $stackCapture = Capture-R16TimeoutStackWindow -CandidateManifestHash $CandidateManifestHash `
+                -RegistersPath $cpuCapture.RegistersPath -SerialText $SerialText -SampleNumber 2
+            $pair.secondStackCapturePath = [string]$stackCapture.Path
+            $pair.status = if ([string]$stackCapture.Status -eq 'captured') { 'two-cpu-and-stack-samples-captured' } else { 'two-cpu-samples-second-stack-unavailable' }
+        } else {
+            $pair.status = 'second-cpu-sample-unavailable'
+        }
+        $pair.secondCapturedAtUtc=(Get-Date).ToUniversalTime().ToString('o')
+    } catch {
+        $pair.status='failed'
+        $pair.error=$_.Exception.Message
+    }
+    [System.IO.File]::WriteAllText($pairPath,($pair | ConvertTo-Json -Depth 10),
+        [System.Text.UTF8Encoding]::new($false))
+    return [pscustomobject]@{
+        Status=[string]$pair.status; Path=$pairPath; CpuCapture=$cpuCapture; StackCapture=$stackCapture
+        DelaySeconds=$DelaySeconds; Error=$pair.error; OwnershipBeforeResume=$pair.ownershipBeforeResume
+        OwnershipBeforeSecondSample=$pair.ownershipBeforeSecondSample; ResumeResponse=$pair.resumeResponse
+        RunningStatusAfterResume=$pair.runningStatusAfterResume
     }
 }
 function Wait-Qmp([int]$Seconds,[System.Diagnostics.Process]$Owner) {
@@ -1210,6 +1293,14 @@ $managedGcTimeoutCpuStateRip = $null
 $managedGcTimeoutCpuStateError = $null
 $managedGcTimeoutCpuStateSerialHashStatus = 'not-attempted'
 $managedGcTimeoutCpuStateSerialHashError = $null
+$managedGcProgressObservationStatus = 'not-attempted'
+$managedGcProgressObservationDelaySeconds = $null
+$managedGcProgressObservationPath = $null
+$managedGcProgressObservationError = $null
+$managedGcProgressCpuSamplePaths = [System.Collections.Generic.List[string]]::new()
+$managedGcProgressStackSamplePaths = [System.Collections.Generic.List[string]]::new()
+$managedGcProgressCpuSamples = @()
+$managedGcProgressStackSamples = @()
 $managedGcTimeoutStackCaptureStatus = 'not-attempted'
 $managedGcTimeoutStackCapturePath = $null
 $managedGcTimeoutStackBinaryPath = $null
@@ -1508,6 +1599,10 @@ if ($isManagedGcRootProbe) {
                 $managedGcTimeoutCpuStateRegistersPath = [string]$cpuCapture.RegistersPath
                 $managedGcTimeoutCpuStateRip = [string]$cpuCapture.Rip
                 $managedGcTimeoutCpuStateSerialHashStatus = 'deferred-until-qemu-exit'
+                if (-not [string]::IsNullOrWhiteSpace([string]$cpuCapture.Path)) {
+                    $managedGcProgressCpuSamplePaths.Add([string]$cpuCapture.Path)
+                }
+                $stackCapture = $null
                 try {
                     $stackCapture = Capture-R16TimeoutStackWindow -CandidateManifestHash $candidateManifestSha256 `
                         -RegistersPath $cpuCapture.RegistersPath -SerialText $serialText
@@ -1524,6 +1619,7 @@ if ($isManagedGcRootProbe) {
                     $managedGcTimeoutStackCapturePath = Join-Path $runRoot 'guest-stack-state-timeout.json'
                     [ordered]@{
                         schema='C188R16_GUEST_STACK_TIMEOUT_CAPTURE_V1'; status='failed'
+                        sampleNumber=1
                         capturedAtUtc=(Get-Date).ToUniversalTime().ToString('o')
                         trigger='bounded-managed-gc-wait-expired-without-terminal-evidence'
                         candidateManifestSha256=$candidateManifestSha256; guestCpuIndex=0
@@ -1531,11 +1627,40 @@ if ($isManagedGcRootProbe) {
                         serialHashStatus='deferred-until-qemu-exit'; serialSha256=$null; serialHashError=$null
                     } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $managedGcTimeoutStackCapturePath -Encoding utf8
                 }
+                if ($null -ne $stackCapture -and -not [string]::IsNullOrWhiteSpace([string]$stackCapture.Path)) {
+                    $managedGcProgressStackSamplePaths.Add([string]$stackCapture.Path)
+                } elseif (-not [string]::IsNullOrWhiteSpace([string]$managedGcTimeoutStackCapturePath)) {
+                    $managedGcProgressStackSamplePaths.Add([string]$managedGcTimeoutStackCapturePath)
+                }
+                $managedGcProgressObservationStatus = 'first-sample-only'
+                $managedGcProgressObservationDelaySeconds = $ManagedGcProgressSampleDelaySeconds
+                try {
+                    $progressPair = Capture-R17ProgressSample -CandidateManifestHash $candidateManifestSha256 `
+                        -SerialPath $serial -SerialText $serialText -DelaySeconds $ManagedGcProgressSampleDelaySeconds
+                    $managedGcProgressObservationStatus = [string]$progressPair.Status
+                    $managedGcProgressObservationPath = [string]$progressPair.Path
+                    $managedGcProgressObservationError = [string]$progressPair.Error
+                    if ($null -ne $progressPair.CpuCapture -and
+                        -not [string]::IsNullOrWhiteSpace([string]$progressPair.CpuCapture.Path)) {
+                        $managedGcProgressCpuSamplePaths.Add([string]$progressPair.CpuCapture.Path)
+                    }
+                    if ($null -ne $progressPair.StackCapture -and
+                        -not [string]::IsNullOrWhiteSpace([string]$progressPair.StackCapture.Path)) {
+                        $managedGcProgressStackSamplePaths.Add([string]$progressPair.StackCapture.Path)
+                    }
+                } catch {
+                    $managedGcProgressObservationStatus = 'failed'
+                    $managedGcProgressObservationError = $_.Exception.Message
+                }
             } catch {
                 $managedGcTimeoutCpuStateStatus = 'failed'
                 $managedGcTimeoutCpuStateError = $_.Exception.Message
+                $managedGcProgressObservationStatus = 'first-sample-failed'
+                $managedGcProgressObservationDelaySeconds = $ManagedGcProgressSampleDelaySeconds
+                $managedGcProgressObservationError = $managedGcTimeoutCpuStateError
                 [ordered]@{
                     schema='C188R15_GUEST_CPU_TIMEOUT_STATE_V1'
+                    sampleNumber=1
                     capturedAtUtc=(Get-Date).ToUniversalTime().ToString('o')
                     trigger='bounded-managed-gc-wait-expired-without-terminal-evidence'
                     candidateManifestSha256=$candidateManifestSha256
@@ -1547,40 +1672,112 @@ if ($isManagedGcRootProbe) {
                     error=$managedGcTimeoutCpuStateError
                 } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $runRoot 'guest-cpu-state-timeout.json') -Encoding utf8
                 $managedGcTimeoutCpuStatePath = Join-Path $runRoot 'guest-cpu-state-timeout.json'
+                if (-not $managedGcProgressCpuSamplePaths.Contains($managedGcTimeoutCpuStatePath)) {
+                    $managedGcProgressCpuSamplePaths.Add($managedGcTimeoutCpuStatePath)
+                }
             }
         }
         [void](Invoke-Qmp 'quit')
     }
     if (-not $qacProcess.WaitForExit(90000)) { throw 'QAC did not exit after the owned QMP quit request.' }
     $qacExitCode = $qacProcess.ExitCode
-    if ($managedGcTimeoutCpuStateStatus -eq 'captured' -and
-        -not [string]::IsNullOrWhiteSpace($managedGcTimeoutCpuStatePath)) {
+    foreach ($cpuCapturePath in @($managedGcProgressCpuSamplePaths.ToArray())) {
+        if (-not (Test-Path -LiteralPath $cpuCapturePath -PathType Leaf)) { continue }
         try {
-            $serialHashResult = Complete-R13TimeoutCpuStateSerialHash -CapturePath $managedGcTimeoutCpuStatePath `
-                -SerialPath $serial
-            $managedGcTimeoutCpuStateSerialHashStatus = [string]$serialHashResult.Status
-            $managedGcTimeoutCpuStateSerialHashError = [string]$serialHashResult.Error
+            $cpuMetadata = Get-Content -LiteralPath $cpuCapturePath -Raw | ConvertFrom-Json -ErrorAction Stop
+            if ([string]$cpuMetadata.status -eq 'captured') {
+                $cpuHashResult = Complete-R13TimeoutCpuStateSerialHash -CapturePath $cpuCapturePath -SerialPath $serial
+                if ([int]$cpuMetadata.sampleNumber -eq 1) {
+                    $serialHashResult = $cpuHashResult
+                    $managedGcTimeoutCpuStateSerialHashStatus = [string]$cpuHashResult.Status
+                    $managedGcTimeoutCpuStateSerialHashError = [string]$cpuHashResult.Error
+                }
+            }
         } catch {
-            $managedGcTimeoutCpuStateSerialHashStatus = 'unavailable-after-qemu-exit'
-            $managedGcTimeoutCpuStateSerialHashError = $_.Exception.Message
-        }
-    }
-    if (-not [string]::IsNullOrWhiteSpace($managedGcTimeoutStackCapturePath)) {
-        try {
-            $stackSerialHash = if ($null -ne $serialHashResult) { [string]$serialHashResult.Sha256 } else { $null }
-            $stackHashResult = Complete-R16TimeoutStackSerialHash -CapturePath $managedGcTimeoutStackCapturePath `
-                -HashStatus $managedGcTimeoutCpuStateSerialHashStatus `
-                -SerialSha256 $stackSerialHash
-            $managedGcTimeoutStackSerialHashStatus = [string]$stackHashResult.Status
-            $managedGcTimeoutStackSerialHashError = [string]$stackHashResult.Error
-        } catch {
-            $managedGcTimeoutStackSerialHashStatus = 'unavailable-after-qemu-exit'
-            $managedGcTimeoutStackSerialHashError = $_.Exception.Message
-            if ([string]::IsNullOrWhiteSpace($managedGcTimeoutStackError)) {
-                $managedGcTimeoutStackError = $_.Exception.Message
+            if ($cpuCapturePath -ceq $managedGcTimeoutCpuStatePath) {
+                $managedGcTimeoutCpuStateSerialHashStatus = 'unavailable-after-qemu-exit'
+                $managedGcTimeoutCpuStateSerialHashError = $_.Exception.Message
             }
         }
     }
+    foreach ($stackCapturePath in @($managedGcProgressStackSamplePaths.ToArray())) {
+        if (-not (Test-Path -LiteralPath $stackCapturePath -PathType Leaf)) { continue }
+        try {
+            $stackMetadata = Get-Content -LiteralPath $stackCapturePath -Raw | ConvertFrom-Json -ErrorAction Stop
+            $cpuForStack = @($managedGcProgressCpuSamplePaths.ToArray() | ForEach-Object {
+                if (Test-Path -LiteralPath $_ -PathType Leaf) {
+                    Get-Content -LiteralPath $_ -Raw | ConvertFrom-Json -ErrorAction Stop
+                }
+            } | Where-Object { [int]$_.sampleNumber -eq [int]$stackMetadata.sampleNumber } | Select-Object -First 1)
+            $stackHashStatus = if ($cpuForStack.Count -gt 0) { [string]$cpuForStack[0].serialHashStatus } else { 'unavailable-after-qemu-exit' }
+            $stackSerialSha = if ($cpuForStack.Count -gt 0) { [string]$cpuForStack[0].serialSha256 } else { $null }
+            $stackHashResult = Complete-R16TimeoutStackSerialHash -CapturePath $stackCapturePath `
+                -HashStatus $stackHashStatus -SerialSha256 $stackSerialSha
+            if ([int]$stackMetadata.sampleNumber -eq 1) {
+                $managedGcTimeoutStackSerialHashStatus = [string]$stackHashResult.Status
+                $managedGcTimeoutStackSerialHashError = [string]$stackHashResult.Error
+            }
+        } catch {
+            if ($stackCapturePath -ceq $managedGcTimeoutStackCapturePath) {
+                $managedGcTimeoutStackSerialHashStatus = 'unavailable-after-qemu-exit'
+                $managedGcTimeoutStackSerialHashError = $_.Exception.Message
+                if ([string]::IsNullOrWhiteSpace($managedGcTimeoutStackError)) {
+                    $managedGcTimeoutStackError = $_.Exception.Message
+                }
+            }
+        }
+    }
+    $managedGcProgressCpuSamples = @(
+        foreach ($cpuCapturePath in @($managedGcProgressCpuSamplePaths.ToArray())) {
+            if (Test-Path -LiteralPath $cpuCapturePath -PathType Leaf) {
+                $cpuMetadata = Get-Content -LiteralPath $cpuCapturePath -Raw | ConvertFrom-Json -ErrorAction Stop
+                $registerHash = Hash-IfPresent ([string]$cpuMetadata.registersPath)
+                $serialMetadataHash = Hash-IfPresent ([string]$cpuMetadata.serialPath)
+                $managedGcProgressCpuEvidenceValid = ([string]$cpuMetadata.candidateManifestSha256 -ceq $candidateManifestSha256) -and
+                    ([string]$cpuMetadata.status -ne 'captured' -or
+                        ($null -ne $registerHash -and $registerHash -ceq [string]$cpuMetadata.registersSha256 -and
+                         $null -ne $serialMetadataHash -and $serialMetadataHash -ceq [string]$cpuMetadata.serialSha256 -and
+                         [string]$cpuMetadata.serialHashStatus -ceq 'verified-after-qemu-exit'))
+                [ordered]@{
+                    sampleNumber=$cpuMetadata.sampleNumber; schema=$cpuMetadata.schema; status=$cpuMetadata.status
+                    capturedAtUtc=$cpuMetadata.capturedAtUtc; path=$cpuCapturePath
+                    registersPath=$cpuMetadata.registersPath; registersSha256=$cpuMetadata.registersSha256
+                    serialPath=$cpuMetadata.serialPath; serialSha256=$cpuMetadata.serialSha256
+                    serialHashStatus=$cpuMetadata.serialHashStatus; rip=$cpuMetadata.rip
+                    qemuStatusAfterStop=$cpuMetadata.qemuStatusAfterStop
+                    metadataSha256=Hash-IfPresent $cpuCapturePath; evidenceIntegrityValid=$managedGcProgressCpuEvidenceValid
+                    error=$cpuMetadata.error
+                }
+            }
+        }
+    )
+    $managedGcProgressStackSamples = @(
+        foreach ($stackCapturePath in @($managedGcProgressStackSamplePaths.ToArray())) {
+            if (Test-Path -LiteralPath $stackCapturePath -PathType Leaf) {
+                $stackMetadata = Get-Content -LiteralPath $stackCapturePath -Raw | ConvertFrom-Json -ErrorAction Stop
+                $stackHash = Hash-IfPresent ([string]$stackMetadata.stackPath)
+                $registerHash = Hash-IfPresent ([string]$stackMetadata.registersPath)
+                $stackLengthValid = $null -ne $stackHash -and
+                    [int64](Get-Item -LiteralPath $stackMetadata.stackPath).Length -eq [int64]$stackMetadata.lengthBytesCaptured
+                $managedGcProgressStackEvidenceValid = ([string]$stackMetadata.candidateManifestSha256 -ceq $candidateManifestSha256) -and
+                    ([string]$stackMetadata.status -ne 'captured' -or
+                        ($stackLengthValid -and $stackHash -ceq [string]$stackMetadata.stackSha256 -and
+                         $null -ne $registerHash -and $registerHash -ceq [string]$stackMetadata.registersSha256 -and
+                         [string]$stackMetadata.serialHashStatus -ceq 'verified-after-qemu-exit'))
+                [ordered]@{
+                    sampleNumber=$stackMetadata.sampleNumber; schema=$stackMetadata.schema; status=$stackMetadata.status
+                    capturedAtUtc=$stackMetadata.capturedAtUtc; path=$stackCapturePath
+                    stackPath=$stackMetadata.stackPath; startAddress=$stackMetadata.startAddress
+                    lengthBytesRequested=$stackMetadata.lengthBytesRequested; lengthBytesCaptured=$stackMetadata.lengthBytesCaptured
+                    stackSha256=$stackMetadata.stackSha256; registersPath=$stackMetadata.registersPath
+                    registersSha256=$stackMetadata.registersSha256; serialSha256=$stackMetadata.serialSha256
+                    serialHashStatus=$stackMetadata.serialHashStatus; qemuStatusAfterPause=$stackMetadata.qemuStatusAfterPause
+                    metadataSha256=Hash-IfPresent $stackCapturePath; evidenceIntegrityValid=$managedGcProgressStackEvidenceValid
+                    error=$stackMetadata.error
+                }
+            }
+        }
+    )
 } catch {
     $runError = $_.Exception.Message
     if ($null -ne $qacProcess -and -not $qacProcess.HasExited) {
@@ -1655,6 +1852,11 @@ if ($isManagedGcRootProbe) {
 }
 
 $serialText = Read-GuestSerial
+if ($isManagedGcRootProbe) {
+    $terminalObservation = Get-R13ManagedGcTerminalObservation $serialText
+    $transitionTerminalSeen = [bool]$terminalObservation.terminal
+    $guestPass = $transitionTerminalSeen
+}
 $serialAnalysisPath = Join-Path $runRoot 'serial-analysis.json'
 $serialAnalyzer = if ($isManagedGcRootProbe) {
     Join-Path $PSScriptRoot 'analyze-c188r13-managed-gc-root.ps1'
@@ -2147,6 +2349,15 @@ if ($null -ne $transitionAttributionAnalysis) {
         $transitionFailFastManifest = $transitionFailFastProperty.Value
     }
 }
+$managedGcProgressPairMetadata = $null
+if (-not [string]::IsNullOrWhiteSpace($managedGcProgressObservationPath) -and
+    (Test-Path -LiteralPath $managedGcProgressObservationPath -PathType Leaf)) {
+    try { $managedGcProgressPairMetadata = Get-Content -LiteralPath $managedGcProgressObservationPath -Raw | ConvertFrom-Json -ErrorAction Stop }
+    catch { $managedGcProgressObservationError = $_.Exception.Message }
+}
+$managedGcProgressQmpOwnershipVerified = $null -ne $managedGcProgressPairMetadata -and
+    [bool]$managedGcProgressPairMetadata.ownershipBeforeResume.verified -and
+    [bool]$managedGcProgressPairMetadata.ownershipBeforeSecondSample.verified
 $manifest = [ordered]@{
     result=$outcome;runRoot=$runRoot;candidateRoot=$candidate;candidateManifest=$candidateManifestPath
     candidateManifestSha256=$candidateManifestSha256
@@ -2204,6 +2415,20 @@ $manifest = [ordered]@{
     managedGcTimeoutCpuStateError=$managedGcTimeoutCpuStateError
     managedGcTimeoutCpuStateSerialHashStatus=$managedGcTimeoutCpuStateSerialHashStatus
     managedGcTimeoutCpuStateSerialHashError=$managedGcTimeoutCpuStateSerialHashError
+    managedGcProgressObservation=[ordered]@{
+        schema='C188R17_TIME_SEPARATED_GUEST_PROGRESS_PAIR_V1'
+        status=$managedGcProgressObservationStatus
+        sampleDelaySeconds=$managedGcProgressObservationDelaySeconds
+        pairMetadataPath=$managedGcProgressObservationPath
+        pairMetadataSha256=Hash-IfPresent $managedGcProgressObservationPath
+        pairMetadata=$managedGcProgressPairMetadata
+        qmpPauseResumeOwnershipVerified=$managedGcProgressQmpOwnershipVerified
+        cpuSamples=@($managedGcProgressCpuSamples)
+        stackSamples=@($managedGcProgressStackSamples)
+        cpuSampleCount=@($managedGcProgressCpuSamples).Count
+        stackSampleCount=@($managedGcProgressStackSamples).Count
+        error=$managedGcProgressObservationError
+    }
     managedGcTimeoutStackCaptureStatus=$managedGcTimeoutStackCaptureStatus
     managedGcTimeoutStackCapturePath=$managedGcTimeoutStackCapturePath
     managedGcTimeoutStackBinaryPath=$managedGcTimeoutStackBinaryPath
@@ -2357,7 +2582,14 @@ $manifest = [ordered]@{
 }
 $manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $manifestPath -Encoding utf8
 if ($isManagedGcRootProbe) {
-    Write-Output "C188R13_MANAGED_GC_ROOT=$outcome ADMITTED=$admitted CAPTURE_COMPLETE=$transitionAttributionCaptureComplete CLASSIFICATION=$transitionAttributionClassification GC_STARTED=$($transitionAttributionAnalysis.gcCollectionStarted) GC_COMPLETED=$($transitionAttributionAnalysis.gcCollectionCompleted) LIVE_OBJECT=$($transitionAttributionAnalysis.liveObjectSurvived) RETURN=$($transitionAttributionAnalysis.managedEntryReturnValue) QAC_RELEASE=$releaseVerified"
+    $managedGcCollectionStartedOutput = Get-AnalysisBoolean $transitionAttributionAnalysis 'gcCollectionStarted'
+    $managedGcCollectionCompletedOutput = Get-AnalysisBoolean $transitionAttributionAnalysis 'gcCollectionCompleted'
+    $managedGcLiveObjectSurvivedOutput = Get-AnalysisBoolean $transitionAttributionAnalysis 'liveObjectSurvived'
+    $managedGcReturnProperty = if ($null -ne $transitionAttributionAnalysis) {
+        $transitionAttributionAnalysis.PSObject.Properties['managedEntryReturnValue']
+    } else { $null }
+    $managedGcReturnOutput = if ($null -ne $managedGcReturnProperty) { [string]$managedGcReturnProperty.Value } else { '' }
+    Write-Output "C188R13_MANAGED_GC_ROOT=$outcome ADMITTED=$admitted CAPTURE_COMPLETE=$transitionAttributionCaptureComplete CLASSIFICATION=$transitionAttributionClassification GC_STARTED=$managedGcCollectionStartedOutput GC_COMPLETED=$managedGcCollectionCompletedOutput LIVE_OBJECT=$managedGcLiveObjectSurvivedOutput RETURN=$managedGcReturnOutput QAC_RELEASE=$releaseVerified"
     Write-Output "C188R13_MANAGED_GC_ROOT_MANIFEST=$manifestPath"
 } elseif ($isManagedSettingsObjectProbe) {
     $entryReturned = Get-AnalysisBoolean $transitionAttributionAnalysis 'managedEntryReturned'
