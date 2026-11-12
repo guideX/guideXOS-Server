@@ -1,0 +1,118 @@
+{
+  "schema_version": "guidexos.aarch64.runsafe2-qac-r3-qmp-protocol-review.v1",
+  "milestone": "AARCH64-RUNSAFE2-R3",
+  "reviewed_outcome": "QAC_BOUNDED_LIFECYCLE_VERIFIED",
+  "outcome_letter": "A",
+  "reviewed_at_utc": "2026-11-11",
+  "repository": {
+    "branch": "AARCH64_SUPPORT",
+    "review_start_head": "eeb6e58eaaad58b709f13150c085e456b99529d9",
+    "historical_review_record_preserved": "docs/aarch64/AARCH64_RUNSAFE2_R2_NATIVE_RECHECK_20261111.json"
+  },
+  "qemu_protocol": {
+    "reference": "https://www.qemu.org/docs/master/interop/qemu-qmp-ref.html#command-quit",
+    "quit_response_guaranteed_before_termination": false,
+    "premature_eof_expected": true,
+    "shutdown_event_reference": "https://www.qemu.org/docs/master/interop/qemu-qmp-ref.html#event-shutdown",
+    "shutdown_event_can_report_host_qmp_quit": true
+  },
+  "historical_run": {
+    "source_session": "out/aarch64-runsafe2-r2-qac-qualification-20261111/el0-negative-20261111-114126-169",
+    "session_json_sha256": "2da994c5f6e36fdbce9251dea206a4fd8db21904ee84185522253597dafc25a6",
+    "guest_log_sha256": "8c9d5bb6b1bf4c0b1c61e33c8aded034a830ac99e6bc57bbb2365d1eec4b6555",
+    "qac_stderr_sha256": "9a58aa6875d17ac0114f6a868635a17583d56943c3c28d4b1dc4c2a53b534be8",
+    "original_runner_outcome": "EL0_QAC_SUPERVISION_INCOMPLETE",
+    "r2_reviewed_outcome": "EL0_QAC_SUPERVISION_PARTIAL",
+    "r2_review_json_sha256": "0b5db2bbb30f168dc885b41c6f0f075791f0ec6a80b45f2c68e0eed9a556d21c",
+    "original_session_record_modified": false,
+    "standalone_qmp_transcript_available": false,
+    "qmp_shutdown_event_found": false,
+    "qac_exit_cause_recorded": false
+  },
+  "separate_earlier_r2_fallback": {
+    "transcript": "out/aarch64-runsafe2-r2-qac-20261111/el0-negative-20261111-084757-043/qmp-fallback.json",
+    "transcript_sha256": "70e82edc728ad8a935ef8153505c4c74c2d9777f0f8f6dae223ae240402a8255",
+    "reconciliation_sha256": "aaf2399ff72b977c7076f923c0c016e6610c39ecf2189be6b89f649a4636e27f",
+    "different_managed_child_pid": 21912,
+    "quit_acknowledged": true,
+    "after_child_cleanup_deadline": true,
+    "shutdown_event_found": false,
+    "used_to_establish_current_run_cause": false
+  },
+  "qac_ownership": {
+    "exclusive_grant_verified": true,
+    "reservation_id": "6f3c8aa0f49d442b801d7e484fad313d",
+    "qac_cli_pid": 28948,
+    "managed_child_pid": 31372,
+    "managed_child_parent_pid": 28948,
+    "managed_child_identity_verified": true,
+    "managed_child_exit_record_verified": true,
+    "managed_child_exit_code": 0,
+    "managed_child_exit_utc": "2026-11-11T19:42:03.0492010Z",
+    "qac_process_exit_verified": true,
+    "qac_process_exit_code": 0,
+    "reservation_release_verified": true,
+    "final_qac_online": true,
+    "final_reservations": 0,
+    "final_managed_qemu_processes": 0
+  },
+  "qmp": {
+    "port": 52007,
+    "instance_name": "el0-negative-20261111-114126-169",
+    "discovery_method": "ExactChildCommandLineAndQmpInstanceName",
+    "exact_child_endpoint_verified": true,
+    "greeting_verified": true,
+    "query_name_verified": true,
+    "quit_attempts": 1,
+    "transmission_established": true,
+    "transmission_evidence": "The preserved R2 review addendum records quit_write_completed=true and identifies the following StreamReader.ReadLine timeout; endpoint and instance-name validation preceded the write.",
+    "raw_session_qmp_quit_sent": false,
+    "raw_session_sent_timestamp_present": false,
+    "attempt_interval_utc": [
+      "2026-11-11T19:41:56.6347935Z",
+      "2026-11-11T19:41:58.4631874Z"
+    ],
+    "acknowledgement_observed": false,
+    "response_failure": "StreamReader.ReadLine timed out after the command write and endpoint validation",
+    "shutdown_cause_established": false
+  },
+  "timing": {
+    "runtime_limit_seconds": 300,
+    "runtime_to_cleanup_start_seconds": 22.603,
+    "child_cleanup_limit_seconds": 45,
+    "child_cleanup_elapsed_seconds": 12.078,
+    "child_cleanup_deadline_met": true,
+    "reservation_cleanup_limit_seconds": 20,
+    "reservation_cleanup_elapsed_seconds": 1.446,
+    "reservation_cleanup_deadline_met": true,
+    "managed_child_lifetime_seconds": 32.362
+  },
+  "acceptance_evidence": {
+    "guest_pass_verified": true,
+    "request_transmission": true,
+    "protocol_acknowledgement": false,
+    "exact_managed_child_termination": true,
+    "managed_child_exit_code_zero": true,
+    "ownership_cleanup": true,
+    "runtime_deadline_met": true,
+    "child_cleanup_deadline_met": true,
+    "reservation_cleanup_deadline_met": true,
+    "shutdown_causation_proven": false,
+    "bounded_lifecycle_verified": true
+  },
+  "hosted_regressions": {
+    "supervisor_assertions_passed": 59,
+    "covers_ack_eof_timeout_live_child_pretransmission_error_endpoint_identity_exit_record_release_deadlines_and_unrelated_session": true,
+    "el0_structural_assertions_passed": 169,
+    "el0_source_contract_passed": true,
+    "powershell_syntax_passed": true,
+    "qemu_launched_for_review": false
+  },
+  "runsafe3_readiness": {
+    "host_only_implementation_ready": true,
+    "future_qac_guest_acceptance_ready": false,
+    "studio_run_enabled": false,
+    "legacy_phase9_nativeelf_privilege_changed": false,
+    "remaining_operational_risk": "External forcible termination of the PowerShell supervisor cannot run its finalizer; QAC retains the reservation in Recovery Required and provides no independent runtime-deadline command."
+  }
+}

@@ -3,7 +3,8 @@
 - **Repository:** `guideXOSServer_AARCH64`
 - **Branch:** `AARCH64_SUPPORT`
 - **Qualification starting HEAD:** `5d29d173129271e285c68d4344f686d693514a97` (three commits ahead of `origin/AARCH64_SUPPORT`)
-- **Latest native outcome:** `EL0_QAC_SUPERVISION_PARTIAL`
+- **Latest protocol-correct native outcome:** `QAC_BOUNDED_LIFECYCLE_VERIFIED` (R3 Outcome A)
+- **Preserved R2 runner outcome:** `EL0_QAC_SUPERVISION_PARTIAL` (unchanged)
 - **Earlier pre-fix outcome:** `QAC_SUPERVISION_DEFECT_LOCALIZED` (preserved unchanged)
 - **Studio Run:** remains disabled
 - **Scope:** QAC-owned launch supervision for the preserved trusted r6 EL0 diagnostic; not process scheduling
@@ -27,21 +28,28 @@ session name. The recorded discovery method is
 This run directly exercised the fallback.
 
 After endpoint validation, the runner wrote QMP `quit`, then timed out waiting
-for its response at `2026-11-11T19:41:58.4631874Z`. The recorded exception is
-from `StreamReader.ReadLine`, after the write and the exact endpoint/name
-validation. The earlier runner did not persist the write timestamp or mark the
-command sent until a response arrived, so the raw session's `qmp_quit_sent`
-field is false. The fallback and failed-read transitions bound the attempt to
-`19:41:56.6347935Z`–`19:41:58.4631874Z`; an exact send timestamp is unavailable.
-The corrected runner now records request-write and acknowledgement separately.
+for its response at `2026-11-11T19:41:58.4631874Z`. The raw session exception
+is from `StreamReader.ReadLine`; the R2 review addendum records that the write
+completed and the read failed after exact endpoint and instance-name
+validation. The raw session's `qmp_quit_sent` field is false because that
+runner only set the field after receiving a response. The preserved record has
+no standalone QMP transcript or exact write timestamp. The addendum's recorded
+write completion and the failure at the subsequent read establish transmission
+through the verified connection, but do not provide a timestamp for it. The
+attempt interval is `19:41:56.6347935Z`–`19:41:58.4631874Z`.
 
-QEMU's QMP reference says `quit` requests graceful process termination but
-does not guarantee that its response is sent before termination; premature EOF
-is expected in some cases ([QEMU QMP `quit` command](https://www.qemu.org/docs/master/interop/qemu-qmp-ref.html#command-quit)).
-That protocol behavior is consistent with the missing response, but this run
-does not establish that the request caused the exit. It also does not satisfy
-this acceptance contract's explicit acknowledgement requirement. The child
-exit does not substitute for a QMP acknowledgement.
+QEMU's QMP reference says `quit` requests graceful process termination, but
+does not guarantee a response before termination; premature EOF is expected
+in some cases ([QEMU QMP `quit` command](https://www.qemu.org/docs/master/interop/qemu-qmp-ref.html#command-quit)).
+The `SHUTDOWN` event can report a reason such as `host-qmp-quit`, but neither
+the preserved session nor the QAC logs contain that event or a QAC exit-cause
+field ([QEMU QMP `SHUTDOWN` event](https://www.qemu.org/docs/master/interop/qemu-qmp-ref.html#event-shutdown)).
+The separate earlier R2 fallback transcript records a `quit` return for a
+different child after its cleanup deadline; it contains no `SHUTDOWN` event and
+does not establish the cause of this run's exit.
+Therefore, the evidence establishes a transmitted request and a bounded
+process exit, not that the request caused the exit. The absent acknowledgement
+remains recorded as absent.
 
 QAC subsequently recorded exit code 0 at `2026-11-11T19:42:03.0492010Z` and
 released the reservation. Final status/list showed zero reservations and zero
@@ -61,14 +69,18 @@ restored the kernel root, and released two data and four table pages. Scheduler
 continuation and both Phase 12 pass markers were present; the guest recorded
 1,001 timer ticks, 1,000 preemptions, and zero unexpected IRQs or exceptions.
 
-The native result is **Outcome B — `EL0_QAC_SUPERVISION_PARTIAL`**. The fallback
-was exercised and validated, child exit and reservation release were bounded
-and verified, but the QMP `quit` acknowledgement was not observed. No second
-guest was launched. The raw run is preserved under
+The original R2 result remains **Outcome B — `EL0_QAC_SUPERVISION_PARTIAL`** in
+the raw session and first review addendum. Applying the R3 contract, the
+preserved evidence now meets **Outcome A — `QAC_BOUNDED_LIFECYCLE_VERIFIED`**:
+transmission is established by the existing review addendum and the read-timeout
+sequence; QAC verified the exact child exit and release within bounds; the
+missing acknowledgement is permitted by QEMU's protocol. The R3 decision is
+recorded separately and does not rewrite the old outcome. No second guest was
+launched. The raw run is preserved under
 `out/aarch64-runsafe2-r2-qac-qualification-20261111/el0-negative-20261111-114126-169/`;
-the committed [review addendum](AARCH64_RUNSAFE2_R2_NATIVE_RECHECK_20261111.json)
-records its hashes and outcome analysis. The raw `session.json` is not rewritten
-to change the outcome emitted by the runner version that executed it.
+the committed [R2 review addendum](AARCH64_RUNSAFE2_R2_NATIVE_RECHECK_20261111.json)
+retains its hashes and original analysis. The R3 disposition is in
+[AARCH64_RUNSAFE2_R3_QMP_PROTOCOL_REVIEW_20261111.json](AARCH64_RUNSAFE2_R3_QMP_PROTOCOL_REVIEW_20261111.json).
 
 ## Earlier pre-fix native failure (preserved unchanged)
 
@@ -166,13 +178,17 @@ uses the shared state machine in
   endpoint. A matching socket-table PID is recorded when available; when the
   OS query is unavailable, a valid QMP greeting and matching per-session
   `query-name` response are required before `quit`. Any socket-table row naming
-  another or ambiguous owner blocks the command. Shutdown is retried while the
-  child remains active, with a 45-second exit deadline.
-- The state machine records the QMP `quit` write and its response as separate
-  stages. Acceptance requires both the request and an observed acknowledgement,
-  followed by verified child exit and QAC release. A child exit after an
-  unacknowledged request is recorded as partial when all ownership and cleanup
-  checks pass; it cannot be promoted to a lifecycle pass.
+  another or ambiguous owner blocks the command. A connection failure before
+  transmission may be retried only after fresh endpoint verification. Once the
+  `quit` write path begins, the command is not repeated; the child still has a
+  45-second exit deadline.
+- The state machine records request transmission, protocol response, managed
+  child exit status, reservation release, and both cleanup deadlines as
+  independent evidence. Completion accepts an acknowledgement, EOF after a
+  flushed request, or a read timeout after a flushed request, but only after
+  QAC verifies that the exact child exited with code 0 and the reservation is
+  released within bounds. A timeout while the child remains active, an explicit
+  QMP error, an unverified exit, or failed release cannot qualify.
 - After child exit, QAC release has a separate 20-second deadline. If the QAC
   run client has exited but the exact child is verified gone and the reservation
   remains admitted, the runner may request QAC's documented `release` operation.
@@ -198,16 +214,16 @@ not drop active child supervision.
 ## Host regressions and preserved EL0 result
 
 [`test-aarch64-runsafe2-qac-supervisor.ps1`](../../scripts/test-aarch64-runsafe2-qac-supervisor.ps1)
-passes **46 deterministic assertions** covering startup and registration,
+passes **59 deterministic assertions** covering startup and registration,
 temporary states, normal child exit, PASS with pending shutdown, runtime and
 cleanup deadlines, ambiguous child status, lost reservation ownership, QAC
 communication failure, unexpected and unrelated process identities, repeated
 QMP requests, queued cancellation, `Recovery Required`, failed log
 finalization, missing terminal status, and the rule that a live owned child can
-never qualify. The expanded assertions also cover missing and ambiguous
-endpoints, transient `Starting` and QAC communication, separate QMP request and
-acknowledgement states, partial-outcome gates, and exact child lifetime
-calculation.
+never qualify. R3 adds acknowledged quit, EOF and timeout after transmission,
+timeout with a live child, failure before transmission, explicit QMP error,
+wrong instance identity, missing QAC exit evidence, release failure, cleanup
+overruns, and isolation of another managed QEMU session.
 
 `scripts/test-aarch64-el0-host.ps1` was rerun and passed **169 assertions** plus
 `AARCH64_EL0_SOURCE_CONTRACT_PASS`. It verifies the same production address-space
@@ -254,13 +270,13 @@ native attempt requires a distinct justification and fresh QAC grant.
 
 ## RUNSAFE3 readiness
 
-The host harness passes 46 deterministic assertions, and the native fallback
-path was exercised under a genuine exclusive grant. RUNSAFE3 design work may
-proceed, but process scheduling, cancellation, and native supervision must
-remain separate acceptance gates. R2 adds no per-task TTBR ownership,
-preemptive EL0 execution, or Studio Run path. RUNSAFE3 readiness is **design
-only**; native QMP shutdown remains partially qualified because this run did
-not observe a `quit` acknowledgement. A second native run was not launched.
+The host harness passes 59 deterministic assertions, and the native fallback
+path was exercised under a genuine exclusive grant. Host-only RUNSAFE3
+implementation work is ready to proceed. Future RUNSAFE3 QAC guest acceptance
+remains a separate gate for scheduler isolation, task address-space ownership,
+and guest lifecycle evidence; R2 does not prove those properties. Studio Run
+remains disabled, and legacy Phase 9 NativeElf applications remain privileged
+EL1. A second native run was not launched.
 
 The runner's `try/catch/finally` preserves partial evidence and performs bounded
 cleanup for handled PowerShell errors and cancellation paths. An external
@@ -271,3 +287,38 @@ be verified. That held reservation remains visible and blocks another
 exclusive admission, but QAC 2.0 has no independent guest runtime-deadline
 command. This host/process termination case remains an operational risk; the
 runner does not kill an unverified QEMU process to hide it.
+
+## R3 protocol acceptance
+
+QEMU documents that every effort is made to return a `quit` response before
+termination, but that response is not guaranteed and premature EOF is
+expected. Acknowledgement remains an independent evidence field, not a
+completion prerequisite. A pass requires a verified QAC grant and exact child
+identity, a flushed `quit` transmission, a permitted response result
+(acknowledgement, EOF, or read timeout), QAC-recorded child exit code 0, exact
+reservation release, final ownership reconciliation, successful evidence
+finalization, and in-bound runtime and cleanup timings. Connection failure
+before transmission, explicit QMP error, identity mismatch, timeout with a live
+child, missing QAC exit record, nonzero exit, or failed release cannot pass.
+The runner does not repeat a quit after its write path begins.
+
+For this native run, transmission and endpoint identity are established by the
+preserved R2 review addendum and its recorded `ReadLine` timeout after the
+write; the raw `qmp_quit_sent` bit remains false and no exact send timestamp or
+standalone transcript exists. QMP acknowledgement is absent. QAC recorded child
+exit code 0 at `19:42:03.049201Z`, reservation release, 12.078 seconds of child
+cleanup, and 1.446 seconds of reservation cleanup against 45- and 20-second
+limits. No `SHUTDOWN` event or exit cause was preserved, so shutdown causation
+remains unknown. The bounded lifecycle is verified independently of causation.
+
+The review uses these outcome names:
+
+- **A — `QAC_BOUNDED_LIFECYCLE_VERIFIED`:** historical native evidence meets
+  the protocol-correct contract and hosted regressions pass.
+- **B — `QAC_LIFECYCLE_EVIDENCE_PARTIAL`:** the contract is correct, but
+  historical evidence does not establish every required operation.
+- **C — `QAC_SUPERVISOR_DEFECT_REMAINS`:** an ownership, transmission,
+  termination, or cleanup defect remains.
+
+R3 is **Outcome A**. Host-only RUNSAFE3 implementation work is ready; future
+guest acceptance and the external supervisor-termination risk remain separate.

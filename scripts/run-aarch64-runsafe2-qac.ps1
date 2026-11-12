@@ -41,6 +41,9 @@ $cleanupWatch = $null
 $releaseWatch = $null
 $lastQmpAttemptUtc = [DateTimeOffset]::MinValue
 $qmpAttempts = 0
+$qmpQuitCommandAttempted = $false
+$qmpQuitResponseKind = 'NotAttempted'
+$qmpQuitError = ''
 $qmpPort = 0
 $reservationId = ''
 $reservationState = ''
@@ -395,27 +398,91 @@ function Get-FinalQacStateVerified([string]$Id, [string]$Status, [string]$List, 
 
 function Send-Qmp([Net.Sockets.TcpClient]$Client, [IO.StreamReader]$Reader,
                   [IO.StreamWriter]$Writer, [string]$Command, [switch]$GracefulQuit) {
+    if ($GracefulQuit) {
+        $script:qmpQuitCommandAttempted = $true
+        $record.qmp_quit_transmission_status = 'UnverifiedWrite'
+        $record.qmp_quit_result = 'TransmissionUnverified'
+    }
     $Writer.WriteLine((@{ execute = $Command } | ConvertTo-Json -Compress))
     if ($GracefulQuit) {
+        $Writer.Flush()
         $script:qmpQuitSent = $true
         $record.qmp_quit_sent = $true
+        $record.qmp_quit_request_transmitted = $true
         $record.qmp_shutdown_requested = $true
         $record.qmp_quit_sent_utc = [DateTimeOffset]::UtcNow.ToString('o')
-        $record.qmp_quit_result = 'SentAwaitingAcknowledgement'
+        $record.qmp_quit_transmission_status = 'WrittenAndFlushed'
+        $script:qmpQuitResponseKind = 'AwaitingResponse'
+        $record.qmp_quit_result = 'AwaitingResponse'
     }
     while ($true) {
-        $line = $Reader.ReadLine()
-        if (!$line) { throw "QMP closed before returning $Command" }
+        try { $line = $Reader.ReadLine() }
+        catch {
+            if ($GracefulQuit -and (Test-QmpReadTimeout $_.Exception)) {
+                $script:qmpQuitResponseKind = 'ReadTimeoutAfterTransmission'
+                $script:qmpQuitError = $_.Exception.Message
+                $record.qmp_quit_result = $script:qmpQuitResponseKind
+                $record.qmp_quit_error = $script:qmpQuitError
+                $record.qmp_last_error = $_.Exception.Message
+                return $null
+            }
+            throw
+        }
+        if ($null -eq $line) {
+            if ($GracefulQuit) {
+                $script:qmpQuitResponseKind = 'PrematureEofAfterTransmission'
+                $record.qmp_quit_result = $script:qmpQuitResponseKind
+                return $null
+            }
+            throw "QMP closed before returning $Command"
+        }
         $response = $line | ConvertFrom-Json
-        if ($response.error) { throw "QMP $Command failed: $($response.error.desc)" }
-        if ($response.PSObject.Properties.Name -contains 'return') { return $response.return }
+        if ($response.PSObject.Properties.Name -contains 'event' -and $response.event -eq 'SHUTDOWN') {
+            $record.qmp_shutdown_event_observed = $true
+            $record.qmp_shutdown_event_reason = [string]$response.data.reason
+            $record.qmp_shutdown_event_guest = if ($null -ne $response.data.guest) { [bool]$response.data.guest } else { $null }
+            $record.qmp_shutdown_event_timestamp = $response.timestamp
+            $record.qmp_shutdown_cause_established = $record.qmp_shutdown_event_reason -eq 'host-qmp-quit'
+            continue
+        }
+        if ($response.error) {
+            if ($GracefulQuit) {
+                $script:qmpQuitResponseKind = 'ExplicitError'
+                $script:qmpQuitError = [string]$response.error.desc
+                $record.qmp_quit_result = $script:qmpQuitResponseKind
+                $record.qmp_quit_error = $script:qmpQuitError
+                return $null
+            }
+            throw "QMP $Command failed: $($response.error.desc)"
+        }
+        if ($response.PSObject.Properties.Name -contains 'return') {
+            if ($GracefulQuit) {
+                $script:qmpQuitAcknowledged = $true
+                $script:qmpQuitResponseKind = 'Acknowledged'
+            }
+            return $response.return
+        }
     }
 }
 
+function Test-QmpReadTimeout([Exception]$Exception) {
+    $current = $Exception
+    while ($null -ne $current) {
+        if ($current -is [Net.Sockets.SocketException] -and
+            $current.SocketErrorCode -eq [Net.Sockets.SocketError]::TimedOut) { return $true }
+        if ($current.Message -match '(?i)timed out|timeout|period of time') { return $true }
+        $current = $current.InnerException
+    }
+    return $false
+}
+
 function Request-QmpQuit {
+    if ($script:qmpQuitCommandAttempted) { return $false }
     if (!$ownedChild) { return $false }
     $childStatus = Get-QacChildStatus
     if ($childStatus.Status -ne 'OwnedActive') { return $false }
+    $script:qmpQuitResponseKind = 'ConnectionFailureBeforeTransmission'
+    $script:qmpQuitError = ''
     $listeners = @()
     $listenerQueryReliable = $true
     try {
@@ -439,7 +506,11 @@ function Request-QmpQuit {
             -ObservedChildPid ([int]$childStatus.Child.ProcessId) -CommandLine ([string]$childStatus.Child.CommandLine) `
             -QmpPort $qmpPort -ListenerQueryReliable $listenerQueryReliable -ListenerOwnerPids $ownerPids `
             -Greeting $greeting -ExpectedQemuName $sessionId -ObservedQemuName ''
-        if (!$verification.ReadyForIdentityCheck) { throw $verification.Diagnostic }
+        if (!$verification.ReadyForIdentityCheck) {
+            $script:qmpQuitResponseKind = 'EndpointIdentityMismatch'
+            throw $verification.Diagnostic
+        }
+        $script:qmpQuitResponseKind = 'FailureBeforeTransmission'
         $null = Send-Qmp $client $reader $writer 'qmp_capabilities'
         $nameResult = Send-Qmp $client $reader $writer 'query-name'
         $observedQemuName = [string]$nameResult.name
@@ -447,7 +518,10 @@ function Request-QmpQuit {
             -ObservedChildPid ([int]$childStatus.Child.ProcessId) -CommandLine ([string]$childStatus.Child.CommandLine) `
             -QmpPort $qmpPort -ListenerQueryReliable $listenerQueryReliable -ListenerOwnerPids $ownerPids `
             -Greeting $greeting -ExpectedQemuName $sessionId -ObservedQemuName $observedQemuName
-        if (!$verification.Verified) { throw $verification.Diagnostic }
+        if (!$verification.Verified) {
+            $script:qmpQuitResponseKind = 'EndpointIdentityMismatch'
+            throw $verification.Diagnostic
+        }
         $record.qmp_endpoint_verification_method = $verification.Method
         $record.qmp_greeting = $greeting
         $record.qmp_instance_name = $observedQemuName
@@ -457,20 +531,31 @@ function Request-QmpQuit {
             Add-QacTransition $sessionState 'QmpSocketTableFallback' $verification.Diagnostic ([DateTimeOffset]::UtcNow)
         }
         $null = Send-Qmp $client $reader $writer 'quit' -GracefulQuit
-        $script:qmpQuitAcknowledged = $true
-        $record.qmp_shutdown_acknowledged = $true
-        $record.qmp_shutdown_acknowledged_utc = [DateTimeOffset]::UtcNow.ToString('o')
-        $record.qmp_quit_result = 'Acknowledged'
+        if ($qmpQuitResponseKind -eq 'Acknowledged') {
+            $record.qmp_shutdown_acknowledged = $true
+            $record.qmp_shutdown_acknowledged_utc = [DateTimeOffset]::UtcNow.ToString('o')
+        }
+        $record.qmp_quit_response_kind = $qmpQuitResponseKind
         ++$script:qmpAttempts
         $script:lastQmpAttemptUtc = [DateTimeOffset]::UtcNow
-        Add-QacTransition $sessionState 'QmpQuitAcknowledged' "QMP acknowledged quit for exact QAC child PID $($ownedChild.ProcessId)." ([DateTimeOffset]::UtcNow)
-        return $true
+        Add-QacTransition $sessionState 'QmpQuitResponse' "QMP quit response status: $qmpQuitResponseKind." ([DateTimeOffset]::UtcNow)
+        return [bool]($qmpQuitResponseKind -eq 'Acknowledged')
     } catch {
         ++$script:qmpAttempts
         $script:lastQmpAttemptUtc = [DateTimeOffset]::UtcNow
         $record.qmp_last_error = $_.Exception.Message
-        if ($qmpQuitSent -and !$qmpQuitAcknowledged) { $record.qmp_quit_result = 'SentWithoutAcknowledgement' }
-        elseif (!$qmpQuitSent) { $record.qmp_quit_result = 'FailedBeforeQuitSent' }
+        if ($qmpQuitSent -and !$qmpQuitAcknowledged -and $qmpQuitResponseKind -eq 'AwaitingResponse') {
+            $script:qmpQuitResponseKind = 'OtherFailureAfterTransmission'
+        } elseif (!$qmpQuitCommandAttempted -and $qmpQuitResponseKind -eq 'ConnectionFailureBeforeTransmission') {
+            $script:qmpQuitResponseKind = 'ConnectionFailureBeforeTransmission'
+        } elseif ($qmpQuitCommandAttempted -and !$qmpQuitSent) {
+            $script:qmpQuitResponseKind = 'TransmissionUnverified'
+        }
+        $record.qmp_quit_result = $qmpQuitResponseKind
+        $record.qmp_quit_transmission_status = if ($qmpQuitSent) { 'WrittenAndFlushed' } elseif ($qmpQuitCommandAttempted) { 'UnverifiedWrite' } else { 'NotTransmitted' }
+        $record.qmp_quit_request_transmitted = [bool]$qmpQuitSent
+        $record.qmp_quit_response_kind = $qmpQuitResponseKind
+        $record.qmp_quit_error = if ($qmpQuitError) { $qmpQuitError } else { $_.Exception.Message }
         Add-QacTransition $sessionState 'QmpQuitFailed' $_.Exception.Message ([DateTimeOffset]::UtcNow)
         return $false
     } finally { $client.Dispose() }
@@ -596,11 +681,20 @@ $record = [ordered]@{
     qac_communication_failures = @()
     qmp_quit_attempts = 0
     qmp_quit_sent = $false
+    qmp_quit_request_transmitted = $false
     qmp_quit_sent_utc = ''
     qmp_quit_result = 'NotAttempted'
+    qmp_quit_transmission_status = 'NotAttempted'
+    qmp_quit_response_kind = 'NotAttempted'
+    qmp_quit_error = ''
     qmp_shutdown_requested = $false
     qmp_shutdown_acknowledged = $false
     qmp_shutdown_acknowledged_utc = ''
+    qmp_shutdown_event_observed = $false
+    qmp_shutdown_event_reason = ''
+    qmp_shutdown_event_guest = $null
+    qmp_shutdown_event_timestamp = $null
+    qmp_shutdown_cause_established = $false
     qmp_listener_pid = $null
     qmp_listener_query_error = ''
     qmp_endpoint_verification_method = ''
@@ -615,8 +709,10 @@ $record = [ordered]@{
     runtime_deadline_utc_estimate = ''
     child_cleanup_limit_seconds = $ChildCleanupSeconds
     child_cleanup_elapsed_seconds = $null
+    child_cleanup_deadline_met = $false
     reservation_cleanup_limit_seconds = $ReservationCleanupSeconds
     reservation_cleanup_elapsed_seconds = $null
+    reservation_cleanup_deadline_met = $false
     runtime_timeout_observed = $false
     child_cleanup_deadline_expired = $false
     reservation_cleanup_deadline_expired = $false
@@ -836,9 +932,19 @@ try {
 
         $childNow = if ($ownedChild) { Get-QacChildStatus } else { $childObservation }
         $lastChildStatus = $childNow.Status
+        if ($childNow.Status -eq 'Exited' -and !$releaseWatch) { $releaseWatch = [Diagnostics.Stopwatch]::StartNew() }
         $qacExited = $qac.HasExited
         $qacExitCodeNow = if ($qacExited) { [int]$qac.ExitCode } else { $null }
         $stopRequested = [bool]($guestPassed -or $runtimeExpired -or $guestFailureMarker)
+        if ($cleanupWatch) { $record.child_cleanup_elapsed_seconds = [Math]::Round($cleanupWatch.Elapsed.TotalSeconds, 3) }
+        if ($releaseWatch) { $record.reservation_cleanup_elapsed_seconds = [Math]::Round($releaseWatch.Elapsed.TotalSeconds, 3) }
+        $record.child_cleanup_deadline_met = [bool]($cleanupWatch -and $qacChildExitVerified -and
+            $childNow.Status -eq 'Exited' -and !$record.child_cleanup_deadline_expired -and
+            $cleanupWatch.Elapsed.TotalSeconds -le $ChildCleanupSeconds)
+        $record.reservation_cleanup_deadline_met = [bool]($releaseWatch -and
+            ($qacReleaseMarker -or $snapshot.ReservationState -eq 'Released') -and
+            !$record.reservation_cleanup_deadline_expired -and
+            $releaseWatch.Elapsed.TotalSeconds -le $ReservationCleanupSeconds)
         $observation = [ordered]@{
             NowUtc = $now
             QacCommunicationOk = [bool]$snapshot.CommunicationOk
@@ -854,11 +960,18 @@ try {
             CleanupExpired = $false
             ReleaseDeadlineExpired = $false
             QacChildExitVerified = [bool]$qacChildExitVerified
+            ManagedChildExitCode = if ($qacChildExitVerified) { $qemuExitCode } else { $null }
             QacReleaseVerified = [bool]($qacReleaseMarker -or $snapshot.ReservationState -eq 'Released')
             QacProcessExited = [bool]$qacExited
             QacExitCode = $qacExitCodeNow
             QmpShutdownRequested = [bool]$qmpQuitSent
+            QmpShutdownRequestTransmitted = [bool]$qmpQuitSent
             QmpShutdownAcknowledged = [bool]$qmpQuitAcknowledged
+            QmpShutdownResponseKind = [string]$qmpQuitResponseKind
+            QmpShutdownError = [string]$qmpQuitError
+            QmpShutdownEventReason = [string]$record.qmp_shutdown_event_reason
+            ChildCleanupDeadlineMet = [bool]$record.child_cleanup_deadline_met
+            ReservationCleanupDeadlineMet = [bool]$record.reservation_cleanup_deadline_met
             FinalNoOwnedChild = [bool]($childNow.Status -eq 'Exited')
             FinalQacStateVerified = $false
             LogFinalizationOk = [bool]$logFinalizationOk
@@ -877,7 +990,8 @@ try {
                 $record.guest_runtime_seconds = [Math]::Round($runtimeElapsed, 3)
                 Add-QacTransition $sessionState 'ChildCleanupStarted' "Bounded child cleanup started; limit=$ChildCleanupSeconds seconds." $now
             }
-            if ($lastQmpAttemptUtc -eq [DateTimeOffset]::MinValue -or ($now - $lastQmpAttemptUtc).TotalSeconds -ge 2.0) {
+            if (!$qmpQuitCommandAttempted -and
+                ($lastQmpAttemptUtc -eq [DateTimeOffset]::MinValue -or ($now - $lastQmpAttemptUtc).TotalSeconds -ge 2.0)) {
                 $null = Request-QmpQuit
                 $record.qmp_quit_attempts = $qmpAttempts
                 $record.qmp_quit_sent = $qmpQuitSent
@@ -888,22 +1002,20 @@ try {
             $record.guest_runtime_seconds = [Math]::Round($runtimeElapsed, 3)
             Add-QacTransition $sessionState 'UnverifiedChildCleanupStarted' 'A stop condition exists, but no exact active child identity is currently available.' $now
         }
-        if ($childNow.Status -eq 'Exited' -and !$releaseWatch) { $releaseWatch = [Diagnostics.Stopwatch]::StartNew() }
-        if ($cleanupWatch) { $record.child_cleanup_elapsed_seconds = [Math]::Round($cleanupWatch.Elapsed.TotalSeconds, 3) }
-        if ($releaseWatch) { $record.reservation_cleanup_elapsed_seconds = [Math]::Round($releaseWatch.Elapsed.TotalSeconds, 3) }
-
         if ($reservationId -and $qacExited -and $snapshot.Online -and
             $snapshot.List -notmatch ('(?m)^\s*' + [regex]::Escape($reservationId) + '\s+\|') -and
             $childNow.Status -eq 'Exited') {
             $observation.FinalQacStateVerified = $true
             $observation.FinalNoOwnedChild = $true
             $observation.LogFinalizationOk = [bool]$logFinalizationOk
+            $observation.ChildCleanupDeadlineMet = [bool]$record.child_cleanup_deadline_met
+            $observation.ReservationCleanupDeadlineMet = [bool]$record.reservation_cleanup_deadline_met
             $lastStepAction = Step-QacSupervisor -Session $sessionState -Observation $observation
         }
         if (!(Save-SessionRecord)) { $logFinalizationOk = $false }
 
         if ($sessionState.qualifying) {
-            $record.outcome = 'EL0_QAC_SUPERVISION_VERIFIED'
+            $record.outcome = 'QAC_BOUNDED_LIFECYCLE_VERIFIED'
             break
         }
         if ($runtimeWatch -and $runtimeExpired -and !$cleanupWatch) {
@@ -1018,7 +1130,8 @@ finally {
             Add-QacTransition $sessionState 'FinalizerCleanupStarted' 'Monitor exited abnormally; QAC-owned child cleanup remains supervised by bounded finalization.' ([DateTimeOffset]::UtcNow)
         }
         while ($childNow.Status -eq 'OwnedActive' -and $cleanupWatch -and $cleanupWatch.Elapsed.TotalSeconds -lt $ChildCleanupSeconds) {
-            if ($lastQmpAttemptUtc -eq [DateTimeOffset]::MinValue -or ([DateTimeOffset]::UtcNow - $lastQmpAttemptUtc).TotalSeconds -ge 2.0) { $null = Request-QmpQuit }
+            if (!$qmpQuitCommandAttempted -and
+                ($lastQmpAttemptUtc -eq [DateTimeOffset]::MinValue -or ([DateTimeOffset]::UtcNow - $lastQmpAttemptUtc).TotalSeconds -ge 2.0)) { $null = Request-QmpQuit }
             Start-Sleep -Milliseconds 250
             $null = Read-QacLifecycleLogs
             $childNow = Get-QacChildStatus
@@ -1067,6 +1180,15 @@ finally {
         elseif ($record.qac_reservation_id_after) { $record.qac_reservation_release_status = "StillPresent:$($finalSnapshot.ReservationState)" }
         else { $record.qac_reservation_release_status = 'Unverified' }
 
+        if ($cleanupWatch) { $record.child_cleanup_elapsed_seconds = [Math]::Round($cleanupWatch.Elapsed.TotalSeconds, 3) }
+        if ($releaseWatch) { $record.reservation_cleanup_elapsed_seconds = [Math]::Round($releaseWatch.Elapsed.TotalSeconds, 3) }
+        $record.child_cleanup_deadline_met = [bool]($cleanupWatch -and $qacChildExitVerified -and
+            $finalChild.Status -eq 'Exited' -and !$record.child_cleanup_deadline_expired -and
+            $cleanupWatch.Elapsed.TotalSeconds -le $ChildCleanupSeconds)
+        $record.reservation_cleanup_deadline_met = [bool]($releaseWatch -and $record.qac_reservation_released_in_status -and
+            !$record.reservation_cleanup_deadline_expired -and
+            $releaseWatch.Elapsed.TotalSeconds -le $ReservationCleanupSeconds)
+
         $finalObservation = [ordered]@{
             NowUtc = [DateTimeOffset]::UtcNow; QacCommunicationOk = [bool]$finalSnapshot.CommunicationOk
             QacDiagnostic = [string]$finalSnapshot.Diagnostic
@@ -1079,10 +1201,17 @@ finally {
             RuntimeExpired = [bool]$record.runtime_timeout_observed; CleanupExpired = [bool]$record.child_cleanup_deadline_expired
             ReleaseDeadlineExpired = [bool]$record.reservation_cleanup_deadline_expired
             QacChildExitVerified = [bool]$qacChildExitVerified
+            ManagedChildExitCode = if ($qacChildExitVerified) { $qemuExitCode } else { $null }
             QacReleaseVerified = [bool]$record.qac_reservation_released_in_status
             QacProcessExited = [bool]$qacExitVerified; QacExitCode = $record.qac_exit_code
             QmpShutdownRequested = [bool]$qmpQuitSent
+            QmpShutdownRequestTransmitted = [bool]$qmpQuitSent
             QmpShutdownAcknowledged = [bool]$qmpQuitAcknowledged
+            QmpShutdownResponseKind = [string]$qmpQuitResponseKind
+            QmpShutdownError = [string]$qmpQuitError
+            QmpShutdownEventReason = [string]$record.qmp_shutdown_event_reason
+            ChildCleanupDeadlineMet = [bool]$record.child_cleanup_deadline_met
+            ReservationCleanupDeadlineMet = [bool]$record.reservation_cleanup_deadline_met
             FinalNoOwnedChild = [bool]($finalChild.Status -eq 'Exited')
             FinalQacStateVerified = [bool]$record.qac_final_state_verified
             LogFinalizationOk = [bool]$logFinalizationOk
@@ -1092,7 +1221,7 @@ finally {
         $record.state_machine_action = $lastStepAction
         $record.qac_state_transitions = @($sessionState.transitions.ToArray())
         if ($sessionState.qualifying) {
-            $record.outcome = 'EL0_QAC_SUPERVISION_VERIFIED'
+            $record.outcome = 'QAC_BOUNDED_LIFECYCLE_VERIFIED'
             $record.failure = ''
         } elseif ($record.outcome -notmatch 'DEFECT|PENDING|BLOCKED') {
             if ($record.child_cleanup_deadline_expired -or $record.reservation_cleanup_deadline_expired) { $record.outcome = 'QAC_SUPERVISION_DEFECT_LOCALIZED' }
@@ -1102,7 +1231,7 @@ finally {
                     -ChildCleanupExpired ([bool]$record.child_cleanup_deadline_expired) `
                     -ReservationCleanupExpired ([bool]$record.reservation_cleanup_deadline_expired)) {
                 $record.outcome = 'EL0_QAC_SUPERVISION_PARTIAL'
-                $record.failure = 'The validated QMP endpoint received quit, but no QMP acknowledgement was observed. QAC verified child exit and reservation release within the cleanup bounds; native acceptance remains partial.'
+                $record.failure = 'The managed child exited and QAC released the reservation within bounds, but the QMP quit request transmission was not established.'
             }
             elseif ($record.runtime_timeout_observed) { $record.outcome = 'EL0_QAC_RUNTIME_TIMEOUT_CLEANED' }
             elseif (!$exclusiveGrant) { $record.outcome = 'EL0_QAC_SUPERVISION_HOSTED_READY' }
@@ -1126,17 +1255,22 @@ finally {
     }
     if ($cleanupWatch) { $record.child_cleanup_elapsed_seconds = [Math]::Round($cleanupWatch.Elapsed.TotalSeconds, 3) }
     if ($releaseWatch) { $record.reservation_cleanup_elapsed_seconds = [Math]::Round($releaseWatch.Elapsed.TotalSeconds, 3) }
+    $record.child_cleanup_deadline_met = [bool]($sessionState.child_cleanup_deadline_met)
+    $record.reservation_cleanup_deadline_met = [bool]($sessionState.reservation_cleanup_deadline_met)
     $record.qmp_quit_attempts = $qmpAttempts
     $record.qmp_quit_sent = $qmpQuitSent
+    $record.qmp_quit_request_transmitted = $qmpQuitSent
     $record.qmp_shutdown_requested = $qmpQuitSent
     $record.qmp_shutdown_acknowledged = $qmpQuitAcknowledged
+    $record.qmp_quit_response_kind = $qmpQuitResponseKind
+    if ($qmpQuitError) { $record.qmp_quit_error = $qmpQuitError }
     $record.qac_process_exit_verified = $qacExitVerified
     if (!$record.qac_child_exit_verified -and $qacChildExitVerified) { $record.qac_child_exit_verified = $true }
     $record.partial_log_finalization_error = $logFinalizationError
     if (!(Save-SessionRecord)) { $record.partial_log_finalization_error = $logFinalizationError }
 }
 
-if ($record.outcome -ne 'EL0_QAC_SUPERVISION_VERIFIED') {
+if ($record.outcome -ne 'QAC_BOUNDED_LIFECYCLE_VERIFIED') {
     throw "RUNSAFE2 QAC supervision did not qualify ($($record.outcome)): $($record.failure) See $sessionPath"
 }
 Write-Host "RUNSAFE2 QAC supervision outcome: $($record.outcome)" -ForegroundColor Green

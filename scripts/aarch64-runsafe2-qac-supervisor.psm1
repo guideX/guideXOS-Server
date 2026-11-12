@@ -15,9 +15,16 @@ function New-QacSupervisorState {
         runtime_timed_out = $false
         stop_requested = $false
         qmp_shutdown_requested = $false
+        qmp_shutdown_request_transmitted = $false
         qmp_shutdown_acknowledged = $false
+        qmp_shutdown_response_kind = 'NotAttempted'
+        qmp_shutdown_error = ''
+        qmp_shutdown_event_reason = ''
         child_exit_verified = $false
+        child_exit_code = $null
         reservation_release_verified = $false
+        child_cleanup_deadline_met = $false
+        reservation_cleanup_deadline_met = $false
         qac_exit_verified = $false
         qac_exit_code = $null
         failure = ''
@@ -114,15 +121,33 @@ function Step-QacSupervisor {
 
     if ($Observation.Contains('QmpShutdownRequested') -and $Observation.QmpShutdownRequested) {
         if (!$Session.qmp_shutdown_requested) {
-            Add-QacTransition $Session 'QmpShutdownRequested' 'The validated QMP endpoint received the graceful quit command.' $now
+            Add-QacTransition $Session 'QmpShutdownRequested' 'The verified QMP connection transmitted and flushed the graceful quit command.' $now
         }
         $Session.qmp_shutdown_requested = $true
+        $Session.qmp_shutdown_request_transmitted = $true
+    }
+    if ($Observation.Contains('QmpShutdownRequestTransmitted') -and $Observation.QmpShutdownRequestTransmitted) {
+        if (!$Session.qmp_shutdown_request_transmitted) {
+            Add-QacTransition $Session 'QmpShutdownRequested' 'The verified QMP connection transmitted and flushed the graceful quit command.' $now
+        }
+        $Session.qmp_shutdown_requested = $true
+        $Session.qmp_shutdown_request_transmitted = $true
+    }
+    if ($Observation.Contains('QmpShutdownResponseKind') -and $Observation.QmpShutdownResponseKind) {
+        $Session.qmp_shutdown_response_kind = [string]$Observation.QmpShutdownResponseKind
+    }
+    if ($Observation.Contains('QmpShutdownError') -and $Observation.QmpShutdownError) {
+        $Session.qmp_shutdown_error = [string]$Observation.QmpShutdownError
+    }
+    if ($Observation.Contains('QmpShutdownEventReason') -and $Observation.QmpShutdownEventReason) {
+        $Session.qmp_shutdown_event_reason = [string]$Observation.QmpShutdownEventReason
     }
     if ($Observation.Contains('QmpShutdownAcknowledged') -and $Observation.QmpShutdownAcknowledged) {
         if (!$Session.qmp_shutdown_acknowledged) {
             Add-QacTransition $Session 'QmpShutdownAcknowledged' 'QMP acknowledged the graceful quit command.' $now
         }
         $Session.qmp_shutdown_acknowledged = $true
+        $Session.qmp_shutdown_response_kind = 'Acknowledged'
     }
 
     if ($Observation.QacCommunicationOk -ne $true) {
@@ -213,13 +238,24 @@ function Step-QacSupervisor {
             $Session.failure = 'Guest runtime deadline expired.'
         }
     }
-    if ($Observation.QacChildExitVerified) { $Session.child_exit_verified = $true }
+    if ($Observation.QacChildExitVerified) {
+        $Session.child_exit_verified = $true
+        if ($Observation.Contains('ManagedChildExitCode') -and $null -ne $Observation.ManagedChildExitCode) {
+            $Session.child_exit_code = [int]$Observation.ManagedChildExitCode
+        }
+    }
     if ($Observation.QacReleaseVerified -or $reservationState -eq 'Released') {
         $Session.reservation_release_verified = $true
     }
     if ($Observation.QacProcessExited) {
         $Session.qac_exit_verified = $true
         if ($null -ne $Observation.QacExitCode) { $Session.qac_exit_code = [int]$Observation.QacExitCode }
+    }
+    if ($Observation.Contains('ChildCleanupDeadlineMet')) {
+        $Session.child_cleanup_deadline_met = [bool]$Observation.ChildCleanupDeadlineMet
+    }
+    if ($Observation.Contains('ReservationCleanupDeadlineMet')) {
+        $Session.reservation_cleanup_deadline_met = [bool]$Observation.ReservationCleanupDeadlineMet
     }
 
     if ($reservationState -eq 'Recovery Required') {
@@ -352,12 +388,17 @@ function Step-QacSupervisor {
         $action = 'PreserveReleaseUnverified'
     }
 
-    if ($Session.child_exit_verified -and $Session.reservation_release_verified -and
+    $qmpLifecycleResponsePermitted = $Session.qmp_shutdown_request_transmitted -and
+        $Session.qmp_shutdown_response_kind -in @('Acknowledged', 'PrematureEofAfterTransmission', 'ReadTimeoutAfterTransmission') -and
+        [string]::IsNullOrWhiteSpace([string]$Session.qmp_shutdown_error)
+
+    if ($Session.child_exit_verified -and $Session.child_exit_code -eq 0 -and $Session.reservation_release_verified -and
         $Session.qac_exit_verified -and $Session.qac_exit_code -eq 0 -and
-        $Session.guest_pass -and $Session.qmp_shutdown_requested -and $Session.qmp_shutdown_acknowledged -and !$Session.runtime_timed_out -and
+        $Session.guest_pass -and $qmpLifecycleResponsePermitted -and !$Session.runtime_timed_out -and
         !$Session.identity_ambiguous -and
         $Observation.FinalNoOwnedChild -and $Observation.FinalQacStateVerified -and
-        $Observation.LogFinalizationOk -and !$Observation.CleanupExpired -and
+        $Observation.LogFinalizationOk -and $Session.child_cleanup_deadline_met -and $Session.reservation_cleanup_deadline_met -and
+        !$Observation.CleanupExpired -and
         !$Observation.ReleaseDeadlineExpired) {
         $Session.phase = 'Qualified'
         $Session.qualifying = $true
@@ -380,10 +421,13 @@ function Test-QacSupervisorPartial {
     )
 
     return [bool](!$Session.qualifying -and
-        $Session.qmp_shutdown_requested -and !$Session.qmp_shutdown_acknowledged -and
+        !$Session.qmp_shutdown_request_transmitted -and
         $GuestPass -and $Session.child_exit_verified -and
+        $Session.child_exit_code -eq 0 -and
         $Session.reservation_release_verified -and $Session.qac_exit_verified -and
         $Session.qac_exit_code -eq 0 -and $FinalQacStateVerified -and
+        $Session.child_cleanup_deadline_met -and $Session.reservation_cleanup_deadline_met -and
+        [string]::IsNullOrWhiteSpace([string]$Session.qmp_shutdown_error) -and
         !$RuntimeExpired -and !$ChildCleanupExpired -and !$ReservationCleanupExpired)
 }
 
