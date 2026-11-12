@@ -286,6 +286,10 @@ void join_path(const char* base, const char* name, char* output, size_t outputSi
 // Open a file.  Returns file handle index, or 0xFF on failure.
 uint8_t open(const char* path, uint16_t flags);
 
+// Diagnostic status for the most recent open() call, including create-mode
+// filesystem failures that cannot be represented by the legacy handle API.
+Status last_open_status();
+
 // Close a file.
 Status close(uint8_t handle);
 

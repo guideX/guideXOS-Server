@@ -114,6 +114,11 @@ FileWriteStatus update_file_size_path_status(uint8_t, const char*, uint32_t,
     if (status) *status = block::BLOCK_OK;
     return FILE_WRITE_OK;
 }
+FileWriteStatus truncate_path_status(uint8_t, const char*, block::Status* status)
+{
+    if (status) *status = block::BLOCK_OK;
+    return FILE_WRITE_OK;
+}
 bool flush(uint8_t, block::Status* status)
 {
     if (status) *status = block::BLOCK_OK;
@@ -232,6 +237,17 @@ int main()
               table_count_matches_active_slots() &&
               kernel::vfs::get_mount_by_index(remountedSystem)->blockDeviceGeneration == 42,
           "remount reuses the free slot with the current device generation");
+
+    check(kernel::vfs::unmount("/") == kernel::vfs::VFS_ERR_BUSY &&
+              kernel::vfs::mount_count() == kernel::vfs::VFS_MAX_MOUNTS &&
+              g_fatUnmounts == 1,
+          "a filesystem source cannot be unmounted while aliases still reference it");
+    check(kernel::vfs::unmount("/config/navigator") == kernel::vfs::VFS_OK &&
+              g_fatUnmounts == 1 && table_count_matches_active_slots(),
+          "unmounting a nested alias removes only the alias, not its source filesystem");
+    check(kernel::vfs::unmount("/config") == kernel::vfs::VFS_OK &&
+              g_fatUnmounts == 1 && table_count_matches_active_slots(),
+          "unmounting a filesystem alias leaves the shared volume mounted");
 
     std::cout << "vfsMountTableChecks=" << (g_checks - g_failures) << "/" << g_checks << "\n";
     return g_failures == 0 ? 0 : 1;

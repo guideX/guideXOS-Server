@@ -429,6 +429,11 @@ FileWriteStatus update_file_size_path_status(uint8_t volumeIndex,
                                              uint32_t fileSize,
                                              block::Status* outBlockStatus);
 
+// Truncate an existing FAT16/FAT32 file to zero bytes while retaining one
+// allocated cluster for subsequent streaming writes.
+FileWriteStatus truncate_path_status(uint8_t volumeIndex, const char* path,
+                                     block::Status* outBlockStatus);
+
 // Persist all completed writes for a mounted FAT volume.
 bool flush(uint8_t volumeIndex, block::Status* outBlockStatus = nullptr);
 

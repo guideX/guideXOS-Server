@@ -562,6 +562,7 @@ static void scan_pci_nvme()
                 bdev.sectorSize   = ndev.sectorSize;
                 bdev.readFn       = nvme_read_sectors;
                 bdev.writeFn      = nvme_write_sectors;
+                memcopy(bdev.stableId, ndev.serial, sizeof(ndev.serial));
 
                 // Name: "nvme0n1"
                 bdev.name[0] = 'n'; bdev.name[1] = 'v';

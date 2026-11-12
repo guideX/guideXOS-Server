@@ -427,6 +427,7 @@ static void probe_channel(uint16_t ioBase, uint16_t ctrlBase,
         bdev.writeFn      = ata_pio_write;
         bdev.flushFn      = ata_pio_flush;
         memcopy(bdev.name, dev.name, 6);
+        memcopy(bdev.stableId, dev.serial, sizeof(dev.serial));
 
         block::register_device(bdev);
         ++s_deviceCount;

@@ -4,6 +4,10 @@ param(
     [Parameter(Mandatory)][string]$IsoPath,
     [Parameter(Mandatory)][string]$OvmfPath,
     [switch]$PublicPreviewIsoOnly,
+    [switch]$PersistentDataVolume,
+    [string]$DataImagePath,
+    [string]$DataVolumeRoot,
+    [string]$ExpectedDataImageSha256,
     [string]$RunId = 's22r10-pacman-boot2',
     [string]$OutputRoot,
     [string]$QacCliPath,
@@ -344,8 +348,17 @@ function Test-QacChildAndListener {
             $commandLineFailure = 'Actual public-preview QEMU command line does not retain the verified read-only ISO.'
         } elseif ($commandLine -match '(?i)fat:rw:|virtio-9p|virtiofs|vhost-user|smb=|hostfwd=|(^|\s)-netdev(\s|$)|(^|\s)-nic(\s|$)|(^|\s)-virtfs(\s|$)|(^|\s)-fsdev(\s|$)') {
             $commandLineFailure = 'Actual public-preview QEMU command line exposes writable storage, networking, or a host filesystem integration.'
-        } elseif ([regex]::Matches($commandLine,'(?i)(?:^|\s)-drive(?:\s|$)').Count -ne 2) {
+        } elseif ([regex]::Matches($commandLine,'(?i)(?:^|\s)-drive(?:\s|$)').Count -ne $(if ($script:PersistentDataVolume) { 3 } else { 2 })) {
             $commandLineFailure = 'Actual public-preview QEMU command line contains an unexpected drive.'
+        } elseif ($script:PersistentDataVolume -and
+            ($commandLine.IndexOf([string]$script:Validated.DataVolume.path,[StringComparison]::OrdinalIgnoreCase) -lt 0 -or
+             $commandLine -notmatch '(?i)if=none,id=userdata[^\r\n]*format=raw,cache=writeback' -or
+             $commandLine -notmatch '(?i)ide-hd,drive=userdata,serial=GXOS-DATA-V1' -or
+             $commandLine -notmatch '(?i)ide-cd,drive=releasecdrom,bootindex=1' -or
+             $commandLine -notmatch '(?i)-boot\s+order=d' -or
+             [regex]::Matches($commandLine,'(?i)(?:^|\s)-device(?:\s|$)').Count -ne 2 -or
+             $commandLine -match '(?i)ide-hd,drive=userdata[^\r\n]*bootindex=')) {
+            $commandLineFailure = 'Actual S22R22 QEMU command line does not attach exactly the verified non-bootable persistent data image.'
         } elseif ($commandLine -notmatch '(?i)-net\s+none' -or $commandLine -notmatch '(?i)-monitor\s+none') {
             $commandLineFailure = 'Actual public-preview QEMU command line does not disable guest networking and the HMP monitor.'
         }
@@ -702,6 +715,7 @@ $script:RuntimeDeadlineUtc = $null
 $script:ConsoleInputTask = $null
 $script:RuntimeShutdownSent = $false
 $script:GuestRuntimeTimeoutSeconds = $GuestRuntimeTimeoutSeconds
+$script:PersistentDataVolume = [bool]$PersistentDataVolume
 $script:CurrentStage = 'preflight'
 $script:CurrentOperation = $null
 $script:EmptyConsoleLineLogged = $false
@@ -736,14 +750,14 @@ try {
 
     $script:Execution = [ordered]@{
         schemaVersion=1; runId=$null; workspacePath=$null; manifestPath=$null; state='Preparing';
-        project='guideXOSServer'; mode='acceptance'; workflow=$(if ($PublicPreviewIsoOnly) { 's22r18-public-preview-iso-only-qac' } else { 's22r10-pacman-uefi-qac' });
+        project='guideXOSServer'; mode='acceptance'; workflow=$(if ($PersistentDataVolume) { 's22r22-persistent-data-volume-qac' } elseif ($PublicPreviewIsoOnly) { 's22r18-public-preview-iso-only-qac' } else { 's22r10-pacman-uefi-qac' });
         qacCli=$script:QacCli; qemuExecutable=$qemu; qemuVersion=$qemuVersion;
         qacReservationId=$null; reservationId=$null; queuePosition=$null; qacCliProcessId=$null;
         childProcessId=$null; childStartUtc=$null; childExitVerified=$false; qemuExitCode=$null; qacCliExitCode=$null;
         qacCliReleaseReported=$false; qacCliReleaseReportedReservationId=$null; qacCliReleaseReportedChildProcessId=0; qacCliReleaseLineObservedAtUtc=$null;
         reservationReleaseVerified=$false; recoveryRequired=$false;
         manifestSchemaVersion=1; failureDetails=$null; qmp=[ordered]@{endpoint=$null;status='not-allocated';ownership='unbound';quitAcknowledged=$false;quitResponse=$null;lastConnectionError=$null;lastListenerProbe=$null};
-        qemuArguments=@(); com2Transport=[ordered]@{enabled=($null -ne $Com2TcpPort);port=if($null -ne $Com2TcpPort){[int]$Com2TcpPort}else{$null};endpoint=if($null -ne $Com2TcpPort){'127.0.0.1:{0}' -f [int]$Com2TcpPort}else{$null}}; guestResult='INCOMPLETE'; guestResultReason=$null; cleanupEligible=$false;
+        qemuArguments=@(); persistentDataVolume=$null; com2Transport=[ordered]@{enabled=($null -ne $Com2TcpPort);port=if($null -ne $Com2TcpPort){[int]$Com2TcpPort}else{$null};endpoint=if($null -ne $Com2TcpPort){'127.0.0.1:{0}' -f [int]$Com2TcpPort}else{$null}}; guestResult='INCOMPLETE'; guestResultReason=$null; cleanupEligible=$false;
         timings=[ordered]@{stagingStartAtUtc=$null;stagingCompleteAtUtc=$null;reservationRequestedAtUtc=$null;reservationGrantedAtUtc=$null;qemuChildStartAtUtc=$null;firstGuestProgressAtUtc=$null;guestCompletionOrFailureAtUtc=$null;qmpShutdownRequestedAtUtc=$null;qemuChildExitAtUtc=$null;qacReleaseReportedAtUtc=$null;qacReleaseVerifiedAtUtc=$null};
         attempts=[System.Collections.Generic.List[object]]::new(); events=[System.Collections.Generic.List[object]]::new()
     }
@@ -751,7 +765,32 @@ try {
     $script:Execution.timings.stagingStartAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
     if ($PublicPreviewIsoOnly -and $null -ne $Com2TcpPort) { throw 'Public-preview QAC runs cannot attach guest-accessible COM2 host integration.' }
     if (-not $PublicPreviewIsoOnly -and [string]::IsNullOrWhiteSpace($EspPath)) { throw 'The existing S22R10 workflow requires -EspPath.' }
-    if ($PublicPreviewIsoOnly) {
+    if ($PersistentDataVolume -and -not $PublicPreviewIsoOnly) { throw 'The S22R22 persistent data-volume profile requires -PublicPreviewIsoOnly.' }
+    if ($PersistentDataVolume) {
+        if ([string]::IsNullOrWhiteSpace($DataImagePath) -or
+            [string]::IsNullOrWhiteSpace($DataVolumeRoot) -or
+            $ExpectedDataImageSha256 -notmatch '^[A-Fa-f0-9]{64}$') {
+            throw 'The S22R22 profile requires a dedicated writable .img path, its root directory, and its expected current SHA-256.'
+        }
+        $dataPath = Get-QacS22R10FullPath $DataImagePath
+        $dataRootPath = Get-QacS22R10FullPath $DataVolumeRoot
+        if (-not [string]::Equals((Split-Path -Parent $dataPath),$dataRootPath,[StringComparison]::OrdinalIgnoreCase) -or
+            [IO.Path]::GetExtension($dataPath) -ine '.img' -or
+            -not $dataPath.Contains('\CodexArtifacts\S22R22\persistent-data\',[StringComparison]::OrdinalIgnoreCase)) {
+            throw 'S22R22 guest storage must be one .img file directly under E:\CodexArtifacts\S22R22\persistent-data.'
+        }
+    } elseif (-not [string]::IsNullOrWhiteSpace($DataImagePath) -or
+              -not [string]::IsNullOrWhiteSpace($DataVolumeRoot) -or
+              -not [string]::IsNullOrWhiteSpace($ExpectedDataImageSha256)) {
+        throw 'Writable data-image arguments are only valid with -PersistentDataVolume.'
+    }
+    if ($PersistentDataVolume) {
+        $prepare = Join-Path $PSScriptRoot 'prepare-qac-s22r22-persistent-preview.ps1'
+        $prepareArguments = @{
+            IsoPath=$IsoPath; OvmfPath=$OvmfPath; DataImagePath=$DataImagePath; DataVolumeRoot=$DataVolumeRoot; RunId=$RunId;
+            ExpectedIsoSha256=$ExpectedIsoSha256; ExpectedOvmfSha256=$ExpectedOvmfSha256; ExpectedDataImageSha256=$ExpectedDataImageSha256
+        }
+    } elseif ($PublicPreviewIsoOnly) {
         $prepare = Join-Path $PSScriptRoot 'prepare-qac-s22r18-public-preview.ps1'
         $prepareArguments = @{
             IsoPath=$IsoPath; OvmfPath=$OvmfPath; RunId=$RunId;
@@ -770,7 +809,7 @@ try {
     if (-not $prepared.prepared -or $prepared.qemuLaunched -or [string]::IsNullOrWhiteSpace($prepared.manifestPath)) { throw 'Accepted QAC3C2 helper did not return a completed staged workspace.' }
 
     $script:ManifestPath = [string]$prepared.manifestPath
-    $script:Validated = Get-QacS22R10ValidatedManifest -ManifestPath $script:ManifestPath -PublicPreviewIsoOnly:$PublicPreviewIsoOnly
+    $script:Validated = Get-QacS22R10ValidatedManifest -ManifestPath $script:ManifestPath -PublicPreviewIsoOnly:$PublicPreviewIsoOnly -PersistentDataVolume:$PersistentDataVolume -ExpectedDataImagePath $DataImagePath -ExpectedDataVolumeRoot $DataVolumeRoot -ExpectedDataImageSha256 $ExpectedDataImageSha256
     $manifest = $script:Validated.Manifest
     if ($null -ne $Com2TcpPort) {
         $com2Probe = $null
@@ -785,7 +824,7 @@ try {
         }
         $manifest = Set-QacS22R10Com2ManifestTransport -Manifest $manifest -Port ([int]$Com2TcpPort)
         Write-AtomicJson -Path $script:ManifestPath -Value $manifest
-        $script:Validated = Get-QacS22R10ValidatedManifest -ManifestPath $script:ManifestPath -PublicPreviewIsoOnly:$PublicPreviewIsoOnly
+        $script:Validated = Get-QacS22R10ValidatedManifest -ManifestPath $script:ManifestPath -PublicPreviewIsoOnly:$PublicPreviewIsoOnly -PersistentDataVolume:$PersistentDataVolume -ExpectedDataImagePath $DataImagePath -ExpectedDataVolumeRoot $DataVolumeRoot -ExpectedDataImageSha256 $ExpectedDataImageSha256
         $manifest = $script:Validated.Manifest
     }
     $script:Execution.runId = [string]$manifest.runId
@@ -793,6 +832,23 @@ try {
     $script:Execution.manifestPath = $script:ManifestPath
     $script:Execution.manifestSchemaVersion = [int]$manifest.schemaVersion
     $script:Execution.sourceArtifacts = @($manifest.artifacts | ForEach-Object { [ordered]@{name=$_.name;sourcePath=$_.sourcePath;sourceSha256=$_.sourceSha256;privatePath=$_.privatePath;privateSha256=$_.privateSha256;access=$_.access;disposition=$_.disposition} })
+    if ($PersistentDataVolume) {
+        $dataIdentity = Get-QacS22R10ArtifactIdentity -Path $DataImagePath -Kind file
+        if ($dataIdentity.Sha256 -ine $ExpectedDataImageSha256.ToLowerInvariant()) { throw 'Persistent data image changed during QAC workspace staging.' }
+        $script:Execution.persistentDataVolume = [ordered]@{
+            path = $dataIdentity.Path
+            role = 'dedicated-persistent-test-data-volume'
+            stableAtaSerial = 'GXOS-DATA-V1'
+            qemuFormat = 'raw'
+            bytes = [int64]$dataIdentity.TotalBytes
+            beforeQacSha256 = $dataIdentity.Sha256
+            beforeGuestSha256 = $null
+            afterQacSha256 = $null
+            afterQacBytes = $null
+            reusedAcrossReservations = $true
+            bootable = $false
+        }
+    }
     $script:Execution.timings.stagingCompleteAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
     $script:CurrentStage = 'qac-admission'
     $script:OutputPath = $script:Validated.Outputs
@@ -1038,6 +1094,26 @@ try {
                         }
                         break
                     }
+                    if ($PersistentDataVolume) {
+                        $dataBeforeGuest = Get-QacS22R10ArtifactIdentity -Path $DataImagePath -Kind file
+                        if ($dataBeforeGuest.Sha256 -ine $ExpectedDataImageSha256.ToLowerInvariant() -or
+                            $dataBeforeGuest.TotalBytes -ne [int64]$script:Execution.persistentDataVolume.bytes) {
+                            $script:StartupFailure = 'Persistent data image changed after staging and before the paused guest was continued.'
+                            $script:StartupFailureStage = 'persistent-data-image-identity'
+                            Add-ExecutionEvent -Type 'persistent-data-image-preboot-mismatch' -Data @{path=$DataImagePath;expectedSha256=$ExpectedDataImageSha256;observedSha256=$dataBeforeGuest.Sha256;expectedBytes=$script:Execution.persistentDataVolume.bytes;observedBytes=$dataBeforeGuest.TotalBytes;guestHadNotRun=$true}
+                            try { Invoke-QacOwnedChildStartupCleanup -Reason $script:StartupFailure -Stage $script:StartupFailureStage }
+                            catch {
+                                Set-ManifestExecution -Status 'unknown' -ReservationId $script:Execution.reservationId -ChildProcessId $script:Execution.childProcessId
+                                $script:Execution.recoveryRequired = $true
+                                Set-ExecutionState -State 'RecoveryRequired' -Data @{reason=$_.Exception.Message;firstFailure=$script:StartupFailure;stage=$script:StartupFailureStage}
+                                throw
+                            }
+                            break
+                        }
+                        $script:Execution.persistentDataVolume.beforeGuestSha256 = $dataBeforeGuest.Sha256
+                        $script:Execution.persistentDataVolume.beforeGuestBytes = [int64]$dataBeforeGuest.TotalBytes
+                        Add-ExecutionEvent -Type 'persistent-data-image-preboot-identity-verified' -Data @{path=$dataBeforeGuest.Path;sha256=$dataBeforeGuest.Sha256;bytes=$dataBeforeGuest.TotalBytes;guestHadNotRun=$true}
+                    }
                     $continuationAuthorized = Test-QacS22R10ContinuationAuthorization -QacOwnerAlive (-not $script:QacProcess.HasExited) -ReservationValid $true -ListenerOwned ([bool]$listenerBeforeContinuation.Owned) -QmpNegotiated ($null -ne $script:QmpClient.Greeting -and $null -ne $qmpIdentity) -QmpStatus ([string]$qmpIdentity.Status)
                     if (-not $continuationAuthorized) { throw 'QMP continuation authorization gate failed; no state-changing command was sent.' }
                     Add-ExecutionEvent -Type 'qmp-continuation-authorized' -Data @{endpoint=$script:Execution.qmp.endpoint;reservationId=$script:Execution.reservationId;childProcessId=$script:Execution.childProcessId}
@@ -1209,6 +1285,16 @@ try {
     }
 
     if ($script:Execution.reservationReleaseVerified -and $script:Execution.childProcessId -gt 0) {
+        if ($PersistentDataVolume) {
+            $dataAfterQac = Get-QacS22R10ArtifactIdentity -Path $DataImagePath -Kind file
+            if ($dataAfterQac.TotalBytes -ne [int64]$script:Execution.persistentDataVolume.bytes) {
+                throw 'Persistent data image size changed during QAC execution.'
+            }
+            $script:Execution.persistentDataVolume.afterQacSha256 = $dataAfterQac.Sha256
+            $script:Execution.persistentDataVolume.afterQacBytes = [int64]$dataAfterQac.TotalBytes
+            $script:Execution.persistentDataVolume.afterQacAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
+            Add-ExecutionEvent -Type 'persistent-data-image-after-qac-identity-recorded' -Data @{path=$dataAfterQac.Path;sha256=$dataAfterQac.Sha256;bytes=$dataAfterQac.TotalBytes;reservationReleased=$true}
+        }
         Read-SerialAvailable
         $script:Execution.guestAssessment = Get-QacS22R10GuestResult -ObservedSerialLines $script:SerialLines.ToArray()
         if ($script:Execution.guestResult -eq 'INCOMPLETE') {

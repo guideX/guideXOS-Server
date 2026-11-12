@@ -40,6 +40,7 @@
 #include "include/kernel/nvme.h"
 #include "include/kernel/ramdisk.h"
 #include "include/kernel/vfs.h"
+#include "include/kernel/user_data_volume.h"
 #include "include/kernel/fs_fat.h"
 #include "include/kernel/fs_ext4.h"
 #include "include/kernel/fs_ntfs.h"
@@ -689,6 +690,12 @@ static bool is_transient_block_device(const kernel::block::BlockDevice* device)
 
 static bool mount_persistent_storage()
 {
+#if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
+    // The preview package source must remain the immutable boot image at `/`.
+    // User data is discovered later and mounted only at `/Documents`.
+    kernel::serial::puts("[KERNEL] Public preview: writable root-device discovery disabled; trusted boot image owns /\n");
+    return false;
+#else
     if (kernel::vfs::get_mount("/")) {
         kernel::serial::puts("[KERNEL] Persistent storage already mounted at /\n");
         return true;
@@ -712,6 +719,7 @@ static bool mount_persistent_storage()
 
     kernel::serial::puts("[KERNEL] WARNING: No writable persistent storage filesystem found\n");
     return false;
+#endif
 }
 
 extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
@@ -984,6 +992,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         if (is_bootinfo && bootinfo && bootinfo->RamdiskBase != 0 && bootinfo->RamdiskSize != 0) {
             kernel::serial::puts("[KERNEL] Boot wallpaper pack found in ramdisk.img\n");
             kernel::desktop::set_wallpaper_image_pack(reinterpret_cast<const void*>(static_cast<uintptr_t>(bootinfo->RamdiskBase)), bootinfo->RamdiskSize);
+#if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
+            (void)kernel::user_data_volume::mount_documents();
+#endif
             mount_navigator_boot_ca_store_if_available();
             mount_navigator_boot_config_if_available();
         }

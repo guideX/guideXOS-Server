@@ -13,6 +13,19 @@ function Test-QacS22R10PathWithin {
     return $fullPath.StartsWith($fullRoot, [StringComparison]::OrdinalIgnoreCase)
 }
 
+function Assert-QacS22R10NoReparsePath {
+    param([Parameter(Mandatory)][string]$Path)
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    $root = [IO.Path]::GetPathRoot($fullPath)
+    $current = $root
+    foreach ($part in $fullPath.Substring($root.Length).Split([char[]]@('\','/'), [StringSplitOptions]::RemoveEmptyEntries)) {
+        $current = Join-Path $current $part
+        if (-not (Test-Path -LiteralPath $current)) { throw "Required path does not exist: $current" }
+        $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Reparse point in protected S22R22 path: $current" }
+    }
+}
+
 function Get-QacS22R10ArtifactIdentity {
     [CmdletBinding()]
     param(
@@ -60,10 +73,20 @@ function Get-QacS22R10ArtifactIdentity {
 
 function Get-QacS22R10ValidatedManifest {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$ManifestPath, [switch]$PublicPreviewIsoOnly)
+    param(
+        [Parameter(Mandatory)][string]$ManifestPath,
+        [switch]$PublicPreviewIsoOnly,
+        [switch]$PersistentDataVolume,
+        [string]$ExpectedDataImagePath,
+        [string]$ExpectedDataVolumeRoot,
+        [string]$ExpectedDataImageSha256
+    )
 
     $manifest = Test-QacUefiArtifactManifest -ManifestPath $ManifestPath
-    $expectedWorkflow = if ($PublicPreviewIsoOnly) { 's22r18-public-preview-iso-only-qac' } else { 's22r10-pacman-uefi-qac' }
+    if ($PersistentDataVolume -and -not $PublicPreviewIsoOnly) { throw 'The persistent data-volume profile requires the restricted public-preview workflow.' }
+    if ($PersistentDataVolume) { $expectedWorkflow = 's22r22-persistent-data-volume-qac' }
+    elseif ($PublicPreviewIsoOnly) { $expectedWorkflow = 's22r18-public-preview-iso-only-qac' }
+    else { $expectedWorkflow = 's22r10-pacman-uefi-qac' }
     if ($manifest.project -ne 'guideXOSServer' -or $manifest.selectedWorkflow -ne $expectedWorkflow) {
         throw 'Manifest project or workflow does not identify the S22R10 PacMan UEFI acceptance run.'
     }
@@ -74,7 +97,7 @@ function Get-QacS22R10ValidatedManifest {
     $ovmf = @($manifest.artifacts | Where-Object { $_.name -eq 'ovmf-firmware' })
     if ($PublicPreviewIsoOnly) {
         if ($esp.Count -ne 0 -or $iso.Count -ne 1 -or $ovmf.Count -ne 1 -or @($manifest.artifacts).Count -ne 2) {
-            throw 'Public-preview manifest must contain exactly one shared read-only ISO and one shared read-only OVMF image, with no ESP artifact.'
+            throw 'Public-preview workspace artifacts must contain exactly one shared read-only ISO and one shared read-only OVMF image.'
         }
     } elseif ($esp.Count -ne 1 -or $iso.Count -ne 1 -or $ovmf.Count -ne 1 -or @($manifest.artifacts).Count -ne 3) {
         throw 'Manifest must contain exactly one private ESP, one shared ISO, and one shared OVMF image.'
@@ -82,6 +105,52 @@ function Get-QacS22R10ValidatedManifest {
     if (-not $PublicPreviewIsoOnly -and
         ($esp[0].kind -ne 'directory' -or $esp[0].access -ne 'writable' -or $esp[0].disposition -ne 'copy')) {
         throw 'The QEMU writable FAT input must be a private copied ESP directory.'
+    }
+
+    $dataVolume = $null
+    if ($PersistentDataVolume) {
+        if ([string]::IsNullOrWhiteSpace($ExpectedDataImagePath) -or
+            [string]::IsNullOrWhiteSpace($ExpectedDataVolumeRoot) -or
+            $ExpectedDataImageSha256 -notmatch '^[A-Fa-f0-9]{64}$') {
+            throw 'S22R22 requires an explicit persistent test-image path and expected current SHA-256.'
+        }
+        $storage = $manifest.launchContract.storage
+        $guestDisks = @($storage.writableGuestDisks)
+        if ($guestDisks.Count -ne 1 -or $storage.guestHostFilesystemIntegrations.Count -ne 0) {
+            throw 'S22R22 requires exactly one dedicated writable test disk and no host filesystem integration.'
+        }
+        $dataVolume = $guestDisks[0]
+        $expectedDataRoot = Get-QacS22R10FullPath $ExpectedDataVolumeRoot
+        $expectedDataPath = Get-QacS22R10FullPath $ExpectedDataImagePath
+        $manifestDataPath = Get-QacS22R10FullPath ([string]$dataVolume.path)
+        if (-not (Get-QacS22R10FullPath ([string]$storage.dataVolumeRoot)).Equals($expectedDataRoot,[StringComparison]::OrdinalIgnoreCase) -or
+            -not [string]::Equals((Split-Path -Parent $manifestDataPath),$expectedDataRoot,[StringComparison]::OrdinalIgnoreCase) -or
+            -not $manifestDataPath.Equals($expectedDataPath,[StringComparison]::OrdinalIgnoreCase) -or
+            [string]$dataVolume.role -cne 'dedicated-persistent-test-data-volume' -or
+            [string]$dataVolume.access -cne 'writable' -or
+            [string]$dataVolume.qemuFormat -cne 'raw' -or
+            [string]$dataVolume.stableAtaSerial -cne 'GXOS-DATA-V1' -or
+            -not [bool]$dataVolume.reuseAcrossReservations -or
+            [bool]$dataVolume.notBootable -ne $true -or
+            [string]$dataVolume.sha256BeforeLaunch -ine $ExpectedDataImageSha256) {
+            throw 'S22R22 launch contract does not match the explicit persistent test-image identity.'
+        }
+        if ([IO.Path]::GetExtension($manifestDataPath) -ine '.img' -or
+            -not (Test-Path -LiteralPath $manifestDataPath -PathType Leaf)) {
+            throw 'S22R22 persistent guest storage must be an existing regular .img file.'
+        }
+        Assert-QacS22R10NoReparsePath -Path $expectedDataRoot
+        Assert-QacS22R10NoReparsePath -Path $manifestDataPath
+        $dataIdentity = Get-QacS22R10ArtifactIdentity -Path $manifestDataPath -Kind file
+        if ($dataIdentity.Sha256 -ine $ExpectedDataImageSha256.ToLowerInvariant() -or
+            $dataIdentity.TotalBytes -ne [int64]$dataVolume.bytes -or
+            $dataIdentity.TotalBytes -lt 64MB -or $dataIdentity.TotalBytes -gt 2048MB -or
+            ($dataIdentity.TotalBytes % 512) -ne 0) {
+            throw 'S22R22 persistent data-image size or current identity changed before QAC admission.'
+        }
+        if ([IO.Path]::IsPathRooted([string]$dataVolume.path) -eq $false) {
+            throw 'S22R22 persistent data-image path must be absolute.'
+        }
     }
     foreach ($readOnlyArtifact in @($iso[0],$ovmf[0])) {
         if ($readOnlyArtifact.kind -ne 'file' -or $readOnlyArtifact.access -ne 'read-only' -or $readOnlyArtifact.disposition -ne 'share') {
@@ -125,7 +194,7 @@ function Get-QacS22R10ValidatedManifest {
         $bootFile = Join-Path ([string]$esp[0].privatePath) 'EFI\BOOT\BOOTX64.EFI'
         if (-not (Test-Path -LiteralPath $bootFile -PathType Leaf)) { throw 'Private workspace is missing EFI/BOOT/BOOTX64.EFI.' }
     }
-    return [PSCustomObject]@{ Manifest=$manifest; Esp=$(if ($PublicPreviewIsoOnly) { $null } else { $esp[0] }); Iso=$iso[0]; Ovmf=$ovmf[0]; Workspace=$workspace; Outputs=$outputs; PublicPreviewIsoOnly=[bool]$PublicPreviewIsoOnly }
+    return [PSCustomObject]@{ Manifest=$manifest; Esp=$(if ($PublicPreviewIsoOnly) { $null } else { $esp[0] }); Iso=$iso[0]; Ovmf=$ovmf[0]; DataVolume=$dataVolume; Workspace=$workspace; Outputs=$outputs; PublicPreviewIsoOnly=[bool]$PublicPreviewIsoOnly; PersistentDataVolume=[bool]$PersistentDataVolume }
 }
 
 function Get-QacS22R10QmpPortCandidate {
@@ -208,6 +277,7 @@ function New-QacS22R10QemuArguments {
         '{ovmfFirmware}' = [string]$ValidatedManifest.Ovmf.privatePath
         '{esp}' = $(if ($ValidatedManifest.Esp) { [string]$ValidatedManifest.Esp.privatePath } else { '' })
         '{iso}' = [string]$ValidatedManifest.Iso.privatePath
+        '{dataVolume}' = $(if ($ValidatedManifest.DataVolume) { [string]$ValidatedManifest.DataVolume.path } else { '' })
         '{serialLog}' = (Get-QacS22R10FullPath (Join-Path $ValidatedManifest.Workspace ([string]$manifest.outputs.serialLog).Replace('/','\')))
         '{qemuDebugLog}' = (Get-QacS22R10FullPath (Join-Path $ValidatedManifest.Workspace ([string]$manifest.outputs.qemuDebugLog).Replace('/','\')))
         '{QAC3C3-allocated-port}' = [string]$QmpPort
@@ -240,8 +310,24 @@ function New-QacS22R10QemuArguments {
         if ($arguments -match '(?i)fat:rw:|virtio-9p|virtiofs|vhost-user|smb=|hostfwd=|(^|\s)-netdev(\s|$)|(^|\s)-nic(\s|$)|(^|\s)-virtfs(\s|$)|(^|\s)-fsdev(\s|$)') {
             throw 'Public-preview QEMU configuration contains writable storage, network exposure, or a host filesystem integration.'
         }
-        if (@($arguments | Where-Object { $_ -eq '-drive' }).Count -ne 2) {
+        $expectedDriveCount = if ($ValidatedManifest.PersistentDataVolume) { 3 } else { 2 }
+        if (@($arguments | Where-Object { $_ -eq '-drive' }).Count -ne $expectedDriveCount) {
+            if ($ValidatedManifest.PersistentDataVolume) {
+                throw 'S22R22 QEMU configuration contains an unexpected number of block drives.'
+            }
             throw 'Public-preview QEMU configuration must contain only read-only firmware and ISO drives.'
+        }
+        if ($ValidatedManifest.PersistentDataVolume) {
+            $dataDrive = @($arguments | Where-Object { $_ -like 'if=none,id=userdata,file=*' })
+            $dataDevice = @($arguments | Where-Object { $_ -ceq 'ide-hd,drive=userdata,serial=GXOS-DATA-V1' })
+            $cdDevice = @($arguments | Where-Object { $_ -ceq 'ide-cd,drive=releasecdrom,bootindex=1' })
+            $deviceCount = @($arguments | Where-Object { $_ -eq '-device' }).Count
+            if ($dataDrive.Count -ne 1 -or
+                $dataDrive[0] -cne "if=none,id=userdata,file=$($ValidatedManifest.DataVolume.path),format=raw,cache=writeback" -or
+                $dataDevice.Count -ne 1 -or $cdDevice.Count -ne 1 -or $deviceCount -ne 2 -or
+                $arguments -match '(?i)fat:rw:|virtio-9p|virtiofs|vhost-user|smb=|hostfwd=|(^|\s)-blockdev(\s|$)') {
+                throw 'S22R22 QEMU configuration does not attach only the verified dedicated writable raw data image.'
+            }
         }
         if ($joined -notmatch '(?i)-net\s+none' -or $joined -notmatch '(?i)-monitor\s+none') {
             throw 'Public-preview QEMU configuration must disable guest networking and the HMP monitor.'

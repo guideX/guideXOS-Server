@@ -77,6 +77,7 @@ struct BlockDevice {
     uint64_t      totalSectors;
     uint32_t      sectorSize;     // typically 512 or 4096
     char          name[32];       // human-readable, e.g. "ata0", "nvme0n1"
+    char          stableId[32];   // transport-reported serial/identity; empty when unavailable
     ReadSectorsFn  readFn;
     WriteSectorsFn writeFn;
     FlushFn       flushFn;

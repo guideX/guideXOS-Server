@@ -1178,21 +1178,23 @@ bool seek_file(uint8_t fileHandle, uint32_t offset)
     FATFile& f = s_files[fileHandle];
     if (!f.open) return false;
 
-    // Seeking past EOF is allowed by the VFS contract.  A subsequent read
-    // returns zero; for offsets inside the file, rebuild the cluster cursor
-    // so the next FAT read starts at the requested byte rather than at the
-    // position where the file was opened.
+    // Seeking past EOF is allowed by the VFS contract. A subsequent read
+    // returns zero. At EOF, keep the cursor on the last allocated cluster so
+    // append writes can extend from the correct tail.
     set_traversal_status(TRAVERSAL_OK);
     f.currentOffset = offset;
     f.currentCluster = f.firstCluster;
     f.pendingClusterAdvance = false;
-    if (offset == 0 || f.fileSize == 0 || offset >= f.fileSize) return true;
+    if (offset == 0 || f.fileSize == 0) return true;
 
     FATVolume& vol = s_volumes[f.volumeIndex];
     const uint32_t clusterBytes = vol.sectorsPerCluster * vol.bytesPerSector;
     if (clusterBytes == 0) return false;
 
-    const uint32_t clusterIndex = offset / clusterBytes;
+    uint32_t clusterIndex = offset / clusterBytes;
+    if (offset >= f.fileSize && f.fileSize != 0) {
+        clusterIndex = (f.fileSize - 1u) / clusterBytes;
+    }
     const uint32_t stepLimit = max_chain_steps(vol);
     for (uint32_t i = 0; i < clusterIndex && i < stepLimit; ++i) {
         if (is_end_of_chain(vol, f.currentCluster)) {
@@ -1213,6 +1215,8 @@ bool seek_file(uint8_t fileHandle, uint32_t offset)
         set_traversal_status(TRAVERSAL_CHAIN_STEP_LIMIT);
         return false;
     }
+    f.pendingClusterAdvance = offset == f.fileSize && offset != 0 &&
+        (offset % clusterBytes) == 0;
     return true;
 }
 
@@ -2167,24 +2171,94 @@ bool create_file_path(uint8_t volumeIndex, const char* path, const void* buffer,
     return create_file_path_status(volumeIndex, path, buffer, len, nullptr) == FILE_WRITE_OK;
 }
 
-FileWriteStatus update_file_size_path_status(uint8_t volumeIndex,
-                                             const char* path,
-                                             uint32_t fileSize,
-                                             block::Status* outBlockStatus)
+static bool is_clean_end_of_chain(const FATVolume& vol, uint32_t cluster)
+{
+    if (vol.type == FAT_TYPE_FAT16) return cluster >= FAT16_CLUSTER_END;
+    if (vol.type == FAT_TYPE_FAT32) return cluster >= FAT32_CLUSTER_END;
+    return false;
+}
+
+static FileWriteStatus resize_path_status(uint8_t volumeIndex, const char* path,
+                                          uint32_t fileSize,
+                                          block::Status* outBlockStatus)
 {
     s_lastIoStatus = block::BLOCK_OK;
+    s_lastTraversalStatus = TRAVERSAL_OK;
     if (outBlockStatus) *outBlockStatus = block::BLOCK_OK;
     if (volumeIndex >= MAX_FAT_VOLUMES || !path) return FILE_WRITE_INVALID_ARGUMENT;
     if (!s_volumes[volumeIndex].mounted) return FILE_WRITE_NOT_MOUNTED;
 
     FATVolume& vol = s_volumes[volumeIndex];
+    if (vol.type != FAT_TYPE_FAT16 && vol.type != FAT_TYPE_FAT32) {
+        return FILE_WRITE_UNSUPPORTED_TYPE;
+    }
+
     DirEntry entry;
     uint32_t sector = 0;
     uint32_t offset = 0;
     if (!find_path_entry_at(volumeIndex, path, &entry, &sector, &offset)) {
-        return FILE_WRITE_NOT_FOUND;
+        if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+        if (s_lastIoStatus != block::BLOCK_OK) return write_failure_status();
+        return s_lastPathLookupStatus == PATH_LOOKUP_NOT_FOUND
+            ? FILE_WRITE_NOT_FOUND : FILE_WRITE_IO_ERROR;
     }
     if (entry.isDir) return FILE_WRITE_INVALID_ARGUMENT;
+    if (entry.attr & ATTR_READ_ONLY) return FILE_WRITE_READ_ONLY;
+
+    uint32_t clusterBytes = 0;
+    if (!cluster_byte_count(vol, &clusterBytes)) return FILE_WRITE_INVALID_ARGUMENT;
+    uint64_t requiredClusters64 = fileSize == 0
+        ? 1u
+        : (static_cast<uint64_t>(fileSize) + clusterBytes - 1u) / clusterBytes;
+    if (requiredClusters64 > max_chain_steps(vol)) return FILE_WRITE_NO_SPACE;
+    const uint32_t requiredClusters = static_cast<uint32_t>(requiredClusters64);
+
+    uint32_t lastNeededCluster = entry.firstCluster;
+    uint32_t tailCluster = 0;
+    if (entry.firstCluster == 0) {
+        if (fileSize != 0) return FILE_WRITE_NO_SPACE;
+    } else {
+        if (!is_valid_data_cluster(vol, entry.firstCluster)) {
+            set_traversal_status(TRAVERSAL_INVALID_CLUSTER);
+            return FILE_WRITE_CORRUPT_CHAIN;
+        }
+        for (uint32_t clusterIndex = 1; clusterIndex < requiredClusters; ++clusterIndex) {
+            lastNeededCluster = next_cluster(vol, lastNeededCluster);
+            if (s_lastTraversalStatus == TRAVERSAL_IO_ERROR) {
+                if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+                return write_failure_status();
+            }
+            if (is_clean_end_of_chain(vol, lastNeededCluster)) return FILE_WRITE_NO_SPACE;
+            if (!is_valid_data_cluster(vol, lastNeededCluster)) {
+                set_traversal_status(TRAVERSAL_INVALID_CLUSTER);
+                return FILE_WRITE_CORRUPT_CHAIN;
+            }
+        }
+
+        tailCluster = next_cluster(vol, lastNeededCluster);
+        if (s_lastTraversalStatus == TRAVERSAL_IO_ERROR) {
+            if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+            return write_failure_status();
+        }
+        if (is_clean_end_of_chain(vol, tailCluster)) {
+            tailCluster = 0;
+        } else if (!is_valid_data_cluster(vol, tailCluster)) {
+            set_traversal_status(TRAVERSAL_INVALID_CLUSTER);
+            return FILE_WRITE_CORRUPT_CHAIN;
+        } else {
+            // A broken cycle can point the removable tail back into the
+            // retained prefix. Detect it before severing any FAT link.
+            if (chain_cycle_detected(vol, entry.firstCluster, max_chain_steps(vol))) {
+                set_traversal_status(TRAVERSAL_CHAIN_CYCLE);
+                return FILE_WRITE_CORRUPT_CHAIN;
+            }
+            if (s_lastTraversalStatus == TRAVERSAL_IO_ERROR) {
+                if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+                return write_failure_status();
+            }
+        }
+    }
+
     if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
         if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
         return s_lastIoStatus == block::BLOCK_ERR_TIMEOUT
@@ -2199,12 +2273,45 @@ FileWriteStatus update_file_size_path_status(uint8_t volumeIndex,
     serial::puts(" offset=0x");
     serial::put_hex32(offset);
     serial::puts("\n");
-    if (write_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
+    if (write_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK ||
+        flush_volume_io(vol) != block::BLOCK_OK) {
         if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
         return s_lastIoStatus == block::BLOCK_ERR_TIMEOUT
             ? FILE_WRITE_IO_TIMEOUT : FILE_WRITE_IO_ERROR;
     }
+
+    if (tailCluster != 0) {
+        if (write_fat_entry(vol, lastNeededCluster, fat_end_value(vol)) != block::BLOCK_OK ||
+            flush_volume_io(vol) != block::BLOCK_OK) {
+            if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+            return s_lastIoStatus == block::BLOCK_ERR_TIMEOUT
+                ? FILE_WRITE_IO_TIMEOUT : FILE_WRITE_IO_ERROR;
+        }
+        if (!release_cluster_chain(vol, tailCluster)) {
+            if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+            return write_failure_status();
+        }
+        if (flush_volume_io(vol) != block::BLOCK_OK) {
+            if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+            return s_lastIoStatus == block::BLOCK_ERR_TIMEOUT
+                ? FILE_WRITE_IO_TIMEOUT : FILE_WRITE_IO_ERROR;
+        }
+    }
     return FILE_WRITE_OK;
+}
+
+FileWriteStatus update_file_size_path_status(uint8_t volumeIndex,
+                                             const char* path,
+                                             uint32_t fileSize,
+                                             block::Status* outBlockStatus)
+{
+    return resize_path_status(volumeIndex, path, fileSize, outBlockStatus);
+}
+
+FileWriteStatus truncate_path_status(uint8_t volumeIndex, const char* path,
+                                     block::Status* outBlockStatus)
+{
+    return resize_path_status(volumeIndex, path, 0u, outBlockStatus);
 }
 
 bool create_directory_path(uint8_t volumeIndex, const char* path)
