@@ -156,6 +156,8 @@ class Ia64EarlyExecContractTests(unittest.TestCase):
                 "static_gates": "NOT_APPLICABLE",
                 "cpu_state_checkpoint_schema": "none",
                 "cpu_state_static_gates": "NOT_APPLICABLE",
+                "stacked_nat_rse_static_gates": "NOT_APPLICABLE",
+                "stacked_nat_rse_expected_faults": 0,
                 "runtime_qualified": False,
                 "scheduler_qualified": False,
                 "interrupt_fp_preservation": False,

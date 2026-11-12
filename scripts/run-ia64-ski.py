@@ -109,6 +109,19 @@ def load_nat_consumption_validator() -> Any:
 NAT_CONSUMPTION_VALIDATOR = load_nat_consumption_validator()
 
 
+def load_stacked_nat_rse_validator() -> Any:
+    path = ROOT / "scripts" / "validate-ia64-stacked-nat-rse.py"
+    spec = importlib.util.spec_from_file_location("ia64_stacked_nat_rse_validator", path)
+    if spec is None or spec.loader is None:
+        raise GateError(f"cannot load stacked NaT/RSE validator: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+STACKED_NAT_RSE_VALIDATOR = load_stacked_nat_rse_validator()
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -872,6 +885,19 @@ def setup_parser() -> argparse.ArgumentParser:
     nat_probe.add_argument("--ski-init-file", type=Path,
                            help="optional pinned-Ski debugger command file for probe diagnosis")
 
+    stacked_nat_probe = subparsers.add_parser(
+        "stacked-nat-rse-probe", help="qualify the isolated stacked NaT/RSE preservation ELF")
+    stacked_nat_probe.add_argument("--artifact", type=Path, required=True)
+    stacked_nat_probe.add_argument("--manifest", type=Path, required=True)
+    stacked_nat_probe.add_argument("--expected-sha256", required=True)
+    stacked_nat_probe.add_argument("--simulator-sha256", required=True)
+    stacked_nat_probe.add_argument("--ski-prefix", type=Path, default=DEFAULT_SKI_PREFIX)
+    stacked_nat_probe.add_argument("--capture-dir", type=Path)
+    stacked_nat_probe.add_argument("--timeout", type=float, default=60)
+    stacked_nat_probe.add_argument("--mode", choices=("system",), default="system")
+    stacked_nat_probe.add_argument(
+        "--objdump", default="/home/guidex/src/ia64-2-toolchain-shim/ia64-linux-objdump")
+
     kernel = subparsers.add_parser("kernel", help="run a kernel only after separate authorization")
     kernel.add_argument("--artifact", type=Path, required=True)
     kernel.add_argument("--manifest", type=Path, required=True)
@@ -1215,6 +1241,70 @@ def run_nat_consumption_probe(args: argparse.Namespace) -> int:
     })
     result_path.write_text(json.dumps(run_record, indent=2) + "\n", encoding="utf-8")
     return status
+
+
+def run_stacked_nat_rse_probe(args: argparse.Namespace) -> int:
+    require_linux()
+    if not args.artifact.is_file():
+        raise GateError(f"selected stacked NaT/RSE probe ELF does not exist: {args.artifact}")
+    symbols = STACKED_NAT_RSE_VALIDATOR.validate_static(
+        ROOT, args.artifact.resolve(), args.objdump, True,
+        args.manifest.resolve(), args.expected_sha256)
+    load_ranges = validate_direct_system_elf(args.artifact)
+    simulator = verify_ski(args.ski_prefix, args.simulator_sha256)
+    capture_dir = args.capture_dir or Path(tempfile.mkdtemp(
+        prefix="guidexos-ia64-stacked-nat-rse-probe-"))
+
+    with verified_snapshot(args.artifact, args.expected_sha256) as snapshot:
+        validate_direct_system_elf(snapshot)
+        status = run_simulator(
+            [str(simulator), "-forcesystem", str(snapshot)], args.timeout, capture_dir,
+            "ia64-stacked-nat-rse-probe",
+            success_marker="IA64_STACKED_NAT_RSE_PROBE_RESULT=PASS",
+            artifact_hash=args.expected_sha256)
+
+    result_path = capture_dir / "run-result.json"
+    run_record = read_json(result_path, "stacked NaT/RSE probe run result")
+    qualification_errors: list[str] = []
+    stdout_path = Path(run_record.get("stdout", ""))
+    try:
+        runtime = STACKED_NAT_RSE_VALIDATOR.validate_output(
+            stdout_path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, STACKED_NAT_RSE_VALIDATOR.QualificationError) as exc:
+        runtime = None
+        qualification_errors.append(str(exc))
+    if run_record.get("classification") != "SMOKE_PASS":
+        qualification_errors.append(
+            f"simulator classification was {run_record.get('classification')!r}")
+    if run_record.get("ski_fault_count") != 0:
+        qualification_errors.append(
+            f"probe Ski fault count was {run_record.get('ski_fault_count')!r}, expected 0")
+    if run_record.get("ski_instruction_count") is None:
+        qualification_errors.append("probe instruction count is unavailable")
+    if run_record.get("exit_code") != 0 or run_record.get("timed_out") is not False or \
+            run_record.get("cleanup_complete") is not True:
+        qualification_errors.append("probe did not exit cleanly within its bound")
+
+    run_record.update({
+        "classification": "STACKED_NAT_RSE_PROBE_PASS" if not qualification_errors
+        else "STACKED_NAT_RSE_PROBE_FAIL",
+        "qualification_errors": qualification_errors,
+        "expected_faults": 0,
+        "artifact_manifest": str(args.manifest.resolve()),
+        "artifact_manifest_sha256": sha256(args.manifest),
+        "simulator_sha256": args.simulator_sha256,
+        "ski_source_commit": QUALIFIED_SKI_COMMIT,
+        "ski_version": QUALIFIED_SKI_VERSION,
+        "execution_mode": "-forcesystem",
+        "cpu_count": 1,
+        "load_ranges": load_ranges,
+        "stacked_nat_rse_symbols": symbols,
+        "stacked_nat_rse_runtime": runtime,
+    })
+    result_path.write_text(json.dumps(run_record, indent=2) + "\n", encoding="utf-8")
+    classification = run_record["classification"]
+    print(f"[{classification}] capture={capture_dir}")
+    return 0 if classification == "STACKED_NAT_RSE_PROBE_PASS" else (status or 1)
 
 
 def verify_break_probe_evidence(manifest: dict[str, Any]) -> dict[str, Any]:
@@ -1572,6 +1662,85 @@ def verify_nat_consumption_probe_evidence(manifest: dict[str, Any],
             "record_fields": fields}
 
 
+def verify_stacked_nat_rse_probe_evidence(manifest: dict[str, Any],
+                                          objdump: str) -> dict[str, Any]:
+    evidence = manifest.get("stacked_nat_rse_probe")
+    if not isinstance(evidence, dict) or \
+            evidence.get("schema") != "guidexos-ia64-stacked-nat-rse-probe-evidence-v1" or \
+            evidence.get("qualified") is not True or evidence.get("expected_faults") != 0 or \
+            evidence.get("expected_continuations") != 0:
+        raise GateError("candidate manifest lacks a passing independent stacked NaT/RSE probe")
+    try:
+        probe_elf = Path(evidence["artifact"]).resolve(strict=True)
+        probe_manifest_path = Path(evidence["manifest"]).resolve(strict=True)
+        run_result_path = Path(evidence["run_result"]).resolve(strict=True)
+        stdout_path = Path(evidence["stdout"]).resolve(strict=True)
+        stderr_path = Path(evidence["stderr"]).resolve(strict=True)
+        counts_path = Path(evidence["instruction_counts"]).resolve(strict=True)
+    except (KeyError, OSError, TypeError) as exc:
+        raise GateError(f"independent stacked NaT/RSE probe paths are invalid: {exc}") from exc
+
+    for path, key, label in (
+            (probe_elf, "artifact_sha256", "ELF"),
+            (probe_manifest_path, "manifest_sha256", "manifest"),
+            (run_result_path, "run_result_sha256", "run-result"),
+            (stdout_path, "stdout_sha256", "stdout"),
+            (stderr_path, "stderr_sha256", "stderr"),
+            (counts_path, "instruction_counts_sha256", "instruction statistics")):
+        if sha256(path) != evidence.get(key):
+            raise GateError(f"independent stacked NaT/RSE probe {label} changed after qualification")
+    try:
+        probe_symbols = STACKED_NAT_RSE_VALIDATOR.validate_static(
+            ROOT, probe_elf, objdump, True, probe_manifest_path, evidence["artifact_sha256"])
+    except (KeyError, STACKED_NAT_RSE_VALIDATOR.QualificationError) as exc:
+        raise GateError(f"independent stacked NaT/RSE probe no longer qualifies: {exc}") from exc
+
+    run_record = read_json(run_result_path, "stacked NaT/RSE probe run result")
+    if run_record.get("classification") != "STACKED_NAT_RSE_PROBE_PASS" or \
+            run_record.get("artifact_sha256") != evidence["artifact_sha256"] or \
+            run_record.get("artifact_manifest_sha256") != evidence["manifest_sha256"] or \
+            run_record.get("ski_fault_count") != 0 or \
+            run_record.get("expected_faults") != 0 or \
+            run_record.get("ski_instruction_count") is None or \
+            run_record.get("exit_code") != 0 or run_record.get("timed_out") is not False or \
+            run_record.get("cleanup_complete") is not True or \
+            run_record.get("execution_mode") != "-forcesystem" or \
+            run_record.get("cpu_count") != 1 or \
+            run_record.get("simulator_sha256") != QUALIFIED_SKI_SHA256 or \
+            run_record.get("ski_source_commit") != QUALIFIED_SKI_COMMIT or \
+            run_record.get("ski_version") != QUALIFIED_SKI_VERSION or \
+            run_record.get("qualification_errors") != []:
+        raise GateError("independent stacked NaT/RSE probe result is incomplete or failed")
+    if Path(run_record.get("stdout", "")).resolve() != stdout_path or \
+            Path(run_record.get("stderr", "")).resolve() != stderr_path or \
+            Path(run_record.get("instruction_counts", "")).resolve() != counts_path or \
+            run_record.get("stdout_sha256") != evidence["stdout_sha256"] or \
+            run_record.get("stderr_sha256") != evidence["stderr_sha256"] or \
+            run_record.get("instruction_counts_sha256") != evidence["instruction_counts_sha256"]:
+        raise GateError("stacked NaT/RSE probe run-result does not bind its capture files")
+
+    stdout_text = stdout_path.read_text(encoding="utf-8", errors="replace")
+    stderr_text = stderr_path.read_text(encoding="utf-8", errors="replace")
+    try:
+        runtime = STACKED_NAT_RSE_VALIDATOR.validate_output(stdout_text)
+    except STACKED_NAT_RSE_VALIDATOR.QualificationError as exc:
+        raise GateError(f"stacked NaT/RSE probe output failed revalidation: {exc}") from exc
+    unexpected_faults = [line for line in (stdout_text + "\n" + stderr_text).splitlines()
+                         if not line.startswith("IA64_STACKED_NAT_RSE_") and
+                         any(marker in line.lower() for marker in FAULT_MARKERS)]
+    if unexpected_faults:
+        raise GateError("stacked NaT/RSE probe emitted a fault diagnostic: " +
+                        unexpected_faults[0][:180])
+    if run_record.get("stacked_nat_rse_runtime") != runtime or \
+            validate_direct_system_elf(probe_elf) != run_record.get("load_ranges") or \
+            run_record.get("stacked_nat_rse_symbols") != probe_symbols:
+        raise GateError("stacked NaT/RSE probe result does not bind current ELF/runtime evidence")
+    return {"artifact": probe_elf, "artifact_sha256": evidence["artifact_sha256"],
+            "manifest": probe_manifest_path, "run_result": run_result_path,
+            "symbols": probe_symbols, "simulator_sha256": run_record.get("simulator_sha256"),
+            "runtime": runtime}
+
+
 def verify_kernel_resource_limits(timeout: float) -> dict[str, int | float]:
     if timeout <= 0 or timeout > 60:
         raise GateError("kernel execution requires a wall-clock timeout no greater than 60 seconds")
@@ -1627,11 +1796,13 @@ def run_kernel(args: argparse.Namespace) -> int:
                 manifest.get("general_exception_static_gates") != "PASS" or \
                 manifest.get("unaligned_reference_static_gates") != "PASS" or \
                 manifest.get("nat_consumption_static_gates") != "PASS" or \
+                manifest.get("stacked_nat_rse_static_gates") != "PASS" or \
                 manifest.get("post_rfi_static_gates") != "PASS" or \
                 manifest.get("expected_exception_faults") != 5 or \
                 manifest.get("general_exception_expected_faults") != 1 or \
                 manifest.get("unaligned_reference_expected_faults") != 1 or \
                 manifest.get("nat_consumption_expected_faults") != 1 or \
+                manifest.get("stacked_nat_rse_expected_faults") != 0 or \
                 manifest.get("guest_execution_authorized") is not False:
             raise GateError("early-exec manifest or static gates are incomplete")
         probe_evidence = verify_break_probe_evidence(manifest)
@@ -1639,10 +1810,13 @@ def run_kernel(args: argparse.Namespace) -> int:
         unaligned_probe_evidence = verify_unaligned_reference_probe_evidence(
             manifest, args.objdump)
         nat_probe_evidence = verify_nat_consumption_probe_evidence(manifest, args.objdump)
+        stacked_nat_rse_probe_evidence = verify_stacked_nat_rse_probe_evidence(
+            manifest, args.objdump)
         if probe_evidence["simulator_sha256"] != simulator_hash or \
                 general_probe_evidence["simulator_sha256"] != simulator_hash or \
                 unaligned_probe_evidence["simulator_sha256"] != simulator_hash or \
-                nat_probe_evidence["simulator_sha256"] != simulator_hash:
+                nat_probe_evidence["simulator_sha256"] != simulator_hash or \
+                stacked_nat_rse_probe_evidence["simulator_sha256"] != simulator_hash:
             raise GateError("kernel and all independent exception probes must use the same qualified Ski binary")
         validator_cmd = [sys.executable, str(ROOT / "scripts" / "validate-ia64-elf.py"),
                          "--elf", str(args.artifact), "--repo-root", str(ROOT),
@@ -1703,6 +1877,16 @@ def run_kernel(args: argparse.Namespace) -> int:
         if result.returncode:
             print(result.stderr, file=sys.stderr, end="")
             raise GateError("Register NaT Consumption static source/disassembly/identity gates failed")
+        stacked_nat_rse_gate_cmd = [
+            sys.executable, str(ROOT / "scripts" / "validate-ia64-stacked-nat-rse.py"),
+            "--kernel", "--repo-root", str(ROOT), "--elf", str(args.artifact),
+            "--objdump", args.objdump]
+        result = subprocess.run(stacked_nat_rse_gate_cmd, capture_output=True, text=True,
+                                check=False, env=validation_env)
+        print(result.stdout, end="")
+        if result.returncode:
+            print(result.stderr, file=sys.stderr, end="")
+            raise GateError("stacked NaT/RSE kernel integration gates failed")
         cpu_state_cmd = [sys.executable, str(ROOT / "scripts" / "validate-ia64-cpu-state.py"),
                          "--repo-root", str(ROOT), "--elf", str(args.artifact), "--objdump", args.objdump]
         result = subprocess.run(cpu_state_cmd, capture_output=True, text=True,
@@ -1739,7 +1923,10 @@ def run_kernel(args: argparse.Namespace) -> int:
                             "ia64_unaligned_reference_continuation",
                             "ia64_nat_consumption_record",
                             "ia64_nat_consumption_fault_site",
-                            "ia64_nat_consumption_continuation")
+                            "ia64_nat_consumption_continuation",
+                            "ia64_stacked_nat_rse_record",
+                            "ia64_stacked_nat_rse_test",
+                            "ia64_stacked_nat_rse_pressure_child")
         if any(name not in candidate_elf.symbols for name in required_symbols):
             raise GateError("candidate ELF lacks CPU-state checkpoint expectation symbols")
         checkpoint_expectations = {
@@ -1817,6 +2004,23 @@ def run_kernel(args: argparse.Namespace) -> int:
 
     result_path = capture_dir / "run-result.json"
     run_record = read_json(result_path, "kernel run result")
+    stacked_runtime = None
+    stacked_errors: list[str] = []
+    if args.profile == "early-exec":
+        try:
+            stacked_runtime = STACKED_NAT_RSE_VALIDATOR.validate_output(
+                Path(run_record.get("stdout", "")).read_text(
+                    encoding="utf-8", errors="replace"),
+                "IA64_STACKED_NAT_RSE_KERNEL_RESULT=PASS")
+        except (OSError, STACKED_NAT_RSE_VALIDATOR.QualificationError) as exc:
+            stacked_errors.append(str(exc))
+        if stacked_errors:
+            run_record["classification_before_stacked_nat_rse"] = run_record.get("classification")
+            run_record["classification"] = "STACKED_NAT_RSE_KERNEL_FAIL"
+            status = 1
+        run_record["stacked_nat_rse_expected_faults"] = 0
+        run_record["stacked_nat_rse_evidence_errors"] = stacked_errors
+        run_record["stacked_nat_rse_runtime"] = stacked_runtime
     run_record.update({
         "artifact_manifest": str(args.manifest.resolve()),
         "artifact_manifest_sha256": sha256(args.manifest),
@@ -1860,6 +2064,12 @@ def run_kernel(args: argparse.Namespace) -> int:
         run_record["nat_consumption_probe_simulator_sha256"] = \
             nat_probe_evidence["simulator_sha256"]
         run_record["nat_consumption_expected_faults"] = 1
+        run_record["stacked_nat_rse_probe_artifact_sha256"] = \
+            stacked_nat_rse_probe_evidence["artifact_sha256"]
+        run_record["stacked_nat_rse_probe_run_result"] = \
+            str(stacked_nat_rse_probe_evidence["run_result"])
+        run_record["stacked_nat_rse_probe_simulator_sha256"] = \
+            stacked_nat_rse_probe_evidence["simulator_sha256"]
     result_path.write_text(json.dumps(run_record, indent=2) + "\n", encoding="utf-8")
     return status
 
@@ -1880,6 +2090,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_unaligned_reference_probe(args)
         if args.operation == "nat-consumption-probe":
             return run_nat_consumption_probe(args)
+        if args.operation == "stacked-nat-rse-probe":
+            return run_stacked_nat_rse_probe(args)
         return run_kernel(args)
     except GateError as exc:
         print(f"[RUN_BLOCKED] {exc}", file=sys.stderr)

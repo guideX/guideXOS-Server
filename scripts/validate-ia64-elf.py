@@ -172,6 +172,8 @@ def check_artifact_manifest(path: Path, manifest_path: Path, profile: str) -> li
         "cpu_state_checkpoint_schema": (
             "guidexos-ia64-cpu-state-checkpoints-v1" if profile == "early-exec" else "none"),
         "cpu_state_static_gates": "PASS" if profile == "early-exec" else "NOT_APPLICABLE",
+        "stacked_nat_rse_static_gates": "PASS" if profile == "early-exec" else "NOT_APPLICABLE",
+        "stacked_nat_rse_expected_faults": 0,
         "fp_register_policy": {
             "runtime": "all-allocatable-registers-reserved",
             "compile-only": "abi-preserved-registers-fixed; scratch-registers-available",
@@ -187,7 +189,9 @@ def check_artifact_manifest(path: Path, manifest_path: Path, profile: str) -> li
             "boot_contract": "ski-physical-entry-single-cpu-no-preempt",
             "static_gates": "PASS",
             "nat_consumption_static_gates": "PASS",
+            "stacked_nat_rse_static_gates": "PASS",
             "nat_consumption_expected_faults": 1,
+            "stacked_nat_rse_expected_faults": 0,
             "expected_exception_faults": 5,
         })
     else:

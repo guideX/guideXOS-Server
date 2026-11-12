@@ -110,6 +110,7 @@
 
 #if defined(ARCH_IA64)
 #include <arch/ski_console.h>
+#include <arch/stacked_nat_rse.h>
 #endif
 
 #if defined(ARCH_RISCV64)
@@ -1641,7 +1642,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     kernel::arch::ia64::report_startup_cpu_state_checkpoints();
     kernel::arch::ia64::ski_console::puts("IA64-2 early-exec: SKI single-entry profile\r\n");
     kernel::arch::ia64::ski_console::puts("Interrupts masked; scheduler and threads unavailable\r\n");
-    const bool break_exception_qualified =
+    const bool stacked_nat_rse_qualified =
+        kernel::arch::ia64::run_stacked_nat_rse_qualification();
+    const bool break_exception_qualified = stacked_nat_rse_qualified &&
         kernel::arch::ia64::run_break_exception_qualification();
     const bool general_exception_qualified = break_exception_qualified &&
         kernel::arch::ia64::run_general_exception_qualification();
@@ -1649,10 +1652,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::arch::ia64::run_unaligned_reference_qualification();
     const bool nat_consumption_qualified = unaligned_reference_qualified &&
         kernel::arch::ia64::run_nat_consumption_qualification();
-    if (!break_exception_qualified || !general_exception_qualified ||
+    if (!stacked_nat_rse_qualified || !break_exception_qualified || !general_exception_qualified ||
         !unaligned_reference_qualified || !nat_consumption_qualified) {
         kernel::arch::ia64::ski_console::puts(
-            "Early exception qualification failed; stopping before all other startup paths\r\n");
+            "Early IA-64 qualification failed; stopping before all other startup paths\r\n");
     }
     kernel::arch::ia64::ski_console::stop();
     while (1) {

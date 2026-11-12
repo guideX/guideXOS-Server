@@ -128,10 +128,13 @@ ARCH_SOURCES := $(filter-out arch/ia64/break_exception.cpp,$(ARCH_SOURCES))
 ARCH_SOURCES := $(filter-out arch/ia64/general_exception.cpp,$(ARCH_SOURCES))
 ARCH_SOURCES := $(filter-out arch/ia64/unaligned_reference.cpp,$(ARCH_SOURCES))
 ARCH_SOURCES := $(filter-out arch/ia64/nat_consumption.cpp,$(ARCH_SOURCES))
+ARCH_SOURCES := $(filter-out arch/ia64/stacked_nat_rse.cpp,$(ARCH_SOURCES))
 ASM_SOURCES := $(filter-out arch/ia64/break_exception_entry.s,$(ASM_SOURCES))
 ASM_SOURCES := $(filter-out arch/ia64/general_exception_entry.s,$(ASM_SOURCES))
 ASM_SOURCES := $(filter-out arch/ia64/unaligned_reference_entry.s,$(ASM_SOURCES))
 ASM_SOURCES := $(filter-out arch/ia64/nat_consumption_entry.s,$(ASM_SOURCES))
+ASM_SOURCES := $(filter-out arch/ia64/stacked_nat_rse_test.s,$(ASM_SOURCES))
+ASM_SOURCES := $(filter-out arch/ia64/stacked_nat_rse_entry.s,$(ASM_SOURCES))
 endif
 endif
 MBEDTLS_C_SOURCES := $(if $(filter 1,$(MBEDTLS_GUIDEXOS_LINK_ENABLED)),$(MBEDTLS_GUIDEXOS_C_SOURCES))

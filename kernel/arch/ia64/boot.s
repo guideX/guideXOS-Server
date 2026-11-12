@@ -360,6 +360,11 @@ clear_bss:
 (p7) st8 [r14] = r16, 8
 (p7) br.cond.dptk clear_bss ;;
 
+#ifdef GXOS_IA64_EARLY_EXEC_PROFILE
+    /* Qualify stacked NaT/RSE before any C++ register frame becomes live. */
+    br.call.sptk.many b0 = ia64_stacked_nat_rse_boot_test ;;
+#endif
+
     /* ---- 9. Call kernel_main(0, 0) ----
      * IA-64 C calling convention: first two args in out0, out1.
      * Use alloc to create a register frame with 2 output registers.

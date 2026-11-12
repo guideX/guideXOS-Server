@@ -48,6 +48,8 @@ elif command -v ia64-linux-gnu-g++ >/dev/null 2>&1; then
     CROSS="ia64-linux-gnu"
 elif command -v ia64-elf-g++ >/dev/null 2>&1; then
     CROSS="ia64-elf"
+elif [[ -n "${IA64_CXX:-}" && -n "${IA64_AS:-}" && -n "${IA64_LD:-}" ]]; then
+    CROSS="custom"
 else
     echo '[TOOLCHAIN_BLOCKED] No IA-64 C++ cross-compiler found.' >&2
     echo 'Install a GNU IA-64 toolchain with g++, as, ld, and readelf; see docs/IA64_SUPPORT.md.' >&2
@@ -55,9 +57,9 @@ else
     exit 2
 fi
 
-CXX="${CROSS}-g++"
-AS="${CROSS}-as"
-LD="${CROSS}-ld"
+CXX="${IA64_CXX:-${CROSS}-g++}"
+AS="${IA64_AS:-${CROSS}-as}"
+LD="${IA64_LD:-${CROSS}-ld}"
 for tool in "$CXX" "$AS" "$LD"; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "[TOOLCHAIN_BLOCKED] Required target tool is missing: $tool" >&2
@@ -99,7 +101,9 @@ if ! command -v sha256sum >/dev/null 2>&1; then
     echo '[TOOLCHAIN_BLOCKED] sha256sum is required to record the ELF hash.' >&2
     exit 2
 fi
-if command -v "${CROSS}-readelf" >/dev/null 2>&1; then
+if [[ -n "${IA64_READELF:-}" ]]; then
+    READELF="$IA64_READELF"
+elif command -v "${CROSS}-readelf" >/dev/null 2>&1; then
     READELF="${CROSS}-readelf"
 elif command -v readelf >/dev/null 2>&1; then
     READELF=readelf
@@ -107,7 +111,9 @@ else
     echo '[TOOLCHAIN_BLOCKED] readelf is required to verify the target ELF.' >&2
     exit 2
 fi
-if command -v "${CROSS}-objdump" >/dev/null 2>&1; then
+if [[ -n "${IA64_OBJDUMP:-}" ]]; then
+    OBJDUMP="$IA64_OBJDUMP"
+elif command -v "${CROSS}-objdump" >/dev/null 2>&1; then
     OBJDUMP="${CROSS}-objdump"
 else
     echo '[TOOLCHAIN_BLOCKED] Target objdump is required for IA-64 static qualification.' >&2
@@ -141,10 +147,11 @@ INTERRUPT_FP_PRESERVATION=unimplemented
 BOOT_APPROVED=no
 EARLY_EXEC_STATIC_GATES=pending
 IA64_CPU_STATE_STATIC_GATES=pending
+IA64_STACKED_NAT_RSE_STATIC_GATES=pending
 IA64_RUNTIME_LIBGCC=$RUNTIME_LIBGCC
 EOF
 
-printf '[INFO] Toolchain prefix: %s-\n' "$CROSS"
+printf '[INFO] Toolchain prefix: %s\n' "$CROSS"
 printf '[INFO] Compiler target: %s\n' "$TARGET_TRIPLE"
 printf '[INFO] Compiler: %s\n' "$("$CXX" --version | head -n 1)"
 printf '[INFO] Compiler sysroot: %s\n' "$("$CXX" -print-sysroot 2>/dev/null || true)"
@@ -213,11 +220,16 @@ if [[ "$FP_PROFILE" == early-exec ]]; then
     python3 "$REPO_ROOT/scripts/validate-ia64-nat-consumption.py" \
         --elf "$KERNEL" --repo-root "$REPO_ROOT" --objdump "$OBJDUMP" \
         2>&1 | tee "$BUILD_DIR/ia64-nat-consumption-safety-gates.txt"
+    python3 "$REPO_ROOT/scripts/validate-ia64-stacked-nat-rse.py" \
+        --kernel --elf "$KERNEL" --repo-root "$REPO_ROOT" --objdump "$OBJDUMP" \
+        2>&1 | tee "$BUILD_DIR/ia64-stacked-nat-rse-safety-gates.txt"
     sed -i 's/^EARLY_EXEC_STATIC_GATES=pending$/EARLY_EXEC_STATIC_GATES=pass/' "$PROFILE_FILE"
     sed -i 's/^IA64_CPU_STATE_STATIC_GATES=pending$/IA64_CPU_STATE_STATIC_GATES=pass/' "$PROFILE_FILE"
+    sed -i 's/^IA64_STACKED_NAT_RSE_STATIC_GATES=pending$/IA64_STACKED_NAT_RSE_STATIC_GATES=pass/' "$PROFILE_FILE"
 else
     sed -i 's/^EARLY_EXEC_STATIC_GATES=pending$/EARLY_EXEC_STATIC_GATES=not-applicable/' "$PROFILE_FILE"
     sed -i 's/^IA64_CPU_STATE_STATIC_GATES=pending$/IA64_CPU_STATE_STATIC_GATES=not-applicable/' "$PROFILE_FILE"
+    sed -i 's/^IA64_STACKED_NAT_RSE_STATIC_GATES=pending$/IA64_STACKED_NAT_RSE_STATIC_GATES=not-applicable/' "$PROFILE_FILE"
 fi
 
 python3 - "$KERNEL" "$BUILD_DIR" "$FP_PROFILE" "$MANIFEST_FILE" <<'PY'
@@ -249,11 +261,13 @@ manifest = {
     "general_exception_static_gates": "PASS" if profile == "early-exec" else "NOT_APPLICABLE",
     "unaligned_reference_static_gates": "PASS" if profile == "early-exec" else "NOT_APPLICABLE",
     "nat_consumption_static_gates": "PASS" if profile == "early-exec" else "NOT_APPLICABLE",
+    "stacked_nat_rse_static_gates": "PASS" if profile == "early-exec" else "NOT_APPLICABLE",
     "post_rfi_static_gates": "PASS" if profile == "early-exec" else "NOT_APPLICABLE",
     "break_exception_expected_faults": 2 if profile == "early-exec" else 0,
     "general_exception_expected_faults": 1 if profile == "early-exec" else 0,
     "unaligned_reference_expected_faults": 1 if profile == "early-exec" else 0,
     "nat_consumption_expected_faults": 1 if profile == "early-exec" else 0,
+    "stacked_nat_rse_expected_faults": 0,
     "expected_exception_faults": 5 if profile == "early-exec" else 0,
     "runtime_qualified": False,
     "scheduler_qualified": False,

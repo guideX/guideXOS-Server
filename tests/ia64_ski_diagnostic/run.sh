@@ -17,10 +17,10 @@ printf 'Q' > "$OUT_DIR/ssc-getchar.stdin"
 
 TOOL_PREFIX="${IA64_TOOLCHAIN_PREFIX:-/home/guidex/src/ia64-2-toolchain-shim/ia64-linux}"
 SKI_PREFIX="${SKI_PREFIX:-/home/guidex/opt/ski-dfc2902}"
-CXX="${TOOL_PREFIX}-g++"
-AS="${TOOL_PREFIX}-as"
-LD="${TOOL_PREFIX}-ld"
-OBJDUMP="${TOOL_PREFIX}-objdump"
+CXX="${IA64_CXX:-${TOOL_PREFIX}-g++}"
+AS="${IA64_AS:-${TOOL_PREFIX}-as}"
+LD="${IA64_LD:-${TOOL_PREFIX}-ld}"
+OBJDUMP="${IA64_OBJDUMP:-${TOOL_PREFIX}-objdump}"
 SKI="$SKI_PREFIX/bin/bskinc"
 for tool in "$CXX" "$AS" "$LD" "$OBJDUMP" "$SKI"; do
     if [[ ! -x "$tool" ]]; then
