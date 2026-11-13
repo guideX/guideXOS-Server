@@ -11,9 +11,9 @@ if ($LASTEXITCODE -ne 0) {
     throw "Roughtime hosted tests need the pinned dependency. Install it with: python -m pip install -r requirements-roughtime.txt"
 }
 
-& $Python -B -m unittest discover -s tests -p "test_roughtime_v1.py" -v
+& $Python -B -m unittest discover -s tests -p "test_roughtime*.py" -v
 if ($LASTEXITCODE -ne 0) {
-    throw "Roughtime v1 hosted tests failed."
+    throw "Roughtime v1 hosted and portable differential tests failed."
 }
 
-Write-Output "ROUGHTIME_V1_HOSTED_RESULT: PASS (23 tests)"
+Write-Output "ROUGHTIME_V1_AND_PORTABLE_RESULT: PASS"

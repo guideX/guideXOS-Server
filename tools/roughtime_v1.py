@@ -26,6 +26,10 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 MAGIC = b"ROUGHTIM"
 VERSION = 1
 MAX_PACKET_BYTES = 1024
+# RFC 10049 recommends UDP request messages of at least 1024 bytes. The local
+# decoder bound allows that message size plus its 12-byte packet wrapper.
+# Responses keep a separate 1024-byte total packet cap.
+MAX_REQUEST_PACKET_BYTES = 1036
 MAX_MAP_PAIRS = 16
 MAX_MERKLE_HEIGHT = 32
 MIN_TIME_SECONDS = 1_704_067_200  # guideXOS clock contract: 2024-01-01 UTC
@@ -140,8 +144,8 @@ def _wrap_packet(message: bytes) -> bytes:
     return MAGIC + struct.pack("<I", len(message)) + message
 
 
-def _unwrap_packet(packet: bytes) -> bytes:
-    if not isinstance(packet, bytes) or not 12 <= len(packet) <= MAX_PACKET_BYTES:
+def _unwrap_packet(packet: bytes, *, max_packet_bytes: int = MAX_PACKET_BYTES) -> bytes:
+    if not isinstance(packet, bytes) or not 12 <= len(packet) <= max_packet_bytes:
         raise RoughtimeError("packet is truncated or exceeds the packet limit")
     if packet[:8] != MAGIC:
         raise RoughtimeError("invalid Roughtime packet magic")
@@ -243,7 +247,9 @@ def verify_response(
 
     if len(response_packet) > len(request_packet):
         raise RoughtimeError("response exceeds the request datagram size")
-    request_fields = _parse_message(_unwrap_packet(request_packet))
+    request_fields = _parse_message(
+        _unwrap_packet(request_packet, max_packet_bytes=MAX_REQUEST_PACKET_BYTES)
+    )
     _required(request_fields, ("VER", "NONC", "TYPE", "SRV"), "request")
     if request_fields["NONC"] != expected_nonce or len(expected_nonce) != 32:
         raise RoughtimeError("expected nonce does not match the transmitted request")
