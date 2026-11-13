@@ -898,6 +898,22 @@ def setup_parser() -> argparse.ArgumentParser:
     stacked_nat_probe.add_argument(
         "--objdump", default="/home/guidex/src/ia64-2-toolchain-shim/ia64-linux-objdump")
 
+    cooperative_context_probe = subparsers.add_parser(
+        "cooperative-context-probe",
+        help="qualify the isolated two-context cooperative RSE switch ELF")
+    cooperative_context_probe.add_argument("--artifact", type=Path, required=True)
+    cooperative_context_probe.add_argument("--manifest", type=Path, required=True)
+    cooperative_context_probe.add_argument("--expected-sha256", required=True)
+    cooperative_context_probe.add_argument("--simulator-sha256", required=True)
+    cooperative_context_probe.add_argument("--ski-prefix", type=Path, default=DEFAULT_SKI_PREFIX)
+    cooperative_context_probe.add_argument("--capture-dir", type=Path)
+    cooperative_context_probe.add_argument("--timeout", type=float, default=60)
+    cooperative_context_probe.add_argument("--mode", choices=("system",), default="system")
+    cooperative_context_probe.add_argument(
+        "--objdump", default="/home/guidex/src/ia64-2-toolchain-shim/ia64-linux-objdump")
+    cooperative_context_probe.add_argument("--static-only", action="store_true",
+                                           help="run artifact and disassembly gates without Ski")
+
     kernel = subparsers.add_parser("kernel", help="run a kernel only after separate authorization")
     kernel.add_argument("--artifact", type=Path, required=True)
     kernel.add_argument("--manifest", type=Path, required=True)
@@ -1305,6 +1321,391 @@ def run_stacked_nat_rse_probe(args: argparse.Namespace) -> int:
     classification = run_record["classification"]
     print(f"[{classification}] capture={capture_dir}")
     return 0 if classification == "STACKED_NAT_RSE_PROBE_PASS" else (status or 1)
+
+
+COOP_CONTEXT_EVENT_NAMES = (
+    "A_TO_B", "B_FIRST_ENTRY", "B_TO_A_FIRST", "A_RESUMED_FIRST",
+    "A_TO_B_SECOND", "B_RESUMED", "B_TO_A_SECOND", "A_RESUMED_FINAL",
+)
+COOP_CONTEXT_EVENT_IDS = (0xA, 0xB, 0xB, 0xA, 0xA, 0xB, 0xB, 0xA)
+
+
+def validate_cooperative_context_probe_manifest(manifest: dict[str, Any]) -> None:
+    expected_fields = {
+        "guest_execution_authorized": "probe-only",
+        "execution_count_authorized": 1,
+        "system_mode": "-forcesystem",
+        "cpu_count": 1,
+        "ivt_bytes": 0x8000,
+        "expected_faults": 0,
+        "expected_events": list(COOP_CONTEXT_EVENT_NAMES),
+        "intentional_exit_ssc": 66,
+        "scheduler_enabled": False,
+        "external_interrupts_enabled": False,
+    }
+    mismatches = [f"{key}={manifest.get(key)!r}, expected {value!r}"
+                  for key, value in expected_fields.items() if manifest.get(key) != value]
+    if mismatches:
+        raise GateError("cooperative context probe manifest contract failed: " + "; ".join(mismatches))
+
+
+def validate_cooperative_context_switch_source(switch_source: str) -> None:
+    if "STORE64 C_PFS, r16" not in switch_source or "mov ar.pfs = r22" not in switch_source:
+        raise GateError("switch source does not save and restore PFS")
+
+    first_dispatch_start = switch_source.find("adds r28 = C_FIRST_ENTRY, r15")
+    first_entry_start = switch_source.find(".Lfirst_entry_context:")
+    saved_context_start = switch_source.find(".Lsaved_context:")
+    target_checked_start = switch_source.find(".Ltarget_checked:")
+    if min(first_dispatch_start, first_entry_start, saved_context_start, target_checked_start) < 0 or \
+            not first_dispatch_start < first_entry_start < saved_context_start < target_checked_start:
+        raise GateError("switch source lacks distinct first-entry and saved-context validation paths")
+
+    dispatch = switch_source[first_dispatch_start:first_entry_start]
+    first_entry = switch_source[first_entry_start:saved_context_start]
+    saved_context = switch_source[saved_context_start:target_checked_start]
+    if not re.search(
+            r"cmp\.eq p6, p7 = r20, r0 ;;\s*\(p6\) br\.cond\.sptk \.Lsaved_context",
+            dispatch):
+        raise GateError("switch source does not route first-entry and resumed contexts separately")
+    if not re.search(
+            r"cmp\.eq p6, p7 = r20, r0 ;;\s*\(p7\) br\.cond\.sptk ia64_coop_switch_fail",
+            first_entry):
+        raise GateError("first-entry bootstrap must require its defined zero PFS")
+    if not re.search(
+            r"cmp\.eq p6, p7 = r20, r0 ;;\s*\(p6\) br\.cond\.sptk ia64_coop_switch_fail",
+            saved_context):
+        raise GateError("saved context must require a nonzero PFS")
+
+    rsc_start = switch_source.find("adds r28 = C_RSC, r15")
+    first_flag_start = switch_source.find("adds r28 = C_FIRST_ENTRY, r15")
+    rsc_validation = switch_source[rsc_start:first_flag_start] if rsc_start >= 0 and \
+        first_flag_start >= 0 else ""
+    if not re.search(
+            r"mov r21 = 3 ;;\s*cmp\.eq p6, p7 = r20, r21 ;;\s*"
+            r"\(p7\) br\.cond\.sptk ia64_coop_switch_fail",
+            rsc_validation):
+        raise GateError("switch source does not fail-stop unsupported RSC profiles")
+
+
+def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Path,
+                                               expected_hash: str, objdump: str
+                                               ) -> dict[str, Any]:
+    manifest = check_manifest(
+        artifact, manifest_path, "cooperative-context-switch-probe", expected_hash,
+        "guidexos-ia64-cooperative-context-probe-v1")
+    validate_cooperative_context_probe_manifest(manifest)
+
+    elf = ELF_VALIDATOR.Elf64(artifact)
+    if elf.machine != EM_IA_64 or elf.type != ET_EXEC or elf.data[5] != 1:
+        raise GateError("cooperative context probe must be little-endian ELF64 EM_IA_64 ET_EXEC")
+    ivt = elf.section(".ivt")
+    if ivt is None or ivt["size"] != 0x8000 or ivt["addr"] % 0x8000 or \
+            ivt["align"] < 0x8000 or elf.symbols.get("ia64_ivt", {}).get("value") != ivt["addr"] or \
+            elf.symbols.get("ia64_ivt_end", {}).get("value") != ivt["addr"] + 0x8000:
+        raise GateError("cooperative probe IVT geometry is invalid")
+
+    names = (
+        "_start", "ia64_coop_context_switch", "ia64_coop_probe_run",
+        "ia64_coop_a_test", "ia64_coop_b_first_entry", "ia64_coop_b_test",
+        "__text_start", "__text_end",
+        "ia64_coop_context_a", "ia64_coop_context_b", "ia64_coop_probe_record",
+        "ia64_coop_stack_a_guard_low", "ia64_coop_stack_a_bottom",
+        "ia64_coop_stack_a_top", "ia64_coop_stack_a_guard_high",
+        "ia64_coop_stack_b_guard_low", "ia64_coop_stack_b_bottom",
+        "ia64_coop_stack_b_top", "ia64_coop_stack_b_guard_high",
+        "ia64_coop_rbs_a_guard_low", "ia64_coop_rbs_a_base",
+        "ia64_coop_rbs_a_limit", "ia64_coop_rbs_a_guard_high",
+        "ia64_coop_rbs_b_guard_low", "ia64_coop_rbs_b_base",
+        "ia64_coop_rbs_b_limit", "ia64_coop_rbs_b_guard_high",
+    )
+    missing = [name for name in names if name not in elf.symbols]
+    if missing:
+        raise GateError("cooperative probe ELF lacks required symbols: " + ", ".join(missing))
+    symbol = lambda name: elf.symbols[name]["value"]
+    size = lambda name: elf.symbols[name]["size"]
+    if size("ia64_coop_context_a") != 1024 or size("ia64_coop_context_b") != 1024 or \
+            size("ia64_coop_probe_record") != 344:
+        raise GateError("cooperative context or event-record geometry changed")
+
+    ranges: dict[str, tuple[int, int]] = {}
+    for name in ("a", "b"):
+        stack_base = symbol(f"ia64_coop_stack_{name}_bottom")
+        stack_limit = symbol(f"ia64_coop_stack_{name}_top")
+        rbs_base = symbol(f"ia64_coop_rbs_{name}_base")
+        rbs_limit = symbol(f"ia64_coop_rbs_{name}_limit")
+        if stack_limit - stack_base != 65536 or stack_base % 16:
+            raise GateError(f"context {name.upper()} stack geometry is invalid")
+        if rbs_limit - rbs_base != 65536 or rbs_base % 512 or rbs_limit % 512:
+            raise GateError(f"context {name.upper()} RBS geometry is invalid")
+        if symbol(f"ia64_coop_stack_{name}_guard_low") + 8 != stack_base or \
+                symbol(f"ia64_coop_stack_{name}_guard_high") != stack_limit or \
+                symbol(f"ia64_coop_rbs_{name}_guard_low") + 8 != rbs_base or \
+                symbol(f"ia64_coop_rbs_{name}_guard_high") != rbs_limit:
+            raise GateError(f"context {name.upper()} boundary canaries do not bracket their ranges")
+        ranges[f"stack_{name}"] = (symbol(f"ia64_coop_stack_{name}_guard_low"), stack_limit + 8)
+        ranges[f"rbs_{name}"] = (symbol(f"ia64_coop_rbs_{name}_guard_low"), rbs_limit + 8)
+    for left_name, left in ranges.items():
+        for right_name, right in ranges.items():
+            if left_name < right_name and ranges_overlap(left, right):
+                raise GateError(f"independent probe ranges overlap: {left_name} and {right_name}")
+    context_a = (symbol("ia64_coop_context_a"), symbol("ia64_coop_context_a") + 1024)
+    context_b = (symbol("ia64_coop_context_b"), symbol("ia64_coop_context_b") + 1024)
+    if context_a[0] % 512 or context_b[0] % 512 or ranges_overlap(context_a, context_b):
+        raise GateError("context records are not separate 512-byte aligned objects")
+    if symbol("__text_start") >= symbol("__text_end"):
+        raise GateError("cooperative probe text bounds are invalid")
+
+    script_dir = ROOT / "tests" / "ia64_cooperative_context_switch"
+    switch_source = (script_dir / "context_switch.s").read_text(encoding="utf-8")
+    sequence_source = (script_dir / "probe_sequence.s").read_text(encoding="utf-8")
+    entry_source = (script_dir / "entry.s").read_text(encoding="utf-8")
+    build_source = (script_dir / "build.sh").read_text(encoding="utf-8")
+    required_switch_terms = (
+        "flushrs", "mf", "mov.m ar.rsc = r0", "mov r24 = ar.rnat", "invala",
+        "mov ar.bspstore = r20", "mov ar.rnat = r21", "mov ar.pfs = r22",
+        "st8.spill", "ld8.fill", "stf.spill", "ldf.fill", "ar.unat",
+        "ar.lc", "ar.ec", "ar.ccv", "ar.fpsr", "mov pr = r20, -1",
+        "mov b1 = r20", "mov b5 = r20", "mov.m ar.rsc = r20", "br.ret.sptk.many b0",
+        "C_CODE_BASE", "C_CODE_LIMIT", "C_FIRST_ENTRY", "C_PFS", ".Lsaved_context",
+        "STORE64 C_PFS, r16",
+    )
+    missing_terms = [term for term in required_switch_terms if term not in switch_source]
+    if missing_terms:
+        raise GateError("switch source is missing required state/order operations: " +
+                        ", ".join(missing_terms))
+    validate_cooperative_context_switch_source(switch_source)
+    source_order = (
+        "flushrs", "mf", "mov.m ar.rsc = r0", "mov r24 = ar.rnat", "invala",
+        "mov ar.bspstore = r20", "mov ar.rnat = r21", "mov ar.pfs = r22",
+        "mov.m ar.rsc = r20", "br.ret.sptk.many b0",
+    )
+    offset = -1
+    for term in source_order:
+        offset = switch_source.find(term, offset + 1)
+        if offset < 0:
+            raise GateError("switch source no longer follows the required ordered RSE handoff")
+    if "rfi" in switch_source.lower() or "-mfixed-range=f2-f5,f16-f31" not in build_source:
+        raise GateError("switch must remain synchronous and retain the declared FP codegen policy")
+    if "adds r12 = -4096, r12" not in sequence_source or \
+            "STACK_USE_A_LOW" not in sequence_source or "STACK_USE_B_LOW" not in sequence_source or \
+            "tnat.nz p6, p7 = r33" not in sequence_source:
+        raise GateError("A/B probe does not exercise its private memory stacks and stacked NaT state")
+    if entry_source.count(".skip 65536") != 4 or "IVT_HALT" not in entry_source or \
+            "rsm psr.i | psr.ic" not in entry_source:
+        raise GateError("probe entry lacks fixed independent maps, fail-stop IVT, or masked interrupts")
+
+    objdump_path = Path(objdump)
+    if not objdump_path.is_file():
+        raise GateError(f"IA-64 objdump is unavailable: {objdump}")
+    try:
+        result = subprocess.run([str(objdump_path), "-dr", "--disassemble=ia64_coop_context_switch",
+                                 str(artifact)], check=True, capture_output=True, text=True)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise GateError(f"cannot inspect target switch disassembly: {exc}") from exc
+    start = result.stdout.find("<ia64_coop_context_switch>:")
+    end = result.stdout.find("<ia64_coop_switch_fail>:", start)
+    disassembly = result.stdout[start:end if end >= 0 else None] if start >= 0 else ""
+    if not disassembly:
+        raise GateError("target disassembly does not contain the cooperative switch symbol")
+    disassembly_order = (
+        "flushrs", "mf", "mov.m ar.rsc=r0", "mov.m r24=ar.rnat", "invala",
+        "mov.m ar.rsc=r0", "mov.m ar.bspstore=r20", "mov.m ar.rnat=r21",
+        "mov.i ar.pfs=r22", "mov.m ar.rsc=r20", "br.ret.sptk.many b0",
+    )
+    offset = -1
+    for term in disassembly_order:
+        offset = disassembly.find(term, offset + 1)
+        if offset < 0:
+            raise GateError(f"target switch disassembly is missing or reorders {term!r}")
+    if "rfi" in disassembly:
+        raise GateError("synchronous switch disassembly unexpectedly contains RFI")
+    return {"ivt": ivt["addr"], "text": [symbol("__text_start"), symbol("__text_end")],
+            "context_a": symbol("ia64_coop_context_a"),
+            "context_b": symbol("ia64_coop_context_b"),
+            "stack_a": [symbol("ia64_coop_stack_a_bottom"), symbol("ia64_coop_stack_a_top")],
+            "stack_b": [symbol("ia64_coop_stack_b_bottom"), symbol("ia64_coop_stack_b_top")],
+            "rbs_a": [symbol("ia64_coop_rbs_a_base"), symbol("ia64_coop_rbs_a_limit")],
+            "rbs_b": [symbol("ia64_coop_rbs_b_base"), symbol("ia64_coop_rbs_b_limit")],
+            "switch_source": str((script_dir / "context_switch.s").resolve())}
+
+
+def validate_cooperative_context_probe_output(stdout_text: str) -> dict[str, Any]:
+    def parse_hex_fields(text: str, record_name: str) -> dict[str, int]:
+        pairs = re.findall(r"([a-z][a-z0-9_]*)=0x([0-9a-fA-F]+)", text)
+        values: dict[str, int] = {}
+        for key, value in pairs:
+            if key in values:
+                raise GateError(f"cooperative probe {record_name} repeats field {key!r}")
+            values[key] = int(value, 16)
+        return values
+
+    event_pattern = re.compile(
+        r"^IA64_COOP_EVENT sequence=0x([0-9a-fA-F]+) context=0x([0-9a-fA-F]+) event=([A-Z_]+)$",
+        re.MULTILINE)
+    events = [{"sequence": int(match.group(1), 16), "context_id": int(match.group(2), 16),
+               "event": match.group(3)} for match in event_pattern.finditer(stdout_text)]
+    event_lines = [line for line in stdout_text.splitlines()
+                   if line.startswith("IA64_COOP_EVENT")]
+    if len(event_lines) != len(events):
+        raise GateError("cooperative probe contains a malformed transition record")
+    expected = [{"sequence": i + 1, "context_id": COOP_CONTEXT_EVENT_IDS[i],
+                 "event": COOP_CONTEXT_EVENT_NAMES[i]} for i in range(8)]
+    if events != expected:
+        raise GateError(f"cooperative probe transition log is missing, duplicated, or reordered: {events!r}")
+    context_lines = [line for line in stdout_text.splitlines()
+                     if line.startswith("IA64_COOP_CONTEXT_STATE id=")]
+    context_records: dict[str, dict[str, int]] = {}
+    for line in context_lines:
+        match = re.match(r"IA64_COOP_CONTEXT_STATE id=([AB]) (.*)$", line)
+        if match is None or match.group(1) in context_records:
+            raise GateError("cooperative probe context map is malformed or duplicated")
+        values = parse_hex_fields(match.group(2), f"context {match.group(1)}")
+        context_records[match.group(1)] = values
+    if set(context_records) != {"A", "B"}:
+        raise GateError("cooperative probe did not report both final context maps")
+
+    required_context_fields = {
+        "stack_base", "stack_limit", "sp", "rp", "code_base", "code_limit",
+        "rbs_base", "rbs_limit", "switches", "first_entries", "resumes", "bsp",
+        "bspstore", "rnat_defined", "rnat_valid_mask", "observed_psr",
+    }
+    for identity, values in context_records.items():
+        missing = required_context_fields - values.keys()
+        if missing:
+            raise GateError(f"context {identity} state record is missing {sorted(missing)!r}")
+        stack_base, stack_limit, sp = (values["stack_base"], values["stack_limit"], values["sp"])
+        rbs_base, rbs_limit = values["rbs_base"], values["rbs_limit"]
+        bsp, bspstore = values["bsp"], values["bspstore"]
+        rnats = values["rnat_defined"]
+        rnat_mask = values["rnat_valid_mask"]
+        rnat_index = (bspstore >> 3) & 0x3f
+        expected_rnat_mask = ((1 << (rnat_index + 1)) - 1) if rnat_index < 63 else 0
+        if stack_base >= stack_limit or not stack_base <= sp <= stack_limit or sp & 15:
+            raise GateError(f"context {identity} has invalid stack bounds or alignment")
+        if rbs_base >= rbs_limit or rbs_base & 511 or rbs_limit & 511 or \
+                not rbs_base <= bsp <= rbs_limit or bsp != bspstore:
+            raise GateError(f"context {identity} has invalid backing-store bounds or pointers")
+        if not values["code_base"] <= values["rp"] < values["code_limit"] or values["rp"] & 15:
+            raise GateError(f"context {identity} has an invalid saved return continuation")
+        if values["switches"] != 2 or values["observed_psr"] & 0x4000:
+            raise GateError(f"context {identity} switch count or interrupt state is invalid")
+        if (rnat_mask != expected_rnat_mask or rnat_mask == 0 or
+                rnats & ~rnat_mask):
+            raise GateError(f"context {identity} defined RNAT bits do not match the valid mask")
+    if (context_records["A"]["first_entries"], context_records["A"]["resumes"]) != (0, 2) or \
+            (context_records["B"]["first_entries"], context_records["B"]["resumes"]) != (1, 1):
+        raise GateError("cooperative probe restarted a context or missed a resumed entry")
+
+    ranges = {
+        "stack A": (context_records["A"]["stack_base"], context_records["A"]["stack_limit"]),
+        "stack B": (context_records["B"]["stack_base"], context_records["B"]["stack_limit"]),
+        "RBS A": (context_records["A"]["rbs_base"], context_records["A"]["rbs_limit"]),
+        "RBS B": (context_records["B"]["rbs_base"], context_records["B"]["rbs_limit"]),
+    }
+    range_items = list(ranges.items())
+    for index, (left_name, left) in enumerate(range_items):
+        for right_name, right in range_items[index + 1:]:
+            if ranges_overlap(left, right):
+                raise GateError(f"cooperative probe memory maps overlap: {left_name} and {right_name}")
+
+    validation = re.search(r"IA64_COOP_CONTEXT_VALIDATION errors=0x0\b([^\r\n]*)", stdout_text)
+    if validation is None:
+        raise GateError("cooperative probe context validation did not report zero errors")
+    state = validation.group(1)
+    values = parse_hex_fields(state, "architectural state")
+    required_state = {
+        "nat_a_before", "nat_a_after", "nat_b_before", "nat_b_after",
+        "pfs_a_before", "pfs_a_after", "pfs_b_before", "pfs_b_after",
+        "psr_a", "psr_b", "fp_a_low", "fp_a_high", "fp_b_first_low",
+        "fp_b_first_high", "fp_b_resume_low", "fp_b_resume_high",
+    }
+    if required_state - values.keys():
+        raise GateError("cooperative probe architectural state record is incomplete")
+    if (values["nat_a_before"], values["nat_a_after"],
+            values["nat_b_before"], values["nat_b_after"]) != (1, 1, 0, 0):
+        raise GateError("cooperative probe lost or unexpectedly changed a tested NaT state")
+    if not values["pfs_a_before"] or values["pfs_a_before"] != values["pfs_a_after"] or \
+            not values["pfs_b_before"] or values["pfs_b_before"] != values["pfs_b_after"]:
+        raise GateError("cooperative probe PFS state is missing or changed across a resume")
+    if values["psr_a"] & 0x4000 or values["psr_b"] & 0x4000:
+        raise GateError("cooperative probe resumed with PSR.i enabled")
+    if (values["fp_a_low"], values["fp_a_high"], values["fp_b_first_low"],
+            values["fp_b_first_high"], values["fp_b_resume_low"],
+            values["fp_b_resume_high"]) != (
+                0x415f46505f303031, 0x3fff800000000000,
+                0x425f46505f303032, 0x3fff800000000000,
+                0x425f46505f303032, 0x3fff800000000000):
+        raise GateError("cooperative probe preserved floating-point images do not match sentinels")
+    if "IA64_COOP_CONTEXT_PROBE_RESULT=PASS" not in stdout_text or \
+            "IA64_COOP_CONTEXT_PROBE_RESULT=FAIL" in stdout_text:
+        raise GateError("cooperative probe success marker is absent or contradictory")
+    return {"events": events, "context_state_lines": context_lines,
+            "architectural_state": state.strip()}
+
+
+def run_cooperative_context_probe(args: argparse.Namespace) -> int:
+    require_linux()
+    if not args.artifact.is_file():
+        raise GateError(f"selected cooperative context probe ELF does not exist: {args.artifact}")
+    static_symbols = validate_cooperative_context_probe_static(
+        args.artifact.resolve(), args.manifest.resolve(), args.expected_sha256, args.objdump)
+    if args.static_only:
+        print(f"[COOPERATIVE_CONTEXT_STATIC_PASS] {json.dumps(static_symbols, sort_keys=True)}")
+        return 0
+    load_ranges = validate_direct_system_elf(args.artifact)
+    simulator = verify_ski(args.ski_prefix, args.simulator_sha256)
+    capture_dir = args.capture_dir or Path(tempfile.mkdtemp(
+        prefix="guidexos-ia64-cooperative-context-probe-"))
+    with verified_snapshot(args.artifact, args.expected_sha256) as snapshot:
+        validate_direct_system_elf(snapshot)
+        status = run_simulator(
+            [str(simulator), "-forcesystem", str(snapshot)], args.timeout, capture_dir,
+            "ia64-cooperative-context-probe",
+            success_marker="IA64_COOP_CONTEXT_PROBE_RESULT=PASS",
+            artifact_hash=args.expected_sha256)
+
+    result_path = capture_dir / "run-result.json"
+    run_record = read_json(result_path, "cooperative context probe run result")
+    qualification_errors: list[str] = []
+    stdout_path = Path(run_record.get("stdout", ""))
+    try:
+        runtime = validate_cooperative_context_probe_output(
+            stdout_path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, GateError) as exc:
+        runtime = None
+        qualification_errors.append(str(exc))
+    if run_record.get("classification") != "SMOKE_PASS":
+        qualification_errors.append(f"simulator classification was {run_record.get('classification')!r}")
+    if run_record.get("ski_fault_count") != 0:
+        qualification_errors.append(f"probe fault count was {run_record.get('ski_fault_count')!r}, expected 0")
+    if run_record.get("ski_instruction_count") is None:
+        qualification_errors.append("probe instruction count is unavailable")
+    if run_record.get("exit_code") != 0 or run_record.get("timed_out") is not False or \
+            run_record.get("cleanup_complete") is not True:
+        qualification_errors.append("probe did not exit cleanly within its bound")
+
+    run_record.update({
+        "classification": "COOPERATIVE_CONTEXT_PROBE_PASS" if not qualification_errors
+        else "COOPERATIVE_CONTEXT_PROBE_FAIL",
+        "qualification_errors": qualification_errors,
+        "expected_faults": 0,
+        "execution_count_authorized": 1,
+        "artifact_manifest": str(args.manifest.resolve()),
+        "artifact_manifest_sha256": sha256(args.manifest),
+        "simulator_sha256": args.simulator_sha256,
+        "ski_source_commit": QUALIFIED_SKI_COMMIT,
+        "ski_version": QUALIFIED_SKI_VERSION,
+        "execution_mode": "-forcesystem",
+        "cpu_count": 1,
+        "load_ranges": load_ranges,
+        "cooperative_context_symbols": static_symbols,
+        "cooperative_context_runtime": runtime,
+    })
+    result_path.write_text(json.dumps(run_record, indent=2) + "\n", encoding="utf-8")
+    classification = run_record["classification"]
+    print(f"[{classification}] capture={capture_dir}")
+    return 0 if classification == "COOPERATIVE_CONTEXT_PROBE_PASS" else (status or 1)
 
 
 def verify_break_probe_evidence(manifest: dict[str, Any]) -> dict[str, Any]:
@@ -2092,6 +2493,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_nat_consumption_probe(args)
         if args.operation == "stacked-nat-rse-probe":
             return run_stacked_nat_rse_probe(args)
+        if args.operation == "cooperative-context-probe":
+            return run_cooperative_context_probe(args)
         return run_kernel(args)
     except GateError as exc:
         print(f"[RUN_BLOCKED] {exc}", file=sys.stderr)
