@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory=$true)][string]$RepoRoot,
     [Parameter(Mandatory=$true)][string]$CandidateRoot,
     [Parameter(Mandatory=$true)][string]$RunRoot,
-    [Parameter(Mandatory=$true)][string]$OutputDirectory
+    [Parameter(Mandatory=$true)][string]$OutputDirectory,
+    [string]$UnconsumedCandidateRoot = ''
 )
 
 $ErrorActionPreference='Stop'
@@ -152,6 +153,34 @@ $r16StackMeta=Get-Content -LiteralPath $r16StackMetaPath -Raw | ConvertFrom-Json
 $attemptPath=Join-Path (Split-Path -Parent $CandidateRoot) ('guest-launch-attempt-' + [System.IO.Path]::GetFileName($CandidateRoot) + '.json')
 if(-not (Test-Path -LiteralPath $attemptPath -PathType Leaf)) { $attemptPath=Join-Path (Split-Path -Parent $CandidateRoot) 'guest-launch-attempt-candidate-r16-stack-capture-20261111T203000000Z.json' }
 if(-not (Test-Path -LiteralPath $attemptPath -PathType Leaf)) { throw 'Preserved R16 one-boot guard input is missing.' }
+$consumedGuard=Get-Content -LiteralPath $attemptPath -Raw | ConvertFrom-Json
+Assert-R17 ($consumedGuard.maxGuestBoots -eq 1 -and $consumedGuard.automaticRetry -eq $false -and
+    $consumedGuard.candidateManifestSha256 -ceq $candidateManifestSha256) 'consumed one-boot guard is bound to the preserved R16 candidate and forbids retries'
+$guardPreflightAst=$runnerAst.Find({param($node)
+    $node -is [System.Management.Automation.Language.IfStatementAst] -and
+    $node.Extent.Text -match 'candidate already has a QAC guest attempt'
+},$true)
+Assert-R17 ($null -ne $guardPreflightAst -and $guardPreflightAst.Extent.Text -match 'Test-Path -LiteralPath \$attemptPath') 'live runner rejects an existing candidate guard before attempting another guest'
+$guardFixtureRoot=Join-Path $OutputDirectory 'synthetic-guard-predicate'
+[void](New-Item -ItemType Directory -Path $guardFixtureRoot -Force)
+$attemptPath=Join-Path $guardFixtureRoot 'synthetic-consumed-guard.json'
+$HostedPreflightOnly=$false
+$guardFixtureBlockedWithoutGuard=$false
+try { Invoke-Expression $guardPreflightAst.Extent.Text | Out-Null } catch { $guardFixtureBlockedWithoutGuard=$true }
+Assert-R17 (-not $guardFixtureBlockedWithoutGuard) 'an unconsumed synthetic candidate guard permits the one authorized attempt'
+[System.IO.File]::WriteAllText($attemptPath,(@{candidateManifestSha256=$candidateManifestSha256;maxGuestBoots=1;automaticRetry=$false} | ConvertTo-Json),[System.Text.UTF8Encoding]::new($false))
+$guardFixtureBlockedAfterConsumption=$false
+try { Invoke-Expression $guardPreflightAst.Extent.Text | Out-Null } catch { $guardFixtureBlockedAfterConsumption=$_.Exception.Message -match 'already has a QAC guest attempt' }
+Assert-R17 $guardFixtureBlockedAfterConsumption 'a consumed synthetic one-boot guard blocks another attempt'
+$attemptPath=Join-Path (Split-Path -Parent $CandidateRoot) ('guest-launch-attempt-' + [System.IO.Path]::GetFileName($CandidateRoot) + '.json')
+if(-not [string]::IsNullOrWhiteSpace($UnconsumedCandidateRoot)) {
+    $freshCandidatePath=[System.IO.Path]::GetFullPath($UnconsumedCandidateRoot)
+    $freshManifestPath=Join-Path $freshCandidatePath 'candidate-manifest.json'
+    $freshManifest=Get-Content -LiteralPath $freshManifestPath -Raw | ConvertFrom-Json
+    $freshGuardPath=Join-Path (Split-Path -Parent $freshCandidatePath) ("guest-launch-attempt-" + [System.IO.Path]::GetFileName($freshCandidatePath) + '.json')
+    Assert-R17 ([string]$freshManifest.candidateRoot -ceq $freshCandidatePath -and
+        -not (Test-Path -LiteralPath $freshGuardPath -PathType Leaf)) 'the preserved R17 candidate keeps its original identity with an unconsumed one-boot guard'
+}
 $runnerScriptSha256=Get-Sha256 $runnerPath
 $script:manifestWriteText=$manifestWriteCommand.Parent.Extent.Text
 $scenarioExpected=@{
@@ -293,6 +322,12 @@ foreach($caseName in @('success','incomplete','fatal','timeout')) {
         Assert-R17 ($null -eq $written.managedGcProgressObservation.pairMetadataSha256) "$caseName optional absent progress metadata does not throw or synthesize a hash"
     }
 }
+$successManifestPath=Join-Path $OutputDirectory 'success\guest-manifest.json'
+$successManifest=Get-Content -LiteralPath $successManifestPath -Raw | ConvertFrom-Json
+Assert-R17 ($successManifest.candidateIdentity.candidateManifestSha256 -ceq $candidateManifestSha256 -and
+    $successManifest.serialLogSha256 -ceq (Get-Sha256 (Join-Path $OutputDirectory 'success\serial.log')) -and
+    $successManifest.qmpLogSha256 -ceq (Get-Sha256 (Join-Path $OutputDirectory 'success\qmp.log')) -and
+    $successManifest.qacReleaseVerified -eq $true) 'clean post-QEMU manifest creation retains candidate, closed serial/QMP hashes, and independent QAC release evidence'
 
 # Rehearse the actual QAC-blocked path with no analyzer object and no one-boot
 # guard. QAC release remains false because this scenario owns no reservation.

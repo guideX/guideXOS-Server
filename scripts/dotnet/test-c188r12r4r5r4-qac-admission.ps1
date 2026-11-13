@@ -46,6 +46,17 @@ Assert-Qac 'complete empty QAC lane is clear' (Test-QacClear $emptySnapshot)
 Assert-Qac 'clear-lane preflight requires complete empty Windows QEMU census and matching inspection count' (
     Test-QacClearWithCensus -Snapshot $emptySnapshot -WindowsCensusComplete $true `
         -LocalQemuProcesses @() -InspectionsComplete $true -InspectionCount 0)
+$unavailableSnapshot = [pscustomobject]@{
+    Status='Coordinator unavailable: Coordinator connection timed out or is unavailable.'
+    List='Coordinator unavailable: Coordinator connection timed out or is unavailable.'
+    StatusExit=1;ListExit=1
+}
+$unavailableStatus = ConvertFrom-QacStatusSnapshot -Text $unavailableSnapshot.Status -ExitCode $unavailableSnapshot.StatusExit
+Assert-Qac 'coordinator unavailable is not interpreted as an empty lane' (
+    -not $unavailableStatus.Valid -and -not (Test-QacClear $unavailableSnapshot))
+Assert-Qac 'an incomplete process census remains inadmissible even with empty local process results' (-not (
+    Test-QacClearWithCensus -Snapshot $emptySnapshot -WindowsCensusComplete $false `
+        -LocalQemuProcesses @() -InspectionsComplete $true -InspectionCount 0))
 Assert-Qac 'local Windows QEMU process blocks clear-lane preflight' (-not (
     Test-QacClearWithCensus -Snapshot $emptySnapshot -WindowsCensusComplete $true `
         -LocalQemuProcesses @([pscustomobject]@{ProcessId=901;Name='qemu-system-x86_64.exe'}) `
@@ -83,6 +94,8 @@ Managed sessions: 1
 Managed session: $reservationId | Running | guideXOSServer · $ownerUser (PID $ownerPid)
 "@
 $runningSnapshot = [pscustomobject]@{Status=$activeStatus;List=$activeList;StatusExit=0;ListExit=0}
+Assert-Qac 'a coordinator-reported occupied lane is distinct from unavailable and cannot pass empty-lane admission' (
+    -not (Test-QacClear $runningSnapshot))
 $inspection = [pscustomobject]@{
     id=$reservationId;project='guideXOSServer';mode='acceptance';state='Running';queuePosition=0
     owner="$ownerUser (PID $ownerPid)";ownerLiveness='Verified';ownerProcessStartedAtUtc=$ownerStart

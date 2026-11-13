@@ -118,6 +118,16 @@ def main() -> int:
     assert "result" not in changed_target and changed_target["classification"] == "lookup-state-changed-but-progress-not-qualified"
     checks.append("changed target does not pass the same-target lookup progress test")
 
+    changed_instruction = analyzer.classify_progress(
+        {"lookupLoopState": {}, "observedRip": "0x10005D000",
+         "callerFrames": [{"symbol": "Thread::GcScanRootsWorker"}]},
+        {"lookupLoopState": {}, "observedRip": "0x10005D018",
+         "callerFrames": [{"symbol": "Thread::GcScanRootsWorker"}]},
+    )
+    assert changed_instruction["result"] == "GC_STACKWALK_PROGRESS_VERIFIED"
+    assert changed_instruction["classification"] == "gc-root-scan-call-chain-observed-at-a-different-instruction"
+    checks.append("time-separated CPU/stack samples at different instructions in the GC root-scan chain show new progress")
+
     candidate = args.candidate_root.resolve()
     cpu_source = args.capture_json.resolve()
     stack_source = args.stack_json.resolve()
@@ -175,7 +185,22 @@ def main() -> int:
     rc, report = run_analyzer(analyzer_script, candidate, pair_path,
                               args.output_directory / "synthetic-completion-analysis.json", completed_gc)
     assert rc == 0 and report["result"] == "NATIVEAOT_SINGLE_COLLECTION_VERIFIED" and report["nativeGcAcceptance"] is True
-    checks.append("only the complete R13 classification plus collection, live-reference, and 1123 return fields can qualify native acceptance")
+    assert report["managedGcAnalysis"]["gcCollectionCompleted"] is True
+    checks.append("GC.Collect return and counter evidence confirms root-scan completion; full R13 fields qualify collection, live-reference, and 1123 return")
+
+    missing_completion = args.output_directory / "synthetic-missing-gc-completion.json"
+    write_json(missing_completion, {
+        "classification": "MANAGED_GC_ROOT_INCOMPLETE",
+        "gcCollectionStarted": True,
+        "gcCollectionCompleted": False,
+        "liveObjectSurvived": False,
+        "managedEntryReturnValue": None,
+    })
+    rc, report = run_analyzer(analyzer_script, candidate, pair_path,
+                              args.output_directory / "missing-gc-completion-analysis.json", missing_completion)
+    assert rc == 0 and report["result"] == "GC_STACKWALK_EVIDENCE_INCOMPLETE"
+    assert report["nativeGcAcceptance"] is False and report["managedGcAnalysis"]["gcCollectionCompleted"] is False
+    checks.append("missing GC completion evidence stays incomplete and cannot be inferred from lookup or stack-walk samples")
 
     result = {
         "schema": "C188R17_STACKWALK_PROGRESS_HOSTED_TESTS_V1",
