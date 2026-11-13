@@ -497,7 +497,7 @@ function Invoke-GuestOperatorCommand {
             Write-Host 'Commands: status | screenshot LABEL | key KEY | qkey ARROW | move DX,DY | click BUTTON | wait SECONDS | result fail REASON | result pass | shutdown'
             if ($null -ne $script:Com2TcpPort) { Write-Host 'This run uses result pass for the COM2 storage request/provider/response gate; the external read-only client must also have succeeded.' }
             else { Write-Host 'This run uses result pass for the PacMan guest smoke marker.' }
-            Write-Host 'Keys include meta_l, ctrl-esc, esc, enter, tab, up, down, left, right, f12, alt-f4, letters, digits, slash, dot, shift-semicolon, and shift-letter.'
+            Write-Host 'Keys include meta_l, ctrl-esc, esc, enter, tab, backspace, up, down, left, right, f12, alt-f4, letters, digits, slash, dot, shift-semicolon, and shift-letter.'
             Write-Host 'qkey pairs a paced up/down/left/right QMP key event with ownership checks and fail-safe release.'
             Write-Host 'Mouse moves are relative, with each axis limited to -49..49. Clicks pair button down/up with ownership checks.'
             return $false
@@ -509,7 +509,7 @@ function Invoke-GuestOperatorCommand {
             return $false
         }
         'screenshot' {
-            if ($parts.Count -lt 2 -or $parts[1] -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,48}$') { throw 'Use screenshot with a safe alphanumeric label.' }
+            if ($parts.Count -lt 2 -or $parts[1] -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,48}$') { throw (New-QacS22R10OperatorInputException 'Use screenshot with a safe alphanumeric label.') }
             Confirm-QacRuntimeOwnership
             $path = Join-Path $script:ScreenshotPath ($parts[1] + '.ppm')
             $command = New-QacS22R10ScreendumpCommand -Path $path
@@ -524,14 +524,14 @@ function Invoke-GuestOperatorCommand {
             return $false
         }
         'key' {
-            if ($parts.Count -lt 2 -or $parts[1] -notmatch '^(?i)(meta_l|meta_r|ctrl-esc|esc|enter|tab|space|up|down|left|right|home|end|pageup|pagedown|f12|alt-f4|slash|dot|shift-semicolon|shift-[a-z]|[a-z0-9])$') { throw 'Unsupported QMP key. Use one key from help.' }
+            if ($parts.Count -lt 2 -or $parts[1] -notmatch '^(?i)(meta_l|meta_r|ctrl-esc|esc|enter|tab|backspace|space|up|down|left|right|home|end|pageup|pagedown|f12|alt-f4|slash|dot|shift-semicolon|shift-[a-z]|[a-z0-9])$') { throw (New-QacS22R10OperatorInputException 'Unsupported QMP key. Use one key from help.') }
             Confirm-QacRuntimeOwnership
             [void](Invoke-QacS22R10Qmp -Client $script:QmpClient -Execute 'human-monitor-command' -Arguments @{ 'command-line' = "sendkey $($parts[1].ToLowerInvariant())" })
             Add-ExecutionEvent -Type 'guest-key' -Data @{key=$parts[1].ToLowerInvariant()}
             return $false
         }
         'qkey' {
-            if ($parts.Count -ne 2 -or $parts[1] -notmatch '^(?i)(up|down|left|right)$') { throw 'Use qkey with up, down, left, or right.' }
+            if ($parts.Count -ne 2 -or $parts[1] -notmatch '^(?i)(up|down|left|right)$') { throw (New-QacS22R10OperatorInputException 'Use qkey with up, down, left, or right.') }
             $key = $parts[1].ToLowerInvariant()
             $keyMayBeDown = $false
             try {
@@ -559,11 +559,11 @@ function Invoke-GuestOperatorCommand {
             return $false
         }
         'move' {
-            if ($parts.Count -ne 2 -or $parts[1] -notmatch '^(-?\d+),(-?\d+)$') { throw 'Use move dx,dy with integer deltas.' }
-            $dx = [int]$Matches[1]
-            $dy = [int]$Matches[2]
-            if ([Math]::Abs($dx) -gt 49 -or [Math]::Abs($dy) -gt 49) { throw 'Each relative mouse axis must be within -49..49.' }
-            if ($dx -eq 0 -and $dy -eq 0) { throw 'Relative mouse move must include a non-zero delta.' }
+            if ($parts.Count -ne 2 -or $parts[1] -notmatch '^(-?\d+),(-?\d+)$') { throw (New-QacS22R10OperatorInputException 'Use move dx,dy with integer deltas.') }
+            $dx = 0; $dy = 0
+            if (-not [int]::TryParse($Matches[1],[ref]$dx) -or -not [int]::TryParse($Matches[2],[ref]$dy)) { throw (New-QacS22R10OperatorInputException 'Mouse deltas must be 32-bit integers.') }
+            if ([Math]::Abs([long]$dx) -gt 49 -or [Math]::Abs([long]$dy) -gt 49) { throw (New-QacS22R10OperatorInputException 'Each relative mouse axis must be within -49..49.') }
+            if ($dx -eq 0 -and $dy -eq 0) { throw (New-QacS22R10OperatorInputException 'Relative mouse move must include a non-zero delta.') }
             Confirm-QacRuntimeOwnership
             $events = @()
             if ($dx -ne 0) { $events += @{type='rel';data=@{axis='x';value=$dx}} }
@@ -574,7 +574,7 @@ function Invoke-GuestOperatorCommand {
             return $false
         }
         'click' {
-            if ($parts.Count -ne 2 -or $parts[1].ToLowerInvariant() -notin @('left','middle','right')) { throw 'Use click with left, middle, or right.' }
+            if ($parts.Count -ne 2 -or $parts[1].ToLowerInvariant() -notin @('left','middle','right')) { throw (New-QacS22R10OperatorInputException 'Use click with left, middle, or right.') }
             $button = $parts[1].ToLowerInvariant()
             $buttonMayBeDown = $false
             try {
@@ -584,7 +584,31 @@ function Invoke-GuestOperatorCommand {
                 Add-ExecutionEvent -Type 'guest-pointer-button-down' -Data @{button=$button;endpoint=$script:Execution.qmp.endpoint;childProcessId=$script:Execution.childProcessId}
                 Start-Sleep -Milliseconds 500
                 Confirm-QacRuntimeOwnership
-                [void](Invoke-QacS22R10Qmp -Client $script:QmpClient -Execute 'input-send-event' -Arguments @{events=@(@{type='btn';data=@{down=$false;button=$button}})})
+                try {
+                    [void](Invoke-QacS22R10Qmp -Client $script:QmpClient -Execute 'input-send-event' -Arguments @{events=@(@{type='btn';data=@{down=$false;button=$button}})})
+                } catch {
+                    $buttonReleaseFailure = $_
+                    try {
+                        Read-SerialAvailable
+                        $qmpTranscriptLines = [IO.File]::ReadAllLines($script:QmpTranscriptPath)
+                    } catch {
+                        Add-ExecutionEvent -Type 'guest-shutdown-evidence-read-failed' -Data @{button=$button;reason=$_.Exception.Message;qmpReleaseFailure=$buttonReleaseFailure.Exception.Message}
+                        throw $buttonReleaseFailure
+                    }
+                    if (Test-QacS22R10ExpectedGuestShutdownAfterInputReleaseFailure -FailureMessage $buttonReleaseFailure.Exception.Message -QmpTranscriptLines $qmpTranscriptLines -ObservedSerialLines $script:SerialLines.ToArray()) {
+                        $buttonMayBeDown = $false
+                        $script:Execution.timings.guestShutdownObservedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
+                        Add-ExecutionEvent -Type 'guest-shutdown-observed-during-button-release' -Data @{button=$button;qmpReleaseFailure=$buttonReleaseFailure.Exception.Message;evidence='QMP SHUTDOWN guest=true reason=guest-shutdown and exact normal desktop shutdown serial marker'}
+                        Confirm-QacRuntimeOwnership
+                        $reply = Invoke-QacS22R10Qmp -Client $script:QmpClient -Execute 'quit' -TimeoutMilliseconds 5000
+                        $script:Execution.qmp.quitResponse = $reply
+                        $script:Execution.qmp.quitAcknowledged = $true
+                        Add-ExecutionEvent -Type 'qmp-quit-after-guest-shutdown-acknowledged' -Data @{response=$reply;reservationId=$script:Execution.reservationId;childProcessId=$script:Execution.childProcessId;endpoint=$script:Execution.qmp.endpoint}
+                        Write-Host 'The desktop shutdown completed; QMP quit was acknowledged. Verifying QAC child exit and reservation release.'
+                        return $true
+                    }
+                    throw $buttonReleaseFailure
+                }
                 $buttonMayBeDown = $false
                 Add-ExecutionEvent -Type 'guest-pointer-button-up' -Data @{button=$button;endpoint=$script:Execution.qmp.endpoint;childProcessId=$script:Execution.childProcessId}
                 Start-Sleep -Milliseconds 500
@@ -603,7 +627,7 @@ function Invoke-GuestOperatorCommand {
         }
         'wait' {
             $seconds = 0
-            if ($parts.Count -lt 2 -or -not [int]::TryParse($parts[1],[ref]$seconds) -or $seconds -lt 0 -or $seconds -gt 1200) { throw 'wait must be between 0 and 1200 seconds.' }
+            if ($parts.Count -lt 2 -or -not [int]::TryParse($parts[1],[ref]$seconds) -or $seconds -lt 0 -or $seconds -gt 1200) { throw (New-QacS22R10OperatorInputException 'wait must be between 0 and 1200 seconds.') }
             $until = [DateTimeOffset]::UtcNow.AddSeconds($seconds)
             while ([DateTimeOffset]::UtcNow -lt $until -and -not $script:QacProcess.HasExited) {
                 Read-SerialAvailable
@@ -614,7 +638,7 @@ function Invoke-GuestOperatorCommand {
             return $false
         }
         'result' {
-            if ($parts.Count -lt 2) { throw 'result requires pass or fail.' }
+            if ($parts.Count -lt 2) { throw (New-QacS22R10OperatorInputException 'result requires pass or fail.') }
             $kind = $parts[1].ToLowerInvariant()
             if ($kind -eq 'pass') {
                 $guest = if ($null -ne $script:Com2TcpPort) {
@@ -628,14 +652,14 @@ function Invoke-GuestOperatorCommand {
             } elseif ($kind -eq 'fail') {
                 $script:Execution.guestResult = 'FAIL'
                 $script:Execution.guestResultReason = if ($parts.Count -ge 3) { $parts[2] } else { 'Operator classified the existing guest smoke workflow as failed.' }
-            } else { throw 'result requires pass or fail.' }
+            } else { throw (New-QacS22R10OperatorInputException 'result requires pass or fail.') }
             $script:Execution.timings.guestCompletionOrFailureAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
             Set-ExecutionState -State 'GuestEvaluationComplete' -Data @{guestResult=$script:Execution.guestResult;reason=$script:Execution.guestResultReason}
             Write-Host "Guest result recorded: $($script:Execution.guestResult) — $($script:Execution.guestResultReason)"
             return $false
         }
         { $_ -in @('shutdown','quit','done') } {
-            if ($script:Execution.guestResult -notin @('PASS','FAIL')) { throw 'Record the guest result before requesting QMP shutdown.' }
+            if ($script:Execution.guestResult -notin @('PASS','FAIL')) { throw (New-QacS22R10OperatorInputException 'Record the guest result before requesting QMP shutdown.') }
             Confirm-QacRuntimeOwnership
             $script:Execution.timings.qmpShutdownRequestedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
             Set-ExecutionState -State 'ShutdownRequested' -Data @{qmpEndpoint=$script:Execution.qmp.endpoint}
@@ -646,7 +670,7 @@ function Invoke-GuestOperatorCommand {
             Write-Host 'QMP quit was acknowledged; waiting for QAC to verify exact child exit and reservation release.'
             return $true
         }
-        default { throw "Unknown guest operator command: $($parts[0]). Type help." }
+        default { throw (New-QacS22R10OperatorInputException "Unknown guest operator command: $($parts[0]). Type help.") }
     }
 }
 
@@ -668,7 +692,8 @@ function New-QacExecutionProcess {
 
 function Complete-QacAttempt {
     param([Parameter(Mandatory)][Diagnostics.Process]$Process)
-    $waitSeconds = if ($script:Execution.timings.qmpShutdownRequestedAtUtc) { $ShutdownTimeoutSeconds } else { 30 }
+    $shutdownObserved = $script:Execution.timings.qmpShutdownRequestedAtUtc -or $script:Execution.timings.guestShutdownObservedAtUtc
+    $waitSeconds = if ($shutdownObserved) { $ShutdownTimeoutSeconds } else { 30 }
     $deadline = [DateTimeOffset]::UtcNow.AddSeconds($waitSeconds)
     while (-not $Process.HasExited -and [DateTimeOffset]::UtcNow -lt $deadline) {
         Drain-QacOutput -Process $Process -StdoutTask ([ref]$script:StdoutTask) -StderrTask ([ref]$script:StderrTask)
@@ -758,7 +783,7 @@ try {
         reservationReleaseVerified=$false; recoveryRequired=$false;
         manifestSchemaVersion=1; failureDetails=$null; qmp=[ordered]@{endpoint=$null;status='not-allocated';ownership='unbound';quitAcknowledged=$false;quitResponse=$null;lastConnectionError=$null;lastListenerProbe=$null};
         qemuArguments=@(); persistentDataVolume=$null; com2Transport=[ordered]@{enabled=($null -ne $Com2TcpPort);port=if($null -ne $Com2TcpPort){[int]$Com2TcpPort}else{$null};endpoint=if($null -ne $Com2TcpPort){'127.0.0.1:{0}' -f [int]$Com2TcpPort}else{$null}}; guestResult='INCOMPLETE'; guestResultReason=$null; cleanupEligible=$false;
-        timings=[ordered]@{stagingStartAtUtc=$null;stagingCompleteAtUtc=$null;reservationRequestedAtUtc=$null;reservationGrantedAtUtc=$null;qemuChildStartAtUtc=$null;firstGuestProgressAtUtc=$null;guestCompletionOrFailureAtUtc=$null;qmpShutdownRequestedAtUtc=$null;qemuChildExitAtUtc=$null;qacReleaseReportedAtUtc=$null;qacReleaseVerifiedAtUtc=$null};
+        timings=[ordered]@{stagingStartAtUtc=$null;stagingCompleteAtUtc=$null;reservationRequestedAtUtc=$null;reservationGrantedAtUtc=$null;qemuChildStartAtUtc=$null;firstGuestProgressAtUtc=$null;guestCompletionOrFailureAtUtc=$null;qmpShutdownRequestedAtUtc=$null;guestShutdownObservedAtUtc=$null;qemuChildExitAtUtc=$null;qacReleaseReportedAtUtc=$null;qacReleaseVerifiedAtUtc=$null};
         attempts=[System.Collections.Generic.List[object]]::new(); events=[System.Collections.Generic.List[object]]::new()
     }
 
@@ -1199,7 +1224,18 @@ try {
                             }
                             continue
                         }
-                        if (Invoke-GuestOperatorCommand -Text $operatorLine) { $smokeCompleted = $true; break }
+                        $operatorCommandCompleted = $false
+                        try {
+                            $operatorCommandCompleted = Invoke-GuestOperatorCommand -Text $operatorLine
+                        } catch {
+                            if (Test-QacS22R10OperatorInputException -Exception $_.Exception) {
+                                Add-ExecutionEvent -Type 'operator-command-rejected' -Data @{command=$operatorLine;reason=$_.Exception.Message}
+                                Write-Host "Command rejected: $($_.Exception.Message) The QAC session remains active."
+                                continue
+                            }
+                            throw
+                        }
+                        if ($operatorCommandCompleted) { $smokeCompleted = $true; break }
                     }
                 }
             }

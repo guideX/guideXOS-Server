@@ -278,11 +278,12 @@ try {
     function Confirm-QacRuntimeOwnership { }
     $script:ScreenshotPath=Join-Path $first.OutputDirectory 'screenshots'
     $script:QmpClient=[PSCustomObject]@{fixture=$true}
-    $script:Execution=[ordered]@{guestResult='INCOMPLETE';events=[System.Collections.Generic.List[object]]::new();qmp=[ordered]@{endpoint='127.0.0.1:50001'};childProcessId=1234}
+    $script:Execution=[ordered]@{guestResult='INCOMPLETE';events=[System.Collections.Generic.List[object]]::new();qmp=[ordered]@{endpoint='127.0.0.1:50001'};childProcessId=1234;timings=[ordered]@{qmpShutdownRequestedAtUtc=$null;guestShutdownObservedAtUtc=$null}}
     $script:QmpCommandCalls=0
     $script:LastQmpCommand=$null
     $script:QmpCalls=[System.Collections.Generic.List[object]]::new()
     $script:QmpKeyUpFailureCount=0
+    $script:QmpButtonUpFailureCount=0
     function Invoke-QacS22R10Qmp {
         param($Client,[string]$Execute,[hashtable]$Arguments,[int]$TimeoutMilliseconds)
         $script:QmpCommandCalls++
@@ -292,10 +293,21 @@ try {
             $script:QmpKeyUpFailureCount--
             throw 'fixture key-up failure'
         }
+        if ($Execute -eq 'input-send-event' -and $script:QmpButtonUpFailureCount -gt 0 -and $Arguments.events[0].type -eq 'btn' -and $Arguments.events[0].data.down -eq $false) {
+            $script:QmpButtonUpFailureCount--
+            throw 'QMP command failed: {"class":"GenericError","desc":"VM not running"}'
+        }
+        if ($Execute -eq 'quit') { return @{return=@{}} }
         return 'fixture screendump failure'
     }
     [void](Assert-Throws 'unsafe screenshot labels that could traverse directories are rejected' { Invoke-GuestOperatorCommand 'screenshot ..\outside' } 'safe alphanumeric label')
     Assert-True 'unsafe screenshot labels are rejected before contacting QMP' ($script:QmpCommandCalls -eq 0)
+    $moveInputRejected=$false
+    try { [void](Invoke-GuestOperatorCommand 'move 50,0') } catch { $moveInputRejected=Test-QacS22R10OperatorInputException -Exception $_.Exception }
+    Assert-True 'out-of-range relative mouse input is tagged for safe interactive rejection before QMP control' ($moveInputRejected -and $script:QmpCommandCalls -eq 0)
+    $overflowMoveInputRejected=$false
+    try { [void](Invoke-GuestOperatorCommand 'move 999999999999999999999999,0') } catch { $overflowMoveInputRejected=Test-QacS22R10OperatorInputException -Exception $_.Exception }
+    Assert-True 'overflowing relative mouse input is rejected as local input instead of an unhandled conversion failure' ($overflowMoveInputRejected -and $script:QmpCommandCalls -eq 0)
     [void](Assert-Throws 'QMP screenshot failures remain explicit operator errors' { Invoke-GuestOperatorCommand 'screenshot initial' } 'screendump command failed')
     $expectedScreenshot=Join-Path $script:ScreenshotPath 'initial.ppm'
     $expectedScreenshotCommand=New-QacS22R10ScreendumpCommand -Path $expectedScreenshot
@@ -305,7 +317,7 @@ try {
         param([Parameter(Mandatory)][string]$Type,[Parameter(Mandatory)][hashtable]$Data)
         $script:Execution.events.Add([PSCustomObject]@{type=$Type;data=$Data})
     }
-    foreach ($keyCase in @(@{Input='key slash';Expected='sendkey slash'},@{Input='key dot';Expected='sendkey dot'},@{Input='key shift-semicolon';Expected='sendkey shift-semicolon'},@{Input='key shift-a';Expected='sendkey shift-a'})) {
+    foreach ($keyCase in @(@{Input='key slash';Expected='sendkey slash'},@{Input='key dot';Expected='sendkey dot'},@{Input='key backspace';Expected='sendkey backspace'},@{Input='key shift-semicolon';Expected='sendkey shift-semicolon'},@{Input='key shift-a';Expected='sendkey shift-a'})) {
         [void](Invoke-GuestOperatorCommand $keyCase.Input)
         Assert-True "Navigator URL punctuation/uppercase key '$($keyCase.Input)' is sent through the owned QMP client" ($script:LastQmpCommand.Execute -eq 'human-monitor-command' -and $script:LastQmpCommand.Arguments['command-line'] -eq $keyCase.Expected)
     }
@@ -319,16 +331,53 @@ try {
     $script:Execution.events.Clear(); $script:QmpKeyUpFailureCount=1
     [void](Assert-Throws 'paired QMP key-up failures remain visible to the operator' { Invoke-GuestOperatorCommand 'qkey left' } 'fixture key-up failure')
     Assert-True 'paired QMP key attempts an ownership-checked fail-safe key-up after an up failure' ($script:QmpCalls.Count -eq 3 -and $script:QmpCalls[2].Execute -eq 'input-send-event' -and $script:QmpCalls[2].Arguments.events[0].data.down -eq $false -and @($script:Execution.events | Where-Object { $_.type -eq 'guest-qcode-key-failsafe-up' }).Count -eq 1)
+    function Read-SerialAvailable { }
+    $shutdownMessage=[ordered]@{event='SHUTDOWN';data=[ordered]@{guest=$true;reason='guest-shutdown'}} | ConvertTo-Json -Compress
+    $shutdownStopMessage=[ordered]@{event='STOP'} | ConvertTo-Json -Compress
+    $shutdownReturnMessage=[ordered]@{return=[ordered]@{}} | ConvertTo-Json -Compress
+    $shutdownTranscriptRecord=[ordered]@{direction='RX';line=$shutdownMessage} | ConvertTo-Json -Compress
+    $shutdownStopRecord=[ordered]@{direction='RX';line=$shutdownStopMessage} | ConvertTo-Json -Compress
+    $shutdownReturnRecord=[ordered]@{direction='RX';line=$shutdownReturnMessage} | ConvertTo-Json -Compress
+    $shutdownFailureRecord=[ordered]@{direction='RX';line='{"id":296,"error":{"class":"GenericError","desc":"VM not running"}}'} | ConvertTo-Json -Compress
+    $script:QmpTranscriptPath=Join-Path $first.OutputDirectory 'qmp-guest-shutdown-fixture.jsonl'
+    [IO.File]::WriteAllLines($script:QmpTranscriptPath,[string[]]@($shutdownReturnRecord,$shutdownTranscriptRecord,$shutdownStopRecord,$shutdownFailureRecord),(New-Object Text.UTF8Encoding($false)))
+    $normalShutdownLine='[SHUTDOWN] final reason=system-shutdown exitCode=0 caller=desktop expected=1 runtime=none app=none'
+    $script:SerialLines=[System.Collections.Generic.List[string]]::new(); $script:SerialLines.Add($normalShutdownLine)
+    $script:Execution.events.Clear(); $script:QmpCalls.Clear(); $script:QmpButtonUpFailureCount=1
+    $shutdownClickResult=Invoke-GuestOperatorCommand 'click left'
+    Assert-True 'desktop shutdown during mouse-up requires QMP guest-shutdown and the exact normal serial marker before ownership-checked QMP quit' ($shutdownClickResult -eq $true -and $script:QmpCalls.Count -eq 3 -and $script:QmpCalls[2].Execute -eq 'quit' -and $script:Execution.qmp.quitAcknowledged -and @($script:Execution.events | Where-Object { $_.type -eq 'guest-shutdown-observed-during-button-release' }).Count -eq 1 -and @($script:Execution.events | Where-Object { $_.type -eq 'qmp-quit-after-guest-shutdown-acknowledged' }).Count -eq 1 -and $script:Execution.timings.guestShutdownObservedAtUtc)
+    $script:SerialLines.Clear(); $script:SerialLines.Add('[SHUTDOWN] final reason=system-shutdown exitCode=1 caller=desktop expected=1 runtime=none app=none')
+    $script:Execution.events.Clear(); $script:QmpCalls.Clear(); $script:QmpButtonUpFailureCount=1
+    [void](Assert-Throws 'button-up VM-not-running without the exact normal desktop serial marker remains a failure' { Invoke-GuestOperatorCommand 'click left' } 'VM not running')
+    Assert-True 'unqualified mouse-up failure keeps the existing best-effort button release path' ($script:QmpCalls.Count -eq 3 -and @($script:Execution.events | Where-Object { $_.type -eq 'guest-pointer-button-failsafe-up' }).Count -eq 1)
     Remove-Item Function:\Invoke-QacS22R10Qmp -Force -ErrorAction SilentlyContinue
     Remove-Item Function:\Add-ExecutionEvent -Force -ErrorAction SilentlyContinue
     Remove-Item Function:\Confirm-QacRuntimeOwnership -Force -ErrorAction SilentlyContinue
+    Remove-Item Function:\Read-SerialAvailable -Force -ErrorAction SilentlyContinue
     Import-Module $launchPath -Force -ErrorAction Stop
     Remove-Item Function:\Invoke-GuestOperatorCommand -Force -ErrorAction SilentlyContinue
-    $script:ScreenshotPath=$null; $script:QmpClient=$null; $script:Execution=$null; $script:QmpCommandCalls=$null; $script:LastQmpCommand=$null; $script:QmpCalls=$null; $script:QmpKeyUpFailureCount=$null
+    $script:ScreenshotPath=$null; $script:QmpClient=$null; $script:Execution=$null; $script:QmpCommandCalls=$null; $script:LastQmpCommand=$null; $script:QmpCalls=$null; $script:QmpKeyUpFailureCount=$null; $script:QmpButtonUpFailureCount=$null; $script:QmpTranscriptPath=$null; $script:SerialLines=$null
 
     Assert-True 'coordinator online status is required for launch' (Test-QacS22R10CoordinatorOnline -StatusOutput "Coordinator: Online`nManaged sessions: 0" -ExitCode 0)
     Assert-True 'coordinator unavailability fails closed' (-not (Test-QacS22R10CoordinatorOnline -StatusOutput 'Coordinator: Unavailable' -ExitCode 2))
     Assert-True 'coordinator recovery state fails closed' (-not (Test-QacS22R10CoordinatorOnline -StatusOutput "Coordinator: Online`nRecovery: Required" -ExitCode 0))
+    $normalShutdownLine='[SHUTDOWN] final reason=system-shutdown exitCode=0 caller=desktop expected=1 runtime=none app=none'
+    $shutdownMessage=[ordered]@{event='SHUTDOWN';data=[ordered]@{guest=$true;reason='guest-shutdown'}} | ConvertTo-Json -Compress
+    $shutdownStopMessage=[ordered]@{event='STOP'} | ConvertTo-Json -Compress
+    $shutdownReturnMessage=[ordered]@{return=[ordered]@{}} | ConvertTo-Json -Compress
+    $shutdownTranscriptRecord=[ordered]@{direction='RX';line=$shutdownMessage} | ConvertTo-Json -Compress
+    $shutdownStopRecord=[ordered]@{direction='RX';line=$shutdownStopMessage} | ConvertTo-Json -Compress
+    $shutdownReturnRecord=[ordered]@{direction='RX';line=$shutdownReturnMessage} | ConvertTo-Json -Compress
+    $shutdownFailureRecord=[ordered]@{direction='RX';line='{"id":450,"error":{"class":"GenericError","desc":"VM not running"}}'} | ConvertTo-Json -Compress
+    $mixedShutdownTranscript=@($shutdownReturnRecord,$shutdownTranscriptRecord,$shutdownStopRecord,$shutdownFailureRecord)
+    $vmNotRunningFailure='QMP command failed: {"class":"GenericError","desc":"VM not running"}'
+    Assert-True 'normal guest shutdown recognition tolerates ordinary QMP responses and STOP events around the exact guest-shutdown event' (Test-QacS22R10ExpectedGuestShutdownAfterInputReleaseFailure -FailureMessage $vmNotRunningFailure -QmpTranscriptLines $mixedShutdownTranscript -ObservedSerialLines @($normalShutdownLine))
+    Assert-True 'shutdown QMP evidence without the normal serial marker is rejected' (-not (Test-QacS22R10ExpectedGuestShutdownAfterInputReleaseFailure -FailureMessage $vmNotRunningFailure -QmpTranscriptLines $mixedShutdownTranscript -ObservedSerialLines @('[SHUTDOWN] final reason=system-shutdown exitCode=1 caller=desktop expected=1 runtime=none app=none')))
+    Assert-True 'shutdown serial marker without the QMP guest event is rejected' (-not (Test-QacS22R10ExpectedGuestShutdownAfterInputReleaseFailure -FailureMessage $vmNotRunningFailure -QmpTranscriptLines @() -ObservedSerialLines @($normalShutdownLine)))
+    Assert-True 'other QMP failures cannot be classified as expected guest shutdown' (-not (Test-QacS22R10ExpectedGuestShutdownAfterInputReleaseFailure -FailureMessage 'QMP read timed out or failed.' -QmpTranscriptLines @($shutdownTranscriptRecord) -ObservedSerialLines @($normalShutdownLine)))
+    $operatorInputException=New-QacS22R10OperatorInputException 'fixture rejected input'
+    Assert-True 'local guest operator input errors carry a dedicated recovery classification' (Test-QacS22R10OperatorInputException -Exception $operatorInputException)
+    Assert-True 'ordinary QMP exceptions do not carry the local input classification' (-not (Test-QacS22R10OperatorInputException -Exception ([System.Exception]::new('fixture QMP failure'))))
     Assert-True 'queued QAC request can be cancelled without launching QEMU' (Test-QacS22R10QueuedCancellationNeeded -ReservationState 'Waiting' -CancellationRequested $true)
     Assert-True 'blocked acceptance request can be cancelled while queued' (Test-QacS22R10QueuedCancellationNeeded -ReservationState 'Blocked' -CancellationRequested $true)
     Assert-True 'running QAC reservation cannot be cancelled through queued path' (-not (Test-QacS22R10QueuedCancellationNeeded -ReservationState 'Running' -CancellationRequested $true))
@@ -505,6 +554,9 @@ try {
 
     $runnerSource=Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\run-qac-s22r10-uefi.ps1') -Raw
     Assert-True 'interactive runner ignores empty console lines instead of terminating an active QAC guest' ($runnerSource -match 'if \(\[string\]::IsNullOrWhiteSpace\(\$operatorLine\)\)\s*\{[\s\S]{0,1024}continue')
+    Assert-True 'interactive runner continues only after tagged local input rejection and rethrows control or ownership failures' ($runnerSource -match 'Test-QacS22R10OperatorInputException\s+-Exception \$_\.Exception' -and $runnerSource -match "operator-command-rejected" -and $runnerSource -match 'The QAC session remains active' -and $runnerSource -match '\n\s*throw\s*\n\s*}\n\s*if \(\$operatorCommandCompleted\)')
+    Assert-True 'mouse release shutdown-race recovery requires transcript and serial evidence before returning to QAC completion' ($runnerSource -match 'Test-QacS22R10ExpectedGuestShutdownAfterInputReleaseFailure' -and $runnerSource -match 'guest-shutdown-observed-during-button-release' -and $runnerSource -match 'return \$true\s*\n\s*}\s*throw \$buttonReleaseFailure')
+    Assert-True 'normal guest shutdown requires fresh QAC ownership before QMP quit and then uses the bounded configured exit window' ($runnerSource -match '\[ValidateRange\(1,120\)\]\[int\]\$ShutdownTimeoutSeconds\s*=\s*30' -and $runnerSource -match 'guestShutdownObservedAtUtc\s*=\s*\[DateTimeOffset\]::UtcNow\.ToString\(''O''\)' -and $runnerSource -match 'Confirm-QacRuntimeOwnership\s*\n\s*\$reply = Invoke-QacS22R10Qmp -Client \$script:QmpClient -Execute ''quit''' -and $runnerSource -match 'qmp-quit-after-guest-shutdown-acknowledged' -and $runnerSource -match '\$shutdownObserved\s*=\s*\$script:Execution\.timings\.qmpShutdownRequestedAtUtc\s*-or\s*\$script:Execution\.timings\.guestShutdownObservedAtUtc' -and $runnerSource -match 'guestShutdownObservedAtUtc=\$null')
     Assert-True 'COM2 qualification option is recorded in the run manifest and forwarded through QEMU arguments while preserving QAC acceptance management' ($runnerSource -match '\[ValidateRange\(49152,65535\)\]\[Nullable\[int\]\]\$Com2TcpPort' -and $launchModuleSource -match 'qualifiedOperation = ''read-only GetStorageSnapshot request type 0004''' -and $runnerSource -match 'Set-QacS22R10Com2ManifestTransport\s+-Manifest \$manifest\s+-Port' -and $runnerSource -match 'New-QacS22R10QemuArguments[^\r\n]*-Com2TcpPort \$Com2TcpPort' -and $runnerSource -match "mode='acceptance'" -and $runnerSource -match 'New-QacS22R10QacArguments')
     Assert-True 'guest command handler accepts and ignores an empty Text value before command parsing' ($runnerSource -match 'function Invoke-GuestOperatorCommand\s*\{\s*param\(\[Parameter\(Mandatory\)\]\[AllowEmptyString\(\)\]\[string\]\$Text\)' -and $runnerSource -match 'if \(-not \$trimmed\)\s*\{\s*\$script:CurrentStage = ''guest-interaction''\s*\$script:CurrentOperation = ''ignored-empty-console-line''\s*return \$false')
     Assert-True 'ignored blank console input is recorded with its interaction stage' ($runnerSource.Contains('empty-console-line-ignored'' -Data @{stage=$script:CurrentStage}'))
@@ -520,7 +572,7 @@ try {
     Assert-True 'empty Text reaches the handler as a harmless no-op rather than a parameter-binding exception' ($emptyCommandResult -eq $false -and $script:CurrentStage -eq 'guest-interaction' -and $script:CurrentOperation -eq 'ignored-empty-console-line')
     $script:CurrentStage=$priorStage; $script:CurrentOperation=$priorOperation
     Remove-Item Function:\Invoke-GuestOperatorCommand -ErrorAction SilentlyContinue
-    Assert-True 'live runner provides relative PS/2 pointer movement over its owned QMP connection with a per-axis -49..49 bound' ($runnerSource -match "'move'\s*\{" -and $runnerSource -match "-Execute 'input-send-event'" -and $runnerSource -match '\[Math\]::Abs\(\$dx\) -gt 49 -or \[Math\]::Abs\(\$dy\) -gt 49')
+    Assert-True 'live runner provides relative PS/2 pointer movement over its owned QMP connection with a per-axis -49..49 bound' ($runnerSource -match "'move'\s*\{" -and $runnerSource -match "-Execute 'input-send-event'" -and $runnerSource -match '\[Math\]::Abs\(\[long\]\$dx\) -gt 49 -or \[Math\]::Abs\(\[long\]\$dy\) -gt 49')
     Assert-True 'live runner revalidates QAC reservation, exact child, and listener before control and pairs mouse button down/up' ($runnerSource -match 'function Confirm-QacRuntimeOwnership' -and $runnerSource -match "'click'\s*\{" -and $runnerSource -match 'Confirm-QacRuntimeOwnership\s*\n\s*\$buttonMayBeDown = \$true' -and $runnerSource -match 'guest-pointer-button-failsafe-up')
     $listenerLoopIndex=$runnerSource.IndexOf('while ([DateTimeOffset]::UtcNow -lt $startupDeadline',[StringComparison]::Ordinal)
     $ownershipGateIndex=$runnerSource.IndexOf('if ($listening) {',[StringComparison]::Ordinal)

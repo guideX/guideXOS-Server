@@ -235,6 +235,61 @@ function Test-QacS22R10CoordinatorOnline {
     return $ExitCode -eq 0 -and $StatusOutput -match '(?m)^Coordinator: Online\s*$' -and $StatusOutput -notmatch '(?i)Recovery:\s*Required'
 }
 
+function New-QacS22R10OperatorInputException {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Message)
+    $exception = [ArgumentException]::new($Message)
+    $exception.Data['QacGuestOperatorInputError'] = $true
+    return $exception
+}
+
+function Test-QacS22R10OperatorInputException {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][System.Exception]$Exception)
+    return $null -ne $Exception.Data -and $Exception.Data.Contains('QacGuestOperatorInputError') -and [bool]$Exception.Data['QacGuestOperatorInputError']
+}
+
+function Test-QacS22R10ExpectedGuestShutdownAfterInputReleaseFailure {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$FailureMessage,
+        [string[]]$QmpTranscriptLines = @(),
+        [string[]]$ObservedSerialLines = @()
+    )
+
+    $qmpErrorPrefix = 'QMP command failed: '
+    if (-not $FailureMessage.StartsWith($qmpErrorPrefix,[StringComparison]::Ordinal)) { return $false }
+    try { $qmpError = $FailureMessage.Substring($qmpErrorPrefix.Length) | ConvertFrom-Json -ErrorAction Stop } catch { return $false }
+    if ([string]$qmpError.class -cne 'GenericError' -or [string]$qmpError.desc -cne 'VM not running') { return $false }
+
+    $guestShutdownObserved = $false
+    foreach ($transcriptLine in $QmpTranscriptLines) {
+        try { $record = $transcriptLine | ConvertFrom-Json -ErrorAction Stop } catch { continue }
+        $directionProperty = $record.PSObject.Properties['direction']
+        $lineProperty = $record.PSObject.Properties['line']
+        if ($null -eq $directionProperty -or $null -eq $lineProperty -or [string]$directionProperty.Value -cne 'RX') { continue }
+        try { $message = [string]$lineProperty.Value | ConvertFrom-Json -ErrorAction Stop } catch { continue }
+        $eventProperty = $message.PSObject.Properties['event']
+        $dataProperty = $message.PSObject.Properties['data']
+        if ($null -eq $eventProperty -or $null -eq $dataProperty) { continue }
+        $guestProperty = $dataProperty.Value.PSObject.Properties['guest']
+        $reasonProperty = $dataProperty.Value.PSObject.Properties['reason']
+        if ($null -ne $guestProperty -and $null -ne $reasonProperty -and
+            [string]$eventProperty.Value -ceq 'SHUTDOWN' -and [bool]$guestProperty.Value -and
+            [string]$reasonProperty.Value -ceq 'guest-shutdown') {
+            $guestShutdownObserved = $true
+            break
+        }
+    }
+    if (-not $guestShutdownObserved) { return $false }
+
+    $normalDesktopShutdownMarker = '^\[SHUTDOWN\] final reason=system-shutdown exitCode=0 caller=desktop expected=1 runtime=none app=none$'
+    foreach ($serialLine in $ObservedSerialLines) {
+        if ([string]$serialLine -cmatch $normalDesktopShutdownMarker) { return $true }
+    }
+    return $false
+}
+
 function Test-QacS22R10QueuedCancellationNeeded {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$ReservationState, [Parameter(Mandatory)][bool]$CancellationRequested)
@@ -787,4 +842,4 @@ function Close-QacS22R10QmpClient {
     try { $Client.Tcp.Dispose() } catch { }
 }
 
-Export-ModuleMember -Function Get-QacS22R10FullPath, Get-QacS22R10ArtifactIdentity, Get-QacS22R10ValidatedManifest, Get-QacS22R10QmpPortCandidate, New-QacS22R10QacArguments, Test-QacS22R10CoordinatorOnline, Test-QacS22R10QueuedCancellationNeeded, Set-QacS22R10Com2ManifestTransport, New-QacS22R10QemuArguments, Test-QacS22R10DirectChildIdentity, Test-QacS22R10ReservationIdentity, Test-QacS22R10ReleaseIdentity, New-QacS22R10ScreendumpCommand, Test-QacS22R10QmpListenerOwner, Get-QacS22R10QmpListenerObservation, Test-QacS22R10ContinuationAuthorization, Stop-QacS22R10OwnedChild, Test-QacS22R10RetryablePortCollision, Test-QacS22R10MarkerWithinDeadline, Get-QacS22R10GuestResult, Get-QacS22R10Com2GuestResult, Test-QacS22R10CleanupEligible, Complete-QacS22R10ProcessOutputDrain, Open-QacS22R10QmpClient, Invoke-QacS22R10Qmp, Initialize-QacS22R10QmpClient, Close-QacS22R10QmpClient
+Export-ModuleMember -Function Get-QacS22R10FullPath, Get-QacS22R10ArtifactIdentity, Get-QacS22R10ValidatedManifest, Get-QacS22R10QmpPortCandidate, New-QacS22R10QacArguments, Test-QacS22R10CoordinatorOnline, New-QacS22R10OperatorInputException, Test-QacS22R10OperatorInputException, Test-QacS22R10ExpectedGuestShutdownAfterInputReleaseFailure, Test-QacS22R10QueuedCancellationNeeded, Set-QacS22R10Com2ManifestTransport, New-QacS22R10QemuArguments, Test-QacS22R10DirectChildIdentity, Test-QacS22R10ReservationIdentity, Test-QacS22R10ReleaseIdentity, New-QacS22R10ScreendumpCommand, Test-QacS22R10QmpListenerOwner, Get-QacS22R10QmpListenerObservation, Test-QacS22R10ContinuationAuthorization, Stop-QacS22R10OwnedChild, Test-QacS22R10RetryablePortCollision, Test-QacS22R10MarkerWithinDeadline, Get-QacS22R10GuestResult, Get-QacS22R10Com2GuestResult, Test-QacS22R10CleanupEligible, Complete-QacS22R10ProcessOutputDrain, Open-QacS22R10QmpClient, Invoke-QacS22R10Qmp, Initialize-QacS22R10QmpClient, Close-QacS22R10QmpClient
