@@ -3,7 +3,9 @@
 
 #include "kernel/arch/arm64/phase2_el0.h"
 #include "kernel/arch/arm64/phase2_mmu.h"
+#include "kernel/arch/arm64/phase3_timer.h"
 #include "kernel/core/include/kernel/common_physical_allocator.h"
+#include "kernel/core/include/kernel/common_scheduler.h"
 
 extern "C" void* phase2_el0_host_physical_pointer(uint64_t physical_address);
 
@@ -16,6 +18,25 @@ static bool g_page_allocated[kArenaPages];
 static uint64_t g_current_root = kPhysicalBase;
 static uint64_t g_assertions = 0;
 static uint64_t g_failures = 0;
+static uint64_t g_host_counter = 0;
+static uint64_t g_timer_start_count = 0;
+static bool g_host_irq_enabled = false;
+alignas(4096) static uint8_t g_scheduler_stacks[16][0x2000];
+static bool g_scheduler_stack_used[16];
+static uint32_t g_scheduler_context_count = 0;
+static uint64_t g_scheduler_switch_count = 0;
+static uint64_t g_interrupt_frame[40];
+
+struct SchedulerMockContext {
+    uint64_t stack_base;
+    uint64_t stack_size;
+    kernel::arch::thread_entry_t entry;
+    void* argument;
+};
+static SchedulerMockContext g_scheduler_contexts[32];
+static uint64_t g_context_switch_marker = 0;
+
+static void kernel_owner_entry(void*) {}
 
 static void expect(bool condition, const char* label)
 {
@@ -422,6 +443,340 @@ static void test_kernel_and_mmio_negative_probes()
            "MMIO probe restores the kernel root and releases every page");
 }
 
+static void allocate_scheduler_pages(uint64_t pages, uint64_t* base)
+{
+    if (!base || pages != 2) { if (base) *base = 0; return; }
+    for (uint32_t i = 0; i < 16; ++i) {
+        if (g_scheduler_stack_used[i]) continue;
+        g_scheduler_stack_used[i] = true;
+        for (uint32_t j = 0; j < sizeof(g_scheduler_stacks[i]); ++j)
+            g_scheduler_stacks[i][j] = 0;
+        *base = reinterpret_cast<uint64_t>(g_scheduler_stacks[i]);
+        return;
+    }
+    *base = 0;
+}
+
+static bool release_scheduler_pages(uint64_t base, uint64_t pages)
+{
+    if (pages != 2) return false;
+    for (uint32_t i = 0; i < 16; ++i) {
+        if (reinterpret_cast<uint64_t>(g_scheduler_stacks[i]) != base ||
+            !g_scheduler_stack_used[i]) continue;
+        g_scheduler_stack_used[i] = false;
+        return true;
+    }
+    return false;
+}
+
+static void* find_execution_task(uint64_t execution_id)
+{
+    for (uint32_t i = 0; i < 16; ++i) {
+        kernel::scheduler::Task* task = kernel::scheduler::task_at(i);
+        if (task && task->execution_id == execution_id) return task;
+    }
+    return nullptr;
+}
+
+static void test_scheduled_el0_runtime_host_simulation()
+{
+    reset_fake_memory();
+    for (uint32_t i = 0; i < 16; ++i) g_scheduler_stack_used[i] = false;
+    g_scheduler_context_count = 0;
+    g_scheduler_switch_count = 0;
+    g_host_counter = 0;
+    g_timer_start_count = 0;
+    kernel::scheduler::Config config{
+        allocate_scheduler_pages, 2, 1, UINT64_C(1000000), release_scheduler_pages
+    };
+    expect(kernel::scheduler::initialize(config),
+           "common scheduler accepts the hosted EL0 runtime fixture configuration");
+    kernel::scheduler::Task* owner = kernel::scheduler::create_task(
+        501, "hosted-owner", kernel_owner_entry, nullptr, true);
+    expect(owner != nullptr, "create a kernel task as child launch owner");
+    kernel::scheduler::set_phase(kernel::scheduler::PHASE_SCHEDULED);
+    expect(kernel::scheduler::prepare_interrupt_contexts(),
+           "prepare the owner's common scheduler exception context");
+    kernel::scheduler::start();
+    expect(kernel::scheduler::current_task() == owner,
+           "common scheduler owns the current launch task");
+    expect(phase2_el0_task_runtime_ready(),
+           "EL0 runtime reports its timer and scheduler dependencies ready");
+
+    uint64_t finite_id = 0;
+    uint64_t loop_id = 0;
+    uint64_t cancel_before_id = 0;
+    uint64_t cancel_running_id = 0;
+    uint64_t fault_id = 0;
+    expect(!phase2_el0_task_create_fixture(
+               GXOS_AARCH64_EL0_FIXTURE_FINITE_PREEMPTION, 502, 10000, &finite_id),
+           "reject child creation from an unowned launch task");
+    expect(!phase2_el0_task_create_fixture(
+               GXOS_AARCH64_EL0_FIXTURE_FINITE_PREEMPTION, owner->id, 999, &finite_id),
+           "reject a child budget below the configured minimum");
+    const uint8_t simd_payload[] = { 0x00, 0x28, 0x20, 0x1e }; // fadd s0, s0, s0
+    expect(!phase2_el0_task_create(simd_payload, sizeof(simd_payload), owner->id,
+                                   10000, &finite_id),
+           "reject SIMD payloads until the child context owns FP/SIMD state");
+    expect(phase2_el0_task_create_fixture(
+               GXOS_AARCH64_EL0_FIXTURE_FINITE_PREEMPTION, owner->id, 10000, &finite_id) &&
+           phase2_el0_task_create_fixture(
+               GXOS_AARCH64_EL0_FIXTURE_NONCOOPERATIVE, owner->id, 1000, &loop_id) &&
+           phase2_el0_task_create_fixture(
+               GXOS_AARCH64_EL0_FIXTURE_CANCELLATION, owner->id, 5000, &cancel_before_id) &&
+           phase2_el0_task_create_fixture(
+               GXOS_AARCH64_EL0_FIXTURE_CANCELLATION, owner->id, 5000, &cancel_running_id) &&
+           phase2_el0_task_create_fixture(
+               GXOS_AARCH64_EL0_FIXTURE_PROTECTED_MEMORY_FAULT, owner->id, 5000, &fault_id),
+           "create five trusted EL0 child contexts without making them runnable");
+
+    kernel::scheduler::Task* finite = static_cast<kernel::scheduler::Task*>(
+        find_execution_task(finite_id));
+    kernel::scheduler::Task* loop = static_cast<kernel::scheduler::Task*>(
+        find_execution_task(loop_id));
+    kernel::scheduler::Task* cancel_before = static_cast<kernel::scheduler::Task*>(
+        find_execution_task(cancel_before_id));
+    kernel::scheduler::Task* cancel_running = static_cast<kernel::scheduler::Task*>(
+        find_execution_task(cancel_running_id));
+    kernel::scheduler::Task* fault = static_cast<kernel::scheduler::Task*>(
+        find_execution_task(fault_id));
+    expect(finite && loop && cancel_before && cancel_running && fault &&
+           finite->execution_address_space != loop->execution_address_space &&
+           finite->execution_context != loop->execution_context &&
+           finite->owner_id == owner->id && loop->owner_id == owner->id,
+           "each child owns a distinct context and address space under its parent identity");
+
+    gxos_aarch64_el0_task_result result{};
+    expect(!phase2_el0_task_start(UINT64_C(0xdead), owner->id),
+           "reject start for a stale execution identity");
+    expect(phase2_el0_task_query(finite_id, owner->id, &result) &&
+           result.state == kernel::scheduler::EXECUTION_CREATED &&
+           result.result_kind == kernel::scheduler::EXECUTION_RESULT_NONE,
+           "created children remain non-runnable with no completion value");
+
+    expect(phase2_el0_task_start(finite_id, owner->id),
+           "make a fully validated child runnable through the common scheduler");
+    g_host_counter = 10;
+    expect(kernel::scheduler::timer_interrupt_at(g_interrupt_frame, g_host_counter) != nullptr &&
+           kernel::scheduler::current_task() == finite &&
+           finite->execution_state == kernel::scheduler::EXECUTION_READY,
+           "host-simulated timer selection enters a ready EL0 task's kernel trampoline");
+    gxos_aarch64_el0_context* finite_context =
+        static_cast<gxos_aarch64_el0_context*>(finite->execution_context);
+    gxos_aarch64_el0_address_space* finite_space =
+        static_cast<gxos_aarch64_el0_address_space*>(finite->execution_address_space);
+    expect(phase2_el0_begin_context(finite_space, finite_context, finite_context->owner_id) &&
+           kernel::scheduler::mark_el0_running(finite, g_host_counter),
+           "validated child activation binds EL0 state to the selected scheduler task");
+
+    bool repeated_preemptions = true;
+    uint64_t child_registers[31]{};
+    child_registers[19] = UINT64_C(0x19191919);
+    repeated_preemptions = phase2_el0_suspend_for_schedule(
+        child_registers, finite_context->entry_pc, 0x340, finite_context->sp_el0) &&
+        kernel::scheduler::timer_interrupt_at(g_interrupt_frame, 110) != nullptr &&
+        kernel::scheduler::current_task() == owner && finite->execution_consumed == 100;
+    g_host_counter = 200;
+    void* resumed = kernel::scheduler::timer_interrupt_at(g_interrupt_frame, g_host_counter);
+    repeated_preemptions = repeated_preemptions &&
+        kernel::scheduler::current_task() == finite && resumed &&
+        (reinterpret_cast<uintptr_t>(resumed) & 1) != 0 &&
+        phase2_el0_resume_for_schedule(finite_space, finite_context, finite_context->owner_id) &&
+        kernel::scheduler::mark_el0_resumed(finite, g_host_counter) &&
+        phase2_mmu_current_root() == finite_space->root;
+    expect(repeated_preemptions && phase2_mmu_current_root() == finite_space->root,
+           "host-simulated preemption restores the matching child root and GPR context");
+
+    child_registers[19] = UINT64_C(0x20202020);
+    repeated_preemptions = repeated_preemptions &&
+        phase2_el0_suspend_for_schedule(child_registers, finite_context->entry_pc + 4,
+                                        0x340, finite_context->sp_el0) &&
+        kernel::scheduler::timer_interrupt_at(g_interrupt_frame, 500) != nullptr &&
+        kernel::scheduler::current_task() == owner && finite->execution_consumed == 400;
+    g_host_counter = 600;
+    resumed = kernel::scheduler::timer_interrupt_at(g_interrupt_frame, g_host_counter);
+    repeated_preemptions = repeated_preemptions && resumed &&
+        (reinterpret_cast<uintptr_t>(resumed) & 1) != 0 &&
+        phase2_el0_resume_for_schedule(finite_space, finite_context, finite_context->owner_id) &&
+        kernel::scheduler::mark_el0_resumed(finite, g_host_counter);
+    expect(repeated_preemptions && finite->execution_state == kernel::scheduler::EXECUTION_RUNNING,
+           "a second independently saved EL0 frame resumes without losing ownership");
+
+    uint64_t svc_frame[31]{};
+    svc_frame[0] = 42;
+    svc_frame[8] = GXOS_AARCH64_EL0_EXIT_SERVICE;
+    gxos_aarch64_el0_context* returned_context = nullptr;
+    expect(phase2_el0_dispatch_exception(
+               svc_frame, GXOS_AARCH64_EL0_VECTOR_LOWER_SYNC_A64,
+               UINT64_C(0x15) << 26, finite_context->entry_pc + 24,
+               0x340, 0, &returned_context) && returned_context == finite_context &&
+           kernel::scheduler::mark_el0_returning(finite, 700) &&
+           phase2_el0_task_finish_exception(finite),
+           "normal SVC completion keeps the child's actual return value and cleans its space");
+    g_host_counter = 700;
+    expect(kernel::scheduler::timer_interrupt_at(g_interrupt_frame, g_host_counter) != nullptr &&
+           kernel::scheduler::current_task() == owner,
+           "finished child returns control through the normal scheduler timer path");
+    expect(phase2_el0_task_query(finite_id, owner->id, &result) &&
+           result.state == kernel::scheduler::EXECUTION_COMPLETED &&
+           result.result_kind == kernel::scheduler::EXECUTION_RESULT_EXIT &&
+           result.result_value == 42 && result.resources_cleaned,
+           "completion reporting preserves the real SVC result 42");
+    expect(!phase2_el0_task_cancel(finite_id, owner->id) &&
+           !kernel::scheduler::complete_el0_task(
+               finite, kernel::scheduler::EXECUTION_COMPLETED,
+               kernel::scheduler::EXECUTION_RESULT_EXIT, 43),
+           "cancellation after exit and duplicate completion cannot replace the real result");
+    expect(phase2_el0_task_reap(finite_id, owner->id) &&
+           !kernel::scheduler::request_el0_cancel(finite),
+           "reaping releases the inactive kernel stack and rejects the stale task pointer");
+
+    expect(phase2_el0_task_cancel(cancel_before_id, owner->id) &&
+           phase2_el0_task_query(cancel_before_id, owner->id, &result) &&
+           result.state == kernel::scheduler::EXECUTION_CANCELLED &&
+           result.result_kind == kernel::scheduler::EXECUTION_RESULT_CANCEL &&
+           result.result_value == 0 && result.resources_cleaned,
+           "cancellation before launch is terminal only after address-space cleanup");
+    expect(phase2_el0_task_reap(cancel_before_id, owner->id),
+           "cancelled unlaunched task can be reaped once");
+
+    expect(phase2_el0_task_start(loop_id, owner->id),
+           "start the non-cooperative trusted loop through scheduler ownership");
+    g_host_counter = 800;
+    expect(kernel::scheduler::timer_interrupt_at(g_interrupt_frame, g_host_counter) != nullptr &&
+           kernel::scheduler::current_task() == loop,
+           "scheduler dispatches the non-cooperative child fixture");
+    gxos_aarch64_el0_context* loop_context =
+        static_cast<gxos_aarch64_el0_context*>(loop->execution_context);
+    gxos_aarch64_el0_address_space* loop_space =
+        static_cast<gxos_aarch64_el0_address_space*>(loop->execution_address_space);
+    expect(phase2_el0_begin_context(loop_space, loop_context, loop_context->owner_id) &&
+           kernel::scheduler::mark_el0_running(loop, g_host_counter) &&
+           phase2_el0_suspend_for_schedule(child_registers, loop_context->entry_pc,
+                                           0x340, loop_context->sp_el0) &&
+           kernel::scheduler::timer_interrupt_at(g_interrupt_frame, 1801) != nullptr &&
+           kernel::scheduler::current_task() == owner &&
+           loop->execution_state == kernel::scheduler::EXECUTION_TIMED_OUT &&
+           phase2_el0_task_finish_preempted(loop),
+           "a non-cooperative loop is stopped at the child budget on a simulated timer IRQ");
+    expect(phase2_el0_task_query(loop_id, owner->id, &result) &&
+           result.state == kernel::scheduler::EXECUTION_TIMED_OUT &&
+           result.result_kind == kernel::scheduler::EXECUTION_RESULT_TIMEOUT &&
+           result.result_value == 0 && result.resources_cleaned,
+           "timeout is distinct from exit and never fabricates an exit value");
+    expect(!phase2_el0_task_cancel(loop_id, owner->id) &&
+           phase2_el0_task_reap(loop_id, owner->id),
+           "timeout wins over later cancellation and remains reapable");
+
+    expect(phase2_el0_task_start(cancel_running_id, owner->id),
+           "start the separate cancellation target");
+    g_host_counter = 1900;
+    expect(kernel::scheduler::timer_interrupt_at(g_interrupt_frame, g_host_counter) != nullptr &&
+           kernel::scheduler::current_task() == cancel_running,
+           "cancellation target becomes scheduler owned");
+    gxos_aarch64_el0_context* cancel_context =
+        static_cast<gxos_aarch64_el0_context*>(cancel_running->execution_context);
+    gxos_aarch64_el0_address_space* cancel_space =
+        static_cast<gxos_aarch64_el0_address_space*>(cancel_running->execution_address_space);
+    expect(phase2_el0_begin_context(cancel_space, cancel_context, cancel_context->owner_id) &&
+           kernel::scheduler::mark_el0_running(cancel_running, g_host_counter) &&
+           phase2_el0_suspend_for_schedule(child_registers, cancel_context->entry_pc,
+                                           0x340, cancel_context->sp_el0) &&
+           kernel::scheduler::timer_interrupt_at(g_interrupt_frame, 2000) != nullptr &&
+           kernel::scheduler::current_task() == owner &&
+           phase2_el0_task_cancel(cancel_running_id, owner->id),
+           "external cancellation terminates a preempted non-cooperative child");
+    expect(phase2_el0_task_query(cancel_running_id, owner->id, &result) &&
+           result.state == kernel::scheduler::EXECUTION_CANCELLED &&
+           result.result_kind == kernel::scheduler::EXECUTION_RESULT_CANCEL &&
+           result.result_value == 0 && result.resources_cleaned &&
+           phase2_el0_task_reap(cancel_running_id, owner->id),
+           "preempted cancellation records no synthetic child return and reaps cleanly");
+
+    expect(phase2_el0_task_start(fault_id, owner->id), "start the protected-memory fault fixture");
+    g_host_counter = 2100;
+    expect(kernel::scheduler::timer_interrupt_at(g_interrupt_frame, g_host_counter) != nullptr &&
+           kernel::scheduler::current_task() == fault,
+           "fault fixture enters through the common scheduler");
+    gxos_aarch64_el0_context* fault_context =
+        static_cast<gxos_aarch64_el0_context*>(fault->execution_context);
+    gxos_aarch64_el0_address_space* fault_space =
+        static_cast<gxos_aarch64_el0_address_space*>(fault->execution_address_space);
+    expect(phase2_el0_begin_context(fault_space, fault_context, fault_context->owner_id) &&
+           kernel::scheduler::mark_el0_running(fault, g_host_counter),
+           "fault fixture owns an active child root before its simulated access");
+    gxos_aarch64_el0_context* fault_return = nullptr;
+    expect(phase2_el0_dispatch_exception(
+               child_registers, GXOS_AARCH64_EL0_VECTOR_LOWER_SYNC_A64,
+               (UINT64_C(0x24) << 26) | UINT64_C(0x0f),
+               fault_context->entry_pc + 4, 0x340, UINT64_C(0x40000000), &fault_return) &&
+           kernel::scheduler::mark_el0_returning(fault, 2150) &&
+           fault_return == fault_context && phase2_el0_task_finish_exception(fault),
+           "protected-memory exception becomes a fault result and restores the kernel root");
+    g_host_counter = 2200;
+    kernel::scheduler::timer_interrupt_at(g_interrupt_frame, g_host_counter);
+    expect(kernel::scheduler::current_task() == owner &&
+           phase2_el0_task_query(fault_id, owner->id, &result) &&
+           result.state == kernel::scheduler::EXECUTION_FAULTED &&
+           result.result_kind == kernel::scheduler::EXECUTION_RESULT_FAULT &&
+           result.result_value == GXOS_AARCH64_EL0_FAULT_DATA_ABORT &&
+           result.resources_cleaned && !phase2_el0_task_cancel(fault_id, owner->id) &&
+           phase2_el0_task_reap(fault_id, owner->id),
+           "fault wins over later cancellation and remains distinguishable after cleanup");
+
+    uint64_t final_budget_id = 0;
+    expect(phase2_el0_task_create_fixture(
+               GXOS_AARCH64_EL0_FIXTURE_FINITE_PREEMPTION, owner->id, 1000,
+               &final_budget_id) &&
+           phase2_el0_task_start(final_budget_id, owner->id),
+           "create and start a child with a finite final-return budget");
+    kernel::scheduler::Task* final_budget = static_cast<kernel::scheduler::Task*>(
+        find_execution_task(final_budget_id));
+    g_host_counter = 2300;
+    expect(final_budget &&
+           kernel::scheduler::timer_interrupt_at(g_interrupt_frame, g_host_counter) != nullptr &&
+           kernel::scheduler::current_task() == final_budget,
+           "dispatch the final-return budget fixture");
+    gxos_aarch64_el0_context* final_budget_context =
+        static_cast<gxos_aarch64_el0_context*>(final_budget->execution_context);
+    gxos_aarch64_el0_address_space* final_budget_space =
+        static_cast<gxos_aarch64_el0_address_space*>(final_budget->execution_address_space);
+    uint64_t final_budget_svc_frame[31]{};
+    final_budget_svc_frame[0] = 42;
+    final_budget_svc_frame[8] = GXOS_AARCH64_EL0_EXIT_SERVICE;
+    gxos_aarch64_el0_context* final_budget_return = nullptr;
+    g_host_counter = 2300;
+    expect(phase2_el0_begin_context(final_budget_space, final_budget_context,
+                                    final_budget_context->owner_id) &&
+           kernel::scheduler::mark_el0_running(final_budget, g_host_counter) &&
+           phase2_el0_dispatch_exception(
+               final_budget_svc_frame, GXOS_AARCH64_EL0_VECTOR_LOWER_SYNC_A64,
+               UINT64_C(0x15) << 26, final_budget_context->entry_pc + 24,
+               0x340, 0, &final_budget_return) &&
+           final_budget_return == final_budget_context,
+           "capture an exit after the child budget without a preceding timer interrupt");
+    g_host_counter = 3301;
+    expect(kernel::scheduler::mark_el0_returning(final_budget, g_host_counter) &&
+           phase2_el0_task_finish_exception(final_budget) &&
+           final_budget->execution_state == kernel::scheduler::EXECUTION_TIMED_OUT &&
+           final_budget->execution_result_kind == kernel::scheduler::EXECUTION_RESULT_TIMEOUT &&
+           final_budget->execution_result == 0 && final_budget->resources_cleaned,
+           "the final return-time counter closes the budget and suppresses a late exit value");
+    g_host_counter = 3400;
+    expect(kernel::scheduler::timer_interrupt_at(g_interrupt_frame, g_host_counter) != nullptr &&
+           kernel::scheduler::current_task() == owner &&
+           phase2_el0_task_query(final_budget_id, owner->id, &result) &&
+           result.state == kernel::scheduler::EXECUTION_TIMED_OUT &&
+           result.result_kind == kernel::scheduler::EXECUTION_RESULT_TIMEOUT &&
+           result.result_value == 0 && result.resources_cleaned &&
+           phase2_el0_task_reap(final_budget_id, owner->id),
+           "reap the final-return timeout after scheduler handoff");
+
+    expect(g_timer_start_count == 5,
+           "each started execution arms the existing architectural timer path");
+    printf("EL0 scheduled-task controls used hosted timer/exception simulation; no native proof.\n");
+}
+
 } // namespace
 
 extern "C" void* phase2_el0_host_physical_pointer(uint64_t physical_address)
@@ -496,6 +851,68 @@ extern "C" void phase3_serial_print(const char*) {}
 extern "C" void phase3_serial_hex(uint64_t) {}
 extern "C" uint64_t phase3_el0_enter(gxos_aarch64_el0_context*) { return 0; }
 
+void phase3_timer_start() { ++g_timer_start_count; }
+uint32_t phase3_timer_irq() { return 30; }
+uint64_t phase3_timer_frequency() { return UINT64_C(1000000); }
+uint64_t phase3_timer_count() { return 0; }
+uint64_t phase3_timer_counter() { return g_host_counter; }
+
+namespace kernel {
+namespace arch {
+
+interrupt_state_t irq_save()
+{
+    const interrupt_state_t previous = g_host_irq_enabled ? 1 : 0;
+    g_host_irq_enabled = false;
+    return previous;
+}
+void irq_restore(interrupt_state_t state) { g_host_irq_enabled = state != 0; }
+void irq_enable() { g_host_irq_enabled = true; }
+void irq_disable() { g_host_irq_enabled = false; }
+void idle() {}
+void memory_barrier() {}
+const char* interface_name() { return "host-simulated-arm64"; }
+
+void* context_init(uint64_t stack_base, uint64_t stack_size,
+                   thread_entry_t entry, void* argument)
+{
+    if (!entry || g_scheduler_context_count >= 32) return nullptr;
+    SchedulerMockContext* context = &g_scheduler_contexts[g_scheduler_context_count++];
+    context->stack_base = stack_base;
+    context->stack_size = stack_size;
+    context->entry = entry;
+    context->argument = argument;
+    return context;
+}
+
+void context_switch(void** old_context, void*)
+{
+    ++g_scheduler_switch_count;
+    if (old_context) *old_context = &g_context_switch_marker;
+}
+
+bool interrupt_frame_save(void* frame, void* destination)
+{
+    if (!frame || !destination) return false;
+    uint64_t* target = static_cast<uint64_t*>(destination);
+    for (uint32_t i = 0; i < kInterruptContextWords; ++i) target[i] = 0;
+    const uint64_t* source = static_cast<const uint64_t*>(frame);
+    for (uint32_t i = 0; i < 31; ++i) target[i] = source[i];
+    return true;
+}
+
+bool context_to_interrupt(void* context, void* destination)
+{
+    if (!context || !destination) return false;
+    uint64_t* target = static_cast<uint64_t*>(destination);
+    for (uint32_t i = 0; i < kInterruptContextWords; ++i) target[i] = 0;
+    target[0] = reinterpret_cast<uint64_t>(context);
+    return true;
+}
+
+} // namespace arch
+} // namespace kernel
+
 int main()
 {
     reset_fake_memory();
@@ -504,13 +921,14 @@ int main()
     test_faults_and_owner_integrity();
     test_invalid_descriptors_and_repeated_cleanup();
     test_kernel_and_mmio_negative_probes();
+    test_scheduled_el0_runtime_host_simulation();
     if (g_failures != 0) {
         printf("AARCH64_EL0_HOST_FAIL assertions=%llu failures=%llu\n",
                static_cast<unsigned long long>(g_assertions),
                static_cast<unsigned long long>(g_failures));
         return 1;
     }
-    printf("AARCH64_EL0_HOST_PASS assertions=%llu scope=structural-simulation\n",
+    printf("AARCH64_EL0_HOST_PASS assertions=%llu scope=structural-and-hosted-scheduler-simulation\n",
            static_cast<unsigned long long>(g_assertions));
     return 0;
 }

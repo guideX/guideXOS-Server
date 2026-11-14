@@ -46,6 +46,7 @@ static const uint64_t kUxn = UINT64_C(1) << 54;
 static const uint64_t kUserRootIndex =
     (GXOS_AARCH64_EL0_USER_BASE >> 39) & UINT64_C(0x1ff);
 static const uint64_t kExpectedUserPstate = UINT64_C(0x3c0); // EL0t, D/A/I/F masked.
+static const uint64_t kScheduledUserPstate = UINT64_C(0x340); // EL0t, IRQs enabled.
 static const uint64_t kQualificationOwner = UINT64_C(0x454c305155414c31); // "EL0QUAL1"
 
 static uint64_t g_next_space_identity = 1;
@@ -439,6 +440,25 @@ extern "C" uint8_t phase2_el0_allocate_page(
     return 1;
 }
 
+extern "C" uint8_t phase2_el0_copy_code(
+    gxos_aarch64_el0_address_space* space, uint64_t owner_id,
+    uint64_t virtual_address, const uint8_t* image, uint64_t image_size)
+{
+    const gxos_aarch64_el0_mapping* mapping = nullptr;
+    uint64_t descriptor = 0;
+    if (!space || !image || image_size == 0 || image_size > GXOS_AARCH64_EL0_PAGE_SIZE ||
+        owner_id == 0 || owner_id != space->owner_id ||
+        !mapping_for(space, virtual_address, &mapping) ||
+        (mapping->flags & GXOS_AARCH64_EL0_PAGE_EXECUTE) == 0 ||
+        (mapping->flags & GXOS_AARCH64_EL0_PAGE_WRITE) != 0 ||
+        !lookup_mapping(space, virtual_address, &descriptor)) return 0;
+    uint8_t* destination = static_cast<uint8_t*>(physical_pointer(mapping->physical_address));
+    if (!destination) return 0;
+    for (uint64_t i = 0; i < image_size; ++i) destination[i] = image[i];
+    sync_user_instruction_page(mapping->physical_address);
+    return 1;
+}
+
 extern "C" uint8_t phase2_el0_query_descriptor(
     const gxos_aarch64_el0_address_space* space, uint64_t virtual_address,
     uint64_t* descriptor)
@@ -466,7 +486,9 @@ extern "C" uint8_t phase2_el0_validate_context(
         expected_owner_id == 0 || expected_owner_id != space->owner_id ||
         context->state != GXOS_AARCH64_EL0_CONTEXT_PREPARED ||
         context->address_space_id != space->identity ||
-        context->owner_id != expected_owner_id || context->pstate != kExpectedUserPstate ||
+        context->owner_id != expected_owner_id ||
+        (context->pstate != kExpectedUserPstate &&
+         context->pstate != kScheduledUserPstate) ||
         !phase2_el0_validate_entry(space, context->entry_pc) ||
         !phase2_el0_validate_stack(space, context->sp_el0)) return 0;
     return 1;
@@ -506,6 +528,87 @@ extern "C" uint8_t phase2_el0_deactivate(gxos_aarch64_el0_address_space* space)
     space->state = GXOS_AARCH64_EL0_SPACE_CREATED;
     g_active_space = nullptr;
     g_active_context = nullptr;
+    return 1;
+}
+
+extern "C" uint8_t phase2_el0_suspend_for_schedule(
+    uint64_t* register_frame, uint64_t elr, uint64_t spsr, uint64_t sp_el0)
+{
+    if (!register_frame || !g_active_space || !g_active_context ||
+        g_active_space->state != GXOS_AARCH64_EL0_SPACE_ACTIVE ||
+        g_active_context->state != GXOS_AARCH64_EL0_CONTEXT_RUNNING ||
+        (spsr & UINT64_C(0x3ff)) != kScheduledUserPstate ||
+        phase2_mmu_current_root() != g_active_space->root ||
+        !mapping_executable(g_active_space, elr) ||
+        !mapping_stack(g_active_space, sp_el0)) return 0;
+    gxos_aarch64_el0_context* context = g_active_context;
+    for (uint32_t i = 0; i < 31; ++i) context->x[i] = register_frame[i];
+    context->sp_el0 = sp_el0;
+    context->entry_pc = elr;
+    context->pstate = spsr;
+    context->state = GXOS_AARCH64_EL0_CONTEXT_PREEMPTED;
+    if (!phase2_el0_deactivate(g_active_space)) {
+        context->state = GXOS_AARCH64_EL0_CONTEXT_RUNNING;
+        return 0;
+    }
+    return 1;
+}
+
+extern "C" uint8_t phase2_el0_resume_for_schedule(
+    gxos_aarch64_el0_address_space* space,
+    gxos_aarch64_el0_context* context, uint64_t expected_owner_id)
+{
+    if (!space || !context || g_active_space || g_active_context ||
+        space->state != GXOS_AARCH64_EL0_SPACE_CREATED ||
+        context->state != GXOS_AARCH64_EL0_CONTEXT_PREEMPTED ||
+        expected_owner_id == 0 || expected_owner_id != space->owner_id ||
+        context->owner_id != expected_owner_id ||
+        context->address_space_id != space->identity ||
+        (context->pstate & UINT64_C(0x3ff)) != kScheduledUserPstate ||
+        !mapping_executable(space, context->entry_pc) ||
+        !mapping_stack(space, context->sp_el0)) return 0;
+    context->state = GXOS_AARCH64_EL0_CONTEXT_RUNNING;
+    if (!phase2_el0_activate(space)) {
+        context->state = GXOS_AARCH64_EL0_CONTEXT_PREEMPTED;
+        return 0;
+    }
+    g_active_context = context;
+    return 1;
+}
+
+extern "C" uint8_t phase2_el0_terminate_preempted(
+    gxos_aarch64_el0_address_space* space,
+    gxos_aarch64_el0_context* context, uint64_t expected_owner_id,
+    uint64_t terminal_state)
+{
+    if (!space || !context || expected_owner_id == 0 ||
+        expected_owner_id != space->owner_id || context->owner_id != expected_owner_id ||
+        context->address_space_id != space->identity || space == g_active_space ||
+        phase2_mmu_current_root() == space->root ||
+        (terminal_state != GXOS_AARCH64_EL0_CONTEXT_TIMED_OUT &&
+         terminal_state != GXOS_AARCH64_EL0_CONTEXT_CANCELLED)) return 0;
+    if (context->state == GXOS_AARCH64_EL0_CONTEXT_PREEMPTED ||
+        (terminal_state == GXOS_AARCH64_EL0_CONTEXT_CANCELLED &&
+         context->state == GXOS_AARCH64_EL0_CONTEXT_PREPARED)) {
+        context->state = terminal_state;
+        space->state = GXOS_AARCH64_EL0_SPACE_TERMINAL;
+    } else if (context->state != terminal_state &&
+               space->state != GXOS_AARCH64_EL0_SPACE_CLEANED) {
+        return 0;
+    }
+    return phase2_el0_cleanup(space);
+}
+
+extern "C" uint8_t phase2_el0_task_active_context(
+    const gxos_aarch64_el0_address_space** space,
+    gxos_aarch64_el0_context** context)
+{
+    if (!space || !context || !g_active_space || !g_active_context ||
+        g_active_space->state != GXOS_AARCH64_EL0_SPACE_ACTIVE ||
+        g_active_context->state != GXOS_AARCH64_EL0_CONTEXT_RUNNING ||
+        phase2_mmu_current_root() != g_active_space->root) return 0;
+    *space = g_active_space;
+    *context = g_active_context;
     return 1;
 }
 

@@ -105,7 +105,28 @@ extern "C" void* phase3_exception_dispatch(uint64_t* frame, uint64_t vector_clas
             if (!phase3_irq_ack_valid(acknowledgement)) {
                 fatal("invalid lower-EL IRQ acknowledgement");
             }
+#if defined(GXOS_AARCH64_PHASE4)
+            const uint32_t irq = phase3_irq_id(acknowledgement);
+            if (!kernel::irq::has_handler(irq)) {
+                kernel::scheduler::note_unexpected_irq(irq);
+                phase3_irq_complete(acknowledgement);
+                return nullptr;
+            }
+            void* next = phase4_irq_dispatch(irq, frame);
             phase3_irq_complete(acknowledgement);
+            return next;
+#else
+            const uint32_t irq = phase3_irq_id(acknowledgement);
+            if (irq != phase3_timer_irq()) {
+                phase3_irq_complete(acknowledgement);
+                fatal("unexpected lower-EL IRQ");
+            }
+            phase3_timer_ack_and_rearm();
+            void* next = kernel::scheduler::timer_interrupt_at(
+                frame, phase3_timer_counter());
+            phase3_irq_complete(acknowledgement);
+            return next;
+#endif
         }
         gxos_aarch64_el0_context* return_context = nullptr;
         if (!phase2_el0_dispatch_exception(frame, vector_class,

@@ -182,6 +182,11 @@ static void allocate_pages(uint64_t pages, uint64_t* base)
     }
 }
 
+static bool release_pages(uint64_t base, uint64_t pages)
+{
+    return kernel::memory::release_pages(base, pages);
+}
+
 static void print(const char* value) { phase3_serial_print(value); }
 
 static void print_dtb_property_rejection(const gxos_aarch64_phase2_platform* platform)
@@ -1399,7 +1404,47 @@ static void graphics_task(void*)
 static void* timer_handler(uint32_t, void* frame, void*)
 {
     phase3_timer_ack_and_rearm();
-    return kernel::scheduler::timer_interrupt(frame);
+    const uint64_t now = phase3_timer_counter();
+#if defined(GXOS_AARCH64_EL0_ISOLATION)
+    kernel::scheduler::Task* interrupted = kernel::scheduler::current_task();
+    if (interrupted && interrupted->execution_kind == kernel::scheduler::EXECUTION_EL0_CHILD &&
+        interrupted->execution_state == kernel::scheduler::EXECUTION_RUNNING) {
+        uint64_t elr = 0;
+        uint64_t spsr = 0;
+        uint64_t sp_el0 = 0;
+        __asm__ volatile("mrs %0, elr_el1\n mrs %1, spsr_el1\n mrs %2, sp_el0"
+                         : "=r"(elr), "=r"(spsr), "=r"(sp_el0));
+        if (!phase2_el0_suspend_for_schedule(static_cast<uint64_t*>(frame), elr, spsr, sp_el0)) {
+            phase3_serial_print("[guideXOS] EL0 timer capture failed; child remains isolated\n");
+            return nullptr;
+        }
+    }
+#endif
+    void* selected = kernel::scheduler::timer_interrupt_at(frame, now);
+#if defined(GXOS_AARCH64_EL0_ISOLATION)
+    if (interrupted && interrupted->execution_kind == kernel::scheduler::EXECUTION_EL0_CHILD &&
+        (interrupted->execution_state == kernel::scheduler::EXECUTION_TIMED_OUT ||
+         interrupted->execution_state == kernel::scheduler::EXECUTION_CANCELLED)) {
+        if (!phase2_el0_task_finish_preempted(interrupted)) {
+            phase3_serial_print("[guideXOS] EL0 terminal cleanup failed\n");
+            for (;;) __asm__ volatile("wfi");
+        }
+    }
+    kernel::scheduler::Task* next = kernel::scheduler::current_task();
+    if (next && next->execution_kind == kernel::scheduler::EXECUTION_EL0_CHILD &&
+        next->execution_state == kernel::scheduler::EXECUTION_PREEMPTED) {
+        gxos_aarch64_el0_context* context =
+            static_cast<gxos_aarch64_el0_context*>(next->execution_context);
+        gxos_aarch64_el0_address_space* space =
+            static_cast<gxos_aarch64_el0_address_space*>(next->execution_address_space);
+        if (!phase2_el0_resume_for_schedule(space, context, context->owner_id) ||
+            !kernel::scheduler::mark_el0_resumed(next, now)) {
+            phase3_serial_print("[guideXOS] EL0 resume failed; kernel stopped safely\n");
+            for (;;) __asm__ volatile("wfi");
+        }
+    }
+#endif
+    return selected;
 }
 
 static bool heap_stress()
@@ -1949,9 +1994,12 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
 
     kernel::common::KernelEntryConfig config = {
         allocate_pages, 16, kCooperativeTarget, kPreemptionTarget,
-        kernel::arch::interface_name(), print
+        kernel::arch::interface_name(), print, release_pages
     };
     if (!kernel::common::kernel_entry_init(config)) fail("common kernel entry: FAIL");
+#if defined(GXOS_AARCH64_EL0_ISOLATION)
+    if (!phase2_el0_task_runtime_ready()) fail("scheduled EL0 runtime: unavailable");
+#endif
     print("[guideXOS] scheduler: initialized\n");
 
     kernel::scheduler::Task* workers[3] = {};

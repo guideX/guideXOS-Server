@@ -38,7 +38,11 @@ enum gxos_aarch64_el0_context_state {
     GXOS_AARCH64_EL0_CONTEXT_PREPARED = 1,
     GXOS_AARCH64_EL0_CONTEXT_RUNNING = 2,
     GXOS_AARCH64_EL0_CONTEXT_EXITED = 3,
-    GXOS_AARCH64_EL0_CONTEXT_FAULTED = 4
+    GXOS_AARCH64_EL0_CONTEXT_FAULTED = 4,
+    GXOS_AARCH64_EL0_CONTEXT_PREEMPTED = 5,
+    GXOS_AARCH64_EL0_CONTEXT_TIMED_OUT = 6,
+    GXOS_AARCH64_EL0_CONTEXT_CANCELLED = 7,
+    GXOS_AARCH64_EL0_CONTEXT_START_FAILED = 8
 };
 
 enum gxos_aarch64_el0_fault_reason {
@@ -54,6 +58,13 @@ enum gxos_aarch64_el0_fault_reason {
 enum gxos_aarch64_el0_negative_probe {
     GXOS_AARCH64_EL0_PROBE_KERNEL_DATA = 1,
     GXOS_AARCH64_EL0_PROBE_DEVICE_MMIO = 2
+};
+
+enum gxos_aarch64_el0_qualification_fixture {
+    GXOS_AARCH64_EL0_FIXTURE_FINITE_PREEMPTION = 1,
+    GXOS_AARCH64_EL0_FIXTURE_NONCOOPERATIVE = 2,
+    GXOS_AARCH64_EL0_FIXTURE_CANCELLATION = 3,
+    GXOS_AARCH64_EL0_FIXTURE_PROTECTED_MEMORY_FAULT = 4
 };
 
 struct gxos_aarch64_el0_negative_probe_result {
@@ -120,6 +131,18 @@ struct gxos_aarch64_el0_context {
     uint64_t kernel_sp;
 };
 
+struct gxos_aarch64_el0_task_result {
+    uint64_t execution_id;
+    uint64_t owner_id;
+    uint64_t state;
+    uint64_t result_kind;
+    uint64_t result_value;
+    uint64_t cpu_time_counter_ticks;
+    uint64_t budget_counter_ticks;
+    uint64_t cancel_requested;
+    uint64_t resources_cleaned;
+};
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -132,6 +155,9 @@ uint8_t phase2_el0_allocate_page(gxos_aarch64_el0_address_space* space,
 uint8_t phase2_el0_map_owned_page(gxos_aarch64_el0_address_space* space,
                                   uint64_t owner_id, uint64_t virtual_address,
                                   uint64_t physical_address, uint64_t flags);
+uint8_t phase2_el0_copy_code(gxos_aarch64_el0_address_space* space,
+                             uint64_t owner_id, uint64_t virtual_address,
+                             const uint8_t* image, uint64_t image_size);
 uint8_t phase2_el0_query_descriptor(const gxos_aarch64_el0_address_space* space,
                                     uint64_t virtual_address,
                                     uint64_t* descriptor);
@@ -147,6 +173,16 @@ uint8_t phase2_el0_begin_context(gxos_aarch64_el0_address_space* space,
                                 uint64_t expected_owner_id);
 uint8_t phase2_el0_activate(gxos_aarch64_el0_address_space* space);
 uint8_t phase2_el0_deactivate(gxos_aarch64_el0_address_space* space);
+uint8_t phase2_el0_suspend_for_schedule(uint64_t* register_frame,
+                                        uint64_t elr, uint64_t spsr,
+                                        uint64_t sp_el0);
+uint8_t phase2_el0_resume_for_schedule(
+    gxos_aarch64_el0_address_space* space,
+    gxos_aarch64_el0_context* context, uint64_t expected_owner_id);
+uint8_t phase2_el0_terminate_preempted(
+    gxos_aarch64_el0_address_space* space,
+    gxos_aarch64_el0_context* context, uint64_t expected_owner_id,
+    uint64_t terminal_state);
 uint8_t phase2_el0_cleanup(gxos_aarch64_el0_address_space* space);
 uint8_t phase2_el0_dispatch_exception(uint64_t* register_frame,
                                       uint64_t vector_class,
@@ -158,6 +194,26 @@ uint8_t phase2_el0_run_qualification(uint64_t* observed_exit_value,
 uint8_t phase2_el0_run_negative_probe(uint64_t probe_kind,
                                       uint64_t device_address,
                                       gxos_aarch64_el0_negative_probe_result* result);
+uint8_t phase2_el0_task_create(const uint8_t* trusted_image,
+                               uint64_t image_size, uint64_t owner_id,
+                               uint64_t budget_microseconds,
+                               uint64_t* execution_id);
+uint8_t phase2_el0_task_start(uint64_t execution_id, uint64_t owner_id);
+uint8_t phase2_el0_task_query(uint64_t execution_id, uint64_t owner_id,
+                              gxos_aarch64_el0_task_result* result);
+uint8_t phase2_el0_task_cancel(uint64_t execution_id, uint64_t owner_id);
+uint8_t phase2_el0_task_reap(uint64_t execution_id, uint64_t owner_id);
+uint8_t phase2_el0_task_create_fixture(uint64_t fixture_kind,
+                                       uint64_t owner_id,
+                                       uint64_t budget_microseconds,
+                                       uint64_t* execution_id);
+uint8_t phase2_el0_task_active_context(
+    const gxos_aarch64_el0_address_space** space,
+    gxos_aarch64_el0_context** context);
+uint64_t phase2_el0_task_clock_now();
+uint8_t phase2_el0_task_runtime_ready();
+uint8_t phase2_el0_task_finish_preempted(void* scheduler_task);
+uint8_t phase2_el0_task_finish_exception(void* scheduler_task);
 
 #ifdef __cplusplus
 }

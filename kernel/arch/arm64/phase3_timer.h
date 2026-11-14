@@ -9,4 +9,5 @@ void phase3_timer_stop();
 uint32_t phase3_timer_irq();
 uint64_t phase3_timer_frequency();
 uint64_t phase3_timer_count();
+uint64_t phase3_timer_counter();
 

@@ -72,4 +72,10 @@ void phase3_timer_stop()
 uint32_t phase3_timer_irq() { return gTimerIrq; }
 uint64_t phase3_timer_frequency() { return gFrequency; }
 uint64_t phase3_timer_count() { return gCount; }
+uint64_t phase3_timer_counter()
+{
+    uint64_t value = 0;
+    __asm__ volatile("mrs %0, cntpct_el0" : "=r"(value));
+    return value;
+}
 

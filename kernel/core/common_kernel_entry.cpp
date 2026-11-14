@@ -13,7 +13,8 @@ bool kernel_entry_init(const KernelEntryConfig& config)
         config.allocate_pages,
         config.stack_pages,
         config.cooperative_switch_target,
-        config.preemption_target
+        config.preemption_target,
+        config.release_pages
     };
     if (!scheduler::initialize(schedulerConfig)) return false;
     if (config.log) {

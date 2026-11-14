@@ -16,6 +16,7 @@ struct KernelEntryConfig {
     uint64_t preemption_target;
     const char* architecture_name;
     void (*log)(const char*);
+    scheduler::page_release_fn release_pages;
 };
 
 bool kernel_entry_init(const KernelEntryConfig& config);
