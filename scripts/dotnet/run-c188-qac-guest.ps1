@@ -4,6 +4,7 @@ param(
     [Parameter(Mandatory=$true)][ValidateSet('identity','lifecycle','coexistence','production-startup','production-apps','production-lifecycle','registry-input-reentry','managed-state-provenance','settings-handoff-diagnostic')][string]$Scenario,
     [Parameter()][switch]$ProductionCompatibility,
     [Parameter()][switch]$EnableGdbStub,
+    [Parameter()][switch]$CaptureCpuOnReadinessTimeout,
     [Parameter()][ValidateRange(60,3600)][int]$MaxRuntimeSeconds = 1200,
     [Parameter()][ValidateRange(30,300)][int]$BootTimeoutSeconds = 180,
     [Parameter()][ValidateRange(30,1800)][int]$AdmissionTimeoutSeconds = 1750,
@@ -235,6 +236,46 @@ function Invoke-Qmp([string]$Command,[object]$Arguments=$null) {
     } finally { $client.Dispose() }
 }
 
+function Save-C188R24TimeoutCpuSnapshot {
+    $snapshotPath = Join-Path $bootRoot 'cpu-timeout-snapshot.json'
+    $registerPath = Join-Path $bootRoot 'cpu-timeout-registers.txt'
+    if ((Test-Path -LiteralPath $snapshotPath) -or (Test-Path -LiteralPath $registerPath)) {
+        throw 'Refusing to overwrite C188R24 timeout CPU snapshot evidence.'
+    }
+    $snapshot = [ordered]@{
+        schema='GUIDEXOS_C188R24_QMP_TIMEOUT_CPU_SNAPSHOT_V1'
+        capturedUtc=[DateTime]::UtcNow.ToString('O')
+        bootEvidencePath=$bootRoot
+        method='QMP query-status and query-cpus-fast, QMP stop, then HMP info registers'
+        initialStatus=$null;cpuTopology=$null;stopResponse=$null;pausedStatus=$null
+        registersResponse=$null;registersPath=$registerPath;registersSha256=''
+        pauseVerified=$false;captureError=''
+    }
+    try {
+        $snapshot.initialStatus = Invoke-Qmp 'query-status'
+        $snapshot.cpuTopology = Invoke-Qmp 'query-cpus-fast'
+        $snapshot.stopResponse = Invoke-Qmp 'stop'
+        $snapshot.pausedStatus = Invoke-Qmp 'query-status'
+        $snapshot.pauseVerified = $snapshot.pausedStatus -match '"running"\s*:\s*false' -and
+            $snapshot.pausedStatus -match '"status"\s*:\s*"paused"'
+        if (-not $snapshot.pauseVerified) {
+            throw 'QMP did not confirm the VM was paused before register capture.'
+        }
+        $snapshot.registersResponse = Invoke-Qmp 'human-monitor-command' `
+            ([ordered]@{'command-line'='info registers'})
+        $registers = ([string]$snapshot.registersResponse | ConvertFrom-Json -ErrorAction Stop).return
+        if ($registers -isnot [string] -or [string]::IsNullOrWhiteSpace($registers)) {
+            throw 'QMP HMP info registers returned no register text.'
+        }
+        Set-Content -LiteralPath $registerPath -Value $registers -Encoding utf8
+        $snapshot.registersSha256 = (Get-FileHash -LiteralPath $registerPath -Algorithm SHA256).Hash
+    } catch {
+        $snapshot.captureError = $_.Exception.Message
+    }
+    $snapshot | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $snapshotPath -Encoding utf8
+    return $snapshotPath
+}
+
 try {
     # qac run owns admission and starts its QEMU child only after the exclusive
     # acceptance reservation is granted. If another managed reservation is
@@ -284,7 +325,13 @@ try {
         if ($qacProcess.HasExited) { throw "QAC/QEMU exited before guest readiness: $($qacProcess.ExitCode)" }
         Start-Sleep -Milliseconds 150
     } while ((Get-Date) -lt $deadline)
-    if (-not $ready) { throw 'Guest did not reach the input loop before timeout.' }
+    if (-not $ready) {
+        if ($CaptureCpuOnReadinessTimeout) {
+            $cpuSnapshotPath = Save-C188R24TimeoutCpuSnapshot
+            Write-Output "C188R24_TIMEOUT_CPU_SNAPSHOT=$cpuSnapshotPath"
+        }
+        throw 'Guest did not reach the input loop before timeout.'
+    }
 
     $text = Read-GuestSerial
     if ($isC188R11Boot) {

@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory=$true)][string]$CandidateRoot,
     [Parameter(Mandatory=$true)][ValidatePattern('^[A-Fa-f0-9]{64}$')][string]$ExpectedKernelSha256,
     [Parameter(Mandatory=$true)][string]$BootEvidencePath,
-    [Parameter()][ValidateRange(60,300)][int]$MaxRuntimeSeconds = 120
+    [Parameter()][ValidateRange(60,300)][int]$MaxRuntimeSeconds = 120,
+    [Parameter()][switch]$CaptureCpuOnReadinessTimeout
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -247,14 +248,18 @@ try {
     $psi.CreateNoWindow = $true
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
-    foreach ($argument in @(
+    $runnerArguments = @(
         '-NoProfile','-File',$baseRunnerPath,
         '-BootEvidencePath',$bootRoot,
         '-ExpectedKernelSha256',$ExpectedKernelSha256,
         '-Scenario','settings-handoff-diagnostic',
         '-MaxRuntimeSeconds',[string]$MaxRuntimeSeconds,
         '-BootTimeoutSeconds','180','-AdmissionTimeoutSeconds','60',
-        '-RunIdentityId',$runIdentityId)) {
+        '-RunIdentityId',$runIdentityId)
+    if ($CaptureCpuOnReadinessTimeout) {
+        $runnerArguments += '-CaptureCpuOnReadinessTimeout'
+    }
+    foreach ($argument in $runnerArguments) {
         [void]$psi.ArgumentList.Add([string]$argument)
     }
     $qacRunner = [System.Diagnostics.Process]::Start($psi)
@@ -546,6 +551,11 @@ $qacExecutionQualified = $null -ne $baseManifest -and
     [bool]$baseManifest.qacAdmissionConfirmed -and
     [bool]$baseManifest.qacOwnershipProofAccepted -and $qacReleaseVerified -and
     -not $ownershipDegraded
+$cpuTimeoutSnapshotPath = Join-Path $bootRoot 'cpu-timeout-snapshot.json'
+$cpuTimeoutSnapshot = if (Test-Path -LiteralPath $cpuTimeoutSnapshotPath -PathType Leaf) {
+    try { Get-Content -LiteralPath $cpuTimeoutSnapshotPath -Raw | ConvertFrom-Json -ErrorAction Stop }
+    catch { $null }
+} else { $null }
 $outcome = if ($runtimeRegressionProven) { 'E_MANAGED_RUNTIME_REGRESSION' }
     elseif (-not $qacExecutionQualified) { 'D_QAC_OR_EXECUTION_BLOCKED' }
     elseif (-not [bool]$clickEvidence.accepted -or
@@ -587,6 +597,9 @@ $finalEvidence = [ordered]@{
     qacOwnershipBeforeSettingsCheckpoint=$preSettingsCheckpointOwnership
     qacOwnershipBeforeShutdown=$preShutdownOwnership
     qmpQuitRequested=$qmpQuitRequested;nestedQmpLogPath=$nestedQmpLogPath;qacReleaseVerified=$qacReleaseVerified
+    cpuTimeoutSnapshotPath=if ($null -ne $cpuTimeoutSnapshot) { $cpuTimeoutSnapshotPath } else { $null }
+    cpuTimeoutSnapshotSha256=if ($null -ne $cpuTimeoutSnapshot) { (Get-FileHash -LiteralPath $cpuTimeoutSnapshotPath -Algorithm SHA256).Hash } else { '' }
+    cpuTimeoutSnapshotCaptureError=if ($null -ne $cpuTimeoutSnapshot) { [string]$cpuTimeoutSnapshot.captureError } else { '' }
     serialCaptureState=$serialCaptureState
     serialHashMatchesAcceptanceManifest=$serialHashMatchesManifest
     serialCaptureComplete=$serialCaptureComplete
