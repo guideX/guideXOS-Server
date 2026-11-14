@@ -243,6 +243,83 @@ SnapshotStatus readSystemAboutSnapshot(
     return SnapshotStatus::Ok;
 }
 
+bool validIdentitySnapshot(const IdentitySnapshotV1& snapshot)
+{
+    const uint32_t knownFlags = kIdentityInfrastructureAvailable |
+        kIdentityRecordsDurable | kIdentityAccountCountAvailable;
+    const uint32_t contextKind = snapshot.currentContextKind;
+    const bool contextValid =
+        (contextKind == static_cast<uint32_t>(identity::IdentityKind::InteractiveUnassigned) &&
+         snapshot.currentUserId == identity::kInvalidUserId) ||
+        (contextKind == static_cast<uint32_t>(identity::IdentityKind::AuthenticatedHuman) &&
+         snapshot.currentUserId >= identity::kFirstHumanUserId &&
+         snapshot.currentUserId <= identity::kMaximumUserId);
+    return snapshot.structureSize == sizeof(IdentitySnapshotV1) &&
+        snapshot.version == kIdentitySnapshotVersion && snapshot.revision != 0u &&
+        (snapshot.flags & kIdentityInfrastructureAvailable) != 0u &&
+        (snapshot.flags & ~knownFlags) == 0u &&
+        snapshot.accountCount <= identity::kMaximumUsers &&
+        (((snapshot.flags & kIdentityAccountCountAvailable) != 0u) ||
+         snapshot.accountCount == 0u) &&
+        snapshot.persistenceState <= static_cast<uint32_t>(identity::PersistenceState::Unsupported) &&
+        contextValid;
+}
+
+SnapshotStatus readIdentitySnapshot(
+    const app::KernelApp* caller,
+    const IdentitySnapshotRequestV1* request,
+    void* output,
+    size_t capacity,
+    size_t* outSize,
+    uint64_t* outRevision)
+{
+    if (outSize) *outSize = 0u;
+    if (outRevision) *outRevision = 0u;
+    if (!caller || !request || !output || !outSize || !outRevision)
+        return SnapshotStatus::InvalidArgument;
+    if (request->structureSize < sizeof(IdentitySnapshotRequestV1))
+        return SnapshotStatus::InvalidArgument;
+    if (request->version != kIdentitySnapshotVersion)
+        return SnapshotStatus::UnsupportedVersion;
+    if (!textEquals(caller->getRuntimeAppId(), kSettingsRuntimeAppId))
+        return SnapshotStatus::Unauthorized;
+
+    identity::RuntimeSnapshotV1 runtimeSnapshot{};
+    if (identity::runtime().snapshot(&runtimeSnapshot) != identity::Result::Ok ||
+        runtimeSnapshot.initialized == 0u) return SnapshotStatus::Unavailable;
+    const uint64_t revision = runtimeSnapshot.generation == UINT64_MAX
+        ? UINT64_MAX : runtimeSnapshot.generation + 1u;
+    *outSize = sizeof(IdentitySnapshotV1);
+    *outRevision = revision;
+    if (capacity < sizeof(IdentitySnapshotV1)) return SnapshotStatus::BufferTooSmall;
+    if (request->knownRevision != 0u && request->knownRevision != revision)
+        return SnapshotStatus::StaleRevision;
+
+    identity::IdentityContextV1 context{};
+    if (identity::runtime().queryContext(identity::ExecutionDomain::Interactive,
+            &context) != identity::Result::Ok) return SnapshotStatus::Unavailable;
+    IdentitySnapshotV1 snapshot{};
+    snapshot.structureSize = sizeof(snapshot);
+    snapshot.version = kIdentitySnapshotVersion;
+    snapshot.revision = revision;
+    snapshot.flags = kIdentityInfrastructureAvailable;
+    if (runtimeSnapshot.allRecordsDurable != 0u)
+        snapshot.flags |= kIdentityRecordsDurable;
+    if (runtimeSnapshot.accountCountAvailable != 0u) {
+        snapshot.flags |= kIdentityAccountCountAvailable;
+        snapshot.accountCount = runtimeSnapshot.accountCount;
+    }
+    snapshot.persistenceState = static_cast<uint32_t>(runtimeSnapshot.persistence);
+    snapshot.currentContextKind = static_cast<uint32_t>(context.kind);
+    snapshot.currentUserId = context.userId;
+    if (!validIdentitySnapshot(snapshot)) return SnapshotStatus::Unavailable;
+
+    uint8_t* destination = static_cast<uint8_t*>(output);
+    const uint8_t* source = reinterpret_cast<const uint8_t*>(&snapshot);
+    for (size_t i = 0u; i < sizeof(snapshot); ++i) destination[i] = source[i];
+    return SnapshotStatus::Ok;
+}
+
 static bool validBitsPerPixel(uint32_t bitsPerPixel)
 {
     return bitsPerPixel == 16u || bitsPerPixel == 24u || bitsPerPixel == 32u;

@@ -16,6 +16,8 @@ $Sources = @(
     "kernel/core/kernel_app.cpp",
     "kernel/core/app_launch_target_resolver.cpp",
     "kernel/core/settings_native_provider.cpp",
+    "kernel/core/identity.cpp",
+    "kernel/core/identity_runtime.cpp",
     "kernel/core/desktop_gradient_persistence.cpp",
     "kernel/core/settings_display_refresh.cpp",
     "settings_presentation_core.cpp"

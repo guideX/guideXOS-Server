@@ -88,8 +88,9 @@ int main()
               (expectedCategories[index] == CategoryId::System ||
                expectedCategories[index] == CategoryId::Display ||
                expectedCategories[index] == CategoryId::Personalization ||
+               expectedCategories[index] == CategoryId::Users ||
                expectedCategories[index] == CategoryId::About),
-              "deferred category state matches the four existing native pages");
+              "native category availability includes Users registry status");
     }
     check(categoryAt(normal, 0, 0) == CategoryId::Count &&
           categoryAt(normal, 12, 44 + 26 + 1) == CategoryId::Count,

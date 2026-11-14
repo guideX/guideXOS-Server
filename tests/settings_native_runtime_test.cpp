@@ -1250,6 +1250,12 @@ int main()
                    "legacy_blue_flower", "gradient_ocean"),
            "legacy applied marker follows an active wallpaper rather than a gradient");
 
+    expect(kernel::identity::runtime().initialize(nullptr) == kernel::identity::Result::Ok,
+           "identity runtime initializes without persistent storage for provider tests");
+
+    expect(kernel::identity::runtime().initialize(nullptr) == kernel::identity::Result::Ok,
+           "identity runtime initializes without persistent storage for provider tests");
+
     AppManager::init();
     AppLogger::init();
     g_testFramebufferAvailable = true;
@@ -1355,6 +1361,30 @@ int main()
     KernelApp* settingsApp = AppManager::getRunningApp(0);
     expect(settingsApp && std::string(settingsApp->getRuntimeAppId()) == kSettingsRuntimeAppId,
            "AppManager assigns the runtime identity before init");
+    IdentitySnapshotRequestV1 identityRequest = {
+        sizeof(IdentitySnapshotRequestV1), kIdentitySnapshotVersion, 0u
+    };
+    IdentitySnapshotV1 identitySnapshot{};
+    size_t identitySnapshotSize = 0u;
+    uint64_t identitySnapshotRevision = 0u;
+    expect(readIdentitySnapshot(settingsApp, &identityRequest, &identitySnapshot,
+                sizeof(identitySnapshot), &identitySnapshotSize, &identitySnapshotRevision) == SnapshotStatus::Ok &&
+            validIdentitySnapshot(identitySnapshot),
+        "native Settings reads a validated live identity registry snapshot");
+    expect(identitySnapshot.accountCount == 0u &&
+            (identitySnapshot.flags & kIdentityAccountCountAvailable) != 0u &&
+            identitySnapshot.currentContextKind == static_cast<uint32_t>(
+                kernel::identity::IdentityKind::InteractiveUnassigned) &&
+            identitySnapshot.currentUserId == kernel::identity::kInvalidUserId &&
+            identitySnapshot.persistenceState == static_cast<uint32_t>(
+                kernel::identity::PersistenceState::Unavailable),
+        "native Users status distinguishes empty registry, no human login, and unavailable persistence");
+    identityRequest.version = kIdentitySnapshotVersion + 1u;
+    expect(readIdentitySnapshot(settingsApp, &identityRequest, &identitySnapshot,
+                sizeof(identitySnapshot), &identitySnapshotSize, &identitySnapshotRevision) ==
+                SnapshotStatus::UnsupportedVersion,
+        "native identity provider rejects unsupported request versions");
+    identityRequest.version = kIdentitySnapshotVersion;
     expect(settingsApp && settingsApp->getWindow() &&
                settingsApp->getWindow()->owner == settingsApp,
            "Settings window owner matches its running application");
@@ -2384,6 +2414,10 @@ int main()
                                    &snapshotSize, &snapshotRevision) ==
                SnapshotStatus::Unauthorized,
            "provider denies a caller without runtime Settings identity, including launch-argument spoofing");
+    expect(readIdentitySnapshot(otherApp, &identityRequest, &identitySnapshot,
+                sizeof(identitySnapshot), &identitySnapshotSize, &identitySnapshotRevision) ==
+                SnapshotStatus::Unauthorized,
+        "identity provider denies non-Settings callers even when launch data contains the Settings identity");
     expect(readDisplaySnapshot(otherApp, &displayRequest, &repeatedDisplaySnapshot,
                                sizeof(repeatedDisplaySnapshot), &repeatedDisplaySize,
                                &repeatedDisplayRevision) == SnapshotStatus::Unauthorized,

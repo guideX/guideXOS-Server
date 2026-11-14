@@ -147,6 +147,7 @@ bool isCategoryAvailable(CategoryId category)
     return category == CategoryId::System ||
         category == CategoryId::Display ||
         category == CategoryId::Personalization ||
+        category == CategoryId::Users ||
         category == CategoryId::About;
 }
 

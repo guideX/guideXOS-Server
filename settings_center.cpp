@@ -3483,14 +3483,14 @@ private:
         drawCard(x, s7ContentTop() - 5, pageWidth(), s7CardHeight(rowCount), title);
 
         if (target == TargetId::Page) {
-            drawS7Row(0, "Account model", usersInfoStateText(state.accountModel));
-            drawS7Row(1, "Current identity", usersInfoStateText(state.currentIdentity));
-            drawS7Row(2, "Authentication", usersInfoStateText(state.authentication));
-            drawS7Row(3, "Separate profiles", usersInfoStateText(state.profiles));
-            drawS7Row(4, "Desktop preferences", "Shared configuration");
-            drawS7Row(5, "Hosted environment", state.hostedRuntime);
-            drawS7Row(6, "Session details", "View details", FocusControl::UsersSessionDetails, true);
-            drawS7Row(7, "Security details", "View details", FocusControl::UsersSecurityDetails, true);
+            drawS7Row(0, "Identity infrastructure", usersInfoStateText(state.accountModel));
+            drawS7Row(1, "Account records", usersInfoStateText(state.accountRecords));
+            drawS7Row(2, "Current identity", usersInfoStateText(state.currentIdentity));
+            drawS7Row(3, "Authentication", usersInfoStateText(state.authentication));
+            drawS7Row(4, "Profiles / permissions", usersInfoStateText(state.profiles));
+            drawS7Row(5, "Record persistence", usersInfoStateText(state.persistence));
+            drawS7Row(6, "Security details", "View details", FocusControl::UsersSecurityDetails, true);
+            drawS7Row(7, "Session details", "View details", FocusControl::UsersSessionDetails, true);
             return;
         }
 

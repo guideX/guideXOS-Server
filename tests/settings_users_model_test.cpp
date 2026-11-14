@@ -33,26 +33,49 @@ int main()
     Counts interaction;
 
     const UsersPageState state = buildUsersPageState("Hosted on Windows");
-    expect(model, state.accountModel == UsersInfoState::NotSupported,
-        "the page states that account management is not supported");
-    expect(model, state.currentIdentity == UsersInfoState::NotDefined &&
-        state.sessionIdentity == UsersInfoState::NotDefined,
-        "no human identity or stable guideXOS session identity is invented");
-    expect(model, state.authentication == UsersInfoState::NotSupported,
-        "authentication is reported as unsupported");
-    expect(model, state.profiles == UsersInfoState::NotSupported,
-        "separate user profiles are reported as unsupported");
-    expect(model, state.sessionManager == UsersInfoState::NotSupported &&
-        state.sessionActions == UsersInfoState::NotSupported,
+    expect(model, state.accountModel == UsersInfoState::Unavailable &&
+        state.accountRecords == UsersInfoState::Unavailable,
+        "hosted Settings does not claim that the native registry provider is present");
+    expect(model, state.currentIdentity == UsersInfoState::Unavailable &&
+        state.sessionIdentity == UsersInfoState::Unavailable,
+        "hosted Settings does not invent a native current identity");
+    expect(model, state.authentication == UsersInfoState::NotImplemented,
+        "authentication is reported as not implemented");
+    expect(model, state.profiles == UsersInfoState::NotImplemented,
+        "separate user profiles are reported as not implemented");
+    expect(model, state.sessionManager == UsersInfoState::NotImplemented &&
+        state.sessionActions == UsersInfoState::NotImplemented,
         "session manager and user-switching actions are not fabricated");
-    expect(model, state.userPermissions == UsersInfoState::NotSupported &&
-        state.fileOwnership == UsersInfoState::NotSupported &&
-        state.userGrantedAppPermissions == UsersInfoState::NotSupported,
-        "user permissions, file ownership, and user-granted app access are unsupported");
+    expect(model, state.userPermissions == UsersInfoState::NotImplemented &&
+        state.fileOwnership == UsersInfoState::NotImplemented &&
+        state.userGrantedAppPermissions == UsersInfoState::NotImplemented,
+        "user permissions, file ownership, and user-granted app access are not implemented");
     expect(model, state.servicePeerAuthentication == UsersInfoState::Unavailable,
         "unauthenticated COM2 service peer state is kept distinct from unsupported login");
     expect(model, state.hostedRuntime == "Hosted on Windows",
         "the hosted runtime is labeled as environment context");
+
+    UsersIdentityInfo nativeProvider{};
+    nativeProvider.available = true;
+    nativeProvider.accountCountAvailable = true;
+    nativeProvider.interactiveContextAvailable = true;
+    nativeProvider.persistence = UsersPersistenceInfo::Persistent;
+    nativeProvider.allRecordsDurable = true;
+    const UsersPageState nativeEmpty = buildUsersPageState("Native AMD64", &nativeProvider);
+    expect(model, nativeEmpty.accountModel == UsersInfoState::Available &&
+        nativeEmpty.accountRecords == UsersInfoState::Absent &&
+        nativeEmpty.currentIdentity == UsersInfoState::Unassigned &&
+        nativeEmpty.authentication == UsersInfoState::NotImplemented &&
+        nativeEmpty.persistence == UsersInfoState::Persistent,
+        "native provider distinguishes available infrastructure, empty registry, no login, and persistence");
+    nativeProvider.accountCount = 2;
+    nativeProvider.persistence = UsersPersistenceInfo::ReadOnly;
+    nativeProvider.allRecordsDurable = false;
+    const UsersPageState nativeRecords = buildUsersPageState("Native AMD64", &nativeProvider);
+    expect(model, nativeRecords.accountRecords == UsersInfoState::Present &&
+        nativeRecords.currentIdentity == UsersInfoState::Unassigned &&
+        nativeRecords.persistence == UsersInfoState::ReadOnly,
+        "native provider status remains distinct from authentication and read-only storage");
 
     const UsersPageState emptyRuntime = buildUsersPageState("");
     const UsersPageState unavailableRuntime = buildUsersPageState("Hosted runtime details unavailable");
@@ -65,8 +88,10 @@ int main()
         "long hosted runtime strings are bounded with an ellipsis");
     expect(model, usersInfoStateText(UsersInfoState::NotDefined) == std::string("Not defined") &&
         usersInfoStateText(UsersInfoState::NotSupported) == std::string("Not supported") &&
-        usersInfoStateText(UsersInfoState::Unavailable) == std::string("Unavailable"),
-        "not defined, not supported, and unavailable remain distinct labels");
+        usersInfoStateText(UsersInfoState::Unavailable) == std::string("Unavailable") &&
+        usersInfoStateText(UsersInfoState::NotImplemented) == std::string("Not implemented") &&
+        usersInfoStateText(UsersInfoState::Unassigned) == std::string("Unassigned"),
+        "unavailable, unsupported, not implemented, and unassigned remain distinct labels");
 
     SettingsRoute route{};
     expect(navigation, parseSettingsRoute("settings://users", route) &&

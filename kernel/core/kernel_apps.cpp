@@ -16666,6 +16666,7 @@ public:
           m_providerStatus(settings_native::SnapshotStatus::Unavailable),
           m_displayProviderStatus(settings_native::SnapshotStatus::Unavailable),
           m_appearanceProviderStatus(settings_native::SnapshotStatus::Unavailable),
+          m_identitySnapshotAvailable(false),
           m_snapshotAvailable(false),
           m_appearanceSnapshotAvailable(false),
           m_gradientPresetCount(0u),
@@ -16711,6 +16712,8 @@ public:
         m_providerStatus = settings_native::SnapshotStatus::Unavailable;
         m_displayProviderStatus = settings_native::SnapshotStatus::Unavailable;
         m_appearanceProviderStatus = settings_native::SnapshotStatus::Unavailable;
+        m_identitySnapshot = settings_native::IdentitySnapshotV1{};
+        m_identitySnapshotAvailable = false;
         m_snapshot = settings_native::SystemAboutSnapshotV2{};
         m_appearanceSnapshot = settings_native::DesktopAppearanceSnapshotV1{};
         m_appearanceSnapshotAvailable = false;
@@ -16733,6 +16736,7 @@ public:
         setIconStatus("Select icon visibility, then choose Apply.");
         m_displayRefreshState.reset();
         m_displayRefreshSignal.reset();
+        refreshIdentitySnapshot();
 
         settings::SettingsWindowConstraints constraints{};
         if (!m_adapter.getWindowConstraints(m_adapter.context, &constraints)) return false;
@@ -16970,6 +16974,9 @@ public:
     void onWindowFocus() override
     {
         m_windowFocused = true;
+        if (m_presentation.selectedCategory() == settings::CategoryId::Users) {
+            refreshIdentitySnapshot();
+        }
         if (m_presentation.selectedCategory() == settings::CategoryId::Personalization) {
             refreshPersonalizationSnapshot();
         }
@@ -16994,6 +17001,7 @@ private:
     settings::SettingsPresentationCore m_presentation;
     settings::SettingsPresentationAdapterV1 m_adapter;
     settings_native::SystemAboutSnapshotV2 m_snapshot{};
+    settings_native::IdentitySnapshotV1 m_identitySnapshot{};
     settings_native::DesktopAppearanceSnapshotV1 m_appearanceSnapshot{};
     settings_native::DisplaySnapshotRefreshState m_displayRefreshState;
     settings_native::DisplayConfigurationChangeSignal m_displayRefreshSignal;
@@ -17003,6 +17011,7 @@ private:
     settings_native::SnapshotStatus m_providerStatus;
     settings_native::SnapshotStatus m_displayProviderStatus;
     settings_native::SnapshotStatus m_appearanceProviderStatus;
+    bool m_identitySnapshotAvailable;
     bool m_snapshotAvailable;
     bool m_appearanceSnapshotAvailable;
     settings_native::BuiltInGradientPresetV1 m_gradientPresets[
@@ -17184,11 +17193,13 @@ private:
         if (category != settings::CategoryId::System &&
             category != settings::CategoryId::Display &&
             category != settings::CategoryId::Personalization &&
-            category != settings::CategoryId::About) return false;
+            category != settings::CategoryId::About &&
+            category != settings::CategoryId::Users) return false;
         if (category != settings::CategoryId::Personalization)
             m_hoverPersonalizationControl = -1;
         if (!m_presentation.selectCategory(category)) return false;
         if (category == settings::CategoryId::Display) refreshDisplaySnapshot();
+        if (category == settings::CategoryId::Users) refreshIdentitySnapshot();
         if (category == settings::CategoryId::Personalization) {
             refreshGradientPresets();
             refreshWallpaperPresets();
@@ -17198,9 +17209,10 @@ private:
         serial::puts("[settings-native] input source=");
         serial::puts(inputSource);
         serial::puts(" category=");
-        serial::puts(category == settings::CategoryId::About ? "about" :
+        serial::puts(category == settings::CategoryId::Users ? "users" :
+            (category == settings::CategoryId::About ? "about" :
             (category == settings::CategoryId::Personalization ? "personalization" :
-             (category == settings::CategoryId::Display ? "display" : "system")));
+             (category == settings::CategoryId::Display ? "display" : "system"))));
         serial::puts(" shared-core=true repaint=pending\n");
         return true;
     }
@@ -17209,6 +17221,25 @@ private:
     {
         return settings_native::refreshDisplaySnapshot(
             &m_adapter, m_displayRefreshState, m_presentation);
+    }
+
+    bool refreshIdentitySnapshot()
+    {
+        settings_native::IdentitySnapshotRequestV1 request{};
+        request.structureSize = sizeof(request);
+        request.version = settings_native::kIdentitySnapshotVersion;
+        settings_native::IdentitySnapshotV1 snapshot{};
+        size_t snapshotSize = 0u;
+        uint64_t revision = 0u;
+        const settings_native::SnapshotStatus status =
+            settings_native::readIdentitySnapshot(this, &request, &snapshot,
+                sizeof(snapshot), &snapshotSize, &revision);
+        m_identitySnapshotAvailable = status == settings_native::SnapshotStatus::Ok &&
+            snapshotSize == sizeof(snapshot) && snapshot.revision == revision &&
+            settings_native::validIdentitySnapshot(snapshot);
+        m_identitySnapshot = m_identitySnapshotAvailable
+            ? snapshot : settings_native::IdentitySnapshotV1{};
+        return m_identitySnapshotAvailable;
     }
 
     bool refreshPersonalizationSnapshot()
@@ -18073,6 +18104,7 @@ private:
                 return true;
             }
             if (key == 'a') return selectSupportedCategory(settings::CategoryId::About, "keyboard");
+            if (key == 'u') return selectSupportedCategory(settings::CategoryId::Users, "keyboard");
             if (key == 's') return selectSupportedCategory(settings::CategoryId::System, "keyboard");
             if (key == 'd') return selectSupportedCategory(settings::CategoryId::Display, "keyboard");
             if (key == 'p') return selectSupportedCategory(settings::CategoryId::Personalization, "keyboard");
@@ -18687,6 +18719,74 @@ private:
         }
     }
 
+    void drawIdentityInformation(uint32_t contentX, uint32_t contentW,
+                                 uint32_t cardY)
+    {
+        const char* labels[8] = {
+            "Identity infrastructure", "Account records", "Current identity",
+            "Kernel operations", "Authentication", "Record persistence",
+            "Profiles and permissions", "Ownership enforcement"
+        };
+        char accountCount[48] = "Unavailable";
+        const char* values[8] = {
+            "Unavailable", accountCount, "Unavailable", "Reserved system identity",
+            "Not implemented", "Unavailable", "Not implemented", "Not implemented"
+        };
+        if (m_identitySnapshotAvailable) {
+            values[0] = "Available";
+            if ((m_identitySnapshot.flags &
+                    settings_native::kIdentityAccountCountAvailable) != 0u) {
+                accountCount[0] = '\0';
+                appendUnsigned(accountCount, sizeof(accountCount),
+                    m_identitySnapshot.accountCount);
+                appendText(accountCount, sizeof(accountCount),
+                    m_identitySnapshot.accountCount == 1u ? " account" : " accounts");
+            }
+            values[2] = m_identitySnapshot.currentContextKind ==
+                static_cast<uint32_t>(identity::IdentityKind::InteractiveUnassigned)
+                    ? "Interactive; no human assigned" : "Authenticated human context";
+            switch (static_cast<identity::PersistenceState>(m_identitySnapshot.persistenceState)) {
+            case identity::PersistenceState::Persistent:
+                values[5] = "Persistent; committed and read back";
+                break;
+            case identity::PersistenceState::Volatile:
+                values[5] = "In memory only";
+                break;
+            case identity::PersistenceState::ReadOnly:
+                values[5] = (m_identitySnapshot.flags &
+                    settings_native::kIdentityRecordsDurable) != 0u
+                    ? "Read-only storage; records loaded" : "Read-only; changes are volatile";
+                break;
+            case identity::PersistenceState::Unavailable:
+                values[5] = (m_identitySnapshot.flags &
+                    settings_native::kIdentityRecordsDurable) != 0u
+                    ? "No writable persistent store" : "In memory only; restart loses changes";
+                break;
+            case identity::PersistenceState::Corrupt:
+                values[5] = "Corrupt store; writes stopped";
+                break;
+            case identity::PersistenceState::Unsupported:
+                values[5] = "Unsupported store version; writes stopped";
+                break;
+            }
+        }
+
+        const uint32_t valueOffset = 176u;
+        const uint32_t valueX = contentX + valueOffset;
+        const uint32_t valueWidth = contentW > valueOffset + 16u
+            ? contentW - valueOffset - 16u : 1u;
+        for (size_t row = 0u; row < 8u; ++row) {
+            const uint32_t rowY = cardY + 42u + static_cast<uint32_t>(row) * 32u;
+            appDrawText(contentX + 16u, rowY, labels[row], rgb(150, 162, 181));
+            drawWrappedSettingsValue(valueX, rowY, values[row], valueWidth,
+                m_identitySnapshotAvailable ? rgb(243, 245, 250) : rgb(165, 173, 187), true);
+            if (row + 1u < 8u) {
+                framebuffer::fill_rect(contentX + 16u, rowY + 24u,
+                    contentW > 32u ? contentW - 32u : 1u, 1u, rgb(55, 61, 74));
+            }
+        }
+    }
+
     void drawPresentation(const settings::SettingsPresentationCore& presentation)
     {
         const uint32_t x = m_drawX;
@@ -18744,13 +18844,16 @@ private:
         const uint32_t contentW = page.content.width;
         const bool display = selected == settings::CategoryId::Display;
         const bool personalization = selected == settings::CategoryId::Personalization;
+        const bool users = selected == settings::CategoryId::Users;
         const settings::CategoryInfo* selectedInfo = settings::categoryInfo(selected);
         const char* pageName = selectedInfo ? selectedInfo->label : "Settings";
-        const char* pageDescription = selected == settings::CategoryId::About
+        const char* pageDescription = users
+            ? "Identity registry and current interactive identity"
+            : (selected == settings::CategoryId::About
             ? "Product release and kernel version"
             : (personalization ? "Desktop appearance and visibility"
                 : (display ? "Active framebuffer; read-only snapshot"
-                           : "Product and hardware details from the kernel"));
+                           : "Product and hardware details from the kernel")));
         const uint32_t titleX = x + page.title.x;
         const uint32_t titleY = y + page.title.y;
         appDrawStrongText(titleX, titleY, pageName, rgb(245, 247, 252));
@@ -18762,13 +18865,16 @@ private:
         framebuffer::fill_rect(cardX, cardY, page.card.width, page.card.height,
             rgb(36, 40, 50));
         appDrawRect(cardX, cardY, page.card.width, page.card.height, rgb(67, 74, 88));
-        const char* cardTitle = selected == settings::CategoryId::About
+        const char* cardTitle = users ? "Identity foundation status"
+            : (selected == settings::CategoryId::About
             ? "Product and version details"
             : (personalization ? "Desktop appearance"
-                : (display ? "Framebuffer and topology" : "System details"));
+                : (display ? "Framebuffer and topology" : "System details")));
         appDrawStrongText(cardX + 16u, cardY + 16u, cardTitle, rgb(225, 233, 245));
         if (display) {
             drawDisplayInformation(contentX, contentW, cardY);
+        } else if (users) {
+            drawIdentityInformation(contentX, contentW, cardY);
         } else if (personalization) {
             settings_layout::PersonalizationLayout personalizationLayout{};
             settings_layout::calculatePersonalizationLayout(page, &personalizationLayout);
@@ -18781,7 +18887,7 @@ private:
         appDrawText(contentX + 12u, y + page.footer.y,
             personalization
                 ? "Tab focus   Arrows select   Enter activate   G/W/I sections"
-                : "S System   D Display   P Personalization   A About",
+                : "S System   D Display   P Personalization   U Users   A About",
             rgb(145, 151, 163));
     }
 };

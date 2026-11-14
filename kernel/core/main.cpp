@@ -12,6 +12,7 @@
 #include "include/kernel/vga.h"
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/process.h"
+#include "include/kernel/identity_runtime.h"
 #include "include/kernel/desktop.h"
 #include "include/kernel/desktop_gradient_persistence.h"
 #include "include/kernel/kernel_apps.h"
@@ -986,6 +987,18 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         
         const bool mounted = mount_persistent_storage();
         if (mounted) kernel::desktop::rememberDesktopGradientStorageDevice();
+        const kernel::identity::Result identityInit = kernel::identity::initializeRuntime();
+        kernel::identity::RuntimeSnapshotV1 identitySnapshot{};
+        (void)kernel::identity::runtime().snapshot(&identitySnapshot);
+        kernel::serial::puts("[IDENTITY] registry initialized=");
+        kernel::serial::puts(identitySnapshot.initialized ? "yes" : "no");
+        kernel::serial::puts(" accounts=");
+        kernel::serial::put_hex32(identitySnapshot.accountCount);
+        kernel::serial::puts(" persistence=");
+        kernel::serial::puts(kernel::identity::persistenceStateName(identitySnapshot.persistence));
+        kernel::serial::puts(" result=");
+        kernel::serial::puts(kernel::identity::resultName(identityInit));
+        kernel::serial::putc('\n');
         kernel::native_elf::log_apps_lifecycle_checkpoint(
             kernel::native_elf::APPS_CHECKPOINT_INITIAL_MOUNT);
 
