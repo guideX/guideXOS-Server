@@ -660,6 +660,7 @@ static void print_el0_negative_probe_record(
 #if defined(GXOS_AARCH64_PHASE9)
 #if defined(GXOS_AARCH64_PHASE12)
 #if defined(GXOS_AARCH64_RUNSAFE3B_DIAGNOSTICS)
+#include "runsafe3b_source_revision.h"
 #ifndef GXOS_AARCH64_RUNSAFE3B_SOURCE_REVISION
 #error RUNSAFE3-B diagnostics require a source revision identity
 #endif
