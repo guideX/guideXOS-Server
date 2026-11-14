@@ -42,23 +42,25 @@ $registrationOnly = Get-C188R23PreparationBoundaryEvidence @'
 [C102-STARTUP] stage=C188B004
 '@
 Assert-R23 ($registrationOnly.prepareBeginObserved -and
-    -not $registrationOnly.codeManagerRegistrationCallEntered -and
-    $registrationOnly.firstMissingMilestone -eq 'module-discovery-or-validation-before-RhRegisterOSModule') 'entry-only trace localizes the pre-registration interval'
+    -not $registrationOnly.codeManagerRegistrationCallSiteReached -and
+    $registrationOnly.firstMissingMilestone -eq 'module-discovery-or-validation-before-RhRegisterOSModule-call-site') 'entry-only trace localizes the pre-registration interval'
 $registered = Get-C188R23PreparationBoundaryEvidence @'
 [C102-STARTUP] stage=C188B004
 [C102-STARTUP] stage=C188B006
 '@
-Assert-R23 ($registered.codeManagerRegistrationCallEntered -and
-    -not $registered.initializeModulesCallIssued -and
-    $registered.firstMissingMilestone -eq 'RhRegisterOSModule-completion-before-InitializeModules') 'registration-entry trace isolates RhRegisterOSModule completion'
-$moduleInitializeEntered = Get-C188R23PreparationBoundaryEvidence @'
+Assert-R23 ($registered.codeManagerRegistrationCallSiteReached -and
+    -not $registered.initializeModulesCallSiteReached -and
+    $registered.firstMissingMilestone -eq 'RhRegisterOSModule-entry-or-return-after-call-site') 'registration call-site without the following checkpoint leaves RhRegisterOSModule entry/return unresolved'
+$moduleCallSite = Get-C188R23PreparationBoundaryEvidence @'
 [C102-STARTUP] stage=C188B004
 [C102-STARTUP] stage=C188B006
 [C102-STARTUP] stage=C188B007
 '@
-Assert-R23 ($moduleInitializeEntered.initializeModulesCallIssued -and
-    -not $moduleInitializeEntered.prepareReturned -and
-    $moduleInitializeEntered.firstMissingMilestone -eq 'InitializeModules-returned-to-shared-preparation') 'module-initialize entry without return is attributed to the real InitializeModules call'
+Assert-R23 ($moduleCallSite.initializeModulesCallSiteReached -and
+    $moduleCallSite.codeManagerRegistrationReturned -and
+    -not $moduleCallSite.prepareReturned -and
+    $moduleCallSite.firstMissingMilestone -eq 'InitializeModules-call-site-to-shared-preparation-return' -and
+    -not $moduleCallSite.initializeModulesCalleeEntryObserved) 'pre-call checkpoint and absent helper return do not claim NativeAOT callee entry'
 $preparedSettingsPending = Get-C188R23PreparationBoundaryEvidence @'
 [C102-STARTUP] stage=C188B004
 [C102-STARTUP] stage=C188B006

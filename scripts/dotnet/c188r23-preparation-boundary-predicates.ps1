@@ -1,9 +1,9 @@
 function Get-C188R23PreparationBoundaryEvidence([string]$SerialText) {
     $prepareBegin = [regex]::IsMatch($SerialText,
         '(?m)^\[C102-STARTUP\] stage=C188B004\s*\r?$')
-    $registrationBegin = [regex]::IsMatch($SerialText,
+    $registrationCallSite = [regex]::IsMatch($SerialText,
         '(?m)^\[C102-STARTUP\] stage=C188B006\s*\r?$')
-    $initializeModulesCall = [regex]::IsMatch($SerialText,
+    $initializeModulesCallSite = [regex]::IsMatch($SerialText,
         '(?m)^\[C102-STARTUP\] stage=C188B007\s*\r?$')
     $prepareReturned = [regex]::IsMatch($SerialText,
         '(?m)^\[C102-STARTUP\] stage=C188B005\s*\r?$')
@@ -16,12 +16,12 @@ function Get-C188R23PreparationBoundaryEvidence([string]$SerialText) {
 
     $firstMissing = if (-not $prepareBegin) {
         'preparation-entry-not-observed'
-    } elseif (-not $registrationBegin) {
-        'module-discovery-or-validation-before-RhRegisterOSModule'
-    } elseif (-not $initializeModulesCall) {
-        'RhRegisterOSModule-completion-before-InitializeModules'
+    } elseif (-not $registrationCallSite) {
+        'module-discovery-or-validation-before-RhRegisterOSModule-call-site'
+    } elseif (-not $initializeModulesCallSite) {
+        'RhRegisterOSModule-entry-or-return-after-call-site'
     } elseif (-not $prepareReturned) {
-        'InitializeModules-returned-to-shared-preparation'
+        'InitializeModules-call-site-to-shared-preparation-return'
     } elseif (-not $nativeReady) {
         'C102-startup-ready-state-published'
     } elseif (-not $settingsLaunch) {
@@ -34,9 +34,11 @@ function Get-C188R23PreparationBoundaryEvidence([string]$SerialText) {
 
     return [ordered]@{
         prepareBeginObserved=$prepareBegin
-        codeManagerRegistrationCallEntered=$registrationBegin
-        initializeModulesCallIssued=$initializeModulesCall
+        codeManagerRegistrationCallSiteReached=$registrationCallSite
+        initializeModulesCallSiteReached=$initializeModulesCallSite
+        codeManagerRegistrationReturned=$initializeModulesCallSite
         prepareReturned=$prepareReturned
+        initializeModulesCalleeEntryObserved=$false
         c188b002Observed=$nativeReady
         managedSettingsLaunchEntered=$settingsLaunch
         realSettingsFactoryEntered=$settingsFactory
