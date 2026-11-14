@@ -467,7 +467,9 @@ void testLifetimeDiagnosticsAndRetention()
         harness.runtime().propertyCount() == propertiesBefore + 4u &&
         harness.runtime().finalValue().isObject() &&
         harness.runtime().finalValue().objectId() ==
-            static_cast<RuntimeObjectId>(objectsBefore + 1u) &&
+            makeRuntimeHandle(static_cast<RuntimeGeneration>(
+                harness.runtime().hostGeneration()),
+                static_cast<std::uint32_t>(objectsBefore + 1u)) &&
         afterDiscard.iteratorResultObjectsAllocated -
             before.iteratorResultObjectsAllocated == 2u &&
         afterDiscard.iteratorResultObjectsPublished -

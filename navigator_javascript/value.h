@@ -27,6 +27,42 @@ enum class WellKnownSymbol : std::uint8_t {
     Iterator = 1,
 };
 
+// Realm-owned handles use the upper 16 bits for a non-zero generation and the
+// lower 16 bits for a slot. Slot 0xffff and generation 0 are reserved, which
+// leaves stale handles distinguishable after a realm reset.
+using RuntimeGeneration = std::uint16_t;
+constexpr RuntimeGeneration kInvalidRuntimeGeneration = 0u;
+constexpr std::uint32_t kRuntimeHandleInvalidPart = 0xffffu;
+constexpr std::uint32_t kRuntimeHandleSlotMask = 0x0000ffffu;
+
+constexpr std::uint32_t makeRuntimeHandle(RuntimeGeneration generation,
+    std::uint32_t slot)
+{
+    return generation == kInvalidRuntimeGeneration ||
+        slot >= kRuntimeHandleInvalidPart
+        ? 0xffffffffu
+        : (static_cast<std::uint32_t>(generation) << 16u) | slot;
+}
+
+constexpr RuntimeGeneration runtimeHandleGeneration(std::uint32_t handle)
+{
+    return static_cast<RuntimeGeneration>(handle >> 16u);
+}
+
+constexpr std::uint32_t runtimeHandleSlot(std::uint32_t handle)
+{
+    return handle & kRuntimeHandleSlotMask;
+}
+
+constexpr bool runtimeHandleIsValid(std::uint32_t handle,
+    RuntimeGeneration generation)
+{
+    return handle != 0xffffffffu &&
+        generation != kInvalidRuntimeGeneration &&
+        runtimeHandleGeneration(handle) == generation &&
+        runtimeHandleSlot(handle) != kRuntimeHandleInvalidPart;
+}
+
 using RuntimeStringId = std::uint32_t;
 constexpr RuntimeStringId kInvalidRuntimeStringId = 0xffffffffu;
 
@@ -37,18 +73,16 @@ using RuntimeObjectId = std::uint32_t;
 constexpr RuntimeObjectId kInvalidRuntimeObjectId = 0xffffffffu;
 
 // Host handles are opaque, context-owned tokens. The upper 32 bits carry a
-// bounded realm generation and the lower 32 bits carry a registry slot. No
+// bounded host generation and the lower 32 bits carry a registry slot. No
 // external pointer is ever stored in a JavaScript Value.
 using RuntimeHostObjectId = std::uint64_t;
 constexpr RuntimeHostObjectId kInvalidRuntimeHostObjectId =
     0xffffffffffffffffull;
 
-// A Value is a small tagged runtime value. String values contain an index into
-// the owning RuntimeContext string store, well-known Symbols carry their
-// bounded identity in that same scalar slot under a distinct type tag, and
-// function values contain an index into that context's function table. None
-// points at lexer/parser buffers. Handles are valid only while their owning
-// context remains alive (or until that context is reset).
+// Values are non-owning tagged scalars. Strings and runtime references are
+// generation-checked handles resolved by their owning RuntimeContext. Copying
+// a Value preserves the handle identity without allocating or retaining a
+// pointer into a moving container.
 class Value {
 public:
     Value() = default;
@@ -88,25 +122,28 @@ public:
     }
     bool isJsonNamespace() const { return type_ == ValueType::JsonNamespace; }
 
-    bool booleanValue() const { return booleanValue_; }
-    double numberValue() const { return numberValue_; }
-    RuntimeStringId stringId() const { return stringId_; }
-    RuntimeFunctionId functionId() const { return functionId_; }
-    RuntimeObjectId objectId() const { return objectId_; }
-    RuntimeHostObjectId hostObjectId() const { return hostObjectId_; }
-    WellKnownSymbol wellKnownSymbolValue() const
-    {
-        return static_cast<WellKnownSymbol>(stringId_);
-    }
+    bool booleanValue() const;
+    double numberValue() const;
+    RuntimeStringId stringId() const;
+    RuntimeFunctionId functionId() const;
+    RuntimeObjectId objectId() const;
+    RuntimeHostObjectId hostObjectId() const;
+    WellKnownSymbol wellKnownSymbolValue() const;
 
 private:
+    union Payload {
+        bool booleanValue;
+        double numberValue;
+        RuntimeStringId stringId;
+        RuntimeFunctionId functionId;
+        RuntimeObjectId objectId;
+        RuntimeHostObjectId hostObjectId;
+        std::uint64_t bits;
+
+        constexpr Payload() : bits(0u) {}
+    } payload_;
+
     ValueType type_ = ValueType::Undefined;
-    bool booleanValue_ = false;
-    double numberValue_ = 0.0;
-    RuntimeStringId stringId_ = kInvalidRuntimeStringId;
-    RuntimeFunctionId functionId_ = kInvalidRuntimeFunctionId;
-    RuntimeObjectId objectId_ = kInvalidRuntimeObjectId;
-    RuntimeHostObjectId hostObjectId_ = kInvalidRuntimeHostObjectId;
 };
 
 const char* valueTypeName(ValueType type);

@@ -354,8 +354,8 @@ void testCrossMethodConsistencyAndStorage()
             objectsBefore && storage.arrayElementCount() == slotsBefore,
         "findIndex allocates no result Array or persistent result object");
     expect(NavigatorScriptRuntimeTestAccess::runtimeObjectSize() == 88u &&
-        NavigatorScriptRuntimeTestAccess::arrayElementSize() == 48u,
-        "findIndex leaves RuntimeObject and Array element storage sizes unchanged");
+        NavigatorScriptRuntimeTestAccess::arrayElementSize() == 24u,
+        "findIndex preserves RuntimeObject and portable Array element storage sizes");
 }
 
 void testHostedFixtureAndNestedEvents()

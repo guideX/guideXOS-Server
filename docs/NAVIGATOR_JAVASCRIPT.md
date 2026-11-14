@@ -14137,3 +14137,52 @@ is qualified.
 The linker, layout, negative-check, and provenance details are in the
 [JS117 kernel object-format report](NAVIGATOR_JAVASCRIPT_JS117_KERNEL_OBJECT_FORMAT.md).
 JS117 did not run QEMU or request QAC admission.
+
+### JS118 portable runtime values and lexical environments — verified
+
+JS118 is **Outcome A — `JS118_PORTABLE_VALUES_ENVIRONMENTS_VERIFIED`**.
+Required gates V0–V4 pass. `Value` is now a 16-byte tagged union with one
+payload and remains trivially copyable. String records and bytes live in a
+caller-backed `RuntimeStringStore`; environment records, bindings, and copied
+binding names live in a caller-backed `EnvironmentStore`. Opaque runtime
+handles carry a 16-bit nonzero generation and slot. Reset advances the
+generation, and capacity, alignment, overflow, invalidation, and rollback
+errors are checked explicitly.
+
+The shared environment layer implements parent chains, shadowing, `var` versus
+lexical duplicate rules, TDZ initialization, const assignment, and closure
+retention. Parameter and function-body environments preserve JS105 visibility
+for non-simple parameter lists. Hosted `Environment` and `RuntimeContext`
+adapt to the same store operations used by the freestanding probe.
+
+Default bounded backing is 2,048 environment records, 16,384 binding records,
+1 MiB of copied binding names, 4,096 runtime string records, and 256 KiB of
+runtime string bytes: 2,080,768 bytes total. AMD64 sizes are Value 16,
+string record 16, environment record 24, Binding 40, EnvironmentStore 88,
+RuntimeStringStore 64, and hosted Environment adapter 32 bytes. The actual
+`value.cpp` and `environment.cpp` compile and link as an AMD64 freestanding
+COFF component with no undefined symbols or C++ runtime imports. This verifies
+V0–V3 for the component and its called operations.
+
+The warning-clean portable harness passed 44/44 checks. JS115 and JS116
+qualification passed, and the complete JavaScript matrix passed 111/111 lanes
+with 17,656/17,656 assertions across 70 assertion-reporting lanes. JS91
+failure-injection checks also verified descriptor rollback using decoded
+generation handles. The final hosted build succeeded; JS109 and JS110 pages
+loaded through Navigator with HTTP 200 and no JavaScript runtime failure. The
+hosted aggregate retained its baseline of 767/774 checks, with only the seven
+known CSS failures in phases 3C, 3G, 6A, three 6B checks, and 6C.
+
+The original 8,398,274-byte executable was restored at SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`.
+All 42 generated fixtures (458,372 bytes) match the saved manifest, and
+`.phase` is absent. No QEMU, guest execution, QAC admission, or optional V5
+kernel-object-format qualification was performed. Evaluator, function,
+object/Array, property, JSON, host-object, and Navigator adapter storage still
+uses hosted containers and exception boundaries. JS119 should qualify bounded
+runtime record pools while preserving identity and generation behavior.
+
+The detailed pre-JS118 architecture, Value and handle layout, string and
+binding semantics, limits, target flags and dependency closure, stack bounds,
+verification results, and JS119 plan are in the
+[JS118 portable values and environments report](NAVIGATOR_JAVASCRIPT_JS118_PORTABLE_VALUES_ENVIRONMENTS.md).

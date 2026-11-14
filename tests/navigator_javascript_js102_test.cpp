@@ -617,8 +617,8 @@ void testBoundariesAndStorage()
         storage.arrayElementCount() == slotsBefore,
         "successful search allocates no result Array or persistent staging slots");
     expect(NavigatorScriptRuntimeTestAccess::runtimeObjectSize() == 88u &&
-        NavigatorScriptRuntimeTestAccess::arrayElementSize() == 48u,
-        "findLast leaves RuntimeObject and RuntimeArrayElement layouts unchanged");
+        NavigatorScriptRuntimeTestAccess::arrayElementSize() == 24u,
+        "findLast preserves RuntimeObject and portable RuntimeArrayElement layouts");
 }
 
 } // namespace

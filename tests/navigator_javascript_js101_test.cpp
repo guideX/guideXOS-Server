@@ -503,9 +503,9 @@ void testErrorsLimitsAndStorage()
         storage.arrayElementCount() == slotsBefore,
         "successful reduction allocates no result Array or persistent staging slots");
     expect(NavigatorScriptRuntimeTestAccess::runtimeObjectSize() == 88u &&
-        NavigatorScriptRuntimeTestAccess::arrayElementSize() == 48u &&
+        NavigatorScriptRuntimeTestAccess::arrayElementSize() == 24u &&
         NavigatorScriptRuntimeTestAccess::methodAttributes(storage, "reduceRight"),
-        "reduceRight preserves object layouts and writable-only native method attributes");
+        "reduceRight preserves portable object layouts and writable-only native method attributes");
 }
 
 std::string denseArraySource(std::size_t length)

@@ -7,12 +7,15 @@ using gxos::javascript::RuntimeContext;
 using gxos::javascript::RuntimeErrorCode;
 using gxos::javascript::RuntimeLimits;
 using gxos::javascript::RuntimeObjectId;
+using gxos::javascript::RuntimeGeneration;
 using gxos::javascript::ScriptResult;
 using gxos::javascript::ScriptStatus;
 using gxos::javascript::SourceView;
 using gxos::javascript::Value;
 using gxos::javascript::ValueType;
 using gxos::javascript::kInvalidRuntimeObjectId;
+using gxos::javascript::runtimeHandleGeneration;
+using gxos::javascript::runtimeHandleSlot;
 
 namespace {
 
@@ -257,8 +260,16 @@ void testResetLifetime()
     expect(context.builtInsInitialized(), "reset lifetime: built-ins active");
     context.reset();
     expect(context.builtInsInitialized(), "reset lifetime: built-ins recreated");
-    expect(context.objectPrototypeId() == 0 && context.arrayPrototypeId() == 1 &&
-        context.mathObjectId() == 2, "reset lifetime: deterministic built-in IDs");
+    expect(runtimeHandleSlot(context.objectPrototypeId()) == 0u &&
+        runtimeHandleSlot(context.arrayPrototypeId()) == 1u &&
+        runtimeHandleSlot(context.mathObjectId()) == 2u &&
+        runtimeHandleGeneration(context.objectPrototypeId()) ==
+            static_cast<RuntimeGeneration>(context.hostGeneration()) &&
+        runtimeHandleGeneration(context.arrayPrototypeId()) ==
+            static_cast<RuntimeGeneration>(context.hostGeneration()) &&
+        runtimeHandleGeneration(context.mathObjectId()) ==
+            static_cast<RuntimeGeneration>(context.hostGeneration()),
+        "reset lifetime: deterministic built-in slots and fresh generation");
     expect(binding(context, "a") == nullptr, "reset lifetime: old binding gone");
     const ScriptResult second = execute(context,
         "var result = Math.abs(-4); var a = []; a.push(2);");

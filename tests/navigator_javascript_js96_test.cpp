@@ -437,8 +437,8 @@ std::string denseArraySource(std::size_t length)
 void testMaximumBoundaries()
 {
     expect(NavigatorScriptRuntimeTestAccess::runtimeObjectSize() == 88u &&
-        NavigatorScriptRuntimeTestAccess::arrayElementSize() == 48u,
-        "some does not change RuntimeObject or Array element record sizes");
+        NavigatorScriptRuntimeTestAccess::arrayElementSize() == 24u,
+        "some preserves RuntimeObject and portable Array element record sizes");
 
     RuntimeContext maximumFalse;
     const ScriptResult allFalse = run(maximumFalse,

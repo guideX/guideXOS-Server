@@ -523,12 +523,12 @@ void testAttributeDefaultsAndFiltering()
         << " B; capacities="
         << limits.maxObjects << ',' << limits.maxTotalProperties << ','
         << limits.maxTotalArrayElements << '\n';
-    expect(NavigatorScriptRuntimeTestAccess::propertyBytes() == 80u &&
-        NavigatorScriptRuntimeTestAccess::arrayElementBytes() == 48u &&
+    expect(NavigatorScriptRuntimeTestAccess::propertyBytes() == 56u &&
+        NavigatorScriptRuntimeTestAccess::arrayElementBytes() == 24u &&
         NavigatorScriptRuntimeTestAccess::objectBytes() == 88u &&
-        sizeof(Value) == 40u &&
+        sizeof(Value) == 16u &&
         NavigatorScriptRuntimeTestAccess::attributeMaskBytes() == 1u,
-        "attribute bytes use existing bounded-record padding without raising record or pool sizes");
+        "portable Values and compact attribute metadata preserve bounded record and pool sizes");
 }
 
 void testAttributeMutationAndFailureAtomicity()

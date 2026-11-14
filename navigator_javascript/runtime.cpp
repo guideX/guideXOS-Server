@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <limits>
 #include <new>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -398,6 +399,40 @@ std::size_t maximumSupportedArrayLength(const RuntimeLimits& limits)
     return maximum;
 }
 
+RuntimeErrorCode runtimeEnvironmentError(EnvironmentErrorCode code)
+{
+    switch (code) {
+    case EnvironmentErrorCode::None:
+    case EnvironmentErrorCode::InvalidStorage:
+    case EnvironmentErrorCode::InvalidAlignment:
+    case EnvironmentErrorCode::InvalidInput:
+    case EnvironmentErrorCode::InvalidReference:
+    case EnvironmentErrorCode::InvalidEnvironment:
+    case EnvironmentErrorCode::StaleGeneration:
+    case EnvironmentErrorCode::BindingAlreadyInitialized:
+    case EnvironmentErrorCode::SizeOverflow:
+    case EnvironmentErrorCode::ParentCycle:
+    case EnvironmentErrorCode::InternalInvariantFailure:
+        return RuntimeErrorCode::InvalidAstState;
+    case EnvironmentErrorCode::MissingBinding:
+        return RuntimeErrorCode::UnknownIdentifier;
+    case EnvironmentErrorCode::UninitializedBinding:
+        return RuntimeErrorCode::UninitializedBinding;
+    case EnvironmentErrorCode::ImmutableAssignment:
+        return RuntimeErrorCode::TypeError;
+    case EnvironmentErrorCode::DuplicateLexicalBinding:
+        return RuntimeErrorCode::DuplicateBinding;
+    case EnvironmentErrorCode::BindingLimitExceeded:
+    case EnvironmentErrorCode::CapacityExceeded:
+        return RuntimeErrorCode::BindingLimitExceeded;
+    case EnvironmentErrorCode::BindingNameTooLong:
+        return RuntimeErrorCode::BindingNameTooLong;
+    case EnvironmentErrorCode::AllocationFailure:
+        return RuntimeErrorCode::AllocationFailure;
+    }
+    return RuntimeErrorCode::InvalidAstState;
+}
+
 bool propertyKeyMatchesArrayIndex(const std::string& key, std::size_t index)
 {
     if (key.empty()) return false;
@@ -421,7 +456,8 @@ class RuntimeContext::Evaluator : public HostFunctionInvoker {
 public:
     explicit Evaluator(RuntimeContext& context)
         : context_(context),
-          initialActiveCallFrames_(context.activeCallFrames_) {}
+          initialActiveCallFrames_(context.activeCallFrames_),
+          currentEnvironment_(context.globalEnvironmentId_) {}
 
     ~Evaluator()
     {
@@ -449,9 +485,9 @@ public:
         }
         if (!preflightGlobalBindings(context_.ast_.root())) return false;
         if (!instantiateDeclarations(context_.ast_.root(),
-            kGlobalEnvironmentId) ||
+            context_.globalEnvironmentId_) ||
             !instantiateLexicalBindings(context_.ast_.root(),
-                kGlobalEnvironmentId)) return false;
+                context_.globalEnvironmentId_)) return false;
         Control control;
         return executeStatement(context_.ast_.root(), false, false, control) &&
             control.kind == ControlKind::Normal;
@@ -707,15 +743,15 @@ private:
     {
         SourceView name;
         if (!identifierName(id, name)) return false;
-        const Binding* found = resolveBinding(name);
-        if (found != nullptr) {
-            if (!found->initialized) {
-                fail(RuntimeErrorCode::UninitializedBinding,
-                    context_.ast_.node(id).location);
-                return false;
-            }
-            value = found->value;
+        EnvironmentError environmentError;
+        if (context_.environmentStore_.readChain(currentEnvironment_, name,
+                value, environmentError)) {
             return true;
+        }
+        if (environmentError.code != EnvironmentErrorCode::MissingBinding) {
+            fail(runtimeEnvironmentError(environmentError.code),
+                context_.ast_.node(id).location);
+            return false;
         }
         // JS1 intentionally tokenizes `undefined` as an identifier.  JS3
         // supplies the primitive when it is not shadowed by a var binding.
@@ -748,21 +784,16 @@ private:
 
     const Value* lookup(SourceView name) const
     {
-        const Binding* found = resolveBinding(name);
-        return found == nullptr ? nullptr : &found->value;
+        const Binding* found = nullptr;
+        EnvironmentError ignored;
+        return resolveBinding(name, found, ignored) ? &found->value : nullptr;
     }
 
-    const Binding* resolveBinding(SourceView name) const
+    bool resolveBinding(SourceView name, const Binding*& found,
+        EnvironmentError& error) const
     {
-        EnvironmentId environment = currentEnvironment_;
-        while (environment != kInvalidEnvironmentId) {
-            const Environment* current = context_.environmentAt(environment);
-            if (current == nullptr) return nullptr;
-            const Binding* found = current->resolve(name);
-            if (found != nullptr) return found;
-            environment = current->parent();
-        }
-        return nullptr;
+        return context_.environmentStore_.resolveChain(currentEnvironment_,
+            name, found, error);
     }
 
     bool declareIn(EnvironmentId environment, SourceView name, Value value,
@@ -775,23 +806,7 @@ private:
         }
         EnvironmentError error;
         if (target->declare(name, value, error, immutable)) return true;
-        switch (error.code) {
-        case EnvironmentErrorCode::BindingLimitExceeded:
-            fail(RuntimeErrorCode::BindingLimitExceeded, location);
-            break;
-        case EnvironmentErrorCode::BindingNameTooLong:
-            fail(RuntimeErrorCode::BindingNameTooLong, location);
-            break;
-        case EnvironmentErrorCode::AllocationFailure:
-            fail(RuntimeErrorCode::AllocationFailure, location);
-            break;
-        case EnvironmentErrorCode::DuplicateLexicalBinding:
-            fail(RuntimeErrorCode::DuplicateBinding, location);
-            break;
-        case EnvironmentErrorCode::None:
-            fail(RuntimeErrorCode::InvalidAstState, location);
-            break;
-        }
+        fail(runtimeEnvironmentError(error.code), location);
         return false;
     }
 
@@ -807,46 +822,16 @@ private:
         EnvironmentError error;
         if (target->declareLexical(name, immutable, error, value,
                 initialized)) return true;
-        switch (error.code) {
-        case EnvironmentErrorCode::BindingLimitExceeded:
-            fail(RuntimeErrorCode::BindingLimitExceeded, location);
-            break;
-        case EnvironmentErrorCode::BindingNameTooLong:
-            fail(RuntimeErrorCode::BindingNameTooLong, location);
-            break;
-        case EnvironmentErrorCode::AllocationFailure:
-            fail(RuntimeErrorCode::AllocationFailure, location);
-            break;
-        case EnvironmentErrorCode::DuplicateLexicalBinding:
-            fail(RuntimeErrorCode::DuplicateBinding, location);
-            break;
-        case EnvironmentErrorCode::None:
-            fail(RuntimeErrorCode::InvalidAstState, location);
-            break;
-        }
+        fail(runtimeEnvironmentError(error.code), location);
         return false;
     }
 
     bool initialize(SourceView name, Value value, SourceLocation location)
     {
-        EnvironmentId environment = currentEnvironment_;
-        while (environment != kInvalidEnvironmentId) {
-            Environment* current = context_.environmentAt(environment);
-            if (current == nullptr) {
-                fail(RuntimeErrorCode::InvalidAstState, location);
-                return false;
-            }
-            Binding* found = current->resolve(name);
-            if (found != nullptr) {
-                if (found->initialized || !current->initialize(name, value)) {
-                    fail(RuntimeErrorCode::InvalidAstState, location);
-                    return false;
-                }
-                return true;
-            }
-            environment = current->parent();
-        }
-        fail(RuntimeErrorCode::UnknownIdentifier, location);
+        EnvironmentError error;
+        if (context_.environmentStore_.initializeChain(currentEnvironment_,
+                name, value, error)) return true;
+        fail(runtimeEnvironmentError(error.code), location);
         return false;
     }
 
@@ -871,8 +856,9 @@ private:
             return false;
         }
         if (target->lookup(name) != nullptr) {
-            if (!target->assign(name, value)) {
-                fail(RuntimeErrorCode::InvalidAstState, location);
+            EnvironmentError error;
+            if (!target->assign(name, value, error)) {
+                fail(runtimeEnvironmentError(error.code), location);
                 return false;
             }
             return true;
@@ -882,32 +868,10 @@ private:
 
     bool assign(SourceView name, Value value, SourceLocation location)
     {
-        EnvironmentId environment = currentEnvironment_;
-        while (environment != kInvalidEnvironmentId) {
-            Environment* current = context_.environmentAt(environment);
-            if (current == nullptr) {
-                fail(RuntimeErrorCode::InvalidAstState, location);
-                return false;
-            }
-            Binding* binding = current->resolve(name);
-            if (binding != nullptr) {
-                if (!binding->initialized) {
-                    fail(RuntimeErrorCode::UninitializedBinding, location);
-                    return false;
-                }
-                if (current->isImmutable(name)) {
-                    fail(RuntimeErrorCode::TypeError, location);
-                    return false;
-                }
-                if (!current->assign(name, value)) {
-                    fail(RuntimeErrorCode::InvalidAstState, location);
-                    return false;
-                }
-                return true;
-            }
-            environment = current->parent();
-        }
-        fail(RuntimeErrorCode::UnknownIdentifier, location);
+        EnvironmentError error;
+        if (context_.environmentStore_.assignChain(currentEnvironment_, name,
+                value, error)) return true;
+        fail(runtimeEnvironmentError(error.code), location);
         return false;
     }
 
@@ -1327,10 +1291,12 @@ private:
     {
         if (!context_.consumeStep(reference.location)) return false;
         if (reference.stringPrimitive) {
+            SourceView string;
+            RuntimeErrorCode ignored = RuntimeErrorCode::None;
+            (void)context_.stringView(reference.receiver, string, ignored);
             value = !reference.key.isSymbol() &&
                 reference.key.string == "length"
-                ? Value::number(static_cast<double>(
-                    context_.stringValue(reference.receiver).size()))
+                ? Value::number(static_cast<double>(string.length))
                 : Value::undefined();
             return true;
         }
@@ -1487,12 +1453,20 @@ private:
             } else if (context_.ast_.node(property.key).kind == AstNodeKind::StringLiteral) {
                 Value keyValue;
                 if (!decodeString(property.key, keyValue)) return false;
-                const std::string* keyText = context_.stringData(keyValue);
-                if (keyText == nullptr) {
+                SourceView keyText;
+                RuntimeErrorCode stringError = RuntimeErrorCode::None;
+                if (!context_.stringView(keyValue, keyText, stringError)) {
                     fail(RuntimeErrorCode::InvalidAstState, property.location);
                     return false;
                 }
-                key = *keyText;
+                try {
+                    key.assign(keyText.data == nullptr ? "" : keyText.data,
+                        keyText.length);
+                } catch (const std::bad_alloc&) {
+                    fail(RuntimeErrorCode::AllocationFailure,
+                        property.location);
+                    return false;
+                }
             } else {
                 fail(RuntimeErrorCode::InvalidAstState, property.location);
                 return false;
@@ -1731,7 +1705,8 @@ private:
         EnvironmentId callEnvironment = kInvalidEnvironmentId;
         RuntimeErrorCode error = RuntimeErrorCode::None;
         if (!context_.createEnvironment(function.closureEnvironment,
-            callEnvironment, error)) {
+            callEnvironment, error, hasNonSimpleParameters
+                ? EnvironmentKind::Parameters : EnvironmentKind::Function)) {
             fail(error, callSite);
             return false;
         }
@@ -1841,7 +1816,8 @@ private:
 
             EnvironmentId bodyEnvironment = kInvalidEnvironmentId;
             if (!context_.createEnvironment(parameterEnvironment,
-                    bodyEnvironment, error)) {
+                    bodyEnvironment, error,
+                    EnvironmentKind::FunctionBody)) {
                 fail(error, callSite);
                 unwindFrame(callerEnvironment, callerThis,
                     previousFrameCount, previousActiveCallFrames);
@@ -2474,7 +2450,7 @@ private:
             return false;
         }
         if (keyCount > context_.limits_.maxRuntimeStringValues ||
-            context_.strings_.size() >
+            context_.stringStore_.count() >
                 context_.limits_.maxRuntimeStringValues - keyCount ||
             keyBytes > context_.limits_.maxTotalRuntimeStringBytes ||
             context_.totalStringBytes_ >
@@ -2686,7 +2662,8 @@ private:
             RuntimeContext::RuntimeObject* unpublished =
                 context_.objectAt(descriptorId);
             if (unpublished != nullptr &&
-                static_cast<std::size_t>(descriptorId) + 1u ==
+                static_cast<std::size_t>(runtimeHandleSlot(descriptorId)) +
+                    1u ==
                     context_.objects_.size()) {
                 context_.totalPropertyCount_ -= insertedProperties;
                 context_.totalPropertyKeyBytes_ -= insertedKeyBytes;
@@ -2794,19 +2771,20 @@ private:
             fail(RuntimeErrorCode::UnsupportedFeature, callSite);
             return false;
         }
-        const std::string* inputSource =
-            context_.stringData(arguments[0]);
-        if (inputSource == nullptr) {
+        SourceView inputSource;
+        RuntimeErrorCode stringError = RuntimeErrorCode::None;
+        if (!context_.stringView(arguments[0], inputSource, stringError)) {
             fail(RuntimeErrorCode::TypeError, callSite);
             return false;
         }
-        if (inputSource->size() > context_.limits_.maxRuntimeStringLength) {
+        if (inputSource.length > context_.limits_.maxRuntimeStringLength) {
             fail(RuntimeErrorCode::StringLimitExceeded, callSite);
             return false;
         }
         std::string inputStorage;
         try {
-            inputStorage = *inputSource;
+            inputStorage.assign(inputSource.data == nullptr ? "" :
+                inputSource.data, inputSource.length);
         } catch (const std::bad_alloc&) {
             fail(RuntimeErrorCode::AllocationFailure, callSite);
             return false;
@@ -2814,7 +2792,7 @@ private:
         const std::string* input = &inputStorage;
 
         const std::size_t objectCountBefore = context_.objects_.size();
-        const std::size_t stringCountBefore = context_.strings_.size();
+        const RuntimeStringMark stringMark = context_.stringStore_.mark();
         const std::size_t stringBytesBefore = context_.totalStringBytes_;
         const std::size_t propertyCountBefore =
             context_.totalPropertyCount_;
@@ -2824,7 +2802,8 @@ private:
             context_.totalArrayElements_;
         const auto rollback = [&]() {
             context_.objects_.resize(objectCountBefore);
-            context_.strings_.resize(stringCountBefore);
+            RuntimeStringError ignored;
+            (void)context_.stringStore_.restore(stringMark, ignored);
             context_.totalStringBytes_ = stringBytesBefore;
             context_.totalPropertyCount_ = propertyCountBefore;
             context_.totalPropertyKeyBytes_ = propertyKeyBytesBefore;
@@ -3493,14 +3472,15 @@ private:
             while (text[length] != '\0') ++length;
             return appendBytes(text, length);
         };
-        const auto appendQuoted = [&](const std::string& text) {
+        const auto appendQuotedBytes = [&](const char* text,
+            std::size_t textLength) {
             if (!appendText("\"")) return false;
             std::size_t offset = 0u;
-            while (offset < text.size()) {
+            while (offset < textLength) {
                 if (!context_.consumeStep(callSite)) return false;
                 const std::size_t characterStart = offset;
                 std::uint32_t scalar = 0u;
-                if (!decodeUtf8Scalar(text.data(), text.size(), offset,
+                if (!decodeUtf8Scalar(text, textLength, offset,
                         scalar)) {
                     fail(RuntimeErrorCode::TypeError, callSite);
                     return false;
@@ -3526,12 +3506,15 @@ private:
                         hex[(scalar >> 4u) & 0x0fu],
                         hex[scalar & 0x0fu]};
                     if (!appendBytes(escaped, sizeof(escaped))) return false;
-                } else if (!appendBytes(text.data() + characterStart,
+                } else if (!appendBytes(text + characterStart,
                         offset - characterStart)) {
                     return false;
                 }
             }
             return appendText("\"");
+        };
+        const auto appendQuoted = [&](const std::string& text) {
+            return appendQuotedBytes(text.data(), text.size());
         };
         const auto prepareValue = [&](const Value& original,
             const std::string& propertyKey, Value& prepared,
@@ -3606,12 +3589,14 @@ private:
                 return appendBytes(number.data(), number.size());
             }
             case ValueType::String: {
-                const std::string* text = context_.stringData(value);
-                if (text == nullptr) {
+                SourceView text;
+                RuntimeErrorCode stringError = RuntimeErrorCode::None;
+                if (!context_.stringView(value, text, stringError)) {
                     fail(RuntimeErrorCode::InvalidAstState, callSite);
                     return false;
                 }
-                return appendQuoted(*text);
+                return appendQuotedBytes(text.data == nullptr ? "" :
+                    text.data, text.length);
             }
             case ValueType::HostObject:
             case ValueType::SymbolNamespace:
@@ -4312,12 +4297,13 @@ private:
             number = input.numberValue();
             return true;
         case ValueType::String: {
-            const std::string* text = context_.stringData(input);
-            if (text == nullptr) {
+            SourceView text;
+            RuntimeErrorCode stringError = RuntimeErrorCode::None;
+            if (!context_.stringView(input, text, stringError)) {
                 fail(RuntimeErrorCode::InvalidAstState, SourceLocation());
                 return false;
             }
-            if (!parseNumber(SourceView(text->data(), text->size()), number)) {
+            if (!parseNumber(text, number)) {
                 number = std::numeric_limits<double>::quiet_NaN();
             }
             return true;
@@ -4358,12 +4344,19 @@ private:
             return true;
         }
         case ValueType::String: {
-            const std::string* string = context_.stringData(input);
-            if (string == nullptr) {
+            SourceView string;
+            RuntimeErrorCode stringError = RuntimeErrorCode::None;
+            if (!context_.stringView(input, string, stringError)) {
                 fail(RuntimeErrorCode::InvalidAstState, SourceLocation());
                 return false;
             }
-            text = *string;
+            try {
+                text.assign(string.data == nullptr ? "" : string.data,
+                    string.length);
+            } catch (const std::bad_alloc&) {
+                fail(RuntimeErrorCode::AllocationFailure, SourceLocation());
+                return false;
+            }
             return true;
         }
         case ValueType::Function:
@@ -4625,9 +4618,10 @@ private:
             return true;
         }
 
-        const Binding* current = resolveBinding(name);
-        if (current == nullptr) {
-            fail(RuntimeErrorCode::UnknownIdentifier,
+        const Binding* current = nullptr;
+        EnvironmentError environmentError;
+        if (!resolveBinding(name, current, environmentError)) {
+            fail(runtimeEnvironmentError(environmentError.code),
                 context_.ast_.node(node.left).location);
             return false;
         }
@@ -4683,9 +4677,10 @@ private:
         }
         SourceView name;
         if (!identifierName(node.argument, name)) return false;
-        const Binding* current = resolveBinding(name);
-        if (current == nullptr) {
-            fail(RuntimeErrorCode::UnknownIdentifier,
+        const Binding* current = nullptr;
+        EnvironmentError environmentError;
+        if (!resolveBinding(name, current, environmentError)) {
+            fail(runtimeEnvironmentError(environmentError.code),
                 context_.ast_.node(node.argument).location);
             return false;
         }
@@ -4805,7 +4800,8 @@ private:
             EnvironmentId iterationEnvironment = kInvalidEnvironmentId;
             RuntimeErrorCode error = RuntimeErrorCode::None;
             if (!context_.createEnvironment(loopEnvironment,
-                    iterationEnvironment, error)) {
+                    iterationEnvironment, error,
+                    EnvironmentKind::Iteration)) {
                 fail(error, node.location);
                 return closeIteratorPreservingError(iterator, node.location);
             }
@@ -4863,7 +4859,8 @@ private:
                 EnvironmentId blockEnvironment = kInvalidEnvironmentId;
                 RuntimeErrorCode error = RuntimeErrorCode::None;
                 if (!context_.createEnvironment(previousEnvironment,
-                        blockEnvironment, error)) {
+                        blockEnvironment, error,
+                        EnvironmentKind::Block)) {
                     fail(error, node.location);
                     return false;
                 }
@@ -5044,8 +5041,10 @@ private:
         case ValueType::Number:
             return value.numberValue() != 0.0 && !std::isnan(value.numberValue());
         case ValueType::String: {
-            const std::string* text = context_.stringData(value);
-            return text != nullptr && !text->empty();
+            SourceView text;
+            RuntimeErrorCode ignored = RuntimeErrorCode::None;
+            return context_.stringView(value, text, ignored) &&
+                text.length != 0u;
         }
         case ValueType::Function:
             return true;
@@ -5075,10 +5074,16 @@ private:
                 !std::isnan(right.numberValue()) &&
                 left.numberValue() == right.numberValue();
         case ValueType::String: {
-            const std::string* leftText = context_.stringData(left);
-            const std::string* rightText = context_.stringData(right);
-            return leftText != nullptr && rightText != nullptr &&
-                *leftText == *rightText;
+            SourceView leftText;
+            SourceView rightText;
+            RuntimeErrorCode ignored = RuntimeErrorCode::None;
+            if (!context_.stringView(left, leftText, ignored) ||
+                !context_.stringView(right, rightText, ignored) ||
+                leftText.length != rightText.length) return false;
+            for (std::size_t index = 0u; index < leftText.length; ++index)
+                if (leftText.data[index] != rightText.data[index])
+                    return false;
+            return true;
         }
         case ValueType::Function:
             return left.functionId() != kInvalidRuntimeFunctionId &&
@@ -5131,7 +5136,7 @@ private:
 
     RuntimeContext& context_;
     std::size_t initialActiveCallFrames_ = 0u;
-    EnvironmentId currentEnvironment_ = kGlobalEnvironmentId;
+    EnvironmentId currentEnvironment_ = kInvalidEnvironmentId;
     Value currentThis_ = Value::undefined();
     std::vector<CallFrame> frames_;
 };
@@ -5383,10 +5388,7 @@ void RuntimeContext::setEventPhase(std::uint8_t phase)
 }
 
 RuntimeContext::RuntimeContext(RuntimeLimits limits)
-    : limits_(limits),
-      ast_(),
-      environment_(EnvironmentLimits{limits.maxBindings,
-          limits.maxBindingNameLength})
+    : limits_(limits), ast_()
 {
     reset();
 }
@@ -5398,10 +5400,11 @@ void RuntimeContext::clearRuntimeState()
     sourceStorage_.clear();
     realmSourceStorage_.clear();
     realmSourceLineCount_ = 0;
-    environment_.reset();
+    environmentStore_.reset(kInvalidRuntimeGeneration);
+    environment_.bind(nullptr, kInvalidEnvironmentId, EnvironmentLimits());
     environments_.clear();
     functions_.clear();
-    strings_.clear();
+    stringStore_.reset(kInvalidRuntimeGeneration);
     objects_.clear();
     totalStringBytes_ = 0;
     totalPropertyCount_ = 0;
@@ -5418,6 +5421,7 @@ void RuntimeContext::clearRuntimeState()
     mathObject_ = kInvalidRuntimeObjectId;
     eventConstantsObject_ = kInvalidRuntimeObjectId;
     eventObject_ = kInvalidRuntimeObjectId;
+    globalEnvironmentId_ = kInvalidEnvironmentId;
     eventObjectCache_.fill(kInvalidRuntimeObjectId);
     eventDispatchStack_ = {};
     eventDispatchDepth_ = 0;
@@ -5456,6 +5460,7 @@ void RuntimeContext::clearRuntimeState()
     hostOperations_ = 0;
     hostCallActive_ = false;
     hostReentryAllowed_ = false;
+    runtimeGeneration_ = kInvalidRuntimeGeneration;
     GXOS_JS84_DIAGNOSTIC(
         diagnostics_.environmentPoolHighWater = environmentCount());
 }
@@ -5472,7 +5477,18 @@ void RuntimeContext::reset()
         return;
     }
 
+    if (hostGeneration_ > 0xfffeu) {
+        setRuntimeError(RuntimeErrorCode::HostGenerationLimitExceeded,
+            SourceLocation());
+        return;
+    }
+    runtimeGeneration_ = static_cast<RuntimeGeneration>(hostGeneration_);
+
     RuntimeErrorCode error = RuntimeErrorCode::None;
+    if (!initializePortableStorage(error)) {
+        setRuntimeError(error, SourceLocation());
+        return;
+    }
     if (!initializeBuiltIns(error)) {
         // Initialization is transactional from the caller's perspective:
         // a context with insufficient limits has no partially usable globals
@@ -5483,30 +5499,110 @@ void RuntimeContext::reset()
     }
 }
 
+bool RuntimeContext::initializePortableStorage(RuntimeErrorCode& error)
+{
+    error = RuntimeErrorCode::None;
+    if (limits_.maxEnvironments == 0u ||
+        limits_.maxEnvironments > kRuntimeHandleInvalidPart ||
+        limits_.maxTotalEnvironmentBindings >=
+            static_cast<std::size_t>(kInvalidBindingIndex) ||
+        limits_.maxBindings > 0xffffu ||
+        limits_.maxFunctionEnvironmentBindings > 0xffffu ||
+        limits_.maxBindingNameLength > 0xffffu) {
+        error = RuntimeErrorCode::EnvironmentLimitExceeded;
+        return false;
+    }
+    if (limits_.maxRuntimeStringValues > kRuntimeHandleInvalidPart) {
+        error = RuntimeErrorCode::StringLimitExceeded;
+        return false;
+    }
+    try {
+        environmentRecordStorage_.resize(limits_.maxEnvironments);
+        bindingStorage_.resize(limits_.maxTotalEnvironmentBindings);
+        bindingNameStorage_.resize(limits_.maxEnvironmentBindingNameBytes);
+        runtimeStringRecordStorage_.resize(limits_.maxRuntimeStringValues);
+        runtimeStringStorage_.resize(limits_.maxTotalRuntimeStringBytes);
+        environments_.reserve(limits_.maxEnvironments - 1u);
+    } catch (const std::bad_alloc&) {
+        error = RuntimeErrorCode::AllocationFailure;
+        return false;
+    } catch (const std::length_error&) {
+        error = RuntimeErrorCode::AllocationFailure;
+        return false;
+    }
+
+    EnvironmentError environmentError;
+    const EnvironmentStorageView environmentStorage{
+        environmentRecordStorage_.data(), environmentRecordStorage_.size(),
+        bindingStorage_.data(), bindingStorage_.size(),
+        bindingNameStorage_.data(), bindingNameStorage_.size()};
+    if (!environmentStore_.configure(environmentStorage, runtimeGeneration_,
+            environmentError)) {
+        error = environmentError.code == EnvironmentErrorCode::AllocationFailure
+            ? RuntimeErrorCode::AllocationFailure
+            : RuntimeErrorCode::InvalidAstState;
+        return false;
+    }
+    RuntimeStringError stringError;
+    const RuntimeStringStorageView stringStorage{
+        runtimeStringRecordStorage_.data(),
+        runtimeStringRecordStorage_.size(), runtimeStringStorage_.data(),
+        runtimeStringStorage_.size()};
+    if (!stringStore_.configure(stringStorage, runtimeGeneration_,
+            stringError)) {
+        error = RuntimeErrorCode::AllocationFailure;
+        return false;
+    }
+
+    EnvironmentId global = kInvalidEnvironmentId;
+    if (!environmentStore_.createRoot(
+            EnvironmentLimits{limits_.maxBindings,
+                limits_.maxBindingNameLength}, global, environmentError)) {
+        error = environmentError.code ==
+                EnvironmentErrorCode::CapacityExceeded
+            ? RuntimeErrorCode::EnvironmentLimitExceeded
+            : RuntimeErrorCode::InvalidAstState;
+        return false;
+    }
+    globalEnvironmentId_ = global;
+    environment_.bind(&environmentStore_, global,
+        EnvironmentLimits{limits_.maxBindings,
+            limits_.maxBindingNameLength});
+    // The global record is part of the bounded environment pool too. Keep
+    // diagnostics aligned with the store's public count before any function
+    // or block scope is allocated.
+    GXOS_JS84_DIAGNOSTIC(
+        diagnostics_.environmentPoolHighWater = environmentCount());
+    return true;
+}
+
 bool RuntimeContext::createString(SourceView text, Value& value,
     RuntimeErrorCode& error)
 {
     error = RuntimeErrorCode::None;
     if (text.data == nullptr && text.length != 0) {
-        error = RuntimeErrorCode::AllocationFailure;
+        error = RuntimeErrorCode::InvalidAstState;
         return false;
     }
     if (text.length > limits_.maxRuntimeStringLength ||
-        strings_.size() >= limits_.maxRuntimeStringValues ||
+        stringStore_.count() >= limits_.maxRuntimeStringValues ||
         text.length > limits_.maxTotalRuntimeStringBytes ||
         totalStringBytes_ > limits_.maxTotalRuntimeStringBytes - text.length ||
-        strings_.size() >= static_cast<std::size_t>(kInvalidRuntimeStringId)) {
+        stringStore_.count() >= kRuntimeHandleInvalidPart) {
         error = RuntimeErrorCode::StringLimitExceeded;
         return false;
     }
-    try {
-        strings_.emplace_back(text.data == nullptr ? "" : text.data, text.length);
-    } catch (const std::bad_alloc&) {
-        error = RuntimeErrorCode::AllocationFailure;
+    RuntimeStringError stringError;
+    RuntimeStringId id = kInvalidRuntimeStringId;
+    if (!stringStore_.create(text, limits_.maxRuntimeStringLength, id,
+            stringError)) {
+        error = stringError.code == RuntimeStringErrorCode::CapacityExceeded
+            ? RuntimeErrorCode::StringLimitExceeded
+            : RuntimeErrorCode::AllocationFailure;
         return false;
     }
     totalStringBytes_ += text.length;
-    value = Value::string(static_cast<RuntimeStringId>(strings_.size() - 1));
+    value = Value::string(id);
     return true;
 }
 
@@ -5522,14 +5618,25 @@ bool RuntimeContext::createOrGetCachedString(SourceView text, Value& value,
         error = RuntimeErrorCode::StringLimitExceeded;
         return false;
     }
-    const char* bytes = text.data == nullptr ? "" : text.data;
-    for (std::size_t index = 0; index < strings_.size(); ++index) {
-        const std::string& existing = strings_[index];
-        if (existing.size() == text.length &&
-            (text.length == 0 ||
-                std::char_traits<char>::compare(existing.data(), bytes,
-                    text.length) == 0)) {
-            value = Value::string(static_cast<RuntimeStringId>(index));
+    for (std::size_t index = 0; index < stringStore_.count(); ++index) {
+        const RuntimeStringId id = makeRuntimeHandle(runtimeGeneration_,
+            static_cast<std::uint32_t>(index));
+        SourceView existing;
+        RuntimeStringError stringError;
+        if (!stringStore_.view(id, existing, stringError)) {
+            error = RuntimeErrorCode::InvalidAstState;
+            return false;
+        }
+        bool matches = existing.length == text.length;
+        for (std::size_t offset = 0u; matches && offset < text.length;
+            ++offset) {
+            const char left = existing.data == nullptr
+                ? '\0' : existing.data[offset];
+            const char right = text.data == nullptr ? '\0' : text.data[offset];
+            matches = left == right;
+        }
+        if (matches) {
+            value = Value::string(id);
             return true;
         }
     }
@@ -5537,51 +5644,59 @@ bool RuntimeContext::createOrGetCachedString(SourceView text, Value& value,
 }
 
 bool RuntimeContext::createEnvironment(EnvironmentId parent,
-    EnvironmentId& result, RuntimeErrorCode& error)
+    EnvironmentId& result, RuntimeErrorCode& error, EnvironmentKind kind)
 {
     error = RuntimeErrorCode::None;
     if (environmentAt(parent) == nullptr) {
         error = RuntimeErrorCode::InvalidFunction;
         return false;
     }
-    if (environmentCount() >= limits_.maxEnvironments ||
-        environments_.size() >=
-            static_cast<std::size_t>(kInvalidEnvironmentId - 1u)) {
+    EnvironmentError environmentError;
+    const EnvironmentLimits limits{limits_.maxFunctionEnvironmentBindings,
+        limits_.maxBindingNameLength};
+    EnvironmentId created = kInvalidEnvironmentId;
+    if (!environmentStore_.create(parent, kind, limits, created,
+            environmentError)) {
         GXOS_JS84_DIAGNOSTIC(++diagnostics_.failedEnvironmentAllocations);
-        error = RuntimeErrorCode::EnvironmentLimitExceeded;
+        error = environmentError.code == EnvironmentErrorCode::CapacityExceeded
+            ? RuntimeErrorCode::EnvironmentLimitExceeded
+            : environmentError.code == EnvironmentErrorCode::AllocationFailure
+                ? RuntimeErrorCode::AllocationFailure
+                : RuntimeErrorCode::InvalidAstState;
         return false;
     }
-    try {
-        environments_.emplace_back(
-            EnvironmentLimits{limits_.maxFunctionEnvironmentBindings,
-                limits_.maxBindingNameLength}, parent);
-    } catch (const std::bad_alloc&) {
-        GXOS_JS84_DIAGNOSTIC(++diagnostics_.failedEnvironmentAllocations);
-        error = RuntimeErrorCode::AllocationFailure;
-        return false;
-    }
+    // initializePortableStorage reserves the complete bounded descriptor
+    // array before the root becomes visible, so this append cannot move any
+    // Environment facade retained by the evaluator.
+    environments_.emplace_back(&environmentStore_, created, limits);
     GXOS_JS84_DIAGNOSTIC({
         ++diagnostics_.environmentsAllocated;
         if (diagnostics_.environmentPoolHighWater < environmentCount())
             diagnostics_.environmentPoolHighWater = environmentCount();
     });
-    result = static_cast<EnvironmentId>(environments_.size());
+    result = created;
     return true;
 }
 
 Environment* RuntimeContext::environmentAt(EnvironmentId id)
 {
-    if (id == kGlobalEnvironmentId) return &environment_;
-    if (id == kInvalidEnvironmentId || id == 0u) return nullptr;
-    const std::size_t index = static_cast<std::size_t>(id - 1u);
+    if (!runtimeHandleIsValid(id, runtimeGeneration_)) return nullptr;
+    const std::size_t slot = runtimeHandleSlot(id);
+    EnvironmentError error;
+    if (!environmentStore_.valid(id, error)) return nullptr;
+    if (slot == 0u) return &environment_;
+    const std::size_t index = slot - 1u;
     return index < environments_.size() ? &environments_[index] : nullptr;
 }
 
 const Environment* RuntimeContext::environmentAt(EnvironmentId id) const
 {
-    if (id == kGlobalEnvironmentId) return &environment_;
-    if (id == kInvalidEnvironmentId || id == 0u) return nullptr;
-    const std::size_t index = static_cast<std::size_t>(id - 1u);
+    if (!runtimeHandleIsValid(id, runtimeGeneration_)) return nullptr;
+    const std::size_t slot = runtimeHandleSlot(id);
+    EnvironmentError error;
+    if (!environmentStore_.valid(id, error)) return nullptr;
+    if (slot == 0u) return &environment_;
+    const std::size_t index = slot - 1u;
     return index < environments_.size() ? &environments_[index] : nullptr;
 }
 
@@ -5599,8 +5714,7 @@ bool RuntimeContext::createFunction(AstNodeId declaration,
         return false;
     }
     if (userFunctionCount_ >= limits_.maxFunctions ||
-        functions_.size() >=
-            static_cast<std::size_t>(kInvalidRuntimeFunctionId)) {
+        functions_.size() >= kRuntimeHandleInvalidPart) {
         error = RuntimeErrorCode::FunctionLimitExceeded;
         return false;
     }
@@ -5618,7 +5732,8 @@ bool RuntimeContext::createFunction(AstNodeId declaration,
         return false;
     }
     ++userFunctionCount_;
-    result = static_cast<RuntimeFunctionId>(functions_.size() - 1u);
+    result = makeRuntimeHandle(runtimeGeneration_,
+        static_cast<std::uint32_t>(functions_.size() - 1u));
     return true;
 }
 
@@ -5627,8 +5742,7 @@ bool RuntimeContext::createNativeFunction(NativeFunctionId native,
 {
     error = RuntimeErrorCode::None;
     if (nativeFunctionCount_ >= limits_.maxNativeFunctions ||
-        functions_.size() >=
-            static_cast<std::size_t>(kInvalidRuntimeFunctionId)) {
+        functions_.size() >= kRuntimeHandleInvalidPart) {
         error = RuntimeErrorCode::NativeFunctionLimitExceeded;
         return false;
     }
@@ -5642,7 +5756,8 @@ bool RuntimeContext::createNativeFunction(NativeFunctionId native,
         return false;
     }
     ++nativeFunctionCount_;
-    result = static_cast<RuntimeFunctionId>(functions_.size() - 1u);
+    result = makeRuntimeHandle(runtimeGeneration_,
+        static_cast<std::uint32_t>(functions_.size() - 1u));
     return true;
 }
 
@@ -5661,7 +5776,7 @@ bool RuntimeContext::createHostMethod(RuntimeHostObjectId object,
         }
     }
     if (hostMethodCount_ >= limits_.maxHostMethodValues ||
-        functions_.size() >= static_cast<std::size_t>(kInvalidRuntimeFunctionId)) {
+        functions_.size() >= kRuntimeHandleInvalidPart) {
         error = RuntimeErrorCode::HostMethodLimitExceeded;
         return false;
     }
@@ -5677,24 +5792,27 @@ bool RuntimeContext::createHostMethod(RuntimeHostObjectId object,
         record.hostObject = cacheOwner;
         record.method = method;
         record.requiresReceiver = requiresReceiver;
-        record.function = static_cast<RuntimeFunctionId>(functions_.size() - 1u);
+        record.function = makeRuntimeHandle(runtimeGeneration_,
+            static_cast<std::uint32_t>(functions_.size() - 1u));
         hostMethods_.push_back(record);
     } catch (const std::bad_alloc&) {
         error = RuntimeErrorCode::AllocationFailure;
         return false;
     }
     ++hostMethodCount_;
-    result = static_cast<RuntimeFunctionId>(functions_.size() - 1u);
+    result = makeRuntimeHandle(runtimeGeneration_,
+        static_cast<std::uint32_t>(functions_.size() - 1u));
     return true;
 }
 
 const RuntimeContext::FunctionRecord* RuntimeContext::functionAt(
     RuntimeFunctionId id) const
 {
-    if (id == kInvalidRuntimeFunctionId || id >= functions_.size()) {
+    if (!runtimeHandleIsValid(id, runtimeGeneration_)) {
         return nullptr;
     }
-    return &functions_[id];
+    const std::size_t slot = runtimeHandleSlot(id);
+    return slot < functions_.size() ? &functions_[slot] : nullptr;
 }
 
 bool RuntimeContext::createObject(bool array,
@@ -5703,7 +5821,7 @@ bool RuntimeContext::createObject(bool array,
 {
     error = RuntimeErrorCode::None;
     if (objects_.size() >= limits_.maxObjects ||
-        objects_.size() >= static_cast<std::size_t>(kInvalidRuntimeObjectId)) {
+        objects_.size() >= kRuntimeHandleInvalidPart) {
         GXOS_JS84_DIAGNOSTIC(++diagnostics_.failedObjectAllocations);
         error = RuntimeErrorCode::ObjectLimitExceeded;
         return false;
@@ -5762,7 +5880,8 @@ bool RuntimeContext::createObject(bool array,
         if (diagnostics_.objectPoolHighWater < objects_.size())
             diagnostics_.objectPoolHighWater = objects_.size();
     });
-    result = static_cast<RuntimeObjectId>(objects_.size() - 1u);
+    result = makeRuntimeHandle(runtimeGeneration_,
+        static_cast<std::uint32_t>(objects_.size() - 1u));
     return true;
 }
 
@@ -5773,7 +5892,7 @@ bool RuntimeContext::createArray(std::size_t logicalLength,
 {
     error = RuntimeErrorCode::None;
     if (objects_.size() >= limits_.maxObjects ||
-        objects_.size() >= static_cast<std::size_t>(kInvalidRuntimeObjectId)) {
+        objects_.size() >= kRuntimeHandleInvalidPart) {
         GXOS_JS84_DIAGNOSTIC(++diagnostics_.failedObjectAllocations);
         error = RuntimeErrorCode::ObjectLimitExceeded;
         return false;
@@ -5837,7 +5956,8 @@ bool RuntimeContext::createArray(std::size_t logicalLength,
         if (diagnostics_.objectPoolHighWater < objects_.size())
             diagnostics_.objectPoolHighWater = objects_.size();
     });
-    result = static_cast<RuntimeObjectId>(objects_.size() - 1u);
+    result = makeRuntimeHandle(runtimeGeneration_,
+        static_cast<std::uint32_t>(objects_.size() - 1u));
     totalArrayElements_ += objects_.back().elements.size();
     GXOS_JS84_DIAGNOSTIC({
         diagnostics_.arraySlotsAllocated += objects_.back().elements.size();
@@ -6106,15 +6226,17 @@ bool RuntimeContext::initializeBuiltIns(RuntimeErrorCode& error)
 
 RuntimeContext::RuntimeObject* RuntimeContext::objectAt(RuntimeObjectId id)
 {
-    if (id == kInvalidRuntimeObjectId || id >= objects_.size()) return nullptr;
-    return &objects_[id];
+    if (!runtimeHandleIsValid(id, runtimeGeneration_)) return nullptr;
+    const std::size_t slot = runtimeHandleSlot(id);
+    return slot < objects_.size() ? &objects_[slot] : nullptr;
 }
 
 const RuntimeContext::RuntimeObject* RuntimeContext::objectAt(
     RuntimeObjectId id) const
 {
-    if (id == kInvalidRuntimeObjectId || id >= objects_.size()) return nullptr;
-    return &objects_[id];
+    if (!runtimeHandleIsValid(id, runtimeGeneration_)) return nullptr;
+    const std::size_t slot = runtimeHandleSlot(id);
+    return slot < objects_.size() ? &objects_[slot] : nullptr;
 }
 
 RuntimeObjectId RuntimeContext::prototypeOf(RuntimeObjectId object) const
@@ -6958,6 +7080,7 @@ bool RuntimeContext::installHostGlobalInternal(const HostGlobalSpec& spec,
     } else if (!environment_.declare(name, value, environmentError)) {
         switch (environmentError.code) {
         case EnvironmentErrorCode::BindingLimitExceeded:
+        case EnvironmentErrorCode::CapacityExceeded:
             error = RuntimeErrorCode::BindingLimitExceeded;
             break;
         case EnvironmentErrorCode::BindingNameTooLong:
@@ -6969,7 +7092,28 @@ bool RuntimeContext::installHostGlobalInternal(const HostGlobalSpec& spec,
         case EnvironmentErrorCode::DuplicateLexicalBinding:
             error = RuntimeErrorCode::InvalidAstState;
             break;
+        case EnvironmentErrorCode::MissingBinding:
+            error = RuntimeErrorCode::UnknownIdentifier;
+            break;
+        case EnvironmentErrorCode::UninitializedBinding:
+            error = RuntimeErrorCode::UninitializedBinding;
+            break;
+        case EnvironmentErrorCode::ImmutableAssignment:
+            error = RuntimeErrorCode::TypeError;
+            break;
+        case EnvironmentErrorCode::BindingAlreadyInitialized:
+            error = RuntimeErrorCode::InvalidAstState;
+            break;
         case EnvironmentErrorCode::None:
+        case EnvironmentErrorCode::InvalidStorage:
+        case EnvironmentErrorCode::InvalidAlignment:
+        case EnvironmentErrorCode::InvalidInput:
+        case EnvironmentErrorCode::InvalidReference:
+        case EnvironmentErrorCode::InvalidEnvironment:
+        case EnvironmentErrorCode::StaleGeneration:
+        case EnvironmentErrorCode::SizeOverflow:
+        case EnvironmentErrorCode::ParentCycle:
+        case EnvironmentErrorCode::InternalInvariantFailure:
             error = RuntimeErrorCode::InvalidAstState;
             break;
         }
@@ -7207,12 +7351,13 @@ bool RuntimeContext::convertValueToHost(const Value& value, HostValue& result,
         result = HostValue::number(value.numberValue());
         return true;
     case ValueType::String: {
-        const std::string* text = stringData(value);
-        if (text == nullptr) {
+        SourceView text;
+        RuntimeErrorCode stringError = RuntimeErrorCode::None;
+        if (!stringView(value, text, stringError)) {
             error = RuntimeErrorCode::HostCallFailed;
             return false;
         }
-        result = HostValue::string(SourceView(text->data(), text->size()));
+        result = HostValue::string(text);
         return true;
     }
     case ValueType::Object:
@@ -7469,17 +7614,34 @@ bool RuntimeContext::writeHostPropertyForTesting(RuntimeHostObjectId object,
     return writeHostProperty(object, key, value, error, SourceLocation());
 }
 
-const std::string* RuntimeContext::stringData(const Value& value) const
+bool RuntimeContext::stringView(const Value& value, SourceView& view,
+    RuntimeErrorCode& error) const
 {
-    if (!value.isString() || value.stringId() >= strings_.size()) return nullptr;
-    return &strings_[value.stringId()];
+    view = SourceView();
+    error = RuntimeErrorCode::None;
+    if (!value.isString()) {
+        error = RuntimeErrorCode::InvalidAstState;
+        return false;
+    }
+    RuntimeStringError stringError;
+    if (!stringStore_.view(value.stringId(), view, stringError)) {
+        error = RuntimeErrorCode::InvalidAstState;
+        return false;
+    }
+    return true;
 }
 
-const std::string& RuntimeContext::stringValue(const Value& value) const
+std::string RuntimeContext::stringValue(const Value& value) const
 {
-    static const std::string empty;
-    const std::string* data = stringData(value);
-    return data == nullptr ? empty : *data;
+    SourceView view;
+    RuntimeErrorCode error = RuntimeErrorCode::None;
+    if (!stringView(value, view, error)) return std::string();
+    try {
+        return std::string(view.data == nullptr ? "" : view.data,
+            view.length);
+    } catch (const std::bad_alloc&) {
+        return std::string();
+    }
 }
 
 void RuntimeContext::setRuntimeError(RuntimeErrorCode code,

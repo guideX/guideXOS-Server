@@ -4,6 +4,7 @@
 #include "environment.h"
 #include "host.h"
 #include "parser.h"
+#include "runtime_string_storage.h"
 #include "value.h"
 
 #include <array>
@@ -118,6 +119,11 @@ constexpr std::size_t kDefaultMaxJavaScriptCallDepth = 64u;
 // valid. The larger bounded pool also permits one maximum-capacity Navigator
 // collection callback pass in a long-lived realm.
 constexpr std::size_t kDefaultMaxJavaScriptEnvironments = 2048u;
+// A single retained pool bounds actual binding metadata without reserving the
+// 2048 x 256 per-environment theoretical maximum.
+constexpr std::size_t kDefaultMaxJavaScriptEnvironmentBindings = 16384u;
+constexpr std::size_t kDefaultMaxJavaScriptEnvironmentNameBytes =
+    1024u * 1024u;
 constexpr std::size_t kDefaultMaxJavaScriptFunctionValues = 4096u;
 constexpr std::size_t kDefaultMaxJavaScriptRuntimeObjects = 1024u;
 constexpr std::size_t kDefaultMaxJavaScriptPropertiesPerObject = 256u;
@@ -164,6 +170,10 @@ struct RuntimeLimits {
     // parents never dangle.  This is both the live-environment and total
     // environment bound for the context lifetime.
     std::size_t maxEnvironments = kDefaultMaxJavaScriptEnvironments;
+    std::size_t maxTotalEnvironmentBindings =
+        kDefaultMaxJavaScriptEnvironmentBindings;
+    std::size_t maxEnvironmentBindingNameBytes =
+        kDefaultMaxJavaScriptEnvironmentNameBytes;
     std::size_t maxFunctions = kDefaultMaxJavaScriptFunctionValues;
     std::size_t maxNativeFunctions =
         kDefaultMaxJavaScriptNativeFunctionValues;
@@ -253,12 +263,15 @@ public:
     const Value& finalValue() const { return finalValue_; }
 
     const Value* lookup(SourceView name) const { return environment_.lookup(name); }
-    // Returns an empty string for a non-string or stale value.  The returned
-    // reference remains valid until reset() or the next string allocation.
-    const std::string& stringValue(const Value& value) const;
+    // Hosted convenience adapter. Portable runtime code reads the stable,
+    // caller-backed bytes through stringView.
+    std::string stringValue(const Value& value) const;
     std::size_t runtimeStringBytes() const { return totalStringBytes_; }
-    std::size_t runtimeStringValueCount() const { return strings_.size(); }
-    std::size_t environmentCount() const { return 1u + environments_.size(); }
+    std::size_t runtimeStringValueCount() const { return stringStore_.count(); }
+    std::size_t environmentCount() const
+    {
+        return environmentStore_.environmentCount();
+    }
     std::size_t functionValueCount() const { return functions_.size(); }
     std::size_t userFunctionCount() const { return userFunctionCount_; }
     std::size_t nativeFunctionCount() const { return nativeFunctionCount_; }
@@ -572,9 +585,12 @@ private:
     bool createString(SourceView text, Value& value, RuntimeErrorCode& error);
     bool createOrGetCachedString(SourceView text, Value& value,
         RuntimeErrorCode& error);
-    const std::string* stringData(const Value& value) const;
+    bool stringView(const Value& value, SourceView& view,
+        RuntimeErrorCode& error) const;
+    bool initializePortableStorage(RuntimeErrorCode& error);
     bool createEnvironment(EnvironmentId parent, EnvironmentId& result,
-        RuntimeErrorCode& error);
+        RuntimeErrorCode& error,
+        EnvironmentKind kind = EnvironmentKind::Function);
     Environment* environmentAt(EnvironmentId id);
     const Environment* environmentAt(EnvironmentId id) const;
     bool createFunction(AstNodeId declaration, EnvironmentId closure,
@@ -666,10 +682,16 @@ private:
     std::string realmSourceStorage_;
     std::size_t realmSourceLineCount_ = 0;
     Ast ast_;
+    EnvironmentStore environmentStore_;
     Environment environment_;
     std::vector<Environment> environments_;
+    std::vector<EnvironmentRecord> environmentRecordStorage_;
+    std::vector<Binding> bindingStorage_;
+    std::vector<char> bindingNameStorage_;
     std::vector<FunctionRecord> functions_;
-    std::vector<std::string> strings_;
+    std::vector<RuntimeStringRecord> runtimeStringRecordStorage_;
+    std::vector<char> runtimeStringStorage_;
+    RuntimeStringStore stringStore_;
     std::vector<RuntimeObject> objects_;
     std::size_t totalStringBytes_ = 0;
     std::size_t totalPropertyCount_ = 0;
@@ -702,6 +724,7 @@ private:
     RuntimeObjectId mathObject_ = kInvalidRuntimeObjectId;
     RuntimeObjectId eventConstantsObject_ = kInvalidRuntimeObjectId;
     RuntimeObjectId eventObject_ = kInvalidRuntimeObjectId;
+    EnvironmentId globalEnvironmentId_ = kInvalidEnvironmentId;
     RuntimeFunctionId eventStopPropagationFunction_ =
         kInvalidRuntimeFunctionId;
     RuntimeFunctionId arrayIteratorNextFunction_ =
@@ -738,6 +761,7 @@ private:
     std::size_t eventDispatchDepth_ = 0;
     HostAdapter* hostAdapter_ = nullptr;
     HostGenerationId hostGeneration_ = kInvalidHostGenerationId;
+    RuntimeGeneration runtimeGeneration_ = kInvalidRuntimeGeneration;
     std::vector<HostObjectRecord> hostObjects_;
     std::vector<HostMethodRecord> hostMethods_;
     std::vector<HostGlobalSpec> hostGlobalSpecs_;

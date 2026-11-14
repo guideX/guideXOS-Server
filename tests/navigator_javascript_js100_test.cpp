@@ -596,8 +596,8 @@ void testPersistentStorageAndLayout()
             objectsBefore && runtime.arrayElementCount() == slotsBefore,
         "successful reduce retains no result object, Array, or persistent staging slots");
     expect(NavigatorScriptRuntimeTestAccess::runtimeObjectSize() == 88u &&
-        NavigatorScriptRuntimeTestAccess::arrayElementSize() == 48u,
-        "reduce leaves RuntimeObject and RuntimeArrayElement layouts unchanged");
+        NavigatorScriptRuntimeTestAccess::arrayElementSize() == 24u,
+        "reduce preserves RuntimeObject and portable RuntimeArrayElement layouts");
 }
 
 std::string denseArraySource(std::size_t length)

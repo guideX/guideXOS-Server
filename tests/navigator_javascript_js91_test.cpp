@@ -153,7 +153,7 @@ struct NavigatorScriptRuntimeTestAccess {
 
     static std::size_t stringValueCount(const RuntimeContext& runtime)
     {
-        return runtime.strings_.size();
+        return runtime.runtimeStringValueCount();
     }
 
     static bool createEmptyObject(RuntimeContext& runtime,

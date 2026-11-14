@@ -59,11 +59,10 @@ struct NavigatorScriptRuntimeTestAccess {
     static std::uint32_t hostMethod(const RuntimeContext& runtime,
         const Value& value)
     {
-        if (!value.isFunction() ||
-            value.functionId() >= runtime.functions_.size()) return 0u;
-        const Function& function = runtime.functions_[value.functionId()];
-        return function.kind == Function::Kind::Host
-            ? function.hostMethod : 0u;
+        if (!value.isFunction()) return 0u;
+        const Function* function = runtime.functionAt(value.functionId());
+        return function != nullptr && function->kind == Function::Kind::Host
+            ? function->hostMethod : 0u;
     }
     static std::size_t symbolPropertyCount(const RuntimeContext& runtime)
     {
