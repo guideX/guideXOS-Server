@@ -10,6 +10,15 @@ namespace desktop {
 static const size_t kGradientConfigTextCapacity = 512u;
 static const size_t kGradientPresetIdCapacity = 96u;
 static const char kDesktopDefaultWallpaperId[] = "legacy_blue_flower";
+static const char kDesktopAppDataConfigPath[] = "/AppData/DESKAPP.CFG";
+
+enum class DesktopAppDataReadStatus : uint8_t {
+    Loaded = 0,
+    Missing = 1,
+    Unavailable = 2,
+    Invalid = 3,
+    UnsupportedVersion = 4
+};
 
 enum class GradientPersistenceStatus : uint32_t {
     Ok = 0,
@@ -64,9 +73,17 @@ enum : uint32_t {
     kDesktopIconPersistenceReadbackAvailable = 1u << 2
 };
 
-// Update only wallpaperId in the canonical /desktop.cfg while retaining every
-// other byte and key. On a failed write or readback, restore the previous
-// bounded file image and report whether that restoration was verified.
+// Load values explicitly saved by Modern Settings from the versioned file on
+// the writable data volume. Missing keys are not overrides of system defaults.
+DesktopAppDataReadStatus readAppDataWallpaperId(
+    char* output, size_t outputCapacity);
+DesktopAppDataReadStatus readAppDataDesktopIconVisibility(
+    uint32_t defaultVisibility, uint32_t* outputVisibility);
+
+// Update only the requested appearance fields in /AppData/DESKAPP.CFG while
+// retaining every other byte and key. On a failed write or readback, restore
+// the previous bounded file image and report whether that restoration worked.
+// FAT32 cannot make this truncate-and-write sequence atomic or crash-safe.
 GradientPersistenceStatus persistBuiltInBackgroundId(
     const char* expectedCurrentId,
     const char* requestedId,
@@ -78,20 +95,16 @@ GradientPersistenceStatus persistBuiltInGradientId(
     const char* requestedId,
     GradientPersistenceResult* output);
 
-// Patch only the four supported system-icon visibility keys in /desktop.cfg.
-// Missing keys use legacy defaults. Malformed known fields and duplicate icon
-// keys are rejected. Unknown key/value lines and unrelated bytes are retained.
+// Patch only the four supported system-icon visibility keys in the versioned
+// AppData file. Missing keys use the active system defaults. Malformed known
+// fields and duplicate icon keys are rejected; unknown lines are retained.
 DesktopIconPersistenceStatus persistDesktopIconVisibility(
     uint32_t expectedVisibility,
     uint32_t requestedVisibility,
     DesktopIconPersistenceResult* output);
 
-bool readCanonicalWallpaperId(
-    char* output, size_t outputCapacity);
-
-// Cache the writable root device while the boot-time VFS mount is available.
-// This lets the settings flow restore / if another subsystem drops its mount.
-void rememberDesktopGradientStorageDevice();
+// Compatibility query for the saved AppData wallpaper override.
+bool readCanonicalWallpaperId(char* output, size_t outputCapacity);
 
 } // namespace desktop
 } // namespace kernel

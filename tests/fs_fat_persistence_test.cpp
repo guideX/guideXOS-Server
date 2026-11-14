@@ -1,6 +1,7 @@
 #include "kernel/block_device.h"
 #include "kernel/fs_ext4.h"
 #include "kernel/fs_fat.h"
+#include "kernel/desktop_gradient_persistence.h"
 #include "kernel/vfs.h"
 
 #include <algorithm>
@@ -246,6 +247,99 @@ int main(int argc, char** argv)
     check(kernel::vfs::unmount("/AppData") == kernel::vfs::VFS_OK &&
               kernel::vfs::unmount("/AppData") == kernel::vfs::VFS_ERR_NOT_MOUNT,
           "alias unmount removes only the alias and is repeat-safe");
+
+    const uint8_t settingsAlias = kernel::vfs::mount_alias(
+        "/AppData", "/Documents/APPDATA");
+    check(settingsAlias != 0xFF,
+          "AppData alias remounts independently of the Documents mount");
+    uint8_t savedDocumentBefore[256]{};
+    const int32_t savedDocumentSizeBefore = kernel::vfs::read_file(
+        "/Documents/UNTITLED.TXT", savedDocumentBefore,
+        static_cast<uint32_t>(sizeof(savedDocumentBefore)));
+    check(savedDocumentSizeBefore > 0,
+          "accepted Notepad document is present before application settings writes");
+
+    char storedWallpaper[kernel::desktop::kGradientPresetIdCapacity]{};
+    uint32_t storedIconVisibility = 0u;
+    check(kernel::desktop::readAppDataWallpaperId(
+              storedWallpaper, sizeof(storedWallpaper)) ==
+              kernel::desktop::DesktopAppDataReadStatus::Missing,
+          "image-backed AppData starts without an application settings override");
+    kernel::desktop::GradientPersistenceResult wallpaperResult{};
+    check(kernel::desktop::persistBuiltInBackgroundId(
+              kernel::desktop::kDesktopDefaultWallpaperId, "gradient_ocean",
+              &wallpaperResult) == kernel::desktop::GradientPersistenceStatus::Ok &&
+              kernel::desktop::readAppDataWallpaperId(
+                  storedWallpaper, sizeof(storedWallpaper)) ==
+                  kernel::desktop::DesktopAppDataReadStatus::Loaded &&
+              std::string(storedWallpaper) == "gradient_ocean",
+          "image-backed FAT32 stores and reopens the selected wallpaper ID");
+    const uint32_t iconDefaults = kernel::desktop::kDesktopIconVisibilityTrash |
+        kernel::desktop::kDesktopIconVisibilityThisSystem |
+        kernel::desktop::kDesktopIconVisibilityFileManager;
+    const uint32_t iconRequest = iconDefaults &
+        ~kernel::desktop::kDesktopIconVisibilityTrash;
+    kernel::desktop::DesktopIconPersistenceResult iconResult{};
+    check(kernel::desktop::persistDesktopIconVisibility(
+              iconDefaults, iconRequest, &iconResult) ==
+              kernel::desktop::DesktopIconPersistenceStatus::Ok &&
+              kernel::desktop::readAppDataDesktopIconVisibility(
+                  iconDefaults, &storedIconVisibility) ==
+                  kernel::desktop::DesktopAppDataReadStatus::Loaded &&
+              storedIconVisibility == iconRequest,
+          "image-backed FAT32 stores and reloads desktop icon visibility");
+    kernel::vfs::FileInfo settingsFileInfo{};
+    char settingsBytes[kernel::desktop::kGradientConfigTextCapacity]{};
+    const int32_t settingsByteCount = kernel::vfs::read_file(
+        kernel::desktop::kDesktopAppDataConfigPath, settingsBytes,
+        static_cast<uint32_t>(sizeof(settingsBytes) - 1u));
+    check(settingsByteCount > 0 &&
+              kernel::vfs::stat(kernel::desktop::kDesktopAppDataConfigPath,
+                                &settingsFileInfo) == kernel::vfs::VFS_OK &&
+              settingsFileInfo.size == static_cast<uint64_t>(settingsByteCount) &&
+              std::string(settingsBytes, static_cast<size_t>(settingsByteCount)).find(
+                  "format=GUIDEXOS-DESKTOP-STATE\nversion=1\n") == 0 &&
+              std::string(settingsBytes, static_cast<size_t>(settingsByteCount)).find(
+                  "wallpaperId=gradient_ocean\n") != std::string::npos &&
+              std::string(settingsBytes, static_cast<size_t>(settingsByteCount)).find(
+                  "showDesktopTrash=0\n") != std::string::npos,
+          "AppData file has the versioned format and exact saved setting values");
+    check(kernel::vfs::stat("/Documents/DESKAPP.CFG", &settingsFileInfo) ==
+              kernel::vfs::VFS_ERR_NOT_FOUND &&
+              kernel::vfs::get_mount("/Documents/UNTITLED.TXT") !=
+                  kernel::vfs::get_mount("/AppData/DESKAPP.CFG"),
+          "AppData settings do not shadow the Documents namespace");
+    uint8_t savedDocumentAfter[256]{};
+    const int32_t savedDocumentSizeAfter = kernel::vfs::read_file(
+        "/Documents/UNTITLED.TXT", savedDocumentAfter,
+        static_cast<uint32_t>(sizeof(savedDocumentAfter)));
+    check(savedDocumentSizeAfter == savedDocumentSizeBefore &&
+              std::memcmp(savedDocumentAfter, savedDocumentBefore,
+                          static_cast<size_t>(savedDocumentSizeBefore)) == 0,
+          "application settings writes preserve the existing Notepad document bytes");
+
+    const int32_t settingsSizeBeforeRestart = settingsByteCount;
+    check(kernel::vfs::unmount("/AppData") == kernel::vfs::VFS_OK,
+          "AppData alias can be removed for a simulated application restart");
+    check(kernel::desktop::readAppDataWallpaperId(
+              storedWallpaper, sizeof(storedWallpaper)) ==
+              kernel::desktop::DesktopAppDataReadStatus::Unavailable,
+          "settings load reports an unavailable AppData mount instead of a default save");
+    check(kernel::vfs::mount_alias("/AppData", "/Documents/APPDATA") != 0xFF &&
+              kernel::desktop::readAppDataWallpaperId(
+                  storedWallpaper, sizeof(storedWallpaper)) ==
+                  kernel::desktop::DesktopAppDataReadStatus::Loaded &&
+              std::string(storedWallpaper) == "gradient_ocean" &&
+              kernel::desktop::readAppDataDesktopIconVisibility(
+                  iconDefaults, &storedIconVisibility) ==
+                  kernel::desktop::DesktopAppDataReadStatus::Loaded &&
+              storedIconVisibility == iconRequest &&
+              kernel::vfs::stat(kernel::desktop::kDesktopAppDataConfigPath,
+                                &settingsFileInfo) == kernel::vfs::VFS_OK &&
+              settingsFileInfo.size == static_cast<uint64_t>(settingsSizeBeforeRestart),
+          "application restart reloads both settings from the same FAT32 image");
+    check(kernel::vfs::unmount("/AppData") == kernel::vfs::VFS_OK,
+          "AppData settings alias releases before the broader VFS teardown checks");
 
     check(kernel::vfs::mkdir("/Documents/NOTES") == kernel::vfs::VFS_OK,
           "create a supported 8.3 document directory");

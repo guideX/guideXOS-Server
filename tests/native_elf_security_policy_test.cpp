@@ -162,6 +162,21 @@ int main()
     writableAlias.alias = true;
     expect(!try_native_entry(writableAlias, package) && nativeEntryCalls == 1,
            "writable alias is rejected before entry");
+    PackageIdentity settingsAsExecutable = package;
+    settingsAsExecutable.executable = "DESKAPP.CFG";
+    expect(!try_native_entry(source, settingsAsExecutable) && nativeEntryCalls == 1,
+           "an AppData configuration filename cannot impersonate the approved executable");
+    PackageIdentity appDataRelativeExecutable = package;
+    appDataRelativeExecutable.executable = "../../AppData/DESKAPP.CFG";
+    expect(!try_native_entry(source, appDataRelativeExecutable) && nativeEntryCalls == 1,
+           "normalized writable AppData paths cannot impersonate the approved package executable");
+    SourceState writableAppData = source;
+    writableAppData.rootMount = false;
+    writableAppData.vfsReadOnly = false;
+    writableAppData.alias = true;
+    writableAppData.blockDeviceReadOnly = false;
+    expect(!try_native_entry(writableAppData, package) && nativeEntryCalls == 1,
+           "the writable AppData mount and backing disk cannot become an approved package source");
     SourceState overlay = source;
     overlay.nestedAppsMount = true;
     expect(!try_native_entry(overlay, package) && nativeEntryCalls == 1,

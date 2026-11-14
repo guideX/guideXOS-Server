@@ -2941,12 +2941,35 @@ void reload_persisted_system_desktop_icons()
 {
     BareMetalDisplayOptionsData store;
     bare_metal_load_display_options(store);
-    s_systemDesktopIconVisibility.showTrash = store.showDesktopTrash;
-    s_systemDesktopIconVisibility.showThisSystem = store.showDesktopThisSystem;
-    s_systemDesktopIconVisibility.showFileManager = store.showDesktopFileManager;
-    s_systemDesktopIconVisibility.showSystemSettings = store.showDesktopSystemSettings;
+    SystemDesktopIconVisibility visibility{};
+    visibility.showTrash = store.showDesktopTrash;
+    visibility.showThisSystem = store.showDesktopThisSystem;
+    visibility.showFileManager = store.showDesktopFileManager;
+    visibility.showSystemSettings = store.showDesktopSystemSettings;
+    const uint32_t defaultVisibility = desktop_icon_visibility_bits(visibility);
+    uint32_t persistedVisibility = defaultVisibility;
+    const DesktopAppDataReadStatus appDataStatus = readAppDataDesktopIconVisibility(
+        defaultVisibility, &persistedVisibility);
+    if (appDataStatus == DesktopAppDataReadStatus::Loaded) {
+        visibility = desktop_icon_visibility_from_bits(persistedVisibility);
+        serial::puts("[desktop] system desktop icon settings loaded source=AppData\n");
+    } else {
+        serial::puts("[desktop] system desktop icon settings loaded source=system-defaults appdata=");
+        switch (appDataStatus) {
+            case DesktopAppDataReadStatus::Missing: serial::puts("missing"); break;
+            case DesktopAppDataReadStatus::Unavailable: serial::puts("unavailable"); break;
+            case DesktopAppDataReadStatus::Invalid: serial::puts("invalid"); break;
+            case DesktopAppDataReadStatus::UnsupportedVersion: serial::puts("unsupported-version"); break;
+            case DesktopAppDataReadStatus::Loaded: serial::puts("loaded"); break;
+        }
+        serial::putc('\n');
+    }
+    s_systemDesktopIconVisibility = visibility;
     s_systemDesktopIconVisibilityLoaded = true;
-    serial::puts("[desktop] system desktop icon settings loaded\n");
+    if (s_initialized) {
+        refresh_desktop_icons();
+        s_needsRedraw = true;
+    }
 }
 
 SystemDesktopIconVisibility get_system_desktop_icon_visibility()
@@ -5679,6 +5702,9 @@ static bool persist_wallpaper_selection(const char* wallpaperId)
 
 static void load_persisted_wallpaper_id()
 {
+    char appDataWallpaperId[kBareMetalWallpaperIdMax] = {};
+    const DesktopAppDataReadStatus appDataStatus = readAppDataWallpaperId(
+        appDataWallpaperId, sizeof(appDataWallpaperId));
     char wallpaperFileId[kBareMetalWallpaperIdMax];
     const bool haveWallpaperFileId = bare_metal_load_wallpaper_id_file(wallpaperFileId, sizeof(wallpaperFileId));
 
@@ -5694,16 +5720,32 @@ static void load_persisted_wallpaper_id()
     const char* wallpaperId = nullptr;
     const char* wallpaperSource = nullptr;
 
-    if (haveConfig && source == BareMetalDisplayOptionsLoadSource::Primary &&
+    if (appDataStatus == DesktopAppDataReadStatus::Loaded) {
+        wallpaperId = appDataWallpaperId;
+        wallpaperSource = "AppData";
+    } else if (appDataStatus != DesktopAppDataReadStatus::Missing &&
+               appDataStatus != DesktopAppDataReadStatus::Unavailable) {
+        serial::puts("[desktop] appdata wallpaper override ignored status=");
+        switch (appDataStatus) {
+            case DesktopAppDataReadStatus::Invalid: serial::puts("invalid"); break;
+            case DesktopAppDataReadStatus::UnsupportedVersion: serial::puts("unsupported-version"); break;
+            case DesktopAppDataReadStatus::Missing: serial::puts("missing"); break;
+            case DesktopAppDataReadStatus::Unavailable: serial::puts("unavailable"); break;
+            case DesktopAppDataReadStatus::Loaded: serial::puts("loaded"); break;
+        }
+        serial::putc('\n');
+    }
+
+    if (!wallpaperId && haveConfig && source == BareMetalDisplayOptionsLoadSource::Primary &&
         configWallpaperId[0]) {
         // /desktop.cfg is the canonical appearance store. Older sidecar ids
         // remain as a fallback only when the canonical key is absent.
         wallpaperId = configWallpaperId;
         wallpaperSource = "primary-config";
-    } else if (haveWallpaperFileId) {
+    } else if (!wallpaperId && haveWallpaperFileId) {
         wallpaperId = wallpaperFileId;
         wallpaperSource = "wallpaper-file";
-    } else if (haveConfig) {
+    } else if (!wallpaperId && haveConfig) {
         wallpaperId = configWallpaperId;
         wallpaperSource = bare_metal_display_options_load_source_name(source);
     }

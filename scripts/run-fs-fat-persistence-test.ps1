@@ -23,7 +23,11 @@ $imageSource = (Resolve-Path -LiteralPath $PreparedImage -ErrorAction Stop).Path
 if ((Get-Item -LiteralPath $imageSource).Length -lt 64MB) {
     throw "Prepared image is smaller than the supported provisioning minimum."
 }
-$outputRoot = [IO.Path]::GetFullPath($OutputDirectory)
+$outputRoot = if ([IO.Path]::IsPathRooted($OutputDirectory)) {
+    [IO.Path]::GetFullPath($OutputDirectory)
+} else {
+    [IO.Path]::GetFullPath((Join-Path $repoRoot $OutputDirectory))
+}
 New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
 $testImage = Join-Path $outputRoot "hosted-data-volume-copy.img"
 Copy-Item -LiteralPath $imageSource -Destination $testImage -Force
@@ -36,6 +40,7 @@ $arguments = @(
     "tests/fs_fat_persistence_test.cpp",
     "kernel/core/block_device.cpp",
     "kernel/core/fs_fat.cpp",
+    "kernel/core/desktop_gradient_persistence.cpp",
     "kernel/core/vfs.cpp",
     "-o", $executable
 )

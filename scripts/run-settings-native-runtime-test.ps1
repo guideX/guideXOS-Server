@@ -7,7 +7,11 @@ $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Set-Location $RepoRoot
 
 $Compiler = Get-Command g++ -ErrorAction Stop
-$FullOutputDirectory = Join-Path $RepoRoot $OutputDirectory
+$FullOutputDirectory = if ([IO.Path]::IsPathRooted($OutputDirectory)) {
+    [IO.Path]::GetFullPath($OutputDirectory)
+} else {
+    [IO.Path]::GetFullPath((Join-Path $RepoRoot $OutputDirectory))
+}
 New-Item -ItemType Directory -Path $FullOutputDirectory -Force | Out-Null
 $Output = Join-Path $FullOutputDirectory "settings_native_runtime_test.exe"
 

@@ -89,12 +89,11 @@ uint32_t g_testIconPersistedVisibility =
     kernel::desktop::kDesktopAppearanceIconFileManager;
 bool g_testConfigMounted = false;
 bool g_testConfigReadOnly = false;
-bool g_testMountRestoreAllowed = false;
-int g_testMountCalls = 0;
 char g_testConfigBytes[kernel::desktop::kGradientConfigTextCapacity] = {};
 size_t g_testConfigLength = 0u;
 int g_testConfigWriteCount = 0;
 int g_testConfigFailWriteNumber = 0;
+kernel::vfs::Status g_testConfigFailWriteStatus = kernel::vfs::VFS_ERR_IO;
 bool g_testConfigFailWritePartial = false;
 int g_testConfigCorruptOnWriteNumber = 0;
 bool g_testConfigFailNextRead = false;
@@ -703,18 +702,6 @@ const MountPoint* get_mount(const char*)
     return &g_testConfigMount;
 }
 
-uint8_t mount(const char*, uint8_t blockDevIndex)
-{
-    ++g_testMountCalls;
-    if (!g_testMountRestoreAllowed) return 0xFFu;
-    g_testConfigMounted = true;
-    g_testConfigMount.active = true;
-    g_testConfigMount.alias = false;
-    g_testConfigMount.readOnly = g_testConfigReadOnly;
-    g_testConfigMount.blockDevIndex = blockDevIndex;
-    return 0u;
-}
-
 Status stat(const char*, FileInfo* output)
 {
     if (!g_testConfigMounted || !output || g_testConfigLength == 0u)
@@ -730,7 +717,7 @@ int32_t read_file(const char*, void* output, uint32_t capacity)
         return VFS_ERR_NOT_FOUND;
     if (g_testConfigFailNextRead) {
         g_testConfigFailNextRead = false;
-        return VFS_ERR_IO;
+        return g_testConfigFailWriteStatus;
     }
     const size_t count = g_testConfigLength < capacity
         ? g_testConfigLength : capacity;
@@ -774,6 +761,14 @@ int32_t write_file(const char*, const void* bytes, uint32_t size)
     }
     return static_cast<int32_t>(size);
 }
+
+Status unlink(const char*)
+{
+    if (!g_testConfigMounted) return VFS_ERR_NOT_MOUNT;
+    if (g_testConfigReadOnly) return VFS_ERR_READ_ONLY;
+    g_testConfigLength = 0u;
+    return VFS_OK;
+}
 } // namespace vfs
 
 namespace native_elf {
@@ -796,6 +791,7 @@ static void setTestDesktopConfig(const char* text)
     g_testConfigReadOnly = false;
     g_testConfigWriteCount = 0;
     g_testConfigFailWriteNumber = 0;
+    g_testConfigFailWriteStatus = kernel::vfs::VFS_ERR_IO;
     g_testConfigFailWritePartial = false;
     g_testConfigCorruptOnWriteNumber = 0;
     g_testConfigFailNextRead = false;
@@ -810,424 +806,128 @@ static std::string testDesktopConfigText()
 static void testGradientConfigPersistence()
 {
     using namespace kernel::desktop;
-    const char* original =
-        "version=1\r\n"
-        "wallpaperId=gradient_sunset\r\n"
-        "backgroundScaleMode=fit\r\n"
-        "taskbarPosition=top\r\n"
-        "futureAppearanceKey=keep-this-value\r\n";
-    char persistedId[kGradientPresetIdCapacity] = {};
-    setTestDesktopConfig(original);
-    expect(readCanonicalWallpaperId(persistedId, sizeof(persistedId)) &&
-               std::string(persistedId) == "gradient_sunset",
-           "canonical desktop configuration exposes its current wallpaper id");
+    char id[kGradientPresetIdCapacity] = {};
+    uint32_t defaults = kDesktopIconVisibilityTrash |
+        kDesktopIconVisibilityThisSystem | kDesktopIconVisibilityFileManager;
+    uint32_t icons = 0u;
+    GradientPersistenceResult wallpaper{};
+    DesktopIconPersistenceResult iconResult{};
 
-    GradientPersistenceResult persistence{};
-    const char* shippedDefault =
-        "version=1\r\n"
-        "wallpaperId=\r\n"
-        "backgroundScaleMode=fill\r\n"
-        "desktopThemeId=classic\r\n"
-        "taskbarPosition=bottom\r\n"
-        "showDesktopTrash=1\r\n"
-        "showDesktopThisSystem=1\r\n"
-        "showDesktopFileManager=1\r\n"
-        "showDesktopSystemSettings=0\r\n"
-        "smallLiveDesktopFolderIcons=1\r\n"
-        "autoArrangeDesktopIcons=0\r\n";
-    setTestDesktopConfig(shippedDefault);
-    const int defaultReadWriteCount = g_testConfigWriteCount;
-    expect(!readCanonicalWallpaperId(persistedId, sizeof(persistedId)) &&
-               g_testConfigWriteCount == defaultReadWriteCount &&
-               testDesktopConfigText() == shippedDefault,
-           "reading the literal empty default stays read-only and preserves its bytes");
-    const GradientPersistenceStatus defaultApplyStatus =
-        persistBuiltInBackgroundId("legacy_blue_flower", "legacy_dinos",
-                                   &persistence);
-    std::string expectedDefaultApply = shippedDefault;
-    expectedDefaultApply.replace(expectedDefaultApply.find("wallpaperId=\r\n") +
-                                     std::string("wallpaperId=").size(),
-                                 0u, "legacy_dinos");
-    expect(defaultApplyStatus == GradientPersistenceStatus::Ok &&
-               std::string(persistence.persistedId) == "legacy_dinos" &&
-               testDesktopConfigText() == expectedDefaultApply,
-           "Dinos Apply commits from the untouched shipped empty wallpaper default");
+    g_testConfigMounted = false;
+    expect(readAppDataWallpaperId(id, sizeof(id)) == DesktopAppDataReadStatus::Unavailable &&
+               persistBuiltInBackgroundId(kDesktopDefaultWallpaperId, "gradient_ocean",
+                                          &wallpaper) == GradientPersistenceStatus::Unavailable,
+           "settings persistence requires the mounted AppData volume");
 
-    setTestDesktopConfig(shippedDefault);
+    g_testConfigMounted = true;
+    g_testConfigReadOnly = true;
+    expect(readAppDataWallpaperId(id, sizeof(id)) == DesktopAppDataReadStatus::Missing &&
+               persistBuiltInBackgroundId(kDesktopDefaultWallpaperId, "gradient_ocean",
+                                          &wallpaper) == GradientPersistenceStatus::Unavailable,
+           "read-only AppData rejects writes as unavailable without attempting rollback");
+
+    g_testConfigReadOnly = false;
+    g_testConfigLength = 0u;
+    expect(readAppDataWallpaperId(id, sizeof(id)) == DesktopAppDataReadStatus::Missing &&
+               persistDesktopIconVisibility(defaults, defaults & ~kDesktopIconVisibilityTrash,
+                                            &iconResult) == DesktopIconPersistenceStatus::Ok &&
+               testDesktopConfigText().find("format=GUIDEXOS-DESKTOP-STATE\nversion=1\n") == 0 &&
+               testDesktopConfigText().find("showDesktopTrash=0\n") != std::string::npos,
+           "first icon change creates a versioned AppData file with only the requested override");
+    expect(readAppDataDesktopIconVisibility(defaults, &icons) == DesktopAppDataReadStatus::Loaded &&
+               icons == (defaults & ~kDesktopIconVisibilityTrash),
+           "saved desktop icon visibility reloads with the untouched system defaults");
+
     expect(persistBuiltInBackgroundId(kDesktopDefaultWallpaperId, "gradient_ocean",
-                                      &persistence) == GradientPersistenceStatus::Ok &&
-               std::string(persistence.persistedId) == "gradient_ocean" &&
-               testDesktopConfigText().find("wallpaperId=gradient_ocean\r\n") != std::string::npos,
-           "the effective empty default also permits a valid gradient mutation");
+                                      &wallpaper) == GradientPersistenceStatus::Ok &&
+               readAppDataWallpaperId(id, sizeof(id)) == DesktopAppDataReadStatus::Loaded &&
+               std::string(id) == "gradient_ocean" &&
+               testDesktopConfigText().find("showDesktopTrash=0\n") != std::string::npos,
+           "wallpaper Apply stores and verifies its ID while preserving icon settings");
+    const std::string prior = testDesktopConfigText();
+    expect(persistDesktopIconVisibility(defaults & ~kDesktopIconVisibilityTrash,
+                                       defaults & ~kDesktopIconVisibilityTrash,
+                                       &iconResult) == DesktopIconPersistenceStatus::NoChange &&
+               testDesktopConfigText() == prior,
+           "unchanged icon visibility does not rewrite persistent settings");
 
-    const char* unknownStoredConfig = "version=1\r\nwallpaperId=removed_wallpaper\r\n";
-    setTestDesktopConfig(unknownStoredConfig);
-    expect(persistBuiltInBackgroundId(kDesktopDefaultWallpaperId, "legacy_dinos",
-                                      &persistence) == GradientPersistenceStatus::Conflict &&
-               g_testConfigWriteCount == 0 &&
-               testDesktopConfigText() == unknownStoredConfig,
-           "an unknown stored wallpaper remains a conflict rather than the empty default");
+    setTestDesktopConfig(
+        "format=GUIDEXOS-DESKTOP-STATE\nversion=1\nwallpaperId=gradient_ocean\n"
+        "futureSetting=preserve\n");
+    expect(persistBuiltInBackgroundId("gradient_ocean", "gradient_forest", &wallpaper) ==
+               GradientPersistenceStatus::Ok &&
+               testDesktopConfigText().find("futureSetting=preserve\n") != std::string::npos &&
+               testDesktopConfigText().find("wallpaperId=gradient_forest\n") != std::string::npos,
+           "targeted wallpaper updates preserve unknown AppData keys");
 
-    setTestDesktopConfig(original);
-    expect(persistBuiltInGradientId("gradient_sunset", "gradient_ocean",
-                                    &persistence) == GradientPersistenceStatus::Ok &&
-               std::string(persistence.persistedId) == "gradient_ocean" &&
-               (persistence.flags & kGradientPersistenceReadbackAvailable) != 0u,
-           "gradient persistence commits and reads back the requested id");
-    std::string expected = original;
-    expected.replace(expected.find("gradient_sunset"),
-                     std::string("gradient_sunset").size(), "gradient_ocean");
-    expect(testDesktopConfigText() == expected &&
-               testDesktopConfigText().find("futureAppearanceKey=keep-this-value") != std::string::npos &&
-               testDesktopConfigText().find("taskbarPosition=top") != std::string::npos,
-           "canonical update preserves unrelated keys, values, and line endings");
-
-    setTestDesktopConfig(original);
-    expect(persistBuiltInBackgroundId("gradient_sunset", "legacy_ameobagx",
-                                      &persistence) == GradientPersistenceStatus::Ok &&
-               std::string(persistence.persistedId) == "legacy_ameobagx" &&
-               testDesktopConfigText().find("backgroundScaleMode=fit\r\n") != std::string::npos &&
-               testDesktopConfigText().find("futureAppearanceKey=keep-this-value\r\n") != std::string::npos,
-           "wallpaper apply uses the shared canonical writer and preserves unrelated desktop fields");
-    expect(persistBuiltInBackgroundId("legacy_ameobagx", "legacy_wallpaper2",
-                                      &persistence) == GradientPersistenceStatus::Ok &&
-               std::string(persistence.persistedId) == "legacy_wallpaper2" &&
-               persistBuiltInBackgroundId("legacy_wallpaper2", "gradient_forest",
-                                          &persistence) == GradientPersistenceStatus::Ok &&
-               std::string(persistence.persistedId) == "gradient_forest",
-           "image-to-image and image-to-gradient changes share the same verified writer");
-
-    setTestDesktopConfig(original);
-    expect(persistBuiltInGradientId("gradient_violet", "gradient_ocean",
-                                    &persistence) == GradientPersistenceStatus::Conflict &&
-               g_testConfigWriteCount == 0 &&
-               std::string(persistence.persistedId) == "gradient_sunset",
-           "canonical config conflict is rejected without a write");
-
-    setTestDesktopConfig(original);
-    g_testConfigMounted = false;
-    g_testMountRestoreAllowed = false;
-    expect(persistBuiltInGradientId("gradient_sunset", "gradient_ocean",
-                                    &persistence) == GradientPersistenceStatus::Unavailable &&
+    setTestDesktopConfig(
+        "format=GUIDEXOS-DESKTOP-STATE\nversion=1\nwallpaperId=gradient_ocean\n"
+        "wallpaperId=gradient_forest\n");
+    expect(readAppDataWallpaperId(id, sizeof(id)) == DesktopAppDataReadStatus::Invalid &&
+               persistBuiltInBackgroundId("gradient_ocean", "gradient_forest", &wallpaper) ==
+                   GradientPersistenceStatus::InvalidConfiguration &&
                g_testConfigWriteCount == 0,
-           "unavailable configuration storage rejects a gradient commit");
+           "duplicate wallpaper keys are rejected without modifying AppData");
+    setTestDesktopConfig("format=GUIDEXOS-DESKTOP-STATE\nversion=2\nwallpaperId=gradient_ocean\n");
+    expect(readAppDataWallpaperId(id, sizeof(id)) == DesktopAppDataReadStatus::UnsupportedVersion &&
+               persistBuiltInBackgroundId("gradient_ocean", "gradient_forest", &wallpaper) ==
+                   GradientPersistenceStatus::InvalidConfiguration,
+           "future AppData schema versions are not overwritten");
 
+    const char* original =
+        "format=GUIDEXOS-DESKTOP-STATE\nversion=1\nwallpaperId=gradient_ocean\n"
+        "futureSetting=keep\n";
     setTestDesktopConfig(original);
-    g_testConfigMount.blockDevIndex = 3u;
-    rememberDesktopGradientStorageDevice();
-    g_testConfigMounted = false;
-    const int mountCallsBeforeRestore = g_testMountCalls;
-    g_testMountRestoreAllowed = true;
-    expect(persistBuiltInBackgroundId("gradient_sunset", "legacy_ameobagx",
-                                      &persistence) == GradientPersistenceStatus::Ok &&
-               g_testMountCalls == mountCallsBeforeRestore + 1 &&
-               g_testConfigMount.blockDevIndex == 3u &&
-               std::string(persistence.persistedId) == "legacy_ameobagx",
-           "cached writable root ownership restores the same VFS device before wallpaper persistence");
-    g_testMountRestoreAllowed = false;
+    g_testConfigFailWriteNumber = 1;
+    g_testConfigFailWritePartial = true;
+    expect(persistBuiltInBackgroundId("gradient_ocean", "gradient_forest", &wallpaper) ==
+               GradientPersistenceStatus::WriteFailedRolledBack &&
+               (wallpaper.flags & kGradientPersistenceRollbackVerified) != 0u &&
+               testDesktopConfigText() == original,
+           "partial write failure restores and verifies the previous AppData bytes");
+    setTestDesktopConfig(original);
+    g_testConfigCorruptOnWriteNumber = 1;
+    expect(persistBuiltInBackgroundId("gradient_ocean", "gradient_forest", &wallpaper) ==
+               GradientPersistenceStatus::ReadbackFailedRolledBack &&
+               (wallpaper.flags & kGradientPersistenceRollbackVerified) != 0u &&
+               testDesktopConfigText() == original,
+           "readback mismatch restores and verifies the previous AppData bytes");
+
+    setTestDesktopConfig("");
+    g_testConfigFailWriteNumber = 1;
+    g_testConfigFailWritePartial = true;
+    expect(persistBuiltInBackgroundId(kDesktopDefaultWallpaperId, "gradient_ocean", &wallpaper) ==
+               GradientPersistenceStatus::WriteFailedRolledBack &&
+               (wallpaper.flags & kGradientPersistenceRollbackVerified) != 0u &&
+               g_testConfigLength == 0u,
+           "failed first save removes the incomplete newly-created settings file");
+
+    setTestDesktopConfig("");
+    g_testConfigFailWriteNumber = 1;
+    g_testConfigFailWriteStatus = kernel::vfs::VFS_ERR_NO_SPACE;
+    expect(persistBuiltInBackgroundId(kDesktopDefaultWallpaperId, "gradient_ocean", &wallpaper) ==
+               GradientPersistenceStatus::WriteFailedRolledBack &&
+               (wallpaper.flags & kGradientPersistenceRollbackVerified) != 0u &&
+               g_testConfigLength == 0u,
+           "disk-full on a first setting save returns failure and leaves no partial settings file");
+
+    setTestDesktopConfig(
+        "format=GUIDEXOS-DESKTOP-STATE\nversion=1\nshowDesktopTrash=perhaps\n");
+    expect(readAppDataDesktopIconVisibility(defaults, &icons) == DesktopAppDataReadStatus::Invalid &&
+               persistDesktopIconVisibility(defaults, defaults & ~kDesktopIconVisibilityTrash,
+                                            &iconResult) ==
+                   DesktopIconPersistenceStatus::InvalidConfiguration,
+           "malformed supported values remain visible errors and are not silently reset");
+
     setTestDesktopConfig(original);
     g_testConfigReadOnly = true;
-    expect(persistBuiltInGradientId("gradient_sunset", "gradient_ocean",
-                                    &persistence) == GradientPersistenceStatus::Unavailable &&
-               g_testConfigWriteCount == 0,
-           "read-only configuration storage rejects a gradient commit");
-
-    setTestDesktopConfig(
-        "wallpaperId=gradient_sunset\nwallpaperId=gradient_violet\n");
-    expect(persistBuiltInGradientId("gradient_sunset", "gradient_ocean",
-                                    &persistence) == GradientPersistenceStatus::InvalidConfiguration &&
-               g_testConfigWriteCount == 0,
-           "ambiguous duplicate wallpaper keys are rejected before writing");
-
-    setTestDesktopConfig(original);
-    g_testConfigFailWriteNumber = 1;
-    g_testConfigFailWritePartial = true;
-    expect(persistBuiltInBackgroundId("gradient_sunset", "legacy_ameobagx",
-                                      &persistence) ==
-               GradientPersistenceStatus::WriteFailedRolledBack &&
-               (persistence.flags & kGradientPersistenceRollbackVerified) != 0u &&
-               std::string(persistence.persistedId) == "gradient_sunset" &&
-               testDesktopConfigText() == original,
-           "short wallpaper write restores the exact prior desktop configuration");
-
-    setTestDesktopConfig(original);
-    g_testConfigFailWriteNumber = 1;
-    g_testConfigFailWritePartial = true;
-    expect(persistBuiltInGradientId("gradient_sunset", "gradient_ocean",
-                                    &persistence) ==
-               GradientPersistenceStatus::WriteFailedRolledBack &&
-               (persistence.flags & kGradientPersistenceRollbackVerified) != 0u &&
-               std::string(persistence.persistedId) == "gradient_sunset" &&
-               testDesktopConfigText() == original,
-           "partial write failure restores the exact previous canonical file");
-
-    setTestDesktopConfig(original);
-    g_testConfigCorruptOnWriteNumber = 1;
-    expect(persistBuiltInGradientId("gradient_sunset", "gradient_ocean",
-                                    &persistence) ==
-               GradientPersistenceStatus::ReadbackFailedRolledBack &&
-               (persistence.flags & kGradientPersistenceRollbackVerified) != 0u &&
-               testDesktopConfigText() == original,
-           "readback mismatch restores the exact previous canonical file");
-
-    setTestDesktopConfig(original);
-    g_testConfigCorruptOnWriteNumber = 1;
-    expect(persistBuiltInBackgroundId("gradient_sunset", "legacy_ameobagx",
-                                      &persistence) ==
-               GradientPersistenceStatus::ReadbackFailedRolledBack &&
-               (persistence.flags & kGradientPersistenceRollbackVerified) != 0u &&
-               testDesktopConfigText() == original,
-           "wallpaper readback mismatch restores the exact prior canonical file");
-
-    setTestDesktopConfig(original);
-    g_testConfigFailWriteNumber = 1;
-    g_testConfigFailWritePartial = true;
-    g_testConfigCorruptOnWriteNumber = 2;
-    // The first write fails after a partial update; the restoration write is
-    // deliberately made unverifiable by corrupting its readback.
-    expect(persistBuiltInGradientId("gradient_sunset", "gradient_ocean",
-                                    &persistence) ==
-               GradientPersistenceStatus::RollbackFailed &&
-               (persistence.flags & kGradientPersistenceRollbackAttempted) != 0u &&
-               (persistence.flags & kGradientPersistenceRollbackVerified) == 0u,
-           "rollback failure is returned distinctly and is never reported as restored");
-
-    setTestDesktopConfig(original);
-    g_testConfigFailWriteNumber = 1;
-    g_testConfigFailWritePartial = true;
-    g_testConfigCorruptOnWriteNumber = 2;
-    expect(persistBuiltInBackgroundId("gradient_sunset", "legacy_ameobagx",
-                                      &persistence) ==
-               GradientPersistenceStatus::RollbackFailed &&
-               (persistence.flags & kGradientPersistenceRollbackAttempted) != 0u &&
-               (persistence.flags & kGradientPersistenceRollbackVerified) == 0u,
-           "wallpaper rollback failure remains distinct and never reports restoration");
-
-    const char* alternatingIds[2] = { "gradient_sunset", "gradient_ocean" };
-    for (int cycle = 0; cycle < 100; ++cycle) {
-        const char* from = alternatingIds[cycle % 2];
-        const char* to = alternatingIds[(cycle + 1) % 2];
-        std::string source = original;
-        source.replace(source.find("gradient_sunset"),
-                       std::string("gradient_sunset").size(), from);
-        setTestDesktopConfig(source.c_str());
-        expect(persistBuiltInGradientId(from, to, &persistence) ==
-                   GradientPersistenceStatus::Ok &&
-                   std::string(persistence.persistedId) == to,
-               "repeated gradient commit cycle completes with verified state");
-    }
-    const char* wallpaperIds[2] = { "legacy_ameobagx", "legacy_wallpaper2" };
-    for (int cycle = 0; cycle < 100; ++cycle) {
-        const char* from = wallpaperIds[cycle % 2];
-        const char* to = wallpaperIds[(cycle + 1) % 2];
-        std::string source = original;
-        source.replace(source.find("gradient_sunset"),
-                       std::string("gradient_sunset").size(), from);
-        setTestDesktopConfig(source.c_str());
-        expect(persistBuiltInBackgroundId(from, to, &persistence) ==
-                   GradientPersistenceStatus::Ok &&
-                   std::string(persistence.persistedId) == to,
-               "repeated built-in wallpaper writes complete with verified readback");
-    }
-    for (int cycle = 0; cycle < 100; ++cycle) {
-        setTestDesktopConfig(original);
-        g_testConfigFailWriteNumber = 1;
-        g_testConfigFailWritePartial = true;
-        expect(persistBuiltInGradientId("gradient_sunset", "gradient_ocean",
-                                        &persistence) ==
-                   GradientPersistenceStatus::WriteFailedRolledBack &&
-                   (persistence.flags & kGradientPersistenceRollbackVerified) != 0u &&
-                   testDesktopConfigText() == original,
-               "repeated injected write failure preserves the previous config");
-    }
-    for (int cycle = 0; cycle < 100; ++cycle) {
-        setTestDesktopConfig(original);
-        g_testConfigFailWriteNumber = 1;
-        g_testConfigFailWritePartial = true;
-        expect(persistBuiltInBackgroundId("gradient_sunset", "legacy_ameobagx",
-                                          &persistence) ==
-                   GradientPersistenceStatus::WriteFailedRolledBack &&
-                   (persistence.flags & kGradientPersistenceRollbackVerified) != 0u &&
-                   testDesktopConfigText() == original,
-               "repeated injected wallpaper write failures restore the canonical config");
-    }
-
-    const char* iconConfig =
-        "version=1\r\n"
-        "wallpaperId=gradient_forest\r\n"
-        "backgroundScaleMode=fit\r\n"
-        "desktopThemeId=classic\r\n"
-        "taskbarPosition=top\r\n"
-        "showDesktopTrash=1\r\n"
-        "showDesktopThisSystem=1\r\n"
-        "showDesktopFileManager=1\r\n"
-        "showDesktopSystemSettings=0\r\n"
-        "smallLiveDesktopFolderIcons=1\r\n"
-        "autoArrangeDesktopIcons=0\r\n"
-        "futureAppearanceKey=preserve-me\r\n";
-    const uint32_t iconVisibilityAllThree =
-        kDesktopIconVisibilityTrash | kDesktopIconVisibilityThisSystem |
-        kDesktopIconVisibilityFileManager;
-    const uint32_t iconVisibilityAllFour =
-        iconVisibilityAllThree | kDesktopIconVisibilitySystemSettings;
-    DesktopIconPersistenceResult iconPersistence{};
-    setTestDesktopConfig(iconConfig);
-    expect(persistDesktopIconVisibility(
-               iconVisibilityAllThree, iconVisibilityAllFour,
-               &iconPersistence) == DesktopIconPersistenceStatus::Ok &&
-               iconPersistence.persistedVisibility == iconVisibilityAllFour &&
-               (iconPersistence.flags & kDesktopIconPersistenceReadbackAvailable) != 0u,
-           "system icon persistence commits and semantically verifies the requested values");
-    std::string iconExpected = iconConfig;
-    const size_t settingsValue = iconExpected.find("showDesktopSystemSettings=0");
-    iconExpected.replace(settingsValue,
-                         std::string("showDesktopSystemSettings=0").size(),
-                         "showDesktopSystemSettings=1");
-    expect(testDesktopConfigText() == iconExpected &&
-               testDesktopConfigText().find("wallpaperId=gradient_forest\r\n") != std::string::npos &&
-               testDesktopConfigText().find("backgroundScaleMode=fit\r\n") != std::string::npos &&
-               testDesktopConfigText().find("taskbarPosition=top\r\n") != std::string::npos &&
-               testDesktopConfigText().find("futureAppearanceKey=preserve-me\r\n") != std::string::npos,
-           "icon-only write changes one boolean and preserves unrelated settings, unknown keys, and CRLF bytes");
-    const int iconWritesBeforeNoChange = g_testConfigWriteCount;
-    expect(persistDesktopIconVisibility(
-               iconVisibilityAllFour, iconVisibilityAllFour,
-               &iconPersistence) == DesktopIconPersistenceStatus::NoChange &&
-               g_testConfigWriteCount == iconWritesBeforeNoChange,
-           "unchanged icon state performs no canonical configuration write");
-
-    setTestDesktopConfig(original);
-    expect(persistDesktopIconVisibility(
-               iconVisibilityAllThree,
-               iconVisibilityAllThree & ~kDesktopIconVisibilityFileManager,
-               &iconPersistence) == DesktopIconPersistenceStatus::Ok &&
-               testDesktopConfigText().find("futureAppearanceKey=keep-this-value\r\n") != std::string::npos &&
-               testDesktopConfigText().find("showDesktopFileManager=0\n") != std::string::npos,
-           "missing optional icon keys use documented defaults and append only the changed key");
-
-    const char* malformedHistoricalConfig =
-        "version=1\n"
-        "wallpaperId=gradient_forest\n"
-        "backgroundScaleMode=fill\n"
-        "desktopThemeId=classic\n"
-        "taskbarPosition=bottom\n"
-        "showDesktopTrash=1\n"
-        "showDesktopThisSystem=1\n"
-        "showDesktopFileManager=1\n"
-        "showDesktopSystemSettings=0\n"
-        "smallLiveDesktopFolderIcons=1\n"
-        "autoArrangeDesktopIcon";
-    setTestDesktopConfig(malformedHistoricalConfig);
-    const std::string malformedBefore = testDesktopConfigText();
-    expect(persistDesktopIconVisibility(
-               iconVisibilityAllThree,
-               iconVisibilityAllThree & ~kDesktopIconVisibilityTrash,
-               &iconPersistence) == DesktopIconPersistenceStatus::InvalidConfiguration &&
-               g_testConfigWriteCount == 0 && malformedBefore.size() == 257u &&
-               testDesktopConfigText() == malformedBefore,
-           "exact historical 257-byte incomplete config blocks icon writes byte-for-byte");
-
-    std::string completeHistorical261 = malformedBefore;
-    completeHistorical261.replace(completeHistorical261.find("autoArrangeDesktopIcon"),
-        std::string("autoArrangeDesktopIcon").size(), "autoArrangeDesktopIcons=0\n");
-    expect(completeHistorical261.size() == 261u,
-           "complete historical auto-arrange field reconstructs the recorded 261-byte size");
-    setTestDesktopConfig(completeHistorical261.c_str());
-    expect(persistDesktopIconVisibility(
-               iconVisibilityAllThree,
-               iconVisibilityAllThree & ~kDesktopIconVisibilityTrash,
-               &iconPersistence) == DesktopIconPersistenceStatus::Ok &&
-               testDesktopConfigText().size() == 261u &&
-               testDesktopConfigText().find("autoArrangeDesktopIcons=0\n") != std::string::npos &&
-               testDesktopConfigText().find("showDesktopTrash=0\n") != std::string::npos,
-           "complete 261-byte config accepts a targeted icon update without losing fields");
-
-    const std::string noFinalNewlineConfig =
-        "version=1\nwallpaperId=legacy_guidexos_space\nshowDesktopTrash=1\n"
-        "showDesktopThisSystem=1\nshowDesktopFileManager=1\nfutureTail=keep-exactly";
-    setTestDesktopConfig(noFinalNewlineConfig.c_str());
-    expect(persistDesktopIconVisibility(
-               iconVisibilityAllThree,
-               iconVisibilityAllThree & ~kDesktopIconVisibilityTrash,
-               &iconPersistence) == DesktopIconPersistenceStatus::Ok &&
-               testDesktopConfigText() ==
-                   "version=1\nwallpaperId=legacy_guidexos_space\nshowDesktopTrash=0\n"
-                   "showDesktopThisSystem=1\nshowDesktopFileManager=1\nfutureTail=keep-exactly",
-           "targeted icon writes preserve longer wallpaper IDs and a missing final newline");
-
-    setTestDesktopConfig(
-        "showDesktopTrash=1\nshowDesktopTrash=0\nshowDesktopThisSystem=1\n");
-    expect(persistDesktopIconVisibility(
-               iconVisibilityAllThree, iconVisibilityAllThree & ~kDesktopIconVisibilityTrash,
-               &iconPersistence) == DesktopIconPersistenceStatus::InvalidConfiguration &&
-               g_testConfigWriteCount == 0,
-           "duplicate icon keys are rejected before persistence");
-
-    setTestDesktopConfig(iconConfig);
-    expect(persistDesktopIconVisibility(
-               iconVisibilityAllFour,
-               iconVisibilityAllFour & ~kDesktopIconVisibilityTrash,
-               &iconPersistence) == DesktopIconPersistenceStatus::Conflict &&
-               g_testConfigWriteCount == 0 &&
-               iconPersistence.persistedVisibility == iconVisibilityAllThree,
-           "icon persistence detects a configuration conflict without modifying the file");
-
-    setTestDesktopConfig(iconConfig);
-    g_testConfigFailWriteNumber = 1;
-    g_testConfigFailWritePartial = true;
-    expect(persistDesktopIconVisibility(
-               iconVisibilityAllThree, iconVisibilityAllFour,
-               &iconPersistence) == DesktopIconPersistenceStatus::WriteFailedRolledBack &&
-               (iconPersistence.flags & kDesktopIconPersistenceRollbackVerified) != 0u &&
-               testDesktopConfigText() == iconConfig,
-           "short icon configuration write restores and verifies the exact prior bytes");
-
-    setTestDesktopConfig(iconConfig);
-    g_testConfigCorruptOnWriteNumber = 1;
-    expect(persistDesktopIconVisibility(
-               iconVisibilityAllThree, iconVisibilityAllFour,
-               &iconPersistence) == DesktopIconPersistenceStatus::ReadbackFailedRolledBack &&
-               (iconPersistence.flags & kDesktopIconPersistenceRollbackVerified) != 0u &&
-               testDesktopConfigText() == iconConfig,
-           "icon readback mismatch restores and verifies the prior configuration");
-
-    setTestDesktopConfig(iconConfig);
-    g_testConfigFailWriteNumber = 1;
-    g_testConfigFailWritePartial = true;
-    g_testConfigCorruptOnWriteNumber = 2;
-    expect(persistDesktopIconVisibility(
-               iconVisibilityAllThree, iconVisibilityAllFour,
-               &iconPersistence) == DesktopIconPersistenceStatus::RollbackFailed &&
-               (iconPersistence.flags & kDesktopIconPersistenceRollbackAttempted) != 0u &&
-               (iconPersistence.flags & kDesktopIconPersistenceRollbackVerified) == 0u,
-           "icon rollback uncertainty is reported distinctly after injected restore failure");
-
-    bool settingsVisible = false;
-    for (int cycle = 0; cycle < 100; ++cycle) {
-        std::string cycleSource = iconConfig;
-        const uint32_t current = settingsVisible
-            ? iconVisibilityAllFour : iconVisibilityAllThree;
-        const bool nextSettingsVisible = !settingsVisible;
-        const uint32_t next = nextSettingsVisible
-            ? iconVisibilityAllFour : iconVisibilityAllThree;
-        if (settingsVisible) {
-            const size_t currentValue = cycleSource.find("showDesktopSystemSettings=0");
-            cycleSource.replace(currentValue,
-                std::string("showDesktopSystemSettings=0").size(),
-                "showDesktopSystemSettings=1");
-        }
-        setTestDesktopConfig(cycleSource.c_str());
-        expect(persistDesktopIconVisibility(
-                   current,
-                   next, &iconPersistence) == DesktopIconPersistenceStatus::Ok &&
-                   iconPersistence.persistedVisibility == next &&
-                   testDesktopConfigText().find("futureAppearanceKey=preserve-me\r\n") != std::string::npos,
-               "repeated icon writes preserve unrelated configuration fields");
-        settingsVisible = nextSettingsVisible;
-    }
-
-    g_testConfigMounted = false;
+    expect(persistBuiltInBackgroundId("gradient_ocean", "gradient_forest", &wallpaper) ==
+               GradientPersistenceStatus::Unavailable &&
+               (wallpaper.flags & kGradientPersistenceRollbackAttempted) == 0u &&
+               (wallpaper.flags & kGradientPersistenceRollbackVerified) == 0u,
+           "read-only AppData is reported unavailable and never claims a rollback");
     g_testConfigReadOnly = false;
+    g_testConfigMounted = false;
 }
 
 int main()

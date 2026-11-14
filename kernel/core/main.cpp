@@ -13,7 +13,6 @@
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/process.h"
 #include "include/kernel/desktop.h"
-#include "include/kernel/desktop_gradient_persistence.h"
 #include "include/kernel/kernel_apps.h"
 #include "include/kernel/kernel_app.h"
 #include "include/kernel/kernel_compositor.h"
@@ -985,7 +984,6 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::putc('\n');
         
         const bool mounted = mount_persistent_storage();
-        if (mounted) kernel::desktop::rememberDesktopGradientStorageDevice();
         kernel::native_elf::log_apps_lifecycle_checkpoint(
             kernel::native_elf::APPS_CHECKPOINT_INITIAL_MOUNT);
 
@@ -1000,6 +998,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         }
 
         kernel::desktop::reload_persisted_wallpaper();
+        kernel::desktop::reload_persisted_system_desktop_icons();
 #if defined(GXOS_BARE_METAL)
         kernel::desktop::refresh_bare_metal_desktop_folders_after_vfs_ready();
 #endif

@@ -245,7 +245,8 @@ void set_wallpaper_by_id(const char* wallpaperId);
 const char* get_wallpaper_id();
 
 // Enumerate and apply the desktop-owned built-in gradient presets. The apply
-// call checks the desktop appearance revision and commits through /desktop.cfg.
+// call checks the desktop appearance revision and commits through the versioned
+// Modern Settings file under /AppData.
 uint32_t get_builtin_gradient_preset_count();
 bool get_builtin_gradient_preset(
     uint32_t index, DesktopBuiltInGradientPresetV1* output);
@@ -300,7 +301,7 @@ struct DesktopIconVisibilityApplyResultV1 {
 };
 
 // Apply selected public system-icon visibility groups through the desktop
-// owner's shared appearance revision and canonical /desktop.cfg persistence.
+// owner's shared appearance revision and /AppData persistence.
 DesktopIconVisibilityApplyStatus apply_system_icon_visibility(
     uint32_t targetMask, uint32_t visibleMask, uint64_t expectedRevision,
     DesktopIconVisibilityApplyResultV1* output);

@@ -45,12 +45,27 @@ function Get-Frame([string]$Pattern) {
 $frame = [ordered]@{
     kernelMain = Get-Frame 'kernel_main\(void\*, uint32_t\)'
     desktopMouse = Get-Frame 'kernel::desktop::handle_mouse\('
+    desktopTick = Get-Frame 'kernel::desktop::tick\('
     desktopLaunch = Get-Frame 'kernel::desktop::launch_app\('
+    appManagerUpdate = Get-Frame 'kernel::app::AppManager::update\('
     appManagerLaunch = Get-Frame 'kernel::app::AppManager::launchApp\('
     settingsInit = Get-Frame 'SettingsNativeApp::init\('
     settingsMouse = Get-Frame 'SettingsNativeApp::onMouseDown\('
+    settingsUpdate = Get-Frame 'SettingsNativeApp::update\('
+    settingsPersonalizationActivate = Get-Frame 'SettingsNativeApp::activateFocusedPersonalizationControl\('
+    settingsPersonalizationClick = Get-Frame 'SettingsNativeApp::handlePersonalizationClick\('
+    settingsApplyWallpaper = Get-Frame 'SettingsNativeApp::applyPendingBackground\('
+    settingsApplyDesktopIcons = Get-Frame 'SettingsNativeApp::applyPendingDesktopIcons\('
     settingsRefresh = Get-Frame 'settings_native::refreshDisplaySnapshot\('
     settingsProviderCallback = Get-Frame 'SettingsNativeApp::readProviderSnapshot\('
+    settingsApplyWallpaperProvider = Get-Frame 'settings_native::applyBuiltInWallpaper\('
+    settingsApplyIconsProvider = Get-Frame 'settings_native::applyDesktopIconVisibility\('
+    desktopApplyWallpaper = Get-Frame 'kernel::desktop::apply_builtin_background\('
+    desktopApplyIcons = Get-Frame 'kernel::desktop::apply_system_icon_visibility\('
+    persistWallpaper = Get-Frame 'kernel::desktop::persistBuiltInBackgroundId\('
+    persistDesktopIcons = Get-Frame 'kernel::desktop::persistDesktopIconVisibility\('
+    appDataWriteAndVerify = Get-Frame '::writeAndVerify\('
+    appDataReadConfig = Get-Frame '::readAppDataConfig\('
     readDisplaySnapshot = Get-Frame 'settings_native::readDisplaySnapshot\('
     displaySubmit = Get-Frame 'DisplayConfigurationService::submit\('
     compositorMouseDown = Get-Frame 'KernelCompositor::handleMouseDown\('
@@ -80,8 +95,19 @@ $settingsLaunchPath = $frame.kernelMain + $frame.desktopMouse + $frame.desktopLa
 $settingsNavigationPath = $frame.kernelMain + $frame.desktopMouse +
     $frame.compositorMouseDown + $frame.settingsMouse + $frame.settingsRefresh +
     $frame.settingsProviderCallback + $frame.readDisplaySnapshot + $frame.displaySubmit
+$settingsApplyBasePath = $frame.kernelMain + $frame.desktopTick + $frame.appManagerUpdate +
+    $frame.settingsUpdate + $frame.settingsPersonalizationActivate +
+    $frame.settingsPersonalizationClick
+$settingsWallpaperApplyPath = $settingsApplyBasePath + $frame.settingsApplyWallpaper +
+    $frame.settingsApplyWallpaperProvider + $frame.desktopApplyWallpaper +
+    $frame.persistWallpaper + $frame.appDataWriteAndVerify + $frame.appDataReadConfig
+$settingsIconApplyPath = $settingsApplyBasePath + $frame.settingsApplyDesktopIcons +
+    $frame.settingsApplyIconsProvider + $frame.desktopApplyIcons +
+    $frame.persistDesktopIcons + $frame.appDataWriteAndVerify + $frame.appDataReadConfig
 $settingsWorst = [Math]::Max($settingsLaunchPath, $settingsNavigationPath) +
     $unmodeledCallReserve + $interruptReserve + $bootEntryReserve
+$settingsPersistenceWorst = (@($settingsWallpaperApplyPath, $settingsIconApplyPath) |
+    Measure-Object -Maximum).Maximum + $unmodeledCallReserve + $interruptReserve + $bootEntryReserve
 $legacyDisplayInitPath = $frame.kernelMain + $frame.desktopMouse + $frame.desktopLaunch +
     $frame.appManagerLaunch + $frame.displayOptionsInit + $frame.displayOptionsLoad +
     $frame.displayOptionsQuery + $frame.displaySubmit
@@ -125,8 +151,8 @@ if ($frame.bridgeServe -gt 1024) { throw "COM2 inlined dispatcher frame is too l
 if ($frame.readStorageSnapshot -gt 1024) { throw "Storage provider frame is too large: $($frame.readStorageSnapshot) bytes." }
 if ($frame.readMbr -gt 4608) { throw "MBR reader frame is too large: $($frame.readMbr) bytes." }
 if ($frame.decodeStorageSnapshot -gt 6144) { throw "Storage diagnostic decoder frame is too large: $($frame.decodeStorageSnapshot) bytes." }
-if ([Math]::Max($settingsWorst, $legacyDisplayWorst) -gt $guardedPathLimit) {
-    throw "Display budget is $([Math]::Max($settingsWorst, $legacyDisplayWorst)) bytes, above the $guardedPathLimit-byte guarded limit."
+if ([Math]::Max([Math]::Max($settingsWorst, $settingsPersistenceWorst), $legacyDisplayWorst) -gt $guardedPathLimit) {
+    throw "Display/Settings budget is $([Math]::Max([Math]::Max($settingsWorst, $settingsPersistenceWorst), $legacyDisplayWorst)) bytes, above the $guardedPathLimit-byte guarded limit."
 }
 if ($com2Worst -gt $guardedPathLimit) {
     throw "COM2 service budget is $com2Worst bytes, above the $guardedPathLimit-byte guarded limit."
@@ -135,6 +161,9 @@ if ($com2Worst -gt $guardedPathLimit) {
 Write-Output ("Settings Display: launch={0} navigation={1} guarded={2}/{3} bytes; headroom={4} bytes." -f `
     $settingsLaunchPath, $settingsNavigationPath, $settingsWorst, $stackCapacity,
     ($stackCapacity - $settingsWorst))
+Write-Output ("Settings AppData Apply: wallpaper={0} icons={1}; guarded={2}/{3} bytes; headroom={4} bytes." -f `
+    $settingsWallpaperApplyPath, $settingsIconApplyPath, $settingsPersistenceWorst,
+    $stackCapacity, ($stackCapacity - $settingsPersistenceWorst))
 Write-Output ("Legacy Display Options: init={0} query={1} apply={2} refresh={3}; guarded={4}/{5} bytes; headroom={6} bytes." -f `
     $legacyDisplayInitPath, $legacyDisplayQueryPath, $legacyDisplayApplyPath,
     $legacyDisplayRefreshPath, $legacyDisplayWorst, $stackCapacity,
