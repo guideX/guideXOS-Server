@@ -15,6 +15,7 @@
 #endif
 
 #include "guidexos_nativeaot_pal_contract.h"
+#include "guidexos_nativeaot_amd64_unwind_primitive.h"
 
 namespace {
 
@@ -602,9 +603,13 @@ extern "C" PVOID WINAPI guidexos_nativeaot_startup_AddVectoredExceptionHandler(
 }
 
 extern "C" PVOID WINAPI guidexos_nativeaot_startup_RtlVirtualUnwind(
-    ULONG, ULONG64, ULONG64, PRUNTIME_FUNCTION, PCONTEXT,
-    PBOOLEAN, PULONG64, PKNONVOLATILE_CONTEXT_POINTERS) {
-    return nullptr;
+    ULONG handlerType, ULONG64 imageBase, ULONG64 controlPc,
+    PRUNTIME_FUNCTION functionEntry, PCONTEXT context,
+    PVOID* handlerData, PULONG64 establisherFrame,
+    PKNONVOLATILE_CONTEXT_POINTERS contextPointers) {
+    return guideXosRtlVirtualUnwindWindows(
+        handlerType, imageBase, controlPc, functionEntry, context,
+        handlerData, establisherFrame, contextPointers);
 }
 
 extern "C" SIZE_T WINAPI guidexos_nativeaot_startup_VirtualQuery(

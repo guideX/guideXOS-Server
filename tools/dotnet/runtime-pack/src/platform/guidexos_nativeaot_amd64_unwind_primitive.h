@@ -20,3 +20,11 @@ extern "C" void* __cdecl guideXosRtlVirtualUnwind(
     uint32_t handlerType, uint64_t imageBase, uint64_t controlPc,
     void* functionEntry, void* context, void** handlerData,
     uint64_t* establisherFrame, void* contextPointers);
+
+// Adapter for NativeAOT's Windows x64 RtlVirtualUnwind ABI. The shared
+// primitive's compact register-pointer list remains available to existing
+// hosted diagnostics; this entry translates the Windows structure layout.
+extern "C" void* __cdecl guideXosRtlVirtualUnwindWindows(
+    uint32_t handlerType, uint64_t imageBase, uint64_t controlPc,
+    void* functionEntry, void* context, void** handlerData,
+    uint64_t* establisherFrame, void* windowsContextPointers);

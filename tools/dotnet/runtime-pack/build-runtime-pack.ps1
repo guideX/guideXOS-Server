@@ -541,6 +541,8 @@ $fpArchiveObjects = if ($NativeAotFpRepair) {
     ""
 }
 $productionGcEnvironmentObjects = ""
+$nativeUnwindPrimitiveSource = $null
+$nativeUnwindPrimitiveObject = $null
 if ($ProductionApplication) {
     # The PE-to-ELF image has no Windows loader to resolve gcenv.windows.cpp.
     # Compile the existing guideXOS-neutral GC environment and its Win64-side
@@ -551,6 +553,7 @@ if ($ProductionApplication) {
     $gcEnvSource = Join-Path $RuntimePackRoot "src\gcenv\guidexos_gcenv.cpp"
     $gcBridgeSource = Join-Path $RuntimePackRoot "src\platform\guidexos_nativeaot_gcenv_startup_bridge.cpp"
     $startupImportsSource = Join-Path $RuntimePackRoot "src\platform\guidexos_nativeaot_startup_imports.cpp"
+    $nativeUnwindPrimitiveSource = Join-Path $RuntimePackRoot "src\platform\guidexos_nativeaot_amd64_unwind_primitive.cpp"
     $gcConfigSource = Join-Path $gcSourceRoot "gc\gcconfig.cpp"
     $gcConfigWrapperSource = Join-Path $OutputRoot "guidexos_nativeaot_gcconfig_replacement.cpp"
     $rhConfigSource = Join-Path $gcSourceRoot "nativeaot\Runtime\RhConfig.cpp"
@@ -561,13 +564,14 @@ if ($ProductionApplication) {
     $gcEnvObject = Join-Path $OutputRoot "guidexos_gcenv.production.obj"
     $gcBridgeObject = Join-Path $OutputRoot "guidexos_nativeaot_gcenv_startup_bridge.production.obj"
     $startupImportsObject = Join-Path $OutputRoot "guidexos_nativeaot_startup_imports.production.obj"
+    $nativeUnwindPrimitiveObject = Join-Path $OutputRoot "guidexos_nativeaot_amd64_unwind_primitive.production.obj"
     $gcConfigObject = Join-Path $OutputRoot "guidexos_nativeaot_gcconfig_replacement.production.obj"
     $rhConfigObject = Join-Path $OutputRoot "guidexos_nativeaot_rhconfig_replacement.production.obj"
     $startupObject = Join-Path $OutputRoot "guidexos_nativeaot_startup_replacement.production.obj"
     $gcSupportRoot = Join-Path $OutputRoot "gcconfig-support"
     $gcSupportMinipal = Join-Path $gcSupportRoot "minipal"
     $gcSupportUtils = Join-Path $gcSupportMinipal "utils.h"
-    foreach ($path in @($gcEnvSource, $gcBridgeSource, $startupImportsSource, $gcConfigSource, $rhConfigSource, $startupSource, $runtimeInstanceSource, $gcSourceRoot)) {
+    foreach ($path in @($gcEnvSource, $gcBridgeSource, $startupImportsSource, $nativeUnwindPrimitiveSource, $gcConfigSource, $rhConfigSource, $startupSource, $runtimeInstanceSource, $gcSourceRoot)) {
         if (-not (Test-Path -LiteralPath $path)) {
             throw "Production NativeAOT GC environment input is missing: $path"
         }
@@ -910,6 +914,8 @@ guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_DEBUG_HEADERS);
         "if errorlevel 1 exit /b %errorlevel%",
         "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $gcDefines /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$startupImportsObject`" `"$startupImportsSource`"",
         "if errorlevel 1 exit /b %errorlevel%",
+        "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $gcDefines /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$nativeUnwindPrimitiveObject`" `"$nativeUnwindPrimitiveSource`"",
+        "if errorlevel 1 exit /b %errorlevel%",
         "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $gcDefines $gcIncludes /Fo:`"$gcConfigObject`" `"$gcConfigWrapperSource`"",
         "if errorlevel 1 exit /b %errorlevel%",
         "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $rhConfigDefines $gcIncludes /Fo:`"$rhConfigObject`" `"$rhConfigWrapperSource`"",
@@ -921,7 +927,7 @@ guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_DEBUG_HEADERS);
     $gcLines | Set-Content -LiteralPath $gcBatch -Encoding ASCII
     & $gcBatch
     if ($LASTEXITCODE -ne 0) { throw "Production NativeAOT GC environment compilation failed with exit code $LASTEXITCODE" }
-    foreach ($path in @($gcEnvObject, $gcBridgeObject, $startupImportsObject, $gcConfigObject, $rhConfigObject, $startupObject)) {
+    foreach ($path in @($gcEnvObject, $gcBridgeObject, $startupImportsObject, $nativeUnwindPrimitiveObject, $gcConfigObject, $rhConfigObject, $startupObject)) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
             throw "Production NativeAOT GC environment object was not produced: $path"
         }
@@ -1734,6 +1740,16 @@ $manifest = [ordered]@{
     managedExceptions = $false
     managedThreads = $false
     productionApplication = [bool]$ProductionApplication
+    productionNativeUnwindPrimitive = if ($ProductionApplication) { [ordered]@{
+        implementation = 'guideXosRtlVirtualUnwind'
+        source = $nativeUnwindPrimitiveSource
+        sourceSha256 = Get-Hash $nativeUnwindPrimitiveSource
+        object = $nativeUnwindPrimitiveObject
+        objectSha256 = Get-Hash $nativeUnwindPrimitiveObject
+        startupImportSource = Join-Path $RuntimePackRoot 'src\platform\guidexos_nativeaot_startup_imports.cpp'
+        startupImportSourceSha256 = Get-Hash (Join-Path $RuntimePackRoot 'src\platform\guidexos_nativeaot_startup_imports.cpp')
+        linkedByManagedProof = $true
+    } } else { $null }
     persistentCompositeLifecycle = [bool]$PersistentCompositeLifecycle
     threadStaticLifecycleDiagnostics = [bool]$ThreadStaticLifecycleDiagnostics
 }

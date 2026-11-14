@@ -1277,6 +1277,7 @@ Invoke-Logged 'pwsh' @('-NoProfile','-ExecutionPolicy','Bypass','-File',$hostedT
     '-RepoRoot',$root,'-OutputDirectory',$hostedTestRoot,'-DiagnosticMap',$mapPath,
     '-ProductionRuntimeManifest',$productionRuntimeManifestPath,
     '-StartupImportsObject',(Join-Path $runtimeRoot 'guidexos_nativeaot_startup_imports.production.obj'),
+    '-NativeUnwindObject',(Join-Path $runtimeRoot 'guidexos_nativeaot_amd64_unwind_primitive.production.obj'),
     '-PalContractObject',(Join-Path $artifactRoot 'guidexos_nativeaot_pal_contract.obj')) (Join-Path $candidate 'hosted-tests.log')
 Require-File (Join-Path $hostedTestRoot 'hosted-test-results.json') 'Native allocation hosted-test result'
 $hostedTestResults = Get-Content -LiteralPath (Join-Path $hostedTestRoot 'hosted-test-results.json') -Raw | ConvertFrom-Json

@@ -231,6 +231,7 @@ $runtimePackSdkPath = $null
 $runtimePackManifestHash = $null
 $runtimePackObjectHash = $null
 $startupImportsObj = $null
+$nativeUnwindPrimitiveObj = $null
 if ($UseGuideXosRuntimePack) {
     if ([string]::IsNullOrWhiteSpace($RuntimePackRoot)) {
         $RuntimePackRoot = Join-Path $RepoRoot "tools\dotnet\runtime-pack"
@@ -388,6 +389,19 @@ if ($UseGuideXosRuntimePack) {
         $startupImportsObj = Join-Path $runtimePackOutputRoot "guidexos_nativeaot_startup_imports.production.obj"
         if (-not (Test-Path -LiteralPath $startupImportsObj)) {
             throw "Production NativeAOT import shim object not found: $startupImportsObj"
+        }
+        $unwindPrimitive = $runtimePackManifestObject.productionNativeUnwindPrimitive
+        if (-not [bool]$runtimePackManifestObject.productionApplication -or
+            [string]$unwindPrimitive.implementation -cne 'guideXosRtlVirtualUnwind' -or
+            [string]$unwindPrimitive.sourceSha256 -cne (Get-Sha256Hex ([string]$unwindPrimitive.source)) -or
+            [string]$unwindPrimitive.startupImportSourceSha256 -cne (Get-Sha256Hex ([string]$unwindPrimitive.startupImportSource))) {
+            throw 'Production runtime-pack manifest does not bind the source-backed NativeAOT unwind implementation.'
+        }
+        $nativeUnwindPrimitiveObj = [string]$unwindPrimitive.object
+        if ([string]::IsNullOrWhiteSpace($nativeUnwindPrimitiveObj) -or
+            -not (Test-Path -LiteralPath $nativeUnwindPrimitiveObj) -or
+            [string]$unwindPrimitive.objectSha256 -cne (Get-Sha256Hex $nativeUnwindPrimitiveObj)) {
+            throw 'Production NativeAOT unwind primitive object is missing or does not match its runtime-pack manifest.'
         }
     }
 }
@@ -827,6 +841,7 @@ try {
         $publishProperties += "-p:HostLogProofC102StartupObj=$c102StartupObj"
         $publishProperties += "-p:HostLogProofPalMinWinObj=$palMinWinObj"
         $publishProperties += "-p:HostLogProofNativeImportObj=$startupImportsObj"
+        $publishProperties += "-p:HostLogProofNativeUnwindObj=$nativeUnwindPrimitiveObj"
     }
     if ($ThreadStaticLifecycleDiagnostics) {
         $publishProperties += "-p:HostLogProofManagedHostShimsObj=$managedHostShimsObj"

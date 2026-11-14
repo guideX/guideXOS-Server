@@ -945,6 +945,7 @@
     <NativeLibrary Include="$(HostLogProofGcStartupContractObj)" Condition="'$(HostLogProofGcStartupContractObj)' != '' and Exists('$(HostLogProofGcStartupContractObj)')" />
     <NativeLibrary Include="$(HostLogProofC102StartupObj)" Condition="'$(HostLogProofC102StartupObj)' != '' and Exists('$(HostLogProofC102StartupObj)')" />
     <NativeLibrary Include="$(HostLogProofNativeImportObj)" Condition="'$(HostLogProofNativeImportObj)' != '' and Exists('$(HostLogProofNativeImportObj)')" />
+    <NativeLibrary Include="$(HostLogProofNativeUnwindObj)" Condition="'$(HostLogProofNativeUnwindObj)' != '' and Exists('$(HostLogProofNativeUnwindObj)')" />
     <NativeLibrary Include="$(HostLogProofManagedHostShimsObj)" Condition="'$(HostLogProofManagedHostShimsObj)' != '' and Exists('$(HostLogProofManagedHostShimsObj)')" />
   </ItemGroup>
 </Project>

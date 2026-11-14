@@ -70,6 +70,29 @@ uint16_t unwindFrameOffset(const uint8_t* code) {
            static_cast<uint16_t>(code[1]) << 8;
 }
 
+uint32_t compactPointerIndex(uint32_t reg) {
+    switch (reg) {
+        case 3u: return 0u;
+        case 5u: return 2u;
+        case 6u: return 3u;
+        case 7u: return 4u;
+        case 12u: return 5u;
+        case 13u: return 6u;
+        case 14u: return 7u;
+        case 15u: return 8u;
+        default: return 0xFFFFFFFFu;
+    }
+}
+
+uint64_t** windowsIntegerContextPointer(void* pointers, uint32_t reg) {
+    if (pointers == nullptr || reg > 15u) return nullptr;
+    // AMD64 KNONVOLATILE_CONTEXT_POINTERS starts with 16 floating-context
+    // pointers, followed by 16 integer-context pointers in CONTEXT order.
+    constexpr size_t kIntegerContextOffset = 16u * sizeof(void*);
+    return reinterpret_cast<uint64_t**>(reinterpret_cast<uint8_t*>(pointers) +
+        kIntegerContextOffset + static_cast<size_t>(reg) * sizeof(void*));
+}
+
 } // namespace
 
 extern "C" void* __cdecl guideXosRtlVirtualUnwind(
@@ -215,4 +238,34 @@ extern "C" void* __cdecl guideXosRtlVirtualUnwind(
     if (handlerData != nullptr) *handlerData = nullptr;
     (void)flags;
     return nullptr;
+}
+
+extern "C" void* __cdecl guideXosRtlVirtualUnwindWindows(
+    uint32_t handlerType, uint64_t imageBase, uint64_t controlPc,
+    void* functionEntry, void* context, void** handlerData,
+    uint64_t* establisherFrame, void* windowsContextPointers) {
+    if (windowsContextPointers == nullptr) {
+        return guideXosRtlVirtualUnwind(handlerType, imageBase, controlPc,
+            functionEntry, context, handlerData, establisherFrame, nullptr);
+    }
+
+    uint64_t* compactPointers[10]{};
+    constexpr uint32_t kNonvolatileRegisters[] = {3u, 5u, 6u, 7u, 12u, 13u, 14u, 15u};
+    for (uint32_t reg : kNonvolatileRegisters) {
+        uint64_t** windowsPointer = windowsIntegerContextPointer(
+            windowsContextPointers, reg);
+        const uint32_t compactIndex = compactPointerIndex(reg);
+        compactPointers[compactIndex] = *windowsPointer;
+    }
+
+    void* handler = guideXosRtlVirtualUnwind(handlerType, imageBase, controlPc,
+        functionEntry, context, handlerData, establisherFrame, compactPointers);
+
+    for (uint32_t reg : kNonvolatileRegisters) {
+        uint64_t** windowsPointer = windowsIntegerContextPointer(
+            windowsContextPointers, reg);
+        const uint32_t compactIndex = compactPointerIndex(reg);
+        *windowsPointer = compactPointers[compactIndex];
+    }
+    return handler;
 }

@@ -4,6 +4,7 @@ param(
     [Parameter(Mandatory=$true)][string]$DiagnosticMap,
     [Parameter(Mandatory=$true)][string]$ProductionRuntimeManifest,
     [string]$StartupImportsObject = '',
+    [string]$NativeUnwindObject = '',
     [string]$PalContractObject = '',
     [string]$OriginalR2R1Serial = ''
 )
@@ -85,10 +86,11 @@ $integrationTestHash = $null
 if (-not [string]::IsNullOrWhiteSpace($StartupImportsObject) -or
     -not [string]::IsNullOrWhiteSpace($PalContractObject)) {
     if ([string]::IsNullOrWhiteSpace($StartupImportsObject) -or
+        [string]::IsNullOrWhiteSpace($NativeUnwindObject) -or
         [string]::IsNullOrWhiteSpace($PalContractObject)) {
-        throw 'Both diagnostic startup-import and PAL-contract objects are required for the actual operator-new integration test.'
+        throw 'The actual operator-new integration test requires startup-import, native-unwind, and PAL-contract objects.'
     }
-    foreach ($object in @($StartupImportsObject,$PalContractObject)) {
+    foreach ($object in @($StartupImportsObject,$NativeUnwindObject,$PalContractObject)) {
         if (-not (Test-Path -LiteralPath $object -PathType Leaf)) { throw "Native allocation integration object not found: $object" }
     }
     $integrationTestPath = Join-Path $output 'native-alloc-operator-new-test.exe'
@@ -96,7 +98,7 @@ if (-not [string]::IsNullOrWhiteSpace($StartupImportsObject) -or
     $integrationBatch = Join-Path $output 'operator-new-integration-compile.bat'
     $integrationLines = @(
         '@echo off', 'setlocal', ('call "{0}" >nul' -f $vcvars), 'if errorlevel 1 exit /b %errorlevel%',
-        ('cl.exe /nologo /std:c++17 /MT /GS- /GR- /EHs-c- /DGUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC /I"{0}" "{1}" "{2}" "{3}" "{4}" /Fe:"{5}" /link /FORCE:MULTIPLE /ENTRY:main' -f $includeRoot,(Join-Path $root 'tests\dotnet\runtime-pack\c188r12r4r5r4r5r2r2_native_alloc_operator_new_test.cpp'),$recordSource,$StartupImportsObject,$PalContractObject,$integrationTestPath),
+        ('cl.exe /nologo /std:c++17 /MT /GS- /GR- /EHs-c- /DGUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC /I"{0}" "{1}" "{2}" "{3}" "{4}" "{5}" /Fe:"{6}" /link /FORCE:MULTIPLE /ENTRY:main' -f $includeRoot,(Join-Path $root 'tests\dotnet\runtime-pack\c188r12r4r5r4r5r2r2_native_alloc_operator_new_test.cpp'),$recordSource,$StartupImportsObject,$NativeUnwindObject,$PalContractObject,$integrationTestPath),
         'if errorlevel 1 exit /b %errorlevel%', 'exit /b 0'
     )
     Set-Content -LiteralPath $integrationBatch -Value $integrationLines -Encoding ASCII
