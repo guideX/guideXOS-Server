@@ -24,7 +24,7 @@ namespace shell {
 // Constants
 // ================================================================
 
-static const uint32_t MAX_CMD_LENGTH = 256;
+static const uint32_t MAX_CMD_LENGTH = 384;
 static const uint32_t MAX_HISTORY = 32;
 static const uint32_t MAX_ARGS = 16;
 
@@ -262,6 +262,11 @@ void draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
 
 // Execute a command string directly
 void execute(const char* cmd);
+
+#if defined(GXOS_NAVHTTPS13_GUEST_QUALIFICATION_ACTIVE)
+// Test-only boundary check for the corrected unsigned Roughtime formatter.
+void roughtime_formatter_guest_selftest();
+#endif
 
 // Get current working directory
 const char* get_cwd();

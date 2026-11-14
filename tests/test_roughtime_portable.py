@@ -129,6 +129,70 @@ class AgreementResult(ctypes.Structure):
     ]
 
 
+class RoundSource(ctypes.Structure):
+    _fields_ = [
+        ("server_ipv4", ctypes.c_uint32),
+        ("server_port", ctypes.c_uint16),
+        ("reserved", ctypes.c_uint16),
+        ("operator_identity", ctypes.c_uint32),
+        ("server_public_key", ctypes.c_uint8 * 32),
+    ]
+
+
+class RoundConfiguration(ctypes.Structure):
+    _fields_ = [
+        ("policy_identity", ctypes.c_uint32),
+        ("source_count", ctypes.c_uint8),
+        ("quorum", ctypes.c_uint8),
+        ("reserved", ctypes.c_uint16),
+        ("maximum_age_seconds", ctypes.c_uint32),
+        ("maximum_source_uncertainty_seconds", ctypes.c_uint32),
+        ("maximum_transport_delay_ms", ctypes.c_uint32),
+        ("maximum_forward_jump_seconds", ctypes.c_uint32),
+        ("sources", RoundSource * 3),
+    ]
+
+
+class RoundSourceResult(ctypes.Structure):
+    _fields_ = [
+        ("status", ctypes.c_int),
+        ("server_ipv4", ctypes.c_uint32),
+        ("server_port", ctypes.c_uint16),
+        ("request_bytes", ctypes.c_uint16),
+        ("response_bytes", ctypes.c_uint16),
+        ("verified", ctypes.c_uint8),
+        ("reserved", ctypes.c_uint8 * 3),
+        ("server_key_identity", ctypes.c_uint8 * 32),
+    ]
+
+
+class RoundResult(ctypes.Structure):
+    _fields_ = [
+        ("status", ctypes.c_int),
+        ("attempted_source_count", ctypes.c_uint8),
+        ("verified_response_count", ctypes.c_uint8),
+        ("independent_operator_count", ctypes.c_uint8),
+        ("reserved", ctypes.c_uint8),
+        ("sources", RoundSourceResult * 3),
+        ("evidence", AgreementToken * 3),
+        ("agreement", AgreementResult),
+    ]
+
+
+class AcquisitionResult(ctypes.Structure):
+    _fields_ = [
+        ("status", ctypes.c_int),
+        ("evidence", Evidence),
+        ("server_ipv4", ctypes.c_uint32),
+        ("server_port", ctypes.c_uint16),
+        ("request_bytes", ctypes.c_uint16),
+        ("response_bytes", ctypes.c_uint16),
+        ("clock_evidence_contract_valid", ctypes.c_uint8),
+        ("evidence_expires_monotonic_ns", ctypes.c_uint64),
+        ("agreement_evidence", AgreementToken),
+    ]
+
+
 def _raw_map(entries: list[tuple[str, bytes]]) -> bytes:
     values = bytearray()
     offsets = []
@@ -174,6 +238,70 @@ def _read_independent_vector() -> tuple[dict, bytes, bytes, bytes]:
     response = base64.b64decode(vector["response_packet_base64"])
     key = bytes.fromhex(vector["server_public_key_hex"])
     return vector, request, response, key
+
+
+class RoughtimeUdpFixture:
+    """One-request test-only signer with a separately pinned root key."""
+
+    def __init__(self, root_key, *, mode="normal", midpoint=FIXTURE_TIME, radius=2):
+        self.root_key = root_key
+        self.mode = mode
+        self.midpoint = midpoint
+        self.radius = radius
+        self.errors = []
+        self.endpoint = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.endpoint.bind(("127.0.0.1", 0))
+        self.endpoint.settimeout(3.0)
+        self.address = self.endpoint.getsockname()
+        self.rogue = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.thread = threading.Thread(target=self._serve_once, daemon=True)
+        self.thread.start()
+
+    def _serve_once(self):
+        try:
+            request, client = self.endpoint.recvfrom(1472)
+            fields = rt._parse_message(
+                rt._unwrap_packet(request, max_packet_bytes=rt.MAX_REQUEST_PACKET_BYTES)
+            )
+            public_key = self.root_key.public_key().public_bytes_raw()
+            expected_identity = hashlib.sha512(b"\xff" + public_key).digest()[:32]
+            if fields.get("SRV") != expected_identity or fields.get("TYPE") != b"\0\0\0\0":
+                raise AssertionError("fixture received a request for a different pinned key")
+            if self.mode == "timeout":
+                return
+            nonce = parse_request_nonce(request)
+            response_nonce = bytes([nonce[0] ^ 1]) * 32 if self.mode == "incorrect_nonce" else nonce
+            response = make_response(
+                request, response_nonce, root_key=self.root_key,
+                delegated_key=DELEGATED_KEY, midpoint=self.midpoint, radius=self.radius,
+            )
+            if self.mode == "invalid_signature":
+                signature_offset, _ = _field_bounds(response, "SIG")
+                damaged = bytearray(response)
+                damaged[signature_offset] ^= 1
+                response = bytes(damaged)
+            sender = self.rogue if self.mode == "unexpected_source" else self.endpoint
+            sender.sendto(response, client)
+        except socket.timeout:
+            self.errors.append(TimeoutError("fixture did not receive its bounded request"))
+        except OSError:
+            # close() may race with the bounded receive timeout during cleanup.
+            pass
+        except BaseException as error:
+            self.errors.append(error)
+
+    def close(self):
+        self.endpoint.close()
+        self.rogue.close()
+        self.thread.join(timeout=3.5)
+        if self.thread.is_alive():
+            self.errors.append(TimeoutError("fixture thread did not terminate"))
+
+
+def _unused_udp_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as endpoint:
+        endpoint.bind(("127.0.0.1", 0))
+        return endpoint.getsockname()[1]
 
 
 class PortableRoughtimeTests(unittest.TestCase):
@@ -265,10 +393,22 @@ class PortableRoughtimeTests(unittest.TestCase):
             capture_output=True,
             text=True,
         )
+        round_obj = build / "gxos_roughtime_round.o"
+        subprocess.run(
+            [gxx, "-std=c++14", "-Wall", "-Wextra", "-Werror", "-fno-exceptions",
+             "-fno-rtti", "-fno-builtin", "-ffreestanding", "-O2", "-DGXOS_BARE_METAL",
+             "-DGXOS_ROUGHTIME_AGREEMENT_TESTING", "-DGXOS_ROUGHTIME_ROUND_TESTING",
+             *common_includes, "-c", str(ROOT / "kernel/core/gxos_roughtime_round.cpp"),
+             "-o", str(round_obj)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
         # The shared harness includes the bounded acquisition and agreement
         # code used by the freestanding kernel.
         link_args = [gxx, "-shared", "-o", str(library_path), str(component_obj),
-                     str(acquisition_obj), str(agreement_obj), *(str(obj) for obj in objects)]
+                     str(acquisition_obj), str(agreement_obj), str(round_obj),
+                     *(str(obj) for obj in objects)]
         if is_windows:
             link_args.append("-Wl,--export-all-symbols")
         else:
@@ -322,6 +462,12 @@ class PortableRoughtimeTests(unittest.TestCase):
             ctypes.POINTER(Workspace), ctypes.POINTER(AgreementToken),
         ]
         cls.agreement_issue_function.restype = ctypes.c_int
+        cls.seal_acquisition_function = cls.library.gxos_roughtime_agreement_test_seal_acquisition_evidence
+        cls.seal_acquisition_function.argtypes = [
+            ctypes.POINTER(Evidence), ctypes.POINTER(ctypes.c_uint8),
+            ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(AgreementToken),
+        ]
+        cls.seal_acquisition_function.restype = ctypes.c_int
         cls.agreement_evaluate_function = cls.library.gxos_roughtime_agreement_evaluate
         cls.agreement_evaluate_function.argtypes = [
             ctypes.POINTER(AgreementPolicy), ctypes.POINTER(AgreementToken), ctypes.c_size_t,
@@ -329,6 +475,17 @@ class PortableRoughtimeTests(unittest.TestCase):
             ctypes.POINTER(AgreementResult),
         ]
         cls.agreement_evaluate_function.restype = ctypes.c_int
+        cls.round_test_provider_type = ctypes.CFUNCTYPE(
+            ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(RoundSource),
+            ctypes.POINTER(AcquisitionResult),
+        )
+        cls.round_test_function = cls.library.gxos_roughtime_round_test_run
+        cls.round_test_function.argtypes = [
+            ctypes.POINTER(RoundConfiguration), ctypes.c_uint64,
+            ctypes.POINTER(AgreementContinuity), ctypes.POINTER(RoundResult),
+            cls.round_test_provider_type, ctypes.c_void_p,
+        ]
+        cls.round_test_function.restype = ctypes.c_int
 
     @classmethod
     def tearDownClass(cls):
@@ -477,6 +634,273 @@ class PortableRoughtimeTests(unittest.TestCase):
             ctypes.byref(workspace), ctypes.byref(result),
         )
         return status, result
+
+    def run_udp_acquisition_round(self, *, modes=None, midpoints=None, radii=None,
+                                  operators=None, receipt_times=None, now_ns=1_000_000_000_000,
+                                  maximum_uncertainty=30, duplicate_key=False,
+                                  expected_round_status=0):
+        root_keys = [ROOT_KEY, OTHER_KEY, THIRD_ROOT_KEY]
+        modes = modes or ["normal"] * 3
+        midpoints = midpoints or [FIXTURE_TIME] * 3
+        radii = radii or [2] * 3
+        operators = operators or [201, 202, 203]
+        fixtures = []
+        ports = []
+        for index, (root_key, mode, midpoint, radius) in enumerate(
+                zip(root_keys, modes, midpoints, radii)):
+            if mode in ("network_failure", "monotonic_discontinuity"):
+                fixture = None
+                port = _unused_udp_port()
+            else:
+                fixture = RoughtimeUdpFixture(
+                    root_key, mode=mode, midpoint=midpoint, radius=radius,
+                )
+                port = fixture.address[1]
+            fixtures.append(fixture)
+            ports.append(port)
+
+        configuration = RoundConfiguration()
+        configuration.policy_identity = 0x1501
+        configuration.source_count = 3
+        configuration.quorum = 2
+        configuration.maximum_age_seconds = 300
+        configuration.maximum_source_uncertainty_seconds = maximum_uncertainty
+        configuration.maximum_transport_delay_ms = 2000
+        configuration.maximum_forward_jump_seconds = 300
+        for index, source in enumerate(configuration.sources):
+            source.server_ipv4 = 0x7F000001
+            source.server_port = ports[index]
+            source.operator_identity = operators[index]
+            key = root_keys[index].public_key().public_bytes_raw()
+            if duplicate_key and index == 1:
+                key = root_keys[0].public_key().public_bytes_raw()
+            source.server_public_key[:] = key
+
+        call_index = [0]
+        nonce_counter = [0]
+        fixture_errors = []
+
+        @self.random_fill_callback_type
+        def random_fill(_context, output, output_length):
+            seed = hashlib.sha256(
+                b"NAVHTTPS15-test-only-nonce" + nonce_counter[0].to_bytes(4, "little")
+            ).digest()
+            nonce_counter[0] += 1
+            for offset in range(output_length):
+                output[offset] = seed[offset % len(seed)]
+            return 1
+
+        @self.round_test_provider_type
+        def provider(_context, source_ptr, acquisition_ptr):
+            index = call_index[0]
+            call_index[0] += 1
+            source = source_ptr.contents
+            acquired = acquisition_ptr.contents
+            acquired.server_ipv4 = source.server_ipv4
+            acquired.server_port = source.server_port
+
+            if modes[index] == "network_failure":
+                return 3  # NETWORK_UNAVAILABLE
+            if modes[index] == "monotonic_discontinuity":
+                return 12  # MONOTONIC_DISCONTINUITY from the PIT adapter
+
+            key = bytes(source.server_public_key)
+            nonce = (ctypes.c_uint8 * 32)()
+            request = (ctypes.c_uint8 * 1036)()
+            request_length = ctypes.c_size_t()
+            build_status = self.build_request_random_function(
+                random_fill, None, self._u8(key), nonce, request, len(request),
+                ctypes.byref(request_length),
+            )
+            if build_status != 0:
+                return build_status
+
+            client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            client.settimeout(0.12)
+            try:
+                client.sendto(bytes(request[:request_length.value]),
+                              ("127.0.0.1", source.server_port))
+                response, actual = client.recvfrom(1024)
+            except (socket.timeout, ConnectionResetError, OSError):
+                return 6  # TIMEOUT / bounded network failure
+            finally:
+                client.close()
+            if client.fileno() != -1:
+                fixture_errors.append(AssertionError("UDP client socket was not closed"))
+
+            received_ns = (receipt_times[index] if receipt_times else now_ns - 100_000_000)
+            sent_ns = received_ns - 100_000_000
+            response_arg = self._u8(response)
+            nonce_arg = (ctypes.c_uint8 * 32).from_buffer_copy(bytes(nonce))
+            workspace = Workspace()
+            evidence = Evidence()
+            actual_ip = int.from_bytes(socket.inet_aton(actual[0]), "big")
+            verified_status = self.dispatch_function(
+                response_arg, len(response), actual_ip, actual[1],
+                source.server_ipv4, source.server_port,
+                request, request_length.value, nonce_arg, self._u8(key),
+                sent_ns, received_ns, ctypes.byref(workspace), ctypes.byref(evidence),
+            )
+            if verified_status != 0:
+                return verified_status
+
+            acquired.status = 0
+            acquired.evidence = evidence
+            acquired.request_bytes = request_length.value
+            acquired.response_bytes = len(response)
+            contract_valid = ctypes.c_uint8(0)
+            expires_ns = ctypes.c_uint64(0)
+            sealed = self.seal_acquisition_function(
+                ctypes.byref(evidence), ctypes.byref(contract_valid),
+                ctypes.byref(expires_ns),
+                ctypes.byref(acquired.agreement_evidence),
+            )
+            if sealed != 1:
+                return 10  # CLOCK_EVIDENCE_REJECTED
+            acquired.clock_evidence_contract_valid = contract_valid.value
+            acquired.evidence_expires_monotonic_ns = expires_ns.value
+            return 0
+
+        result = RoundResult()
+        try:
+            status = self.round_test_function(
+                ctypes.byref(configuration), now_ns, None, ctypes.byref(result), provider, None,
+            )
+        finally:
+            for fixture in fixtures:
+                if fixture is not None:
+                    fixture.close()
+                    fixture_errors.extend(fixture.errors)
+        self.assertEqual(status, expected_round_status)
+        self.assertEqual(call_index[0], 0 if duplicate_key else 3)
+        self.assertEqual(fixture_errors, [])
+        return configuration, result
+
+    def test_round_acquisition_three_live_udp_signers_agree(self):
+        _configuration, result = self.run_udp_acquisition_round()
+        self.assertEqual(result.attempted_source_count, 3)
+        self.assertEqual(result.verified_response_count, 3)
+        self.assertEqual(result.independent_operator_count, 3)
+        self.assertEqual(result.agreement.status, 0)
+        self.assertEqual(result.agreement.profile, 2)
+        self.assertEqual(result.agreement.production_policy_accepted, 0)
+        self.assertLessEqual(result.agreement.earliest_unix_seconds,
+                             result.agreement.latest_unix_seconds)
+
+    def test_round_keeps_two_verified_sources_when_one_times_out(self):
+        _configuration, result = self.run_udp_acquisition_round(
+            modes=["normal", "normal", "timeout"],
+        )
+        self.assertEqual(result.attempted_source_count, 3)
+        self.assertEqual(result.verified_response_count, 2)
+        self.assertEqual(result.sources[2].status, 6)
+        self.assertEqual(result.agreement.status, 0)
+
+    def test_round_rejects_two_agreeing_sources_with_a_valid_outlier(self):
+        _configuration, result = self.run_udp_acquisition_round(
+            midpoints=[FIXTURE_TIME, FIXTURE_TIME, FIXTURE_TIME + 100],
+        )
+        self.assertEqual(result.verified_response_count, 3)
+        self.assertEqual(result.agreement.status, 2)  # INCONSISTENT_SOURCES
+
+    def test_round_with_one_verified_source_reports_insufficient_sources(self):
+        _configuration, result = self.run_udp_acquisition_round(
+            modes=["normal", "timeout", "network_failure"],
+        )
+        self.assertEqual(result.verified_response_count, 1)
+        self.assertEqual(result.independent_operator_count, 1)
+        self.assertEqual(result.agreement.status, 1)  # INSUFFICIENT_SOURCES
+
+    def test_round_collapses_duplicate_operator_identity(self):
+        _configuration, result = self.run_udp_acquisition_round(
+            operators=[201, 201, 202],
+        )
+        self.assertEqual(result.verified_response_count, 3)
+        self.assertEqual(result.independent_operator_count, 2)
+        self.assertEqual(result.agreement.status, 0)
+        self.assertEqual(result.agreement.independent_source_count, 2)
+
+    def test_round_rejects_duplicate_server_key_before_network_access(self):
+        _configuration, result = self.run_udp_acquisition_round(
+            duplicate_key=True, expected_round_status=1,
+        )
+        self.assertEqual(result.status, 1)  # INVALID_CONFIGURATION
+        self.assertEqual(result.attempted_source_count, 0)
+
+    def test_round_rejects_bad_signature_without_losing_other_operators(self):
+        _configuration, result = self.run_udp_acquisition_round(
+            modes=["normal", "normal", "invalid_signature"],
+        )
+        self.assertEqual(result.verified_response_count, 2)
+        self.assertEqual(result.sources[2].status, 9)
+        self.assertEqual(result.agreement.status, 0)
+
+    def test_round_rejects_incorrect_nonce_without_losing_other_operators(self):
+        _configuration, result = self.run_udp_acquisition_round(
+            modes=["normal", "normal", "incorrect_nonce"],
+        )
+        self.assertEqual(result.verified_response_count, 2)
+        self.assertEqual(result.sources[2].status, 9)
+        self.assertEqual(result.agreement.status, 0)
+
+    def test_round_rejects_response_from_unexpected_udp_source(self):
+        _configuration, result = self.run_udp_acquisition_round(
+            modes=["normal", "normal", "unexpected_source"],
+        )
+        self.assertEqual(result.verified_response_count, 2)
+        self.assertEqual(result.sources[2].status, 7)
+        self.assertEqual(result.agreement.status, 0)
+
+    def test_round_excludes_verified_but_excessively_uncertain_source_set(self):
+        _configuration, result = self.run_udp_acquisition_round(
+            radii=[40, 40, 40], maximum_uncertainty=30,
+        )
+        self.assertEqual(result.verified_response_count, 3)
+        self.assertEqual(result.agreement.status, 4)  # EXCESSIVE_UNCERTAINTY
+
+    def test_round_rejects_stale_evidence_using_receipt_age(self):
+        now_ns = 1_000_000_000_000
+        old_receipt = now_ns - 301_000_000_000
+        _configuration, result = self.run_udp_acquisition_round(
+            receipt_times=[old_receipt] * 3, now_ns=now_ns,
+        )
+        self.assertEqual(result.verified_response_count, 3)
+        self.assertEqual(result.agreement.status, 3)  # STALE_EVIDENCE
+
+    def test_round_records_reordered_receipt_times_at_one_evaluation_instant(self):
+        now_ns = 1_000_000_000_000
+        _configuration, result = self.run_udp_acquisition_round(
+            receipt_times=[now_ns - 200_000_000, now_ns - 900_000_000,
+                           now_ns - 500_000_000],
+            now_ns=now_ns,
+        )
+        self.assertEqual(result.agreement.status, 0)
+        self.assertEqual(result.agreement.evaluated_monotonic_ns, now_ns)
+        self.assertEqual(result.agreement.maximum_evidence_age_seconds, 1)
+
+    def test_round_reports_network_failure_and_uses_remaining_quorum(self):
+        _configuration, result = self.run_udp_acquisition_round(
+            modes=["normal", "normal", "network_failure"],
+        )
+        self.assertEqual(result.sources[2].status, 3)
+        self.assertEqual(result.verified_response_count, 2)
+        self.assertEqual(result.agreement.status, 0)
+
+    def test_round_reports_monotonic_discontinuity_without_counting_source(self):
+        _configuration, result = self.run_udp_acquisition_round(
+            modes=["normal", "normal", "monotonic_discontinuity"],
+        )
+        self.assertEqual(result.sources[2].status, 12)
+        self.assertEqual(result.verified_response_count, 2)
+        self.assertEqual(result.agreement.status, 0)
+
+    def test_round_classifies_multiple_disjoint_candidate_quorums_ambiguous(self):
+        _configuration, result = self.run_udp_acquisition_round(
+            midpoints=[FIXTURE_TIME + 5, FIXTURE_TIME - 1, FIXTURE_TIME + 11],
+            radii=[10, 2, 2],
+        )
+        self.assertEqual(result.verified_response_count, 3)
+        self.assertEqual(result.agreement.status, 9)  # AMBIGUOUS
 
     def test_kernel_request_builder_matches_hosted_rfc_v1_request(self):
         nonce = bytes(range(32))
@@ -641,6 +1065,42 @@ class PortableRoughtimeTests(unittest.TestCase):
         self.assertEqual(server.fileno(), -1)
         self.assertFalse(fixture_thread.is_alive())
         self.assertEqual(fixture_errors, [])
+
+    def test_acquisition_sealing_sets_bounded_expiry_and_clears_overflow(self):
+        key = bytes(ROOT_KEY.public_key().public_bytes_raw())
+        nonce = b"E" * 32
+        request = self.build_acquisition_request(nonce, key)
+        response = make_response(request, nonce, midpoint=FIXTURE_TIME, radius=3)
+        status, evidence = self.dispatch_acquisition(response, request, nonce, key)
+        self.assertEqual(status, 0)
+
+        contract_valid = ctypes.c_uint8(0)
+        expires_ns = ctypes.c_uint64(0)
+        token = AgreementToken()
+        sealed = self.seal_acquisition_function(
+            ctypes.byref(evidence), ctypes.byref(contract_valid),
+            ctypes.byref(expires_ns), ctypes.byref(token),
+        )
+        self.assertEqual(sealed, 1)
+        self.assertEqual(contract_valid.value, 1)
+        self.assertEqual(expires_ns.value, self.received_ns + 300_000_000_000)
+        self.assertNotEqual(bytes(token.opaque), bytes(256))
+
+        overflow_evidence = Evidence.from_buffer_copy(bytes(evidence))
+        overflow_evidence.received_monotonic_ns = (1 << 64) - 1
+        overflow_evidence.sent_monotonic_ns = overflow_evidence.received_monotonic_ns - 100_000_000
+        overflow_evidence.measured_transport_delay_ns = 100_000_000
+        contract_valid.value = 1
+        expires_ns.value = (1 << 64) - 1
+        token.opaque[:] = b"\xa5" * 256
+        sealed = self.seal_acquisition_function(
+            ctypes.byref(overflow_evidence), ctypes.byref(contract_valid),
+            ctypes.byref(expires_ns), ctypes.byref(token),
+        )
+        self.assertEqual(sealed, 0)
+        self.assertEqual(contract_valid.value, 0)
+        self.assertEqual(expires_ns.value, 0)
+        self.assertEqual(bytes(token.opaque), bytes(256))
 
     def test_unavailable_controlled_server_times_out_without_retrying(self):
         key = bytes(ROOT_KEY.public_key().public_bytes_raw())

@@ -68,8 +68,14 @@
 #if defined(GXOS_NAVHTTPS13_GUEST_QUALIFICATION_ACTIVE)
 #include "include/gxos_roughtime_acquisition.h"
 #include "include/gxos_roughtime_guest_test.h"
+#include "include/kernel/shell.h"
 #include "roughtime_guest_fixture_key.h"
 #include "roughtime_guest_vectors.h"
+#endif
+
+#if defined(GXOS_NAVHTTPS15_GUEST_QUALIFICATION_ACTIVE)
+#include "include/gxos_roughtime_round.h"
+#include "roughtime_multisource_guest_fixture_keys.h"
 #endif
 
 // Interrupt support
@@ -1188,6 +1194,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         const int guestSelftestResult = gxos_roughtime_guest_selftest();
         kernel::serial::puts("[NAVHTTPS13-GUEST-A] hook_result=");
         kernel::serial::puts(guestSelftestResult == 0 ? "PASS\n" : "FAIL\n");
+        kernel::shell::roughtime_formatter_guest_selftest();
         static gxos_roughtime_v1_acquisition_result guestAcquisitionResult;
         const gxos_roughtime_acquisition_status guestAcquisitionStatus =
             kernel::roughtime::acquire_ipv4(
@@ -1197,6 +1204,62 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts(gxos_roughtime_acquisition_status_name(
             guestAcquisitionStatus));
         kernel::serial::putc('\n');
+#endif
+#if defined(GXOS_NAVHTTPS15_GUEST_QUALIFICATION_ACTIVE)
+        // Test-only three-operator fixture acquisition. These anchors are
+        // never present in an ordinary production build.
+        kernel::serial::puts("[NAVHTTPS15-GUEST] qualification_hook=active simulated_independence=yes\n");
+        static gxos_roughtime_agreement_continuity guestRoundContinuity = {};
+        static gxos_roughtime_round_result guestRoundResult;
+        gxos_roughtime_round_configuration guestRoundConfiguration = {};
+        static const uint16_t fixturePorts[3] = { 5319U, 5320U, 5321U };
+        guestRoundConfiguration.policy_identity = 0x1501U;
+        guestRoundConfiguration.source_count = 3;
+        guestRoundConfiguration.quorum = 2;
+        guestRoundConfiguration.maximum_age_seconds = 300;
+        guestRoundConfiguration.maximum_source_uncertainty_seconds = 30;
+        guestRoundConfiguration.maximum_transport_delay_ms = 2000;
+        guestRoundConfiguration.maximum_forward_jump_seconds = 300;
+        for (uint8_t sourceIndex = 0; sourceIndex < 3; ++sourceIndex) {
+            gxos_roughtime_round_source& source =
+                guestRoundConfiguration.sources[sourceIndex];
+            source.server_ipv4 = 0x0a000202U;
+            source.server_port = fixturePorts[sourceIndex];
+            source.operator_identity = 401U + sourceIndex;
+            for (uint8_t keyByte = 0; keyByte < 32; ++keyByte) {
+                source.server_public_key[keyByte] =
+                    gxos_roughtime_navhttps15_fixture_keys[sourceIndex][keyByte];
+            }
+        }
+        const gxos_roughtime_round_status guestRoundStatus =
+            kernel::roughtime::acquire_agreement_round(
+                &guestRoundConfiguration, &guestRoundContinuity, &guestRoundResult);
+        const bool guestRoundPassed = guestRoundStatus == GXOS_ROUGHTIME_ROUND_EVALUATED &&
+            guestRoundResult.agreement.status == GXOS_ROUGHTIME_AGREEMENT_SATISFIED &&
+            guestRoundResult.verified_response_count >= 2 &&
+            guestRoundResult.independent_operator_count >= 2;
+        kernel::serial::puts("[NAVHTTPS15-GUEST] result=");
+        kernel::serial::puts(guestRoundPassed ? "PASS" : "FAIL");
+        kernel::serial::puts(" round_status=");
+        kernel::serial::puts(gxos_roughtime_round_status_name(guestRoundStatus));
+        kernel::serial::puts(" agreement=");
+        kernel::serial::puts(gxos_roughtime_agreement_status_name(
+            guestRoundResult.agreement.status));
+        kernel::serial::puts(" attempted=");
+        kernel::serial::put_hex32(guestRoundResult.attempted_source_count);
+        kernel::serial::puts(" verified=");
+        kernel::serial::put_hex32(guestRoundResult.verified_response_count);
+        kernel::serial::puts(" independent_operators=");
+        kernel::serial::put_hex32(guestRoundResult.independent_operator_count);
+        kernel::serial::puts(" interval=");
+        kernel::serial::put_hex64(guestRoundResult.agreement.earliest_unix_seconds);
+        kernel::serial::putc('-');
+        kernel::serial::put_hex64(guestRoundResult.agreement.latest_unix_seconds);
+        kernel::serial::puts(" uncertainty=");
+        kernel::serial::put_hex64(guestRoundResult.agreement.maximum_uncertainty_seconds);
+        kernel::serial::puts(" max_age=");
+        kernel::serial::put_hex64(guestRoundResult.agreement.maximum_evidence_age_seconds);
+        kernel::serial::puts(" production_policy_accepted=0 trusted_time=not-accepted clock_unchanged=yes public_https=disabled\n");
 #endif
         // I219 Stage 8 is the only diagnostic configuration that enables the
         // NIC hardware interrupt mask, and only after the input/main-loop

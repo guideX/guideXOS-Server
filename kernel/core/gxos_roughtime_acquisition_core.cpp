@@ -181,6 +181,7 @@ extern "C" const char* gxos_roughtime_acquisition_status_name(
     case GXOS_ROUGHTIME_ACQUISITION_VERIFIER_REJECTED: return "verifier-rejected";
     case GXOS_ROUGHTIME_ACQUISITION_CLOCK_EVIDENCE_REJECTED: return "clock-evidence-rejected";
     case GXOS_ROUGHTIME_ACQUISITION_CRYPTO_FAILURE: return "crypto-failure";
+    case GXOS_ROUGHTIME_ACQUISITION_MONOTONIC_DISCONTINUITY: return "monotonic-discontinuity";
     default: return "unknown";
     }
 }

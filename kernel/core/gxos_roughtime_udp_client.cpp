@@ -1,10 +1,10 @@
 #include "include/gxos_roughtime_acquisition.h"
 #include "include/gxos_roughtime_agreement_internal.h"
 
-#include "../../gxos_clock_assurance.h"
 #include "include/kernel/ipv4.h"
 #include "include/kernel/nic.h"
 #include "include/kernel/pit.h"
+#include "include/kernel/desktop.h"
 #include "include/kernel/secure_random.h"
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/socket.h"
@@ -163,6 +163,8 @@ gxos_roughtime_acquisition_status acquire_ipv4(
     }
 
     const uint64_t start_ticks = pit::ticks();
+    uint64_t previous_ticks = start_ticks;
+    uint64_t last_yield_ticks = start_ticks;
     uint64_t sent_ns = 0;
     if (!pit_ticks_to_ns(start_ticks, &sent_ns)) {
         result->status = GXOS_ROUGHTIME_ACQUISITION_INVALID_ARGUMENT;
@@ -231,6 +233,14 @@ gxos_roughtime_acquisition_status acquire_ipv4(
 
     for (uint32_t poll = 0; poll < kMaximumReceivePolls; ++poll) {
         ipv4::poll_network();
+        uint64_t current_ticks = pit::ticks();
+        if (current_ticks < previous_ticks) {
+            result->status = GXOS_ROUGHTIME_ACQUISITION_MONOTONIC_DISCONTINUITY;
+            clear_bytes(&workspace, sizeof(workspace));
+            log_result(result);
+            return result->status;
+        }
+        previous_ticks = current_ticks;
         const int pending = socket::udp_pending(socket_lease.fd());
         if (pending < 0) {
             result->status = GXOS_ROUGHTIME_ACQUISITION_SOCKET_FAILURE;
@@ -257,6 +267,13 @@ gxos_roughtime_acquisition_status acquire_ipv4(
             }
 
             const uint64_t received_ticks = pit::ticks();
+            if (received_ticks < previous_ticks) {
+                result->status = GXOS_ROUGHTIME_ACQUISITION_MONOTONIC_DISCONTINUITY;
+                clear_bytes(&workspace, sizeof(workspace));
+                log_result(result);
+                return result->status;
+            }
+            previous_ticks = received_ticks;
             uint64_t received_ns = 0;
             if (!pit_ticks_to_ns(received_ticks, &received_ns)) {
                 result->status = GXOS_ROUGHTIME_ACQUISITION_INVALID_ARGUMENT;
@@ -278,32 +295,9 @@ gxos_roughtime_acquisition_status acquire_ipv4(
                 return result->status;
             }
 
-            gxos::clockassurance::AuthenticatedEvidence clock_evidence = {
-                true,
-                true,
-                result->evidence.signature_verified != 0,
-                result->evidence.nonce_matched != 0,
-                static_cast<int64_t>(result->evidence.earliest_unix_seconds),
-                static_cast<int64_t>(result->evidence.latest_unix_seconds),
-                received_ns / 1000000000ULL,
-                GXOS_ROUGHTIME_V1_EVIDENCE_MAX_AGE_SECONDS
-            };
-            result->clock_evidence_contract_valid =
-                gxos::clockassurance::assess_authenticated_evidence(
-                    clock_evidence, received_ns / 1000000000ULL) ==
-                gxos::clockassurance::EvidenceResult::Accepted ? 1U : 0U;
-            if (!result->clock_evidence_contract_valid ||
-                received_ns > (~static_cast<uint64_t>(0) -
-                    static_cast<uint64_t>(GXOS_ROUGHTIME_V1_EVIDENCE_MAX_AGE_SECONDS) *
-                    1000000000ULL)) {
-                result->status = GXOS_ROUGHTIME_ACQUISITION_CLOCK_EVIDENCE_REJECTED;
-                clear_bytes(&workspace, sizeof(workspace));
-                log_result(result);
-                return result->status;
-            }
-
             if (!agreement_internal::seal_acquisition_evidence(
-                    result->evidence, result->evidence_expires_monotonic_ns,
+                    result->evidence, &result->clock_evidence_contract_valid,
+                    &result->evidence_expires_monotonic_ns,
                     &result->agreement_evidence)) {
                 result->status = GXOS_ROUGHTIME_ACQUISITION_CLOCK_EVIDENCE_REJECTED;
                 clear_bytes(&workspace, sizeof(workspace));
@@ -316,17 +310,19 @@ gxos_roughtime_acquisition_status acquire_ipv4(
             result->server_port = server_port;
             result->request_bytes = static_cast<uint16_t>(request_length);
             result->response_bytes = static_cast<uint16_t>(received);
-            result->evidence_expires_monotonic_ns = received_ns +
-                static_cast<uint64_t>(GXOS_ROUGHTIME_V1_EVIDENCE_MAX_AGE_SECONDS) *
-                1000000000ULL;
             clear_bytes(&workspace, sizeof(workspace));
             log_result(result);
             return result->status;
         }
 
-        const uint64_t current_ticks = pit::ticks();
-        if (current_ticks < start_ticks || current_ticks - start_ticks >= kRequestDeadlineTicks) {
+        if (current_ticks - start_ticks >= kRequestDeadlineTicks) {
             break;
+        }
+        if (current_ticks - last_yield_ticks >= 10U) {
+            // Shell diagnostics run synchronously. Service input and redraws
+            // while the bounded receive deadline is active.
+            desktop::cooperative_yield();
+            last_yield_ticks = current_ticks;
         }
     }
 

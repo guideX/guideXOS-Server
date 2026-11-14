@@ -361,15 +361,58 @@ namespace roughtime {
 namespace agreement_internal {
 
 bool seal_acquisition_evidence(const gxos_roughtime_v1_evidence& verified,
-                               uint64_t expires_monotonic_ns,
+                               uint8_t* clock_evidence_contract_valid,
+                               uint64_t* expires_monotonic_ns,
                                gxos_roughtime_verified_evidence* token)
 {
-    return issue_token(verified, expires_monotonic_ns, token);
+    if (clock_evidence_contract_valid) *clock_evidence_contract_valid = 0;
+    if (expires_monotonic_ns) *expires_monotonic_ns = 0;
+    if (token) clear_bytes(GxosRoughtimeAgreementAccess::storage(token),
+                           GXOS_ROUGHTIME_AGREEMENT_TOKEN_BYTES);
+    if (!clock_evidence_contract_valid || !expires_monotonic_ns || !token ||
+        !valid_evidence(verified)) {
+        return false;
+    }
+
+    const gxos::clockassurance::AuthenticatedEvidence clock_evidence = {
+        true,
+        true,
+        verified.signature_verified != 0,
+        verified.nonce_matched != 0,
+        static_cast<int64_t>(verified.earliest_unix_seconds),
+        static_cast<int64_t>(verified.latest_unix_seconds),
+        verified.received_monotonic_ns / kNanosecondsPerSecond,
+        GXOS_ROUGHTIME_V1_EVIDENCE_MAX_AGE_SECONDS
+    };
+    if (gxos::clockassurance::assess_authenticated_evidence(
+            clock_evidence, verified.received_monotonic_ns / kNanosecondsPerSecond) !=
+        gxos::clockassurance::EvidenceResult::Accepted ||
+        verified.received_monotonic_ns > UINT64_MAX - kAcquisitionEvidenceLeaseNs) {
+        return false;
+    }
+
+    const uint64_t expiry = verified.received_monotonic_ns + kAcquisitionEvidenceLeaseNs;
+    if (!issue_token(verified, expiry, token)) return false;
+    *clock_evidence_contract_valid = 1;
+    *expires_monotonic_ns = expiry;
+    return true;
 }
 
 } // namespace agreement_internal
 } // namespace roughtime
 } // namespace kernel
+
+#if defined(GXOS_ROUGHTIME_AGREEMENT_TESTING)
+extern "C" int gxos_roughtime_agreement_test_seal_acquisition_evidence(
+    const gxos_roughtime_v1_evidence* verified,
+    uint8_t* clock_evidence_contract_valid,
+    uint64_t* expires_monotonic_ns,
+    gxos_roughtime_verified_evidence* token)
+{
+    return verified && kernel::roughtime::agreement_internal::seal_acquisition_evidence(
+        *verified, clock_evidence_contract_valid, expires_monotonic_ns, token) ? 1 : 0;
+}
+#endif
 
 extern "C" gxos_roughtime_agreement_status gxos_roughtime_agreement_evaluate(
     const gxos_roughtime_agreement_policy* policy,

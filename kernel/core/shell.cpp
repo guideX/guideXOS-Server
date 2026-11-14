@@ -25,6 +25,7 @@
 #include "include/kernel/app_launch_target_resolver.h"
 #include "include/kernel/serial_debug.h"
 #include "include/gxos_roughtime_acquisition.h"
+#include "include/gxos_roughtime_round.h"
 #include "include/gxos_roughtime_guest_test.h"
 
 // Forward declarations for power functions (defined in desktop.cpp, outside any namespace)
@@ -180,6 +181,7 @@ static char s_cwd[256] = "/";
 // Hostname and username
 static const char* s_hostname = "guideXOS";
 static const char* s_username = "root";
+static gxos_roughtime_agreement_continuity s_roughtime_agreement_continuity = {};
 
 // Uptime counter (incremented externally)
 static uint32_t s_uptimeSeconds = 0;
@@ -403,6 +405,7 @@ static void cmd_help() {
     output_string("  udpstat        - UDP statistics\n");
     output_string("  roughtime-selftest - Verify immutable Roughtime guest vectors\n");
     output_string("  roughtime-fetch <ip> <port> <key-hex> - Fetch one pinned v1 response\n");
+    output_string("  roughtime-agree <ip port operator key-hex> x3 - Experimental 2-of-3 UDP agreement\n");
     output_string("\n");
     output_string("Desktop:\n");
     output_string("  apps           - List applications\n");
@@ -6306,6 +6309,21 @@ static bool parse_roughtime_port(const char* text, uint16_t* port)
     return true;
 }
 
+static bool parse_roughtime_u32(const char* text, uint32_t* value_out)
+{
+    if (!text || !value_out || !text[0]) return false;
+    uint32_t value = 0;
+    for (uint32_t i = 0; text[i]; ++i) {
+        if (text[i] < '0' || text[i] > '9') return false;
+        const uint32_t digit = static_cast<uint32_t>(text[i] - '0');
+        if (value > (0xffffffffU - digit) / 10U) return false;
+        value = value * 10U + digit;
+    }
+    if (value == 0) return false;
+    *value_out = value;
+    return true;
+}
+
 static int roughtime_hex_value(char value)
 {
     if (value >= '0' && value <= '9') return value - '0';
@@ -6417,6 +6435,92 @@ static void cmd_roughtime_fetch(const char* address_text,
     output_string("; trusted time: not accepted; OS clock: unchanged; public HTTPS: disabled\n");
 }
 
+static void cmd_roughtime_agree(char args[MAX_ARGS][65])
+{
+    gxos_roughtime_round_configuration configuration = {};
+    configuration.policy_identity = 0x1501U;
+    configuration.source_count = GXOS_ROUGHTIME_ROUND_MAX_SOURCES;
+    configuration.quorum = 2;
+    configuration.maximum_age_seconds = 300;
+    configuration.maximum_source_uncertainty_seconds = 30;
+    configuration.maximum_transport_delay_ms = 2000;
+    configuration.maximum_forward_jump_seconds = 300;
+
+    for (uint32_t i = 0; i < GXOS_ROUGHTIME_ROUND_MAX_SOURCES; ++i) {
+        gxos_roughtime_round_source& source = configuration.sources[i];
+        if (!ipv4::ip_from_string(args[1 + i * 4], &source.server_ipv4) ||
+            !parse_roughtime_port(args[2 + i * 4], &source.server_port) ||
+            !parse_roughtime_u32(args[3 + i * 4], &source.operator_identity) ||
+            !parse_roughtime_key(args[4 + i * 4], source.server_public_key)) {
+            output_string("Usage: roughtime-agree <ip1 port1 operator1 key1> <ip2 port2 operator2 key2> <ip3 port3 operator3 key3>\n");
+            output_string("Each key is 64 hex characters; operator IDs are nonzero decimal integers.\n");
+            return;
+        }
+    }
+
+    gxos_roughtime_round_result result;
+    const gxos_roughtime_round_status round_status =
+        kernel::roughtime::acquire_agreement_round(
+            &configuration, &s_roughtime_agreement_continuity, &result);
+    if (round_status != GXOS_ROUGHTIME_ROUND_EVALUATED) {
+        output_string("Roughtime round rejected: ");
+        output_string(gxos_roughtime_round_status_name(round_status));
+        output_string("\ntrusted_time=not-accepted clock_unchanged=yes public_https=disabled\n");
+        return;
+    }
+
+    char number[24];
+    output_string("Experimental NAVHTTPS15 agreement round\n  attempted sources: ");
+    uint_to_str(result.attempted_source_count, number);
+    output_string(number);
+    output_string("\n  cryptographically verified responses: ");
+    uint_to_str(result.verified_response_count, number);
+    output_string(number);
+    output_string("\n  independent configured operators: ");
+    uint_to_str(result.independent_operator_count, number);
+    output_string(number);
+
+    for (uint32_t i = 0; i < GXOS_ROUGHTIME_ROUND_MAX_SOURCES; ++i) {
+        const gxos_roughtime_round_source_result& source = result.sources[i];
+        char ip_text[16];
+        ipv4::ip_to_string(source.server_ipv4, ip_text);
+        output_string("\n  source ");
+        uint_to_str(i + 1, number);
+        output_string(number);
+        output_string(" ");
+        output_string(ip_text);
+        output_string(":");
+        uint_to_str(source.server_port, number);
+        output_string(number);
+        output_string(" status=");
+        output_string(gxos_roughtime_acquisition_status_name(source.status));
+        if (source.verified) {
+            output_string(" verified=yes request/response=");
+            uint_to_str(source.request_bytes, number);
+            output_string(number);
+            output_string("/");
+            uint_to_str(source.response_bytes, number);
+            output_string(number);
+        }
+    }
+
+    output_string("\n  agreement: ");
+    output_string(gxos_roughtime_agreement_status_name(result.agreement.status));
+    if (result.agreement.status == GXOS_ROUGHTIME_AGREEMENT_SATISFIED) {
+        output_roughtime_seconds("\n  agreed interval earliest (Unix seconds): ",
+                                 result.agreement.earliest_unix_seconds);
+        output_roughtime_seconds("\n  agreed interval latest (Unix seconds): ",
+                                 result.agreement.latest_unix_seconds);
+        output_roughtime_seconds("\n  estimated midpoint (Unix seconds): ",
+                                 result.agreement.estimated_midpoint_unix_seconds);
+        output_roughtime_seconds("\n  maximum uncertainty (seconds): ",
+                                 result.agreement.maximum_uncertainty_seconds);
+        output_roughtime_seconds("\n  maximum evidence age (seconds): ",
+                                 result.agreement.maximum_evidence_age_seconds);
+    }
+    output_string("\n  production policy accepted: no; trusted_time=not-accepted; clock_unchanged=yes; public_https=disabled\n");
+}
+
 static void parse_args(const char* cmd, char args[MAX_ARGS][65], uint32_t& argCount) {
     argCount = 0;
     uint32_t i = 0;
@@ -6470,6 +6574,12 @@ static void execute_command(const char* cmd) {
             output_string("Usage: roughtime-fetch <numeric-ipv4> <port> <64-hex-byte-key>\n");
         } else {
             cmd_roughtime_fetch(args[1], args[2], args[3]);
+        }
+    } else if (str_eq(command, "roughtime-agree")) {
+        if (argCount != 13) {
+            output_string("Usage: roughtime-agree <ip1 port1 operator1 key1> <ip2 port2 operator2 key2> <ip3 port3 operator3 key3>\n");
+        } else {
+            cmd_roughtime_agree(args);
         }
     } else if (str_eq(command, "help") || str_eq(command, "?")) {
         cmd_help();
@@ -7083,6 +7193,23 @@ void execute(const char* cmd) {
     s_cmdLen = 0;
     s_cursorPos = 0;
 }
+
+#if defined(GXOS_NAVHTTPS13_GUEST_QUALIFICATION_ACTIVE)
+void roughtime_formatter_guest_selftest()
+{
+    char formatted[21];
+    static const char expected[] = "18446744073709551615";
+    uint64_to_str(~static_cast<uint64_t>(0), formatted);
+    bool matches = true;
+    for (uint32_t i = 0; i < sizeof(expected); ++i) {
+        if (formatted[i] != expected[i]) matches = false;
+    }
+    serial::puts("[NAVHTTPS13R-GUEST] unsigned_timestamp_formatter=");
+    serial::puts(matches ? "PASS value=" : "FAIL value=");
+    serial::puts(formatted);
+    serial::putc('\n');
+}
+#endif
 
 // ============================================================
 // Drawing
