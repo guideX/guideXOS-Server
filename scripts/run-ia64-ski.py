@@ -500,30 +500,45 @@ def verify_loader_record(path: Path, artifact_hash: str, profile: str,
     return record
 
 
-def _kill_process_group(process: subprocess.Popen[bytes], grace_seconds: float = 1.0) -> None:
+def _process_group_exists(pgid: int) -> bool:
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def _kill_process_group(process: subprocess.Popen[bytes], grace_seconds: float = 1.0) -> bool:
+    pgid = process.pid  # start_new_session=True makes the child the group leader.
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
+        return process.poll() is not None
+
     if process.poll() is None:
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
         try:
             process.wait(timeout=grace_seconds)
         except subprocess.TimeoutExpired:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            process.wait()
-    # Kill helper children too, including xterm if an unexpected build opens one.
-    try:
-        os.killpg(process.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
-    time.sleep(0.05)
-    try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
+            pass
+
+    deadline = time.monotonic() + grace_seconds
+    while _process_group_exists(pgid) and time.monotonic() < deadline:
+        time.sleep(0.05)
+
+    if _process_group_exists(pgid):
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+    if process.poll() is None:
+        process.wait()
+    deadline = time.monotonic() + grace_seconds
+    while _process_group_exists(pgid) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    return process.poll() is not None and not _process_group_exists(pgid)
 
 
 def run_simulator(command: list[str], timeout: float, capture_dir: Path,
@@ -533,7 +548,9 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
                   break_exception_contract: dict[str, Any] | None = None,
                   general_exception_contract: dict[str, Any] | None = None,
                   unaligned_reference_contract: dict[str, Any] | None = None,
-                  nat_consumption_contract: dict[str, Any] | None = None) -> int:
+                  nat_consumption_contract: dict[str, Any] | None = None,
+                  resource_limits: dict[str, int] | None = None,
+                  stdin_pty: bool = False) -> int:
     if timeout <= 0 or timeout > 300:
         raise GateError("timeout must be greater than zero and no more than 300 seconds")
     if capture_dir.exists():
@@ -547,22 +564,64 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
     counts_path = capture_dir / "instruction-counts.txt"
     command = command.copy()
     command[1:1] = ["-stats", "-icnt", str(counts_path)]
+    preexec_fn = None
+    if resource_limits is not None:
+        address_space_bytes = resource_limits["address_space_bytes"]
+        cpu_soft_seconds = resource_limits["cpu_soft_seconds"]
+        cpu_hard_seconds = resource_limits["cpu_hard_seconds"]
+        if address_space_bytes <= 0 or cpu_soft_seconds <= 0 or \
+                cpu_hard_seconds < cpu_soft_seconds:
+            raise GateError("invalid Ski process resource limits")
+
+        def apply_resource_limits() -> None:
+            import resource
+            resource.setrlimit(resource.RLIMIT_AS,
+                               (address_space_bytes, address_space_bytes))
+            resource.setrlimit(resource.RLIMIT_CPU,
+                               (cpu_soft_seconds, cpu_hard_seconds))
+
+        preexec_fn = apply_resource_limits
     started = time.monotonic()
     timed_out = False
-    with stdout_path.open("xb") as stdout_file, stderr_path.open("xb") as stderr_file:
-        process = subprocess.Popen(command, stdout=stdout_file, stderr=stderr_file,
-                                   start_new_session=True, close_fds=True)
-        try:
-            process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            timed_out = True
-        finally:
-            _kill_process_group(process)
+    stdin_master = None
+    stdin_slave = None
+    if stdin_pty:
+        import pty
+        stdin_master, stdin_slave = pty.openpty()
+        stdin_value: int | Any = stdin_slave
+    else:
+        stdin_value = subprocess.DEVNULL
+    try:
+        with stdout_path.open("xb") as stdout_file, stderr_path.open("xb") as stderr_file:
+            process = subprocess.Popen(command, stdin=stdin_value,
+                                       stdout=stdout_file, stderr=stderr_file,
+                                       start_new_session=True, close_fds=True,
+                                       preexec_fn=preexec_fn)
+            if stdin_slave is not None:
+                os.close(stdin_slave)
+                stdin_slave = None
+            try:
+                process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+            finally:
+                process_group_cleanup_complete = _kill_process_group(process)
+    finally:
+        if stdin_slave is not None:
+            os.close(stdin_slave)
+        if stdin_master is not None:
+            os.close(stdin_master)
     elapsed = time.monotonic() - started
     stdout_text = stdout_path.read_text(encoding="utf-8", errors="replace")
     stderr_text = stderr_path.read_text(encoding="utf-8", errors="replace")
     combined = (stdout_text + "\n" + stderr_text).lower()
     return_code = process.returncode
+    termination_signal = None
+    if return_code is not None and return_code < 0:
+        try:
+            termination_signal = signal.Signals(-return_code).name
+        except ValueError:
+            termination_signal = f"SIGNAL_{-return_code}"
     fault_count, instruction_count = extract_ski_counts(stdout_text, stderr_text, counts_path)
     break_evidence_errors: list[str] = []
     general_evidence_errors: list[str] = []
@@ -751,11 +810,18 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
     record = {
         "label": label,
         "command": command,
+        "pid": process.pid,
+        "pgid": process.pid,
+        "stdin": "PTY" if stdin_pty else "DEVNULL",
+        "stdin_is_tty": stdin_pty,
         "artifact_sha256": artifact_hash,
         "classification": classification,
         "exit_code": return_code,
+        "termination_signal": termination_signal,
         "timed_out": timed_out,
-        "cleanup_complete": process.poll() is not None,
+        "timeout_reason": "wall_clock" if timed_out else None,
+        "cleanup_complete": process.poll() is not None and process_group_cleanup_complete,
+        "process_group_cleanup_complete": process_group_cleanup_complete,
         "elapsed_seconds": round(elapsed, 3),
         "stdout": str(stdout_path),
         "stdout_sha256": sha256(stdout_path),
@@ -767,6 +833,7 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
         "cpu_state_checkpoint_errors": checkpoint_errors,
         "ski_instruction_count": instruction_count,
         "ski_fault_count": fault_count,
+        "resource_limits": resource_limits,
         "break_exception_evidence_errors": break_evidence_errors,
         "break_exception_expected_faults": (
             break_exception_contract["expected_faults"] if break_exception_contract else None),
@@ -1330,6 +1397,60 @@ COOP_CONTEXT_EVENT_NAMES = (
 COOP_CONTEXT_EVENT_IDS = (0xA, 0xB, 0xB, 0xA, 0xA, 0xB, 0xB, 0xA)
 
 
+def cooperative_context_probe_command(simulator: Path, snapshot: Path) -> list[str]:
+    """Select the documented headless batch frontend while forcing system mode."""
+    return [str(simulator), "-noconsole", "-forcesystem", str(snapshot)]
+
+
+def capture_cooperative_context_probe_observations(stdout_text: str,
+                                                   stderr_text: str) -> dict[str, Any]:
+    """Retain partial guest evidence even when the strict qualification gate fails."""
+    combined = stdout_text + "\n" + stderr_text
+    event_pattern = re.compile(
+        r"^IA64_COOP_EVENT sequence=0x([0-9a-fA-F]+) "
+        r"context=0x([0-9a-fA-F]+) event=([A-Z_]+)$")
+    event_lines = [line for line in stdout_text.splitlines()
+                   if line.startswith("IA64_COOP_EVENT")]
+    events = []
+    malformed_events = []
+    for line in event_lines:
+        match = event_pattern.fullmatch(line)
+        if match is None:
+            malformed_events.append(line)
+            continue
+        events.append({"sequence": int(match.group(1), 16),
+                       "context_id": int(match.group(2), 16),
+                       "event": match.group(3)})
+
+    address_pattern = re.compile(
+        r"(?P<kind>\b(?:IIP|IIPA|IP))\s*=\s*(?P<address>0x[0-9a-fA-F]+)\b|"
+        r"(?P<fault_kind>\bfault\s*@\s*)(?P<fault_address>0x[0-9a-fA-F]+)\b",
+        re.IGNORECASE)
+    address_matches = list(address_pattern.finditer(combined))
+    last_address = None
+    if address_matches:
+        match = address_matches[-1]
+        raw_address = match.group("address") or match.group("fault_address")
+        last_address = {
+            "address": int(raw_address, 16),
+            "source": "fault diagnostic" if match.group("fault_address") else
+            match.group("kind").upper(),
+        }
+
+    return {
+        "transition_record_lines": event_lines,
+        "transition_records": events,
+        "malformed_transition_record_lines": malformed_events,
+        "context_state_lines": [line for line in stdout_text.splitlines()
+                                 if line.startswith("IA64_COOP_CONTEXT_STATE id=")],
+        "architectural_state_lines": [line for line in stdout_text.splitlines()
+                                      if line.startswith("IA64_COOP_CONTEXT_VALIDATION")],
+        "result_marker_lines": [line for line in stdout_text.splitlines()
+                                if line.startswith("IA64_COOP_CONTEXT_PROBE_RESULT=")],
+        "last_observed_guest_address": last_address,
+    }
+
+
 def validate_cooperative_context_probe_manifest(manifest: dict[str, Any]) -> None:
     expected_fields = {
         "guest_execution_authorized": "probe-only",
@@ -1660,21 +1781,48 @@ def run_cooperative_context_probe(args: argparse.Namespace) -> int:
     with verified_snapshot(args.artifact, args.expected_sha256) as snapshot:
         validate_direct_system_elf(snapshot)
         status = run_simulator(
-            [str(simulator), "-forcesystem", str(snapshot)], args.timeout, capture_dir,
+            cooperative_context_probe_command(simulator, snapshot), args.timeout, capture_dir,
             "ia64-cooperative-context-probe",
             success_marker="IA64_COOP_CONTEXT_PROBE_RESULT=PASS",
-            artifact_hash=args.expected_sha256)
+            artifact_hash=args.expected_sha256,
+            resource_limits={
+                "address_space_bytes": 2 * 1024 * 1024 * 1024,
+                "cpu_soft_seconds": 55,
+                "cpu_hard_seconds": 60,
+            },
+            stdin_pty=True)
 
     result_path = capture_dir / "run-result.json"
     run_record = read_json(result_path, "cooperative context probe run result")
     qualification_errors: list[str] = []
     stdout_path = Path(run_record.get("stdout", ""))
+    stderr_path = Path(run_record.get("stderr", ""))
     try:
-        runtime = validate_cooperative_context_probe_output(
-            stdout_path.read_text(encoding="utf-8", errors="replace"))
+        stdout_text = stdout_path.read_text(encoding="utf-8", errors="replace")
+        stderr_text = stderr_path.read_text(encoding="utf-8", errors="replace")
+        observations = capture_cooperative_context_probe_observations(stdout_text, stderr_text)
+        runtime = validate_cooperative_context_probe_output(stdout_text)
     except (OSError, GateError) as exc:
         runtime = None
+        observations = {"transition_record_lines": [], "transition_records": [],
+                        "malformed_transition_record_lines": [], "context_state_lines": [],
+                        "architectural_state_lines": [], "result_marker_lines": [],
+                        "last_observed_guest_address": None}
         qualification_errors.append(str(exc))
+        if "stdout_text" in locals() and "stderr_text" in locals():
+            observations = capture_cooperative_context_probe_observations(
+                stdout_text, stderr_text)
+    console_error = "Unable to create console window" in \
+        (stdout_text + "\n" + stderr_text) if "stdout_text" in locals() and \
+        "stderr_text" in locals() else False
+    console_started = "IA64_COOP_CONTEXT_PROBE_START" in stdout_text \
+        if "stdout_text" in locals() else False
+    if console_error:
+        console_initialization = "failed"
+    elif console_started:
+        console_initialization = "passed; guest startup marker follows SSC_CONSOLE_INIT"
+    else:
+        console_initialization = "not_observed"
     if run_record.get("classification") != "SMOKE_PASS":
         qualification_errors.append(f"simulator classification was {run_record.get('classification')!r}")
     if run_record.get("ski_fault_count") != 0:
@@ -1682,7 +1830,8 @@ def run_cooperative_context_probe(args: argparse.Namespace) -> int:
     if run_record.get("ski_instruction_count") is None:
         qualification_errors.append("probe instruction count is unavailable")
     if run_record.get("exit_code") != 0 or run_record.get("timed_out") is not False or \
-            run_record.get("cleanup_complete") is not True:
+            run_record.get("cleanup_complete") is not True or \
+            run_record.get("process_group_cleanup_complete") is not True:
         qualification_errors.append("probe did not exit cleanly within its bound")
 
     run_record.update({
@@ -1691,13 +1840,21 @@ def run_cooperative_context_probe(args: argparse.Namespace) -> int:
         "qualification_errors": qualification_errors,
         "expected_faults": 0,
         "execution_count_authorized": 1,
+        "artifact": str(args.artifact.resolve()),
+        "artifact_sha256": args.expected_sha256,
         "artifact_manifest": str(args.manifest.resolve()),
         "artifact_manifest_sha256": sha256(args.manifest),
+        "simulator_executable": str(simulator),
         "simulator_sha256": args.simulator_sha256,
         "ski_source_commit": QUALIFIED_SKI_COMMIT,
         "ski_version": QUALIFIED_SKI_VERSION,
+        "simulator_frontend": "bskinc",
+        "console_options": ["-noconsole"],
+        "console_output_stream": "stdout.log",
+        "console_initialization": console_initialization,
         "execution_mode": "-forcesystem",
         "cpu_count": 1,
+        "cooperative_context_observations": observations,
         "load_ranges": load_ranges,
         "cooperative_context_symbols": static_symbols,
         "cooperative_context_runtime": runtime,

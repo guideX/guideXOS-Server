@@ -74,6 +74,22 @@ class CooperativeContextOutputTests(unittest.TestCase):
         self.assertEqual({line.split(" id=")[1].split()[0] for line in
                           result["context_state_lines"]}, {"A", "B"})
 
+    def test_partial_observations_are_retained_without_qualification(self) -> None:
+        stdout = "\n".join((
+            "IA64_COOP_CONTEXT_PROBE_START mode=forced-system cpu_count=1",
+            "IA64_COOP_EVENT sequence=0x1 context=0xa event=A_TO_B",
+            "IA64_COOP_CONTEXT_STATE id=A stack_base=0x100000 bsp=0x140000 "
+            "bspstore=0x140000 observed_psr=0x0",
+        ))
+        observations = runner.capture_cooperative_context_probe_observations(
+            stdout, "Ski fault @ 0x10dc86\n")
+        self.assertEqual(observations["transition_records"], [
+            {"sequence": 1, "context_id": 0xA, "event": "A_TO_B"}])
+        self.assertEqual(len(observations["context_state_lines"]), 1)
+        self.assertEqual(observations["last_observed_guest_address"], {
+            "address": 0x10DC86, "source": "fault diagnostic"})
+
+
     def test_wrong_identity_and_invalid_return_order_are_rejected(self) -> None:
         wrong_identity = replace_once(valid_output(), "sequence=0x1 context=0xa",
                                        "sequence=0x1 context=0xb")
@@ -197,6 +213,21 @@ class CooperativeContextOutputTests(unittest.TestCase):
         bad_rsc = source.replace("mov r21 = 3 ;;", "mov r21 = 1 ;;", 1)
         with self.assertRaises(runner.GateError):
             runner.validate_cooperative_context_switch_source(bad_rsc)
+
+
+class CooperativeContextRunnerConfigurationTests(unittest.TestCase):
+    def test_command_uses_headless_batch_console_and_explicit_system_mode(self) -> None:
+        self.assertEqual(runner.cooperative_context_probe_command(
+            Path("/opt/ski/bin/bskinc"), Path("/tmp/selected.elf")), [
+                "/opt/ski/bin/bskinc", "-noconsole", "-forcesystem",
+                "/tmp/selected.elf",
+            ])
+
+    def test_cooperative_batch_run_supplies_a_pty_stdin(self) -> None:
+        source = (ROOT / "scripts" / "run-ia64-ski.py").read_text(encoding="utf-8")
+        cooperative_runner = source.split("def run_cooperative_context_probe", 1)[1].split(
+            "def verify_break_probe_evidence", 1)[0]
+        self.assertIn("stdin_pty=True", cooperative_runner)
 
 
 class CooperativeContextSwitchCallerTests(unittest.TestCase):

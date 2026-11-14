@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -229,6 +230,10 @@ class BreakExceptionContractTests(unittest.TestCase):
             self.assertEqual(result["ski_instruction_count"], 0x1ADEF)
             self.assertEqual(result["break_exception_post_rfi_observations"]["slot1"]["PSR"], 0x2000)
             self.assertTrue(result["cleanup_complete"])
+            self.assertTrue(result["process_group_cleanup_complete"])
+            self.assertEqual(result["stdin"], "DEVNULL")
+            self.assertFalse(result["stdin_is_tty"])
+            self.assertEqual(result["pid"], result["pgid"])
             self.assertFalse(result["timed_out"])
             failed_result = json.loads(
                 (failed_capture / "run-result.json").read_text(encoding="utf-8"))
@@ -236,6 +241,52 @@ class BreakExceptionContractTests(unittest.TestCase):
             self.assertEqual(failed_result["classification"],
                              "BREAK_EXCEPTION_QUALIFICATION_FAIL")
             self.assertEqual(failed_result["ski_fault_count"], 1)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "process groups are Linux-only")
+    def test_timeout_reaps_simulator_and_child_process_group(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            fake = base / "fake-ski-tree"
+            fake.write_text(
+                "#!/usr/bin/env python3\n"
+                "import subprocess, sys, time\n"
+                "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+                "time.sleep(30)\n",
+                encoding="utf-8",
+            )
+            fake.chmod(0o755)
+            capture = base / "capture"
+            status = runner.run_simulator([str(fake)], 0.5, capture,
+                                          "process-group-timeout-test")
+            result = json.loads((capture / "run-result.json").read_text(encoding="utf-8"))
+            self.assertEqual(status, 1)
+            self.assertEqual(result["classification"], "TIMEOUT")
+            self.assertEqual(result["timeout_reason"], "wall_clock")
+            self.assertTrue(result["timed_out"])
+            self.assertTrue(result["cleanup_complete"])
+            self.assertTrue(result["process_group_cleanup_complete"])
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "PTY stdin is Linux-only")
+    def test_runner_can_supply_a_pty_on_stdin_while_capturing_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            fake = base / "fake-ski-pty"
+            fake.write_text(
+                "#!/usr/bin/env python3\n"
+                "import os, sys\n"
+                "sys.stdout.write('PTY_STDIN=' + str(int(os.isatty(0))) + '\\n')\n",
+                encoding="utf-8",
+            )
+            fake.chmod(0o755)
+            capture = base / "capture"
+            status = runner.run_simulator([str(fake)], 5, capture, "pty-stdin-test",
+                                          success_marker="PTY_STDIN=1", stdin_pty=True)
+            result = json.loads((capture / "run-result.json").read_text(encoding="utf-8"))
+            self.assertEqual(status, 0)
+            self.assertEqual(result["classification"], "SMOKE_PASS")
+            self.assertEqual(result["stdin"], "PTY")
+            self.assertTrue(result["stdin_is_tty"])
+            self.assertTrue(result["cleanup_complete"])
 
 
 if __name__ == "__main__":
