@@ -273,6 +273,150 @@ bool RuntimeStringStore::create(SourceView text, std::size_t maximumLength,
     return true;
 }
 
+bool RuntimeStringStore::createDecodedStringLiteral(SourceView token,
+    std::size_t maximumLength, RuntimeStringId& result,
+    RuntimeStringError& error)
+{
+    result = kInvalidRuntimeStringId;
+    error.code = RuntimeStringErrorCode::None;
+    if (!valid_) {
+        error.code = RuntimeStringErrorCode::InvalidStorage;
+        return false;
+    }
+    if (token.data == nullptr || token.length < 2u ||
+        (token.data[0] != '\'' && token.data[0] != '"') ||
+        token.data[token.length - 1u] != token.data[0]) {
+        error.code = RuntimeStringErrorCode::InvalidInput;
+        return false;
+    }
+
+    std::size_t decodedLength = 0u;
+    for (std::size_t index = 1u; index + 1u < token.length; ++index) {
+        char value = token.data[index];
+        if (value == '\\') {
+            ++index;
+            if (index + 1u >= token.length) {
+                error.code = RuntimeStringErrorCode::InvalidInput;
+                return false;
+            }
+            switch (token.data[index]) {
+            case '\\': value = '\\'; break;
+            case '\'': value = '\''; break;
+            case '"': value = '"'; break;
+            case 'n': value = '\n'; break;
+            case 'r': value = '\r'; break;
+            case 't': value = '\t'; break;
+            case 'b': value = '\b'; break;
+            case 'f': value = '\f'; break;
+            default:
+                error.code = RuntimeStringErrorCode::InvalidInput;
+                return false;
+            }
+        }
+        (void)value;
+        if (decodedLength == static_cast<std::size_t>(-1)) {
+            error.code = RuntimeStringErrorCode::SizeOverflow;
+            return false;
+        }
+        ++decodedLength;
+    }
+    if (decodedLength > maximumLength) {
+        error.code = RuntimeStringErrorCode::CapacityExceeded;
+        return false;
+    }
+    if (count_ >= storage_.recordCapacity ||
+        count_ >= kRuntimeHandleInvalidPart ||
+        bytesUsed_ > storage_.byteCapacity ||
+        decodedLength > storage_.byteCapacity - bytesUsed_) {
+        error.code = RuntimeStringErrorCode::CapacityExceeded;
+        return false;
+    }
+    if (decodedLength > static_cast<std::size_t>(-1) - bytesUsed_) {
+        error.code = RuntimeStringErrorCode::SizeOverflow;
+        return false;
+    }
+
+    std::size_t output = 0u;
+    for (std::size_t index = 1u; index + 1u < token.length; ++index) {
+        char value = token.data[index];
+        if (value == '\\') {
+            ++index;
+            switch (token.data[index]) {
+            case '\\': value = '\\'; break;
+            case '\'': value = '\''; break;
+            case '"': value = '"'; break;
+            case 'n': value = '\n'; break;
+            case 'r': value = '\r'; break;
+            case 't': value = '\t'; break;
+            case 'b': value = '\b'; break;
+            case 'f': value = '\f'; break;
+            default:
+                error.code = RuntimeStringErrorCode::InternalInvariantFailure;
+                return false;
+            }
+        }
+        storage_.bytes[bytesUsed_ + output++] = value;
+    }
+
+    storage_.records[count_] = RuntimeStringRecord{bytesUsed_, decodedLength};
+    result = makeRuntimeHandle(generation_, static_cast<std::uint32_t>(count_));
+    if (result == kInvalidRuntimeStringId) {
+        error.code = RuntimeStringErrorCode::InternalInvariantFailure;
+        return false;
+    }
+    bytesUsed_ += decodedLength;
+    ++count_;
+    return true;
+}
+
+bool RuntimeStringStore::createConcatenated(SourceView left, SourceView right,
+    std::size_t maximumLength, RuntimeStringId& result,
+    RuntimeStringError& error)
+{
+    result = kInvalidRuntimeStringId;
+    error.code = RuntimeStringErrorCode::None;
+    if (!valid_) {
+        error.code = RuntimeStringErrorCode::InvalidStorage;
+        return false;
+    }
+    if ((left.data == nullptr && left.length != 0u) ||
+        (right.data == nullptr && right.length != 0u)) {
+        error.code = RuntimeStringErrorCode::InvalidInput;
+        return false;
+    }
+    if (left.length > maximumLength ||
+        right.length > maximumLength - left.length) {
+        error.code = RuntimeStringErrorCode::CapacityExceeded;
+        return false;
+    }
+    const std::size_t length = left.length + right.length;
+    if (count_ >= storage_.recordCapacity ||
+        count_ >= kRuntimeHandleInvalidPart ||
+        bytesUsed_ > storage_.byteCapacity ||
+        length > storage_.byteCapacity - bytesUsed_) {
+        error.code = RuntimeStringErrorCode::CapacityExceeded;
+        return false;
+    }
+    if (length > static_cast<std::size_t>(-1) - bytesUsed_) {
+        error.code = RuntimeStringErrorCode::SizeOverflow;
+        return false;
+    }
+    for (std::size_t index = 0u; index < left.length; ++index)
+        storage_.bytes[bytesUsed_ + index] = left.data[index];
+    for (std::size_t index = 0u; index < right.length; ++index)
+        storage_.bytes[bytesUsed_ + left.length + index] = right.data[index];
+
+    storage_.records[count_] = RuntimeStringRecord{bytesUsed_, length};
+    result = makeRuntimeHandle(generation_, static_cast<std::uint32_t>(count_));
+    if (result == kInvalidRuntimeStringId) {
+        error.code = RuntimeStringErrorCode::InternalInvariantFailure;
+        return false;
+    }
+    bytesUsed_ += length;
+    ++count_;
+    return true;
+}
+
 bool RuntimeStringStore::view(RuntimeStringId id, SourceView& result,
     RuntimeStringError& error) const
 {

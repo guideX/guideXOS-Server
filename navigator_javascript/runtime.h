@@ -2,6 +2,8 @@
 
 #include "ast.h"
 #include "environment.h"
+#include "execution_core.h"
+#include "function_storage.h"
 #include "host.h"
 #include "parser.h"
 #include "runtime_string_storage.h"
@@ -83,6 +85,7 @@ enum class RuntimeErrorCode : std::uint8_t {
     DuplicateBinding,
     SyntaxError,
     JsonNestingLimitExceeded,
+    PortableCapacityExceeded,
 };
 
 struct RuntimeError {
@@ -115,6 +118,10 @@ constexpr std::size_t kDefaultMaxJavaScriptRuntimeStringBytes = 256u * 1024u;
 constexpr std::size_t kDefaultMaxJavaScriptRuntimeStringValues = 4096u;
 constexpr std::size_t kDefaultJavaScriptExecutionSteps = 100000u;
 constexpr std::size_t kDefaultMaxJavaScriptCallDepth = 64u;
+// The portable core uses one shared flat pool for live call arguments. It
+// grows by actual call use and reports exhaustion instead of reserving a
+// maximum argument array in every possible call frame.
+constexpr std::size_t kDefaultMaxJavaScriptPortableArgumentValues = 512u;
 // Call frames retain their lexical environments so escaped closures remain
 // valid. The larger bounded pool also permits one maximum-capacity Navigator
 // collection callback pass in a long-lived realm.
@@ -202,6 +209,8 @@ struct RuntimeLimits {
     // also applies a hard depth ceiling so native traversal stays bounded.
     std::size_t maxJsonNestingDepth =
         kDefaultMaxJavaScriptJsonNestingDepth;
+    std::size_t maxPortableArgumentValues =
+        kDefaultMaxJavaScriptPortableArgumentValues;
 };
 
 // Bounded, native-readable allocation history since the most recent reset.
@@ -272,7 +281,10 @@ public:
     {
         return environmentStore_.environmentCount();
     }
-    std::size_t functionValueCount() const { return functions_.size(); }
+    std::size_t functionValueCount() const
+    {
+        return functions_.size() + portableFunctions_.count();
+    }
     std::size_t userFunctionCount() const { return userFunctionCount_; }
     std::size_t nativeFunctionCount() const { return nativeFunctionCount_; }
     std::size_t objectCount() const { return objects_.size(); }
@@ -376,27 +388,10 @@ public:
     bool builtInsInitialized() const { return builtInsInitialized_; }
 
 private:
+    using FunctionRecord = gxos::javascript::FunctionRecord;
     class Evaluator;
     friend class Evaluator;
     friend struct NavigatorScriptRuntimeTestAccess;
-
-    struct FunctionRecord {
-        enum class Kind : std::uint8_t {
-            User = 0,
-            Native,
-            Host,
-        };
-
-        Kind kind = Kind::User;
-        AstNodeId declaration = kInvalidAstNodeId;
-        EnvironmentId closureEnvironment = kInvalidEnvironmentId;
-        std::uint8_t nativeFunction = 0;
-        RuntimeHostObjectId hostObject = kInvalidRuntimeHostObjectId;
-        std::uint32_t hostMethod = 0;
-        bool hostMethodRequiresReceiver = false;
-        bool arrowFunction = false;
-        Value lexicalThis = Value::undefined();
-    };
 
     enum class NativeFunctionId : std::uint8_t {
         ObjectHasOwnProperty = 0,
@@ -588,6 +583,11 @@ private:
     bool stringView(const Value& value, SourceView& view,
         RuntimeErrorCode& error) const;
     bool initializePortableStorage(RuntimeErrorCode& error);
+    bool configurePortableExecutionStorage(RuntimeErrorCode& error);
+    bool appendFunctionRecord(const FunctionRecord& function,
+        RuntimeFunctionId& result, RuntimeErrorCode& error);
+    RuntimeErrorCode mapPortableExecutionError(
+        PortableExecutionErrorCode code) const;
     bool createEnvironment(EnvironmentId parent, EnvironmentId& result,
         RuntimeErrorCode& error,
         EnvironmentKind kind = EnvironmentKind::Function);
@@ -689,6 +689,10 @@ private:
     std::vector<Binding> bindingStorage_;
     std::vector<char> bindingNameStorage_;
     std::vector<FunctionRecord> functions_;
+    std::vector<FunctionRecord> portableFunctionStorage_;
+    FunctionStore portableFunctions_;
+    std::vector<PortableCallFrame> portableCallFrameStorage_;
+    std::vector<Value> portableArgumentStorage_;
     std::vector<RuntimeStringRecord> runtimeStringRecordStorage_;
     std::vector<char> runtimeStringStorage_;
     RuntimeStringStore stringStore_;

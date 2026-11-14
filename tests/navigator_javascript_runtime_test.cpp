@@ -654,25 +654,33 @@ void testRetainedClosureAcrossSameRealmSourceReplacement()
 {
     RuntimeContext context;
     const ScriptResult initial = execute(context,
-        "function makeRetained() { var captured = 41;"
-        " return function() { return captured; }; }"
-        "var retainedClosure = makeRetained();");
+        "function makeRetained(captured) {"
+        " return function(extra) { return captured + extra; }; }"
+        "const retainedClosure = makeRetained(41);");
     expect(initial.succeeded(),
-        "source lifetime: retained closure setup succeeds");
+        "source lifetime: portable retained closure setup succeeds");
 
-    const std::string laterScript = "var replacementMarker = 1;";
+    const std::string laterScript = "const replacementMarker = 1;";
     const ScriptResult replacement = context.executeInSameRealm(
         SourceView(laterScript.data(), laterScript.size()));
     expect(replacement.succeeded(),
         "source lifetime: later same-realm script succeeds");
 
-    const std::string callScript = "var retainedResult = retainedClosure();";
+    const std::string callScript = "const retainedResult = retainedClosure(1);";
     const ScriptResult call = context.executeInSameRealm(
         SourceView(callScript.data(), callScript.size()));
     expect(call.succeeded(),
-        "source lifetime: old closure runs after source replacement");
-    expectNumber(context, "retainedResult", 41.0,
-        "source lifetime: retained AST identifier remains readable");
+        "source lifetime: portable closure runs through hosted evaluator");
+    expectNumber(context, "retainedResult", 42.0,
+        "source lifetime: portable closure environment and AST remain readable");
+
+    RuntimeContext shadowedCallContext;
+    const ScriptResult shadowedCall = execute(shadowedCallContext,
+        "function apply(add) { return add(3); }"
+        "function add(value) { return value + 1; } apply(7);");
+    expect(!shadowedCall.succeeded() &&
+            shadowedCall.runtimeError.code == RuntimeErrorCode::NotCallable,
+        "portable preflight preserves parameter shadowing call error");
 }
 
 void testLimitsAndBudget()

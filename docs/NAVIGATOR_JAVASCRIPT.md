@@ -14186,3 +14186,32 @@ The detailed pre-JS118 architecture, Value and handle layout, string and
 binding semantics, limits, target flags and dependency closure, stack bounds,
 verification results, and JS119 plan are in the
 [JS118 portable values and environments report](NAVIGATOR_JAVASCRIPT_JS118_PORTABLE_VALUES_ENVIRONMENTS.md).
+
+### JS119 shared portable execution core — verified
+
+JS119 adds a bounded exception-free execution core that walks the existing
+AST and uses the JS118 Value, string, and environment stores. The hosted
+`RuntimeContext::execute()` dispatches supported programs through this core
+and keeps the established evaluator for unsupported syntax. The shared
+function record and generation-checked `FunctionStore` support simple
+ordinary and arrow calls, returns, and retained closures. The 54-check
+portable harness and hosted closure interoperability regression pass.
+
+The actual lexer, AST, parser, Value, environment, and JS119 execution anchor
+compile and relocatable-link for AMD64 freestanding COFF with GCC 15.2.0,
+exceptions/RTTI and runtime libraries disabled, and no undefined symbols.
+This verifies only the selected AST execution slice; it does not qualify the
+complete interpreter or guest runtime. The full matrix passes 112/112 lanes
+and 17,710/17,710 assertions. The hosted aggregate remains at its baseline of
+767/774 with only the seven accepted CSS failures. The protected executable
+and all 42 generated fixtures were restored and verified. No QEMU, QAC,
+kernel integration, or guest execution was performed.
+
+The portable slice is limited to primitive expressions, declarations,
+assignments, blocks, simple parameters, function returns, and closures.
+Defaults/rest parameters, host calls, object/Array operations, control flow
+outside blocks, and coercive string addition remain hosted-only. Its recursive
+dispatch and parser have explicit depth limits, but no aggregate stack bound
+or boot-stack safety claim is established. See the
+[JS119 portable execution report](NAVIGATOR_JAVASCRIPT_JS119_PORTABLE_EXECUTION.md)
+for storage accounting, stack measurements, gates, and remaining work.

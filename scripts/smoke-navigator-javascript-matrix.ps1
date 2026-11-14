@@ -7,7 +7,7 @@ $scripts = @(
     Get-ChildItem -LiteralPath $ScriptRoot -File -Filter `
         "smoke-navigator-javascript-*.ps1" |
         Where-Object {
-            $_.Name -match '^smoke-navigator-javascript-(lexer|parser|runtime|js\d+r?\d*)\.ps1$'
+            $_.Name -match '^smoke-navigator-javascript-(lexer|parser|runtime|portable-execution|js\d+r?\d*)\.ps1$'
         } | ForEach-Object {
             $name = $_.BaseName -replace '^smoke-navigator-javascript-', ''
             if ($name -match '^js(\d+)(?:r(\d*))?$') {
@@ -31,6 +31,7 @@ $scripts = @(
                         "lexer" { 0 }
                         "parser" { 1 }
                         "runtime" { 2 }
+                        "portable-execution" { 3 }
                     }
                     Name = $_.Name
                 }

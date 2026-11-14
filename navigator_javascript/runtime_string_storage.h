@@ -54,6 +54,14 @@ public:
 
     bool create(SourceView text, std::size_t maximumLength,
         RuntimeStringId& result, RuntimeStringError& error);
+    // Decode the bounded string escape subset accepted by the lexer/parser
+    // directly into caller-backed storage, without a temporary std::string.
+    bool createDecodedStringLiteral(SourceView token,
+        std::size_t maximumLength, RuntimeStringId& result,
+        RuntimeStringError& error);
+    bool createConcatenated(SourceView left, SourceView right,
+        std::size_t maximumLength, RuntimeStringId& result,
+        RuntimeStringError& error);
     bool view(RuntimeStringId id, SourceView& result,
         RuntimeStringError& error) const;
     RuntimeStringMark mark() const

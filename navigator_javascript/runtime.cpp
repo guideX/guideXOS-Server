@@ -5404,6 +5404,7 @@ void RuntimeContext::clearRuntimeState()
     environment_.bind(nullptr, kInvalidEnvironmentId, EnvironmentLimits());
     environments_.clear();
     functions_.clear();
+    portableFunctions_.reset(kInvalidRuntimeGeneration);
     stringStore_.reset(kInvalidRuntimeGeneration);
     objects_.clear();
     totalStringBytes_ = 0;
@@ -5553,7 +5554,6 @@ bool RuntimeContext::initializePortableStorage(RuntimeErrorCode& error)
         error = RuntimeErrorCode::AllocationFailure;
         return false;
     }
-
     EnvironmentId global = kInvalidEnvironmentId;
     if (!environmentStore_.createRoot(
             EnvironmentLimits{limits_.maxBindings,
@@ -5574,6 +5574,101 @@ bool RuntimeContext::initializePortableStorage(RuntimeErrorCode& error)
     GXOS_JS84_DIAGNOSTIC(
         diagnostics_.environmentPoolHighWater = environmentCount());
     return true;
+}
+
+bool RuntimeContext::configurePortableExecutionStorage(
+    RuntimeErrorCode& error)
+{
+    error = RuntimeErrorCode::None;
+    const std::size_t handleCapacity = static_cast<std::size_t>(
+        kRuntimeHandleInvalidPart - functions_.size());
+    const auto boundedAdd = [](std::size_t left, std::size_t right,
+        std::size_t cap) {
+        return left >= cap || right >= cap - left ? cap : left + right;
+    };
+    std::size_t functionCapacity = limits_.maxFunctions > userFunctionCount_
+        ? limits_.maxFunctions - userFunctionCount_ : 0u;
+    functionCapacity = boundedAdd(functionCapacity,
+        limits_.maxNativeFunctions > nativeFunctionCount_
+            ? limits_.maxNativeFunctions - nativeFunctionCount_ : 0u,
+        handleCapacity);
+    functionCapacity = boundedAdd(functionCapacity,
+        limits_.maxHostMethodValues > hostMethodCount_
+            ? limits_.maxHostMethodValues - hostMethodCount_ : 0u,
+        handleCapacity);
+
+    try {
+        portableFunctionStorage_.resize(functionCapacity);
+        portableCallFrameStorage_.resize(limits_.maxCallDepth);
+        portableArgumentStorage_.resize(limits_.maxPortableArgumentValues);
+    } catch (const std::bad_alloc&) {
+        error = RuntimeErrorCode::AllocationFailure;
+        return false;
+    } catch (const std::length_error&) {
+        error = RuntimeErrorCode::AllocationFailure;
+        return false;
+    }
+    FunctionStoreError functionError;
+    if (!portableFunctions_.configure(
+            FunctionStorageView{portableFunctionStorage_.data(),
+                portableFunctionStorage_.size()}, runtimeGeneration_,
+            static_cast<std::uint32_t>(functions_.size()), functionError)) {
+        error = functionError.code == FunctionStoreErrorCode::InvalidStorage ||
+            functionError.code == FunctionStoreErrorCode::InvalidAlignment
+            ? RuntimeErrorCode::InvalidAstState
+            : RuntimeErrorCode::FunctionLimitExceeded;
+        return false;
+    }
+    return true;
+}
+
+RuntimeErrorCode RuntimeContext::mapPortableExecutionError(
+    PortableExecutionErrorCode code) const
+{
+    switch (code) {
+    case PortableExecutionErrorCode::None: return RuntimeErrorCode::None;
+    case PortableExecutionErrorCode::UnsupportedOperation:
+        return RuntimeErrorCode::UnsupportedFeature;
+    case PortableExecutionErrorCode::InvalidAst:
+    case PortableExecutionErrorCode::InternalInvariantFailure:
+        return RuntimeErrorCode::InvalidAstState;
+    case PortableExecutionErrorCode::MissingBinding:
+        return RuntimeErrorCode::UnknownIdentifier;
+    case PortableExecutionErrorCode::UninitializedBinding:
+        return RuntimeErrorCode::UninitializedBinding;
+    case PortableExecutionErrorCode::DuplicateBinding:
+        return RuntimeErrorCode::DuplicateBinding;
+    case PortableExecutionErrorCode::ImmutableAssignment:
+    case PortableExecutionErrorCode::TypeError:
+        return RuntimeErrorCode::TypeError;
+    case PortableExecutionErrorCode::InvalidAssignmentTarget:
+        return RuntimeErrorCode::InvalidAssignmentTarget;
+    case PortableExecutionErrorCode::InvalidInvocationTarget:
+        return RuntimeErrorCode::NotCallable;
+    case PortableExecutionErrorCode::InvalidFunctionReference:
+    case PortableExecutionErrorCode::InvalidEnvironmentReference:
+    case PortableExecutionErrorCode::StaleReference:
+        return RuntimeErrorCode::InvalidFunction;
+    case PortableExecutionErrorCode::EnvironmentCapacityExhausted:
+        return RuntimeErrorCode::EnvironmentLimitExceeded;
+    case PortableExecutionErrorCode::BindingCapacityExhausted:
+        return RuntimeErrorCode::BindingLimitExceeded;
+    case PortableExecutionErrorCode::FunctionCapacityExhausted:
+        return RuntimeErrorCode::FunctionLimitExceeded;
+    case PortableExecutionErrorCode::StringCapacityExhausted:
+        return RuntimeErrorCode::StringLimitExceeded;
+    case PortableExecutionErrorCode::ArgumentCapacityExhausted:
+        return RuntimeErrorCode::PortableCapacityExceeded;
+    case PortableExecutionErrorCode::StepBudgetExhausted:
+        return RuntimeErrorCode::ExecutionBudgetExceeded;
+    case PortableExecutionErrorCode::CallDepthExhausted:
+        return RuntimeErrorCode::CallDepthExceeded;
+    case PortableExecutionErrorCode::AllocationFailure:
+        return RuntimeErrorCode::AllocationFailure;
+    case PortableExecutionErrorCode::IllegalReturn:
+        return RuntimeErrorCode::IllegalReturn;
+    }
+    return RuntimeErrorCode::InvalidAstState;
 }
 
 bool RuntimeContext::createString(SourceView text, Value& value,
@@ -5665,10 +5760,13 @@ bool RuntimeContext::createEnvironment(EnvironmentId parent,
                 : RuntimeErrorCode::InvalidAstState;
         return false;
     }
-    // initializePortableStorage reserves the complete bounded descriptor
-    // array before the root becomes visible, so this append cannot move any
-    // Environment facade retained by the evaluator.
-    environments_.emplace_back(&environmentStore_, created, limits);
+    // Portable execution can create environment records without constructing
+    // hosted facades. Materialize every record through the new handle so the
+    // vector index continues to match the store's stable slot number.
+    if (environmentAt(created) == nullptr) {
+        error = RuntimeErrorCode::InvalidAstState;
+        return false;
+    }
     GXOS_JS84_DIAGNOSTIC({
         ++diagnostics_.environmentsAllocated;
         if (diagnostics_.environmentPoolHighWater < environmentCount())
@@ -5685,19 +5783,24 @@ Environment* RuntimeContext::environmentAt(EnvironmentId id)
     EnvironmentError error;
     if (!environmentStore_.valid(id, error)) return nullptr;
     if (slot == 0u) return &environment_;
-    const std::size_t index = slot - 1u;
-    return index < environments_.size() ? &environments_[index] : nullptr;
+    if (slot > environments_.capacity()) return nullptr;
+    while (environments_.size() < slot) {
+        const std::size_t nextSlot = environments_.size() + 1u;
+        const EnvironmentId nextId = makeRuntimeHandle(runtimeGeneration_,
+            static_cast<std::uint32_t>(nextSlot));
+        const EnvironmentRecord* record = environmentStore_.record(nextId,
+            error);
+        if (record == nullptr) return nullptr;
+        environments_.emplace_back(&environmentStore_, nextId,
+            EnvironmentLimits{record->bindingLimit,
+                record->nameLengthLimit});
+    }
+    return &environments_[slot - 1u];
 }
 
 const Environment* RuntimeContext::environmentAt(EnvironmentId id) const
 {
-    if (!runtimeHandleIsValid(id, runtimeGeneration_)) return nullptr;
-    const std::size_t slot = runtimeHandleSlot(id);
-    EnvironmentError error;
-    if (!environmentStore_.valid(id, error)) return nullptr;
-    if (slot == 0u) return &environment_;
-    const std::size_t index = slot - 1u;
-    return index < environments_.size() ? &environments_[index] : nullptr;
+    return const_cast<RuntimeContext*>(this)->environmentAt(id);
 }
 
 bool RuntimeContext::createFunction(AstNodeId declaration,
@@ -5714,27 +5817,50 @@ bool RuntimeContext::createFunction(AstNodeId declaration,
         return false;
     }
     if (userFunctionCount_ >= limits_.maxFunctions ||
-        functions_.size() >= kRuntimeHandleInvalidPart) {
+        functionValueCount() >= kRuntimeHandleInvalidPart) {
         error = RuntimeErrorCode::FunctionLimitExceeded;
         return false;
     }
+    FunctionRecord function;
+    function.kind = FunctionRecord::Kind::User;
+    function.declaration = declaration;
+    function.closureEnvironment = closure;
+    function.arrowFunction = arrowFunction ||
+        ast_.node(declaration).kind == AstNodeKind::ArrowFunctionExpression;
+    if (function.arrowFunction) function.lexicalThis = lexicalThis;
+    if (!appendFunctionRecord(function, result, error)) return false;
+    ++userFunctionCount_;
+    return true;
+}
+
+bool RuntimeContext::appendFunctionRecord(const FunctionRecord& function,
+    RuntimeFunctionId& result, RuntimeErrorCode& error)
+{
+    error = RuntimeErrorCode::None;
+    result = kInvalidRuntimeFunctionId;
+    if (functionValueCount() >= kRuntimeHandleInvalidPart) {
+        error = RuntimeErrorCode::FunctionLimitExceeded;
+        return false;
+    }
+    if (portableFunctions_.count() != 0u) {
+        FunctionStoreError storeError;
+        if (portableFunctions_.append(function, result, storeError)) return true;
+        error = storeError.code == FunctionStoreErrorCode::CapacityExceeded
+            ? RuntimeErrorCode::FunctionLimitExceeded
+            : storeError.code == FunctionStoreErrorCode::StaleGeneration
+                ? RuntimeErrorCode::InvalidFunction
+                : RuntimeErrorCode::InvalidAstState;
+        return false;
+    }
     try {
-        FunctionRecord function;
-        function.kind = FunctionRecord::Kind::User;
-        function.declaration = declaration;
-        function.closureEnvironment = closure;
-        function.arrowFunction = arrowFunction ||
-            ast_.node(declaration).kind == AstNodeKind::ArrowFunctionExpression;
-        if (function.arrowFunction) function.lexicalThis = lexicalThis;
         functions_.push_back(function);
     } catch (const std::bad_alloc&) {
         error = RuntimeErrorCode::AllocationFailure;
         return false;
     }
-    ++userFunctionCount_;
     result = makeRuntimeHandle(runtimeGeneration_,
         static_cast<std::uint32_t>(functions_.size() - 1u));
-    return true;
+    return result != kInvalidRuntimeFunctionId;
 }
 
 bool RuntimeContext::createNativeFunction(NativeFunctionId native,
@@ -5742,22 +5868,19 @@ bool RuntimeContext::createNativeFunction(NativeFunctionId native,
 {
     error = RuntimeErrorCode::None;
     if (nativeFunctionCount_ >= limits_.maxNativeFunctions ||
-        functions_.size() >= kRuntimeHandleInvalidPart) {
+        functionValueCount() >= kRuntimeHandleInvalidPart) {
         error = RuntimeErrorCode::NativeFunctionLimitExceeded;
         return false;
     }
-    try {
-        FunctionRecord function;
-        function.kind = FunctionRecord::Kind::Native;
-        function.nativeFunction = static_cast<std::uint8_t>(native);
-        functions_.push_back(function);
-    } catch (const std::bad_alloc&) {
-        error = RuntimeErrorCode::AllocationFailure;
+    FunctionRecord function;
+    function.kind = FunctionRecord::Kind::Native;
+    function.nativeFunction = static_cast<std::uint8_t>(native);
+    if (!appendFunctionRecord(function, result, error)) {
+        if (error == RuntimeErrorCode::FunctionLimitExceeded)
+            error = RuntimeErrorCode::NativeFunctionLimitExceeded;
         return false;
     }
     ++nativeFunctionCount_;
-    result = makeRuntimeHandle(runtimeGeneration_,
-        static_cast<std::uint32_t>(functions_.size() - 1u));
     return true;
 }
 
@@ -5776,32 +5899,34 @@ bool RuntimeContext::createHostMethod(RuntimeHostObjectId object,
         }
     }
     if (hostMethodCount_ >= limits_.maxHostMethodValues ||
-        functions_.size() >= kRuntimeHandleInvalidPart) {
+        functionValueCount() >= kRuntimeHandleInvalidPart) {
         error = RuntimeErrorCode::HostMethodLimitExceeded;
         return false;
     }
+    FunctionRecord function;
+    function.kind = FunctionRecord::Kind::Host;
+    function.hostObject = cacheOwner;
+    function.hostMethod = method;
+    function.hostMethodRequiresReceiver = requiresReceiver;
+    RuntimeFunctionId functionId = kInvalidRuntimeFunctionId;
+    if (!appendFunctionRecord(function, functionId, error)) {
+        if (error == RuntimeErrorCode::FunctionLimitExceeded)
+            error = RuntimeErrorCode::HostMethodLimitExceeded;
+        return false;
+    }
     try {
-        FunctionRecord function;
-        function.kind = FunctionRecord::Kind::Host;
-        function.hostObject = cacheOwner;
-        function.hostMethod = method;
-        function.hostMethodRequiresReceiver = requiresReceiver;
-        functions_.push_back(function);
-
         HostMethodRecord record;
         record.hostObject = cacheOwner;
         record.method = method;
         record.requiresReceiver = requiresReceiver;
-        record.function = makeRuntimeHandle(runtimeGeneration_,
-            static_cast<std::uint32_t>(functions_.size() - 1u));
+        record.function = functionId;
         hostMethods_.push_back(record);
     } catch (const std::bad_alloc&) {
         error = RuntimeErrorCode::AllocationFailure;
         return false;
     }
     ++hostMethodCount_;
-    result = makeRuntimeHandle(runtimeGeneration_,
-        static_cast<std::uint32_t>(functions_.size() - 1u));
+    result = functionId;
     return true;
 }
 
@@ -5812,7 +5937,10 @@ const RuntimeContext::FunctionRecord* RuntimeContext::functionAt(
         return nullptr;
     }
     const std::size_t slot = runtimeHandleSlot(id);
-    return slot < functions_.size() ? &functions_[slot] : nullptr;
+    if (slot < functions_.size()) return &functions_[slot];
+    if (portableFunctions_.count() == 0u) return nullptr;
+    FunctionStoreError error;
+    return portableFunctions_.get(id, error);
 }
 
 bool RuntimeContext::createObject(bool array,
@@ -7713,6 +7841,49 @@ ScriptResult RuntimeContext::execute(SourceView source)
         }
         ast_ = std::move(parsed.ast);
 
+        if (PortableExecutionCore::supports(ast_, ast_.root(),
+                limits_.parser.maxCallArguments,
+                limits_.parser.maxExpressionNesting)) {
+            RuntimeErrorCode storageError = RuntimeErrorCode::None;
+            if (configurePortableExecutionStorage(storageError)) {
+                const PortableExecutionStorageView executionStorage{
+                    portableCallFrameStorage_.data(),
+                    portableCallFrameStorage_.size(),
+                    portableArgumentStorage_.data(),
+                    portableArgumentStorage_.size()};
+                const PortableExecutionLimits executionLimits{
+                    limits_.maxCallDepth,
+                    limits_.parser.maxCallArguments,
+                    limits_.maxFunctions > userFunctionCount_
+                        ? limits_.maxFunctions - userFunctionCount_ : 0u,
+                    limits_.maxExecutionSteps,
+                    limits_.maxFunctionEnvironmentBindings,
+                    limits_.maxBindingNameLength,
+                    limits_.maxRuntimeStringLength,
+                    limits_.parser.maxExpressionNesting};
+                PortableExecutionCore portable(ast_, stringStore_,
+                    environmentStore_, portableFunctions_,
+                    executionStorage, executionLimits, executionSteps_);
+                PortableExecutionResult portableResult;
+                const bool succeeded = portable.run(ast_.root(),
+                    globalEnvironmentId_, finalValue_, portableResult);
+                userFunctionCount_ += portableResult.functionsCreated;
+                totalStringBytes_ = stringStore_.bytesUsed();
+                result_.executionSteps = portableResult.executionSteps;
+                if (!succeeded) {
+                    setRuntimeError(mapPortableExecutionError(
+                        portableResult.error.code),
+                        portableResult.error.location);
+                    return result_;
+                }
+                result_.status = ScriptStatus::Success;
+                return result_;
+            }
+            // The portable executor is an optional backend for this bounded
+            // syntax slice. If its scratch cannot be provisioned, preserve
+            // the established hosted path and its accepted functionality.
+        }
+
         Evaluator evaluator(*this);
         if (!evaluator.run()) return result_;
         result_.status = ScriptStatus::Success;
@@ -7910,6 +8081,8 @@ const char* runtimeErrorCodeName(RuntimeErrorCode code)
         return "HostInvalidValue";
     case RuntimeErrorCode::TooManyArguments:
         return "TooManyArguments";
+    case RuntimeErrorCode::PortableCapacityExceeded:
+        return "PortableCapacityExceeded";
     case RuntimeErrorCode::DocumentLookupLimitExceeded:
         return "DocumentLookupLimitExceeded";
     case RuntimeErrorCode::DocumentTextLimitExceeded:
