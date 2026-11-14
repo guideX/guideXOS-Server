@@ -86,7 +86,7 @@ $studioGuestDefine = if ($StudioGuestQualification) { '-DGXOS_AARCH64_ABI3_STUDI
 $el0QualificationDefine = if ($El0Qualification) { '-DGXOS_AARCH64_EL0_QUALIFICATION' } else { }
 $el0NegativeDefine = if ($El0NegativeQualification) { '-DGXOS_AARCH64_EL0_NEGATIVE_QUALIFICATION' } else { }
 $el0ScheduledDefine = if ($El0ScheduledQualification) { '-DGXOS_AARCH64_RUNSAFE3B_DIAGNOSTICS' } else { }
-$el0ScheduledRevisionDefine = $null
+$el0ScheduledRevisionInclude = @()
 if ($El0ScheduledQualification) {
     $sourceRevision = (& git -C $repoRoot rev-parse HEAD 2>&1 | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or $sourceRevision -notmatch '^[0-9a-f]{40}$') {
@@ -96,7 +96,10 @@ if ($El0ScheduledQualification) {
     if ($LASTEXITCODE -ne 0 -or $sourceState.Length -ne 0) {
         throw 'RUNSAFE3-B candidate builds require a clean, committed source tree.'
     }
-    $el0ScheduledRevisionDefine = '-DGXOS_AARCH64_RUNSAFE3B_SOURCE_REVISION="' + $sourceRevision + '"'
+    $revisionHeader = Join-Path $OutputDirectory 'runsafe3b_source_revision.h'
+    $revisionHeaderText = '#define GXOS_AARCH64_RUNSAFE3B_SOURCE_REVISION "' + $sourceRevision + '"' + "`r`n"
+    [IO.File]::WriteAllText($revisionHeader, $revisionHeaderText, [Text.UTF8Encoding]::new($false))
+    $el0ScheduledRevisionInclude = @('-include',$revisionHeader)
     Write-Host "RUNSAFE3-B source revision: $sourceRevision" -ForegroundColor Cyan
 }
 $loaderFlags = @(
@@ -127,7 +130,8 @@ $kernelFlags = @(
     '--target=aarch64-none-elf','-std=c++14','-march=armv8-a','-O2','-ffreestanding','-nostdlib','-nostdinc++','-fno-builtin','-fno-stack-protector',
     '-fno-exceptions','-fno-rtti','-fno-unwind-tables','-fno-asynchronous-unwind-tables','-fno-pic','-fno-pie','-mcmodel=small',
     '-mgeneral-regs-only','-mstrict-align','-mno-outline-atomics','-ffunction-sections','-fdata-sections','-Wno-c++11-narrowing',
-    '-DGXOS_AARCH64_PHASE4','-DGXOS_AARCH64_PHASE5','-DGXOS_AARCH64_PHASE6','-DGXOS_AARCH64_PHASE7','-DGXOS_AARCH64_PHASE8','-DGXOS_AARCH64_PHASE9','-DGXOS_AARCH64_PHASE10',$phase11Define,$phase12Define,$studioGuestDefine,$el0QualificationDefine,$el0NegativeDefine,$el0ScheduledDefine,$el0ScheduledRevisionDefine,
+    '-DGXOS_AARCH64_PHASE4','-DGXOS_AARCH64_PHASE5','-DGXOS_AARCH64_PHASE6','-DGXOS_AARCH64_PHASE7','-DGXOS_AARCH64_PHASE8','-DGXOS_AARCH64_PHASE9','-DGXOS_AARCH64_PHASE10',$phase11Define,$phase12Define,$studioGuestDefine,$el0QualificationDefine,$el0NegativeDefine,$el0ScheduledDefine,
+    $el0ScheduledRevisionInclude,
     '-DGXOS_AARCH64_EL0_ISOLATION',
     '-DGXOS_BARE_METAL','-DKERNEL_HAS_VIRTIO_INPUT','-DKERNEL_HAS_COMMON_INPUT_QUEUE','-I',$repoRoot,'-I',(Join-Path $repoRoot 'kernel'),'-I',(Join-Path $repoRoot 'sdk\include'),'-I',(Join-Path $repoRoot 'kernel\core\include'),
     '-I',(Join-Path $repoRoot 'kernel\core\freestanding'),'-I',(Join-Path $repoRoot 'kernel\arch\arm64\include'))
