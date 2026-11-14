@@ -334,6 +334,45 @@ class QMPDragSafetyTests(unittest.TestCase):
         finally:
             qmp.close()
 
+    def test_wheel_down_uses_qmp_wheel_button_and_releases(self) -> None:
+        qmp = self.make_qmp()
+        try:
+            started = self.clock.now
+            outcome = qmp.wheel(1, 0.2)
+            self.assertTrue(outcome.success)
+            self.assertEqual(outcome.button, "wheel-down")
+            self.assertTrue(outcome.down_acknowledged)
+            self.assertTrue(outcome.release_acknowledged)
+            self.assertEqual(outcome.guest_event_consumption, "unverified")
+            self.assertEqual(
+                self.input_events(self.sockets[0]),
+                [
+                    {"type": "btn", "data": {"button": "wheel-down", "down": True}},
+                    {"type": "btn", "data": {"button": "wheel-down", "down": False}},
+                ],
+            )
+            self.assertAlmostEqual(self.clock.now - started, 0.3)
+        finally:
+            qmp.close()
+
+    def test_wheel_up_uses_qmp_wheel_button_and_zero_is_rejected(self) -> None:
+        qmp = self.make_qmp()
+        try:
+            outcome = qmp.wheel(-1, 0.2)
+            self.assertTrue(outcome.success)
+            self.assertEqual(outcome.button, "wheel-up")
+            self.assertEqual(
+                self.input_events(self.sockets[0]),
+                [
+                    {"type": "btn", "data": {"button": "wheel-up", "down": True}},
+                    {"type": "btn", "data": {"button": "wheel-up", "down": False}},
+                ],
+            )
+            with self.assertRaisesRegex(ValueError, "must not be zero"):
+                qmp.wheel(0, 0.2)
+        finally:
+            qmp.close()
+
     def test_movement_qmp_failure_runs_one_bounded_release(self) -> None:
         def handler(request: dict[str, Any], sock: FakeSocket) -> Any:
             events = request.get("arguments", {}).get("events", [])

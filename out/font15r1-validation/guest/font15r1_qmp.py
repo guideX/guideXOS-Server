@@ -251,8 +251,9 @@ class WindowsEndpointVerifier:
             {
                 int(row.owning_pid)
                 for row in rows
-                if row.state == self.MIB_TCP_STATE_LISTEN
-                and self._row_address(row.local_address) == QMP_HOST
+                # The listener-specific table is already filtered by Windows.
+                # Some current Windows builds report dwState=0 for these rows.
+                if self._row_address(row.local_address) == QMP_HOST
                 and self._row_port(row.local_port) == port
             }
         )
@@ -850,6 +851,18 @@ class QMP:
             self._active_drag_button = None
             return outcome
 
+    def wheel(self, delta: int, delay: float) -> DragOutcome:
+        """Send one bounded wheel detent using QMP's wheel button events.
+
+        Positive deltas scroll down; negative deltas scroll up. QMP's relative
+        pointer axes are only x and y, so wheel motion must use the dedicated
+        wheel-up and wheel-down button values.
+        """
+        if delta == 0:
+            raise ValueError("wheel delta must not be zero")
+        button = "wheel-down" if delta > 0 else "wheel-up"
+        return self.drag(button, 0, 0, delay)
+
     def key(
         self, qcode: str, delay: float = 0.08, modifiers: tuple[str, ...] = ()
     ) -> None:
@@ -1091,8 +1104,9 @@ def main() -> int:
         elif args.action == "wheel":
             if args.wheel == 0:
                 raise ValueError("--wheel must be nonzero")
-            qmp.input_event({"type": "rel", "data": {"axis": "z", "value": args.wheel}})
-            qmp._sleep(delay)
+            outcome = qmp.wheel(args.wheel, delay)
+            print(json.dumps({"action": args.action, **outcome.as_dict()}, separators=(",", ":")))
+            return 0 if outcome.success else (130 if outcome.interrupted else 2)
         elif args.action == "screenshot":
             if args.screenshot_path is None:
                 raise ValueError("--screenshot-path is required for screenshot")
