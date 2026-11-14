@@ -1,7 +1,8 @@
 param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
     [string]$ArtifactRoot = 'E:\CodexArtifacts\guideXOSServerV1.1_DOTNET_SUPPORT',
-    [string]$CandidateRoot = ''
+    [string]$CandidateRoot = '',
+    [switch]$C188R25FailFastOriginCapture
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -160,6 +161,9 @@ $managedArgs = @(
     '-C188R8NotesInputRouting','-C188R9RegistryInputReentry',
     '-C188R11ManagedStateProvenance','-C188R12R3LifetimeStartAttribution',
     '-ManagedProjectMode','C160Composite')
+if ($C188R25FailFastOriginCapture) {
+    $managedArgs += '-C188R25FailFastOriginCapture'
+}
 $pwsh = (Get-Command 'pwsh.exe' -ErrorAction Stop | Select-Object -First 1).Source
 $r22Test = Join-Path $RepoRoot 'scripts\dotnet\test-c188r22-settings-bootstrap-handoff.ps1'
 $null = Invoke-Logged $pwsh @('-NoProfile','-File',$r22Test) `

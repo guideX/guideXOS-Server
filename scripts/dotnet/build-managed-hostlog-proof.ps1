@@ -39,6 +39,7 @@ param(
     [switch]$C188R12R4R5R4R5R2R2NativeAllocationAttribution,
     [switch]$C188R12R4R5R2R2R4SafeHandoff,
     [switch]$C188R12R4R5R2R3InitializeModulesAttribution,
+    [switch]$C188R25FailFastOriginCapture,
     [switch]$C188R12R4R5R2R3ManagedEntryProbe,
     [switch]$C188R12R4R5R2R3ManagedSettingsObjectProbe,
     [switch]$C188R13ManagedGcRootProbe,
@@ -274,6 +275,7 @@ if ($UseGuideXosRuntimePack) {
     if ($C188R12R4R5R4R5R2R2NativeAllocationAttribution) { $runtimePackBuildArguments += "-C188R12R4R5R4R5R2R2NativeAllocationAttribution" }
     if ($C188R12R4R5R2R2R4SafeHandoff) { $runtimePackBuildArguments += "-C188R12R4R5R2R2R4SafeHandoff" }
     if ($C188R12R4R5R2R3InitializeModulesAttribution) { $runtimePackBuildArguments += "-C188R12R4R5R2R3InitializeModulesAttribution" }
+    if ($C188R25FailFastOriginCapture) { $runtimePackBuildArguments += "-C188R25FailFastOriginCapture" }
     if ($C188R12R4R5R2R3ManagedEntryProbe) { $runtimePackBuildArguments += "-C188R12R4R5R2R3ManagedEntryProbe" }
     if ($C188R12R4R5R2R3ManagedSettingsObjectProbe -or $C188R13ManagedGcRootProbe) { $runtimePackBuildArguments += "-C188R12R4R5R2R3ManagedSettingsObjectProbe" }
     if ($ThreadStaticLifecycleDiagnostics) { $runtimePackBuildArguments += "-ThreadStaticLifecycleDiagnostics" }
@@ -361,6 +363,11 @@ if ($UseGuideXosRuntimePack) {
          [string]$runtimePackManifestObject.c188r12r4r5r2r3InitializeModulesAttributionTransition -notmatch 'explicit preflight gate' -or
          [bool]$runtimePackManifestObject.persistentCompositeLifecycle)) {
         throw 'C188R12R4R5R2R3 requires the explicitly selected isolated transition-attribution runtime pack.'
+    }
+    if ($C188R25FailFastOriginCapture -and
+        (-not [bool]$runtimePackManifestObject.c188r25FailFastOriginCapture -or
+         [string]$runtimePackManifestObject.c188r25FailFastOriginCaptureMarker -cne 'GUIDEXOS_NATIVEAOT_C188R25_FAILFAST_ORIGIN')) {
+        throw 'R25 requires the linked first-failure diagnostic runtime-pack profile.'
     }
     if ($C188R12R4R5R2R3ManagedEntryProbe -and
         (-not $C188R12R4R5R2R3InitializeModulesAttribution -or

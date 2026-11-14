@@ -1,3 +1,4 @@
+param([string]$CandidateRoot='')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'c188r24-initializemodules-predicates.ps1')
@@ -17,33 +18,41 @@ $addresses = [ordered]@{
     createTypeManagersCall='1000ad6a1'
     osModuleHandle='100000000'
 }
+if (-not [string]::IsNullOrWhiteSpace($CandidateRoot)) {
+    $addressPath = Join-Path $CandidateRoot 'r24-runtime-addresses.json'
+    if (-not (Test-Path -LiteralPath $addressPath -PathType Leaf)) {
+        throw 'Candidate-specific R24 runtime-address evidence is required for snapshot qualification.'
+    }
+    $addresses = Get-Content -LiteralPath $addressPath -Raw | ConvertFrom-Json
+}
 $qmp = ConvertFrom-C188R24QmpResponse '{"return":{"running":false,"status":"paused"}}'
 Assert-R24Snapshot (-not [bool]$qmp.return.running -and $qmp.return.status -eq 'paused') 'QMP paused response parses'
 $badQmpRejected = $false
 try { $null = ConvertFrom-C188R24QmpResponse 'not-json' } catch { $badQmpRejected = $true }
 Assert-R24Snapshot $badQmpRejected 'malformed QMP responses fail closed'
 
-$entry = Get-C188R24CpuBoundaryEvidence 'RIP=00000001000AD660 RAX=0000000100000000' $addresses
+$entry = Get-C188R24CpuBoundaryEvidence ("RIP=$($addresses.initializeModules) RAX=0000000100000000") $addresses
 Assert-R24Snapshot ($entry.classification -eq 'initializer-entered-before-registration-return' -and $entry.initializerEntered) 'initializer entry is independently observable'
-$importEntry = Get-C188R24CpuBoundaryEvidence 'RIP=00000001000F94D0 RAX=0000000100000000' $addresses
+$importEntry = Get-C188R24CpuBoundaryEvidence ("RIP=$($addresses.rhpRegisterOsModule) RAX=0000000100000000") $addresses
 Assert-R24Snapshot ($importEntry.rhpRegisterEntered -and -not $importEntry.registrationReturned) 'native import entry is distinguishable from its return'
-$alloc = Get-C188R24CpuBoundaryEvidence 'RIP=00000001000F94E5 RAX=0000000100000000' $addresses
+$rhpAddress = [Convert]::ToUInt64(([string]$addresses.rhpRegisterOsModule -replace '^0[xX]',''),16)
+$alloc = Get-C188R24CpuBoundaryEvidence ("RIP=0x{0:x} RAX=0000000100000000" -f ($rhpAddress + 0x15)) $addresses
 Assert-R24Snapshot ($alloc.classification -eq 'rhp-register-native-allocation-in-progress') 'native allocation call boundary is classified'
-$allocReturned = Get-C188R24CpuBoundaryEvidence 'RIP=00000001000F94F2 RAX=0000000000010000' $addresses
+$allocReturned = Get-C188R24CpuBoundaryEvidence ("RIP=0x{0:x} RAX=0000000000010000" -f ($rhpAddress + 0x22)) $addresses
 Assert-R24Snapshot ($allocReturned.classification -eq 'rhp-register-allocation-succeeded-before-publication') 'successful allocator result precedes publication'
-$publication = Get-C188R24CpuBoundaryEvidence 'RIP=00000001000F9510 RAX=0000000000010000' $addresses
+$publication = Get-C188R24CpuBoundaryEvidence ("RIP=0x{0:x} RAX=0000000000010000" -f ($rhpAddress + 0x40)) $addresses
 Assert-R24Snapshot ($publication.classification -eq 'rhp-register-list-publication-in-progress' -and -not $publication.registrationPublished) 'CAS publication in progress is not reported complete'
-$published = Get-C188R24CpuBoundaryEvidence 'RIP=00000001000F9522 RAX=0000000000010000' $addresses
+$published = Get-C188R24CpuBoundaryEvidence ("RIP=0x{0:x} RAX=0000000000010000" -f ($rhpAddress + 0x52)) $addresses
 Assert-R24Snapshot ($published.registrationPublished -and -not $published.registrationReturned) 'published list entry is separated from function return'
-$allocFailure = Get-C188R24CpuBoundaryEvidence 'RIP=00000001000F952B RAX=0000000000000000' $addresses
+$allocFailure = Get-C188R24CpuBoundaryEvidence ("RIP=0x{0:x} RAX=0000000000000000" -f ($rhpAddress + 0x5B)) $addresses
 Assert-R24Snapshot ($allocFailure.classification -eq 'rhp-register-allocation-failure-return-path' -and -not $allocFailure.registrationPublished) 'null allocation return remains a failure'
-$returnSuccess = Get-C188R24CpuBoundaryEvidence 'RIP=00000001000AD688 RAX=0000000100000000' $addresses
+$returnSuccess = Get-C188R24CpuBoundaryEvidence ("RIP=$($addresses.rhpRegisterCallReturn) RAX=0000000100000000") $addresses
 Assert-R24Snapshot ($returnSuccess.registrationReturned -and $returnSuccess.registrationSuccessObserved) 'caller continuation with expected handle proves M5 and registration success'
-$returnNull = Get-C188R24CpuBoundaryEvidence 'RIP=00000001000AD688 RAX=0000000000000000' $addresses
+$returnNull = Get-C188R24CpuBoundaryEvidence ("RIP=$($addresses.rhpRegisterCallReturn) RAX=0000000000000000") $addresses
 Assert-R24Snapshot ($returnNull.registrationReturned -and -not $returnNull.registrationSuccessObserved) 'caller continuation with null return is not success'
-$manager = Get-C188R24CpuBoundaryEvidence 'RIP=00000001000AD820 RAX=0000000100000000' $addresses
+$manager = Get-C188R24CpuBoundaryEvidence ("RIP=$($addresses.createTypeManagers) RAX=0000000100000000") $addresses
 Assert-R24Snapshot ($manager.classification -eq 'type-manager-helper-current' -and $manager.registrationReturned) 'type-manager entry proves initializer continued past import'
-$initializerReturned = Get-C188R24CpuBoundaryEvidence 'RIP=00000001000F3196 RAX=0000000100000000' $addresses
+$initializerReturned = Get-C188R24CpuBoundaryEvidence ("RIP=$($addresses.initializeModulesCallReturn) RAX=0000000100000000") $addresses
 Assert-R24Snapshot ($initializerReturned.initializerReturned -and $initializerReturned.classification -eq 'initializer-returned-to-shared-helper') 'shared helper return continuation proves M7'
 $unknown = Get-C188R24CpuBoundaryEvidence 'RAX=0000000000000000' $addresses
 Assert-R24Snapshot ($unknown.classification -eq 'cpu-rip-unavailable' -and -not $unknown.initializerEntered) 'missing RIP remains unclassified'

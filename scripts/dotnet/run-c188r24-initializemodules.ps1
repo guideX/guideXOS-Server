@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory=$true)][string]$CandidateRoot,
     [Parameter()][string]$ArtifactRoot='E:\CodexArtifacts\guideXOSServerV1.1_DOTNET_SUPPORT',
-    [Parameter()][ValidateRange(60,300)][int]$MaxRuntimeSeconds=120
+    [Parameter()][ValidateRange(60,300)][int]$MaxRuntimeSeconds=120,
+    [Parameter()][string]$R25ManifestPath=''
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -15,23 +16,26 @@ if (-not $candidate.StartsWith($artifactPrefix,[System.StringComparison]::Ordina
     throw "R24 candidate must remain below ArtifactRoot: $candidate"
 }
 $phaseRoot = [System.IO.Path]::GetDirectoryName($candidate)
+$isR25 = -not [string]::IsNullOrWhiteSpace($R25ManifestPath)
+$runPrefix = if ($isR25) { 'r25' } else { 'r24' }
 $runId = [guid]::NewGuid().ToString('N')
-$bootRoot = Join-Path $phaseRoot ('qac-guest-r24-' + $runId)
+$bootRoot = Join-Path $phaseRoot ('qac-guest-' + $runPrefix + '-' + $runId)
 $guardRoot = Join-Path $phaseRoot 'one-boot-guards'
-$guardPath = Join-Path $guardRoot ('attempt-r24-' + $runId + '.json')
-$preflightRoot = Join-Path $phaseRoot ('qac-preflight-r24-' + $runId)
-$evidencePath = Join-Path $phaseRoot ('r24-run-evidence-' + $runId + '.json')
+$guardPath = Join-Path $guardRoot ('attempt-' + $runPrefix + '-' + $runId + '.json')
+$preflightRoot = Join-Path $phaseRoot ('qac-preflight-' + $runPrefix + '-' + $runId)
+$evidencePath = Join-Path $phaseRoot ($runPrefix + '-run-evidence-' + $runId + '.json')
 $manifestPath = Join-Path $candidate 'candidate-manifest.json'
 $integrityPath = Join-Path $candidate 'candidate-integrity.json'
 $qacCli = 'D:\dev\guideXOS_QAC\src\GuideXOS.QAC.Cli\bin\Debug\net10.0-windows\GuideXOS.QAC.Cli.exe'
 $outerRunner = Join-Path $repo 'scripts\dotnet\run-c188r12r1-settings-handoff.ps1'
 $pwsh = (Get-Command pwsh.exe -ErrorAction Stop | Select-Object -First 1).Source
 $final = [ordered]@{
-    schema='GUIDEXOS_C188R24_INITIALIZEMODULES_RUN_V1';runIdentity=$runId
+    schema=if ($isR25) { 'GUIDEXOS_C188R25_FAILFAST_ORIGIN_RUN_V1' } else { 'GUIDEXOS_C188R24_INITIALIZEMODULES_RUN_V1' };runIdentity=$runId
     candidateRoot=$candidate;bootEvidencePath=$bootRoot;guardPath=$guardPath
     outcome='INITIALIZEMODULES_EVIDENCE_BLOCKED';nativeExecutionAttempted=$false
     candidateIntegrityVerified=$false;qacPreflight='not-run';runnerExitCode=$null
     qacReleaseVerified=$false;cpuSnapshotPath=$null;cpuBoundaryEvidence=$null
+    r25FirstFailureRecordValid=$false;r25CallerAttribution=$null;r25SnapshotPath=$null;r25OriginAnalysisPath=$null
     serialSha256='';qacReservationId=$null;failure='';milestones=$null
 }
 
@@ -49,6 +53,33 @@ try {
         (Get-FileHash -LiteralPath $integrityPath -Algorithm SHA256).Hash -ne $manifest.candidateIntegritySha256 -or
         (Get-FileHash -LiteralPath ([string]$manifest.r24RuntimeAddresses) -Algorithm SHA256).Hash -ne $manifest.r24RuntimeAddressesSha256) {
         throw 'R24 phase, candidate result, integrity hash, or runtime-address evidence is invalid.'
+    }
+    $r25Manifest = $null
+    if ($isR25) {
+        $R25ManifestPath = [System.IO.Path]::GetFullPath($R25ManifestPath)
+        $r25Manifest = Get-Content -LiteralPath $R25ManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
+        if ($r25Manifest.schema -cne 'GUIDEXOS_C188R25_CANDIDATE_V1' -or
+            [System.IO.Path]::GetFullPath([string]$r25Manifest.candidateRoot) -cne $candidate -or
+            [string]$r25Manifest.diagnostics.recordAddress -notmatch '^0x[0-9A-Fa-f]{8,16}$' -or
+            [int]$r25Manifest.diagnostics.recordBytes -ne 80 -or
+            (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash -ine [string]$r25Manifest.candidateManifestSha256 -or
+            (Get-FileHash -LiteralPath $integrityPath -Algorithm SHA256).Hash -ine [string]$r25Manifest.candidateIntegritySha256 -or
+            [System.IO.Path]::GetFullPath([string]$r25Manifest.runtimePackManifest) -cne
+                [System.IO.Path]::GetFullPath([string]$manifest.runtimePackManifest) -or
+            (Get-FileHash -LiteralPath ([string]$r25Manifest.runtimePackManifest) -Algorithm SHA256).Hash -ine
+                [string]$r25Manifest.runtimePackManifestSha256) {
+            throw 'R25 manifest does not bind a valid fail-fast record in the requested candidate.'
+        }
+        $r25Analyzer = Join-Path $repo 'scripts\dotnet\analyze-c188r25-failfast-origin.py'
+        $python = (Get-Command python.exe -ErrorAction Stop | Select-Object -First 1).Source
+        $r25Qualification = & $python $r25Analyzer '--candidate-root' $candidate 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) { throw "R25 linked candidate qualification failed: $r25Qualification" }
+        $r25QualificationObject = $r25Qualification | ConvertFrom-Json -ErrorAction Stop
+        if ([string]$r25QualificationObject.candidate.recordAddress -ine [string]$r25Manifest.diagnostics.recordAddress) {
+            throw 'R25 record address differs from the linked candidate symbol.'
+        }
+        $final.r25ManifestPath=$R25ManifestPath
+        $final.r25RecordAddress=[string]$r25Manifest.diagnostics.recordAddress
     }
     $expectedPaths = @($integrity.files | ForEach-Object { [string]$_.path })
     $actualPaths = @(Get-ChildItem -LiteralPath $candidate -Recurse -File | Where-Object {
@@ -81,7 +112,7 @@ try {
     $final.candidateIntegrityVerified = $true
 
     if (Test-Path -LiteralPath $guardRoot -PathType Container) {
-        foreach ($existingGuardPath in @(Get-ChildItem -LiteralPath $guardRoot -File -Filter 'attempt-r24-*.json')) {
+        foreach ($existingGuardPath in @(Get-ChildItem -LiteralPath $guardRoot -File -Filter 'attempt-*.json')) {
             try { $existingGuard = Get-Content -LiteralPath $existingGuardPath.FullName -Raw | ConvertFrom-Json -ErrorAction Stop }
             catch { throw "Existing R24 guard is unreadable; refusing a new boot: $($existingGuardPath.FullName)" }
             if ([System.IO.Path]::GetFullPath([string]$existingGuard.candidateRoot) -eq $candidate) {
@@ -122,17 +153,17 @@ try {
     }
     $preflight | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $preflightRoot 'qac-preflight.json') -Encoding utf8
     if (-not $clear) {
-        $final.outcome='INITIALIZEMODULES_GUEST_DEFERRED'
+        $final.outcome=if ($isR25) { 'FAILFAST_QUALIFICATION_GUEST_DEFERRED' } else { 'INITIALIZEMODULES_GUEST_DEFERRED' }
         $final.failure='Exclusive QAC preflight was not clear; no reservation or boot was attempted.'
         $final | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $evidencePath -Encoding utf8
-        Write-Output "C188R24_INITIALIZEMODULES=$($final.outcome) QAC_PREFLIGHT=NOT_CLEAR NO_BOOT=TRUE"
-        Write-Output "C188R24_EVIDENCE=$evidencePath"
+        Write-Output "$($runPrefix.ToUpperInvariant())_NATIVE_OUTCOME=$($final.outcome) QAC_PREFLIGHT=NOT_CLEAR NO_BOOT=TRUE"
+        Write-Output "$($runPrefix.ToUpperInvariant())_EVIDENCE=$evidencePath"
         return
     }
 
     $null = New-Item -ItemType Directory -Path $guardRoot -Force
     $guard = [ordered]@{
-        schema='GUIDEXOS_C188R24_ONE_BOOT_GUARD_V1';candidateRoot=$candidate
+        schema=if ($isR25) { 'GUIDEXOS_C188R25_ONE_BOOT_GUARD_V1' } else { 'GUIDEXOS_C188R24_ONE_BOOT_GUARD_V1' };candidateRoot=$candidate
         candidateSourceHead=[string]$manifest.sourceHead
         candidateManifestSha256=(Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash
         candidateIntegritySha256=(Get-FileHash -LiteralPath $integrityPath -Algorithm SHA256).Hash
@@ -142,8 +173,13 @@ try {
         retryAllowed=$false;consumed=$true;consumedUtc=[DateTime]::UtcNow.ToString('O')
     }
     $guard | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $guardPath -Encoding utf8
-    $runnerStdoutPath = Join-Path $phaseRoot ('r24-runner-' + $runId + '.stdout.log')
-    $runnerStderrPath = Join-Path $phaseRoot ('r24-runner-' + $runId + '.stderr.log')
+    if ($isR25) {
+        $null = New-Item -ItemType Directory -Path $bootRoot -Force
+        [ordered]@{schema='GUIDEXOS_C188R25_FAILFAST_CAPTURE_CONFIG_V1';recordAddress=[string]$r25Manifest.diagnostics.recordAddress;recordBytes=80;candidateManifestSha256=(Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash} |
+            ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $bootRoot 'r25-failfast-capture.json') -Encoding utf8
+    }
+    $runnerStdoutPath = Join-Path $phaseRoot ($runPrefix + '-runner-' + $runId + '.stdout.log')
+    $runnerStderrPath = Join-Path $phaseRoot ($runPrefix + '-runner-' + $runId + '.stderr.log')
     $psi = [System.Diagnostics.ProcessStartInfo]::new()
     $psi.FileName=$pwsh;$psi.WorkingDirectory=$repo;$psi.UseShellExecute=$false
     $psi.CreateNoWindow=$true;$psi.RedirectStandardOutput=$true;$psi.RedirectStandardError=$true
@@ -227,9 +263,74 @@ try {
         M11=[bool]($null -ne $r12Evidence -and [string]$r12Evidence.factoryEvidence.captureState -eq 'complete')
         M12=$qacRelease
     }
+    if ($isR25) {
+        $r25SnapshotPath = Join-Path $bootRoot 'r25-failfast-origin-fatal-marker-snapshot.json'
+        if (-not (Test-Path -LiteralPath $r25SnapshotPath -PathType Leaf)) {
+            $r25SnapshotPath = Join-Path $bootRoot 'r25-failfast-origin-readiness-timeout-snapshot.json'
+        }
+        $final.r25SnapshotPath=if (Test-Path -LiteralPath $r25SnapshotPath -PathType Leaf) { $r25SnapshotPath } else { $null }
+        if ($null -ne $final.r25SnapshotPath) {
+            $r25Snapshot = Get-Content -LiteralPath $r25SnapshotPath -Raw | ConvertFrom-Json -ErrorAction Stop
+            $r25Analyzer = Join-Path $repo 'scripts\dotnet\analyze-c188r25-failfast-origin.py'
+            $python = (Get-Command python.exe -ErrorAction Stop | Select-Object -First 1).Source
+            $r25AnalysisText = & $python $r25Analyzer '--candidate-root' $candidate '--snapshot' $r25SnapshotPath 2>&1 | Out-String
+            if ($LASTEXITCODE -eq 0) {
+                $r25AnalysisPath = Join-Path $bootRoot 'r25-origin-analysis.json'
+                Set-Content -LiteralPath $r25AnalysisPath -Value $r25AnalysisText -Encoding utf8
+                $r25Analysis = $r25AnalysisText | ConvertFrom-Json -ErrorAction Stop
+                $final.r25OriginAnalysisPath=$r25AnalysisPath
+                $final.r25FirstFailureRecordValid=[bool]$r25Analysis.recordValid
+                $final.r25CallerAttribution=$r25Analysis.caller
+                if ([bool]$r25Analysis.recordValid -and [bool]$r25Analysis.caller.resolved) {
+                    $final.failure='The first fatal boundary and its enclosing linked function were captured; the underlying violated contract remains unproven.'
+                } elseif ([bool]$r25Analysis.recordValid) {
+                    $final.outcome='FAILFAST_EVIDENCE_BLOCKED'
+                    $final.failure='The first-failure record was valid, but its capture return PC did not resolve to the linked capture call.'
+                }
+            } else {
+                $final.r25AnalysisError=$r25AnalysisText
+            }
+        }
+    }
+    if ($isR25 -and $null -ne $final.r25SnapshotPath) {
+        $r25Snapshot = Get-Content -LiteralPath $final.r25SnapshotPath -Raw | ConvertFrom-Json -ErrorAction Stop
+        $triggerName = [string]$r25Snapshot.trigger
+        $r25CaptureFiles = @(
+            $final.r25SnapshotPath,
+            (Join-Path $bootRoot "r25-failfast-origin-$triggerName-registers.txt"),
+            (Join-Path $bootRoot "r25-failfast-origin-$triggerName-stack.txt"),
+            (Join-Path $bootRoot 'r25-origin-analysis.json'),
+            (Join-Path $bootRoot 'serial.log'),
+            (Join-Path $bootRoot 'qmp.log'),
+            (Join-Path $bootRoot 'qac.stdout.log'),
+            (Join-Path $bootRoot 'qac.stderr.log'),
+            (Join-Path $bootRoot 'qac-exit-code.txt'))
+        $r25FinalFiles = @($r25CaptureFiles | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | ForEach-Object {
+            [ordered]@{
+                path=[System.IO.Path]::GetRelativePath($bootRoot,$_)
+                lengthBytes=(Get-Item -LiteralPath $_).Length
+                sha256=(Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToUpperInvariant()
+            }
+        })
+        $r25HashManifestPath = Join-Path $bootRoot 'r25-final-artifact-hashes.json'
+        if (Test-Path -LiteralPath $r25HashManifestPath) { throw 'Refusing to overwrite post-QEMU R25 artifact hash manifest.' }
+        [ordered]@{
+            schema='GUIDEXOS_C188R25_POST_QEMU_ARTIFACT_HASHES_V1'
+            generatedUtc=[DateTime]::UtcNow.ToString('O')
+            candidateRoot=$candidate
+            qemuExitCode=$qemuExit
+            qacReleaseVerified=[bool]$qacRelease
+            files=$r25FinalFiles
+        } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $r25HashManifestPath -Encoding utf8
+        $final.r25FinalHashManifestPath=$r25HashManifestPath
+        $final.r25FinalHashManifestSha256=(Get-FileHash -LiteralPath $r25HashManifestPath -Algorithm SHA256).Hash.ToUpperInvariant()
+    }
     if (-not $qacRelease) {
-        $final.outcome='INITIALIZEMODULES_EVIDENCE_BLOCKED'
+        $final.outcome=if ($isR25) { 'FAILFAST_EVIDENCE_BLOCKED' } else { 'INITIALIZEMODULES_EVIDENCE_BLOCKED' }
         $final.failure='Post-run QAC shutdown/release could not be verified; inspect the preserved direct-child and QAC evidence.'
+    } elseif ($isR25 -and [bool]$final.r25FirstFailureRecordValid -and
+            $null -ne $final.r25CallerAttribution -and [bool]$final.r25CallerAttribution.resolved) {
+        $final.outcome='FAILFAST_ORIGIN_ATTRIBUTED'
     } elseif ($factoryVerified) {
         $final.outcome='REAL_SETTINGS_FACTORY_NATIVE_VERIFIED'
     } elseif ($m7) {
@@ -245,21 +346,27 @@ try {
         $final.outcome='INITIALIZEMODULES_EVIDENCE_BLOCKED'
         $final.failure='No initializer RIP or return marker was captured; the last serial marker is not treated as the last executed instruction.'
     }
+    if ($isR25 -and $final.outcome -in @('INITIALIZEMODULES_EVIDENCE_BLOCKED','INITIALIZEMODULES_BOUNDARY_ADVANCED')) {
+        $final.outcome='FAILFAST_EVIDENCE_BLOCKED'
+        if ([string]::IsNullOrWhiteSpace([string]$final.failure)) {
+            $final.failure='The boot produced no valid first-failure record and no accepted initialization handoff.'
+        }
+    }
     if ($process.ExitCode -ne 0 -and [string]::IsNullOrWhiteSpace($final.failure)) {
         $final.failure='Bounded Settings runner exited nonzero after preserving its native/QAC evidence.'
     }
 } catch {
     $final.failure=$_.Exception.Message
     if ($final.qacPreflight -eq 'NOT_CLEAR' -or $final.qacPreflight -eq 'unavailable') {
-        $final.outcome='INITIALIZEMODULES_GUEST_DEFERRED'
+        $final.outcome=if ($isR25) { 'FAILFAST_QUALIFICATION_GUEST_DEFERRED' } else { 'INITIALIZEMODULES_GUEST_DEFERRED' }
     }
 }
 if (-not (Test-Path -LiteralPath (Split-Path -Parent $evidencePath))) {
     $null=New-Item -ItemType Directory -Path (Split-Path -Parent $evidencePath) -Force
 }
 $final | ConvertTo-Json -Depth 18 | Set-Content -LiteralPath $evidencePath -Encoding utf8
-Write-Output "C188R24_INITIALIZEMODULES=$($final.outcome) QAC_RELEASE=$($final.qacReleaseVerified) SNAPSHOT=$($final.cpuSnapshotPath)"
-Write-Output "C188R24_EVIDENCE=$evidencePath"
-if ($final.outcome -in @('INITIALIZEMODULES_EVIDENCE_BLOCKED','MODULE_REGISTRATION_CAUSE_PROVEN')) {
-    throw "R24 ended as $($final.outcome): $($final.failure)"
+Write-Output "$($runPrefix.ToUpperInvariant())_NATIVE_OUTCOME=$($final.outcome) QAC_RELEASE=$($final.qacReleaseVerified) SNAPSHOT=$($final.cpuSnapshotPath)"
+Write-Output "$($runPrefix.ToUpperInvariant())_EVIDENCE=$evidencePath"
+if ($final.outcome -in @('INITIALIZEMODULES_EVIDENCE_BLOCKED','MODULE_REGISTRATION_CAUSE_PROVEN','FAILFAST_EVIDENCE_BLOCKED')) {
+    throw "$($runPrefix.ToUpperInvariant()) ended as $($final.outcome): $($final.failure)"
 }

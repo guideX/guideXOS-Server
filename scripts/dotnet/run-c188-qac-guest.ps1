@@ -20,6 +20,7 @@ if ([bool]$ProductionCompatibility -ne $isProductionScenario) {
 }
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+. (Join-Path $PSScriptRoot 'c188r25-failfast-runner-predicates.ps1')
 $phaseRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188-external-app-identity')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r5-notes-proof-invocation')),
@@ -31,6 +32,17 @@ $phaseRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4r1-diagnostic-link-repair')),
     [System.IO.Path]::GetFullPath('E:\CodexArtifacts\guideXOSServerV1.1_DOTNET_SUPPORT'))
 $bootRoot = [System.IO.Path]::GetFullPath($BootEvidencePath)
+$r25CaptureConfigPath = Join-Path $bootRoot 'r25-failfast-capture.json'
+$r25CaptureConfig = $null
+if (Test-Path -LiteralPath $r25CaptureConfigPath -PathType Leaf) {
+    try { $r25CaptureConfig = Get-Content -LiteralPath $r25CaptureConfigPath -Raw | ConvertFrom-Json -ErrorAction Stop }
+    catch { throw 'R25 fail-fast capture configuration is malformed; no QAC guest was launched.' }
+    if ($r25CaptureConfig.schema -cne 'GUIDEXOS_C188R25_FAILFAST_CAPTURE_CONFIG_V1' -or
+        [string]$r25CaptureConfig.recordAddress -notmatch '^0x[0-9A-Fa-f]{8,16}$' -or
+        [int]$r25CaptureConfig.recordBytes -ne 80) {
+        throw 'R25 fail-fast capture configuration failed validation; no QAC guest was launched.'
+    }
+}
 $phaseRoot = @($phaseRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $bootRoot)
     $relative -ne '.' -and -not $relative.StartsWith('..' + [System.IO.Path]::DirectorySeparatorChar) -and
@@ -276,6 +288,61 @@ function Save-C188R24TimeoutCpuSnapshot {
     return $snapshotPath
 }
 
+function Save-C188R25FailFastOriginSnapshot([string]$Trigger) {
+    $snapshotPath = Join-Path $bootRoot ("r25-failfast-origin-$Trigger-snapshot.json")
+    if (Test-Path -LiteralPath $snapshotPath) { throw 'Refusing to overwrite R25 fail-fast evidence.' }
+    $snapshot = [ordered]@{
+        schema='GUIDEXOS_C188R25_FAILFAST_ORIGIN_SNAPSHOT_V1';trigger=$Trigger
+        capturedUtc=[DateTime]::UtcNow.ToString('O');recordAddress=[string]$r25CaptureConfig.recordAddress
+        initialStatus=$null;cpuTopology=$null;stopResponse=$null;pausedStatus=$null
+        registersResponse=$null;registersText=$null;registersSha256=''
+        recordResponse=$null;recordText=$null;recordWords=@();recordValid=$false;recordError=''
+        stackAddress=$null;stackResponse=$null;stackText=$null;stackSha256=''
+        pauseVerified=$false;captureError=''
+    }
+    try {
+        $snapshot.initialStatus = Invoke-Qmp 'query-status'
+        $snapshot.cpuTopology = Invoke-Qmp 'query-cpus-fast'
+        $snapshot.stopResponse = Invoke-Qmp 'stop'
+        $snapshot.pausedStatus = Invoke-Qmp 'query-status'
+        $snapshot.pauseVerified = $snapshot.pausedStatus -match '"running"\s*:\s*false' -and
+            $snapshot.pausedStatus -match '"status"\s*:\s*"paused"'
+        if (-not $snapshot.pauseVerified) { throw 'QMP did not confirm pause before R25 reads.' }
+        $snapshot.registersResponse = Invoke-Qmp 'human-monitor-command' ([ordered]@{'command-line'='info registers'})
+        $snapshot.registersText = [string]([string]$snapshot.registersResponse | ConvertFrom-Json -ErrorAction Stop).return
+        if ([string]::IsNullOrWhiteSpace($snapshot.registersText)) { throw 'R25 CPU register capture was empty.' }
+        $registerPath = Join-Path $bootRoot "r25-failfast-origin-$Trigger-registers.txt"
+        Set-Content -LiteralPath $registerPath -Value $snapshot.registersText -Encoding utf8
+        $snapshot.registersSha256 = (Get-FileHash -LiteralPath $registerPath -Algorithm SHA256).Hash
+        $snapshot.recordResponse = Invoke-Qmp 'human-monitor-command' ([ordered]@{'command-line'=('x/10gx ' + [string]$r25CaptureConfig.recordAddress)})
+        $snapshot.recordText = [string]([string]$snapshot.recordResponse | ConvertFrom-Json -ErrorAction Stop).return
+        $words = [System.Collections.Generic.List[UInt64]]::new()
+        foreach ($line in [regex]::Matches($snapshot.recordText,'(?im)^\s*0x[0-9a-f]{1,16}:\s*(?<values>[^\r\n]+)')) {
+            foreach ($word in [regex]::Matches($line.Groups['values'].Value,'(?i)0x([0-9a-f]{16})')) {
+                $words.Add([Convert]::ToUInt64($word.Groups[1].Value,16))
+            }
+        }
+        $snapshot.recordWords = @($words | ForEach-Object { '0x{0:X16}' -f $_ })
+        if ($words.Count -eq 10) {
+            $snapshot.recordValid = $words[0] -eq 0x4738523235464154 -and
+                $words[1] -eq 1 -and $words[2] -eq 80 -and
+                $words[4] -eq 7 -and $words[9] -eq 0x5055424C49534844 -and $words[5] -ne 0
+            if (-not $snapshot.recordValid) { $snapshot.recordError='record words failed magic/schema/size/published/caller validation' }
+        } else { $snapshot.recordError='QEMU returned other than ten fixed-width record words' }
+        $rspMatch = [regex]::Match($snapshot.registersText,'(?i)\bRSP\s*=\s*([0-9a-f]{8,16})')
+        if ($rspMatch.Success) {
+            $snapshot.stackAddress = '0x' + $rspMatch.Groups[1].Value
+            $snapshot.stackResponse = Invoke-Qmp 'human-monitor-command' ([ordered]@{'command-line'=('x/8gx ' + $snapshot.stackAddress)})
+            $snapshot.stackText = [string]([string]$snapshot.stackResponse | ConvertFrom-Json -ErrorAction Stop).return
+            $stackPath = Join-Path $bootRoot "r25-failfast-origin-$Trigger-stack.txt"
+            Set-Content -LiteralPath $stackPath -Value $snapshot.stackText -Encoding utf8
+            $snapshot.stackSha256 = (Get-FileHash -LiteralPath $stackPath -Algorithm SHA256).Hash
+        }
+    } catch { $snapshot.captureError = $_.Exception.Message }
+    $snapshot | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $snapshotPath -Encoding utf8
+    return $snapshot
+}
+
 try {
     # qac run owns admission and starts its QEMU child only after the exclusive
     # acceptance reservation is granted. If another managed reservation is
@@ -318,14 +385,32 @@ try {
     Wait-QmpListener $BootTimeoutSeconds
     $deadline = (Get-Date).AddSeconds($BootTimeoutSeconds)
     $ready = $false
+    $r25MarkerSeen = $false
     do {
         $text = Read-GuestSerial
+        if ($null -ne $r25CaptureConfig -and -not $r25MarkerSeen -and
+            $text.Contains('[C188R25-FAILFAST-CAPTURED]')) {
+            $r25MarkerSeen = $true
+            $r25Snapshot = Save-C188R25FailFastOriginSnapshot 'fatal-marker'
+            $fatalAction = Get-C188R25FatalCaptureAction $true `
+                ([bool]$r25Snapshot.recordValid) ([bool]$r25Snapshot.pauseVerified)
+            if ($fatalAction -eq 'CAPTURED_FATAL') {
+                Write-Output "C188R25_FAILFAST_CAPTURED=$($r25Snapshot.recordAddress)"
+                throw 'R25 captured a published first-failure record and paused CPU/stack evidence.'
+            }
+            if ([bool]$r25Snapshot.pauseVerified) { [void](Invoke-Qmp 'cont') }
+            Write-Warning 'R25 fatal marker lacked a valid published record and confirmed pause; readiness monitoring continues.'
+        }
         if ($text -match '(?m)^\[KERNEL\] Entering main loop \(waiting for input\)\.\.\.\r?$' -and
             $text -match '(?m)^\[KERNEL\] Input manager initialized') { $ready = $true; break }
         if ($qacProcess.HasExited) { throw "QAC/QEMU exited before guest readiness: $($qacProcess.ExitCode)" }
         Start-Sleep -Milliseconds 150
     } while ((Get-Date) -lt $deadline)
     if (-not $ready) {
+        if ($null -ne $r25CaptureConfig) {
+            $r25Snapshot = Save-C188R25FailFastOriginSnapshot 'readiness-timeout'
+            Write-Output "C188R25_TIMEOUT_FAILFAST_RECORD_VALID=$($r25Snapshot.recordValid)"
+        }
         if ($CaptureCpuOnReadinessTimeout) {
             $cpuSnapshotPath = Save-C188R24TimeoutCpuSnapshot
             Write-Output "C188R24_TIMEOUT_CPU_SNAPSHOT=$cpuSnapshotPath"

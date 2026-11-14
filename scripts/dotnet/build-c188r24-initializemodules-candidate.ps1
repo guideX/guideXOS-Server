@@ -1,7 +1,8 @@
 param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
     [string]$ArtifactRoot = 'E:\CodexArtifacts\guideXOSServerV1.1_DOTNET_SUPPORT',
-    [string]$CandidateRoot = ''
+    [string]$CandidateRoot = '',
+    [switch]$C188R25FailFastOriginCapture
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -23,7 +24,8 @@ $python = (Get-Command python.exe -ErrorAction Stop | Select-Object -First 1).So
 $r23Builder = Join-Path $RepoRoot 'scripts\dotnet\build-c188r23-settings-candidate.ps1'
 $buildLog = Join-Path (Split-Path -Parent $candidate) ('r24-r23-build-' + [guid]::NewGuid().ToString('N') + '.log')
 $buildOutput = (& $pwsh -NoProfile -File $r23Builder -RepoRoot $RepoRoot `
-    -ArtifactRoot $ArtifactRoot -CandidateRoot $candidate 2>&1 | Out-String)
+    -ArtifactRoot $ArtifactRoot -CandidateRoot $candidate `
+    -C188R25FailFastOriginCapture:$C188R25FailFastOriginCapture 2>&1 | Out-String)
 $buildCode = $LASTEXITCODE
 Set-Content -LiteralPath $buildLog -Value $buildOutput -Encoding utf8
 if ($buildCode -ne 0) { throw "R23 source build failed while preparing R24; see $buildLog" }
@@ -50,9 +52,10 @@ $modulesZ = [Convert]::ToUInt64((Get-MapAddress '__modules_z'),16)
 if ($modulesZ -lt $modulesA -or (($modulesZ - $modulesA) % 8) -ne 0) {
     throw 'R24 module-header bounds are invalid in the linked map.'
 }
-if ($initialize -ne '00000001000ad660' -or $rhp -ne '00000001000f94d0' -or
-    $malloc -ne '00000001000f6640' -or $stateHelper -ne '00000001000f2f80' -or
-    $typeManagers -ne '00000001000ad820') {
+if (-not $C188R25FailFastOriginCapture -and
+    ($initialize -ne '00000001000ad660' -or $rhp -ne '00000001000f94d0' -or
+     $malloc -ne '00000001000f6640' -or $stateHelper -ne '00000001000f2f80' -or
+     $typeManagers -ne '00000001000ad820')) {
     throw 'R24 regenerated link changed the inspected code address profile; review disassembly before packaging.'
 }
 $addresses = [ordered]@{
@@ -113,8 +116,19 @@ foreach ($relative in $packageRelative) {
 $binaryTest = Join-Path $RepoRoot 'scripts\dotnet\test-c188r24-initializemodules.py'
 $binaryOutput = (& $python $binaryTest '--candidate-root' $candidate 2>&1 | Out-String)
 $binaryCode = $LASTEXITCODE
+if ($binaryCode -eq 0) {
+    $callOffsetMatch = [regex]::Match($binaryOutput,'R24_INITIALIZEMODULES_SHARED_CALL_OFFSET=(0x[0-9a-fA-F]+)')
+    if (-not $callOffsetMatch.Success) { throw 'R24 ELF test did not identify the linked InitializeModules call site.' }
+    $helperAddress = [Convert]::ToUInt64($stateHelper,16)
+    $callOffset = [Convert]::ToUInt64($callOffsetMatch.Groups[1].Value.Substring(2),16)
+    $addresses.initializeModulesCallSite = '0x{0:x}' -f ($helperAddress + $callOffset)
+    $addresses.initializeModulesCallReturn = '0x{0:x}' -f ($helperAddress + $callOffset + 5)
+    $addresses | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $addressesPath -Encoding utf8
+}
 $snapshotTest = Join-Path $RepoRoot 'scripts\dotnet\test-c188r24-initializemodules-snapshot.ps1'
-$snapshotOutput = (& $pwsh -NoProfile -File $snapshotTest 2>&1 | Out-String)
+$snapshotArgs = @()
+if ($C188R25FailFastOriginCapture) { $snapshotArgs += @('-CandidateRoot',$candidate) }
+$snapshotOutput = (& $pwsh -NoProfile -File $snapshotTest @snapshotArgs 2>&1 | Out-String)
 $snapshotCode = $LASTEXITCODE
 $hostedLog = Join-Path $candidate 'r24-hosted-qualification.log'
 Set-Content -LiteralPath $hostedLog -Value ($binaryOutput + "`n" + $snapshotOutput) -Encoding utf8

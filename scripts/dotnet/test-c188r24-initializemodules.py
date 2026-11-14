@@ -57,6 +57,27 @@ def relative_call_target(elf: bytes, segments: list[tuple[int, int, int]], addre
     return address + 5 + displacement
 
 
+def direct_call_offsets_to(
+    elf: bytes,
+    segments: list[tuple[int, int, int]],
+    function: int,
+    size: int,
+    target: int,
+) -> list[int]:
+    matches = []
+    for offset in range(size - 4):
+        try:
+            instruction = read_va(elf, segments, function + offset, 5)
+        except ValueError:
+            break
+        if instruction[0] != 0xE8:
+            continue
+        displacement = struct.unpack_from("<i", instruction, 1)[0]
+        if function + offset + 5 + displacement == target:
+            matches.append(offset)
+    return matches
+
+
 def map_address(map_text: str, symbol: str) -> int:
     pattern = re.compile(rf"(?m)^\s*\S+\s+{re.escape(symbol)}\s+([0-9A-Fa-f]{{16}})\b")
     match = pattern.search(map_text)
@@ -93,12 +114,24 @@ def main() -> int:
     type_managers = map_address(map_text, "S_P_CoreLib_Internal_Runtime_CompilerHelpers_StartupCodeHelpers__CreateTypeManagers")
     modules_a = map_address(map_text, "__modules_a")
     modules_z = map_address(map_text, "__modules_z")
-    checks.require(initializer == 0x1000AD660, "generated InitializeModules map address")
-    checks.require(register == 0x1000F94D0, "actual RhpRegisterOsModule map address")
-    checks.require(allocator == 0x1000F6640, "native malloc map address")
-    checks.require(pal_virtual_alloc == 0x1000F55D0, "PAL virtual allocation provider map address")
-    checks.require(state_helper == 0x1000F2F80, "shared helper map address")
-    checks.require(type_managers == 0x1000AD820, "generated type-manager helper map address")
+    runtime_manifest_path = Path(manifest.get("runtimePackManifest", ""))
+    runtime_manifest = (
+        json.loads(runtime_manifest_path.read_text(encoding="utf-8-sig"))
+        if runtime_manifest_path.is_file()
+        else {}
+    )
+    r25_profile = runtime_manifest.get("c188r25FailFastOriginCapture") is True
+    if r25_profile:
+        checks.require(all(address >= 0x100000000 for address in (
+            initializer, register, allocator, pal_virtual_alloc, state_helper, type_managers
+        )), "R25 linked initialization symbols use the candidate image address space")
+    else:
+        checks.require(initializer == 0x1000AD660, "generated InitializeModules map address")
+        checks.require(register == 0x1000F94D0, "actual RhpRegisterOsModule map address")
+        checks.require(allocator == 0x1000F6640, "native malloc map address")
+        checks.require(pal_virtual_alloc == 0x1000F55D0, "PAL virtual allocation provider map address")
+        checks.require(state_helper == 0x1000F2F80, "shared helper map address")
+        checks.require(type_managers == 0x1000AD820, "generated type-manager helper map address")
     checks.require((modules_z - modules_a) // 8 == 2 and (modules_z - modules_a) % 8 == 0,
                    "module header pointer/count describe two native entries")
     checks.require("Runtime.WorkstationGC:RuntimeInstance.cpp.obj" in map_text[map_text.index("RhpRegisterOsModule") : map_text.index("RhpRegisterOsModule") + 180],
@@ -106,8 +139,14 @@ def main() -> int:
     checks.require("guidexos_nativeaot_startup_imports.production.obj" in map_text,
                    "startup allocator production object provenance")
 
-    checks.require(relative_call_target(elf, segments, state_helper + 0x211) == initializer,
-                   "native call-site is direct REL32 to InitializeModules")
+    shared_initializer_calls = direct_call_offsets_to(elf, segments, state_helper, 0x300, initializer)
+    checks.require(len(shared_initializer_calls) == 1,
+                   "shared helper has one direct REL32 call to InitializeModules")
+    shared_initializer_call_offset = shared_initializer_calls[0] if len(shared_initializer_calls) == 1 else -1
+    if shared_initializer_call_offset >= 0:
+        checks.require(relative_call_target(
+            elf, segments, state_helper + shared_initializer_call_offset
+        ) == initializer, "native call-site resolves to generated InitializeModules")
     checks.require(relative_call_target(elf, segments, initializer + 0x1B) == reverse_pinvoke,
                    "initializer prologue uses the linked reverse-P/Invoke transition")
     checks.require(relative_call_target(elf, segments, initializer + 0x23) == register,
@@ -122,17 +161,25 @@ def main() -> int:
     helper_prologue = read_va(elf, segments, state_helper, 4)
     checks.require(helper_prologue == bytes.fromhex("48 83 ec 68"),
                    "InitializeModules caller reserves 0x68 bytes and aligns pre-call RSP")
-    call_arguments = read_va(elf, segments, state_helper + 0x211 - 24, 29)
-    checks.require(call_arguments == bytes.fromhex(
-        "c7 44 24 20 10 00 00 00 48 c1 fb 03 4d 8b cd 44 8b c3 49 8b d4 48 8b cd e8 ca a4 fb ff"
-    ), "caller passes fifth count 16 on stack and module/classlib values in Windows x64 registers")
+    call_arguments = read_va(
+        elf, segments, state_helper + shared_initializer_call_offset - 24, 29
+    )
+    expected_call_arguments = bytes.fromhex(
+        "48 c1 fb 03 4d 8b cd 44 8b c3 c7 44 24 20 10 00 00 00 49 8b d4 48 8b cd"
+        if r25_profile
+        else "c7 44 24 20 10 00 00 00 48 c1 fb 03 4d 8b cd 44 8b c3 49 8b d4 48 8b cd"
+    )
+    checks.require(call_arguments[:24] == expected_call_arguments,
+                   "caller passes fifth count 16 on stack and module/classlib values in Windows x64 registers")
+    checks.require(call_arguments[24] == 0xE8,
+                   "generated initializer handoff uses a direct call after ABI setup")
 
     entry = read_va(elf, segments, initializer, 0x40)
     checks.require(entry[:10] == bytes.fromhex("41 56 57 56 55 53 48 83 ec 40"),
                    "initializer saves five nonvolatile registers and reserves 0x40 bytes")
     checks.require(entry[10:26] == bytes.fromhex("48 8b d9 48 8b fa 41 8b f0 49 8b e9 48 8d 4c 24"),
                    "Windows x64 RCX/RDX/R8/R9 arguments are captured in preserved registers")
-    checks.require(entry[26] == 0x30 and entry[27:31] == bytes.fromhex("e8 60 62 04"),
+    checks.require(entry[26] == 0x30 and entry[27] == 0xE8,
                    "reverse-P/Invoke entry transition is first generated prologue call")
     checks.require(read_va(elf, segments, initializer + 0x28, 8) == bytes.fromhex("44 8b b4 24 90 00 00 00"),
                    "fifth argument is loaded from entry RSP+0x90 after the 0x68-byte frame")
@@ -142,9 +189,11 @@ def main() -> int:
                    "Rhp call uses direct call instruction, not an IAT call")
 
     import_body = read_va(elf, segments, register, 0x61)
-    checks.require(import_body[:22] == bytes.fromhex(
-        "40 53 48 83 ec 20 48 8b d9 48 8d 15 e8 ea 0b 00 b9 10 00 00 00 e8"
-    ), "registration entry preserves RBX, allocates shadow space, and requests a 16-byte entry")
+    checks.require(
+        import_body[:12] == bytes.fromhex("40 53 48 83 ec 20 48 8b d9 48 8d 15")
+        and import_body[16:22] == bytes.fromhex("b9 10 00 00 00 e8"),
+        "registration entry preserves RBX, allocates shadow space, and requests a 16-byte entry",
+    )
     checks.require(import_body[0x1D:0x22] == bytes.fromhex("48 85 c0 74 39"),
                    "native allocation failure follows an explicit null-return branch")
     checks.require(bytes.fromhex("f0 49 0f b1 50 10") in import_body,
@@ -184,6 +233,7 @@ def main() -> int:
     checks.require("guidexos_nativeaot_pal_virtual_alloc(void* preferred" in pal_source,
                    "PAL provider exposes the linked virtual-allocation implementation")
 
+    print(f"R24_INITIALIZEMODULES_SHARED_CALL_OFFSET=0x{shared_initializer_call_offset:x}")
     print(f"R24_INITIALIZEMODULES_HOSTED_ASSERTIONS={checks.count} RESULT=PASS")
     return 0
 

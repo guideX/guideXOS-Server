@@ -5,6 +5,23 @@
 #include "guidexos_nativeaot_pal_contract.h"
 #include "guidexos_nativeaot_thread_attachment_contract.h"
 #include <stddef.h>
+#if defined(GUIDEXOS_NATIVEAOT_C188R25_FAILFAST_ORIGIN)
+#include "guidexos_nativeaot_failfast_origin.h"
+extern "C" __declspec(dllexport) volatile GuideXosR25FailFastOriginRecord
+    g_guideXosR25FailFastOriginRecord = {};
+extern "C" volatile uint32_t g_guideXosR25InitializationStage =
+    kGuideXosR25FailFastStageUnknown;
+namespace {
+__declspec(noinline) uintptr_t __cdecl
+guideXosNativeAotR25CaptureCallerReturnAddress();
+[[noreturn]] void guideXosFailFastImpl(uint32_t reason);
+[[noreturn]] __declspec(noinline) void __cdecl guideXosNativeAotR25FailFast(
+    uint32_t reason, uintptr_t callerCaptureReturnAddress);
+}
+#define guideXosFailFast(reason) \
+    guideXosNativeAotR25FailFast( \
+        (reason), guideXosNativeAotR25CaptureCallerReturnAddress())
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
 #include "guidexos_nativeaot_transition_attribution.h"
 #endif
@@ -378,7 +395,9 @@ constexpr gx_uint32 kMinimumTlsBlockSize = 0x110u;
 #if defined(GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION)
 extern "C" guidexos_nativeaot_allocation_diagnostics
     g_guideXosAllocationDiagnostics;
+#if !defined(GUIDEXOS_NATIVEAOT_C188R25_FAILFAST_ORIGIN)
 [[noreturn]] void guideXosFailFast(gx_uint32 reason);
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION)
 extern "C" void __cdecl guideXosNativeAotAllocationContextFixupRequest();
 #endif
@@ -32730,7 +32749,16 @@ uint32_t g_persistentManagedHeapPreserveCount = 0u;
 bool g_persistentManagedHeapInitialized = false;
 #endif
 
+#if defined(GUIDEXOS_NATIVEAOT_C188R25_FAILFAST_ORIGIN)
+__declspec(noinline) uintptr_t __cdecl
+guideXosNativeAotR25CaptureCallerReturnAddress() {
+    return reinterpret_cast<uintptr_t>(_ReturnAddress());
+}
+
+[[noreturn]] void guideXosFailFastImpl(uint32_t reason) {
+#else
 [[noreturn]] void guideXosFailFast(gx_uint32 reason) {
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION) && defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
     g_guideXosAllocationDiagnostics.failFastReason = reason;
 #if defined(GUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION)
@@ -32755,6 +32783,42 @@ bool g_persistentManagedHeapInitialized = false;
     for (;;) {
     }
 }
+
+#if defined(GUIDEXOS_NATIVEAOT_C188R25_FAILFAST_ORIGIN)
+namespace {
+volatile long g_guideXosR25FailFastClaim = 0;
+
+void guideXosR25TryEmitCapturedMarker() {
+    static const char marker[] = "[C188R25-FAILFAST-CAPTURED]\n";
+    for (uint32_t index = 0u; marker[index] != '\0'; ++index) {
+        if ((__inbyte(0x3FDu) & 0x20u) == 0u) return;
+        __outbyte(0x3F8u, static_cast<unsigned char>(marker[index]));
+    }
+}
+}
+
+[[noreturn]] __declspec(noinline) void __cdecl guideXosNativeAotR25FailFast(
+    uint32_t reason, uintptr_t callerCaptureReturnAddress) {
+    if (_InterlockedCompareExchange(&g_guideXosR25FailFastClaim, 1, 0) == 0) {
+        auto& record = g_guideXosR25FailFastOriginRecord;
+        record.magic = kGuideXosR25FailFastOriginMagic;
+        record.schemaVersion = kGuideXosR25FailFastOriginSchema;
+        record.recordBytes = sizeof(GuideXosR25FailFastOriginRecord);
+        record.originalReason = reason;
+        record.fastFailCode = kGuideXosR25FailFastFastFailCode;
+        record.callerCaptureReturnAddress = callerCaptureReturnAddress;
+        record.failFastImplementationAddress = reinterpret_cast<uintptr_t>(
+            &guideXosFailFastImpl);
+        record.initializationStage = g_guideXosR25InitializationStage;
+        record.flags = 0x7u; // call-site PC captured; no runtime thread state; reason is the only ABI value
+        _InterlockedExchange64(
+            reinterpret_cast<volatile __int64*>(&record.published),
+            static_cast<__int64>(kGuideXosR25FailFastOriginPublished));
+        guideXosR25TryEmitCapturedMarker();
+    }
+    guideXosFailFastImpl(reason);
+}
+#endif
 
 unsigned char* currentTlsBlock() {
     void** vector = reinterpret_cast<void**>(__readgsqword(kTlsVectorOffset));
@@ -33104,6 +33168,10 @@ void initializeNativeAotModules(bool registrationOnly = false) {
 #else
 void initializeNativeAotModules() {
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C188R25_FAILFAST_ORIGIN)
+    g_guideXosR25InitializationStage =
+        kGuideXosR25FailFastStageNativeModulePreparation;
+#endif
     if (g_guideXosNativeAotModulesInitialized) {
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
         guideXosNativeAotInitTraceRecord(GX_INIT_STAGE_MODULE_REGISTRATION,
@@ -33269,12 +33337,20 @@ void initializeNativeAotModules() {
     // generated five-argument module initializer is called.
     guidexos_nativeaot_pal_startup_marker(0xC188B007u);
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C188R25_FAILFAST_ORIGIN)
+    g_guideXosR25InitializationStage =
+        kGuideXosR25FailFastStageBeforeInitializeModules;
+#endif
     InitializeModules(
         osModule,
         __modules_a,
         static_cast<int>(__modules_z - __modules_a),
         g_guideXosNativeAotClasslibFunctions,
         16);
+#if defined(GUIDEXOS_NATIVEAOT_C188R25_FAILFAST_ORIGIN)
+    g_guideXosR25InitializationStage =
+        kGuideXosR25FailFastStageInitializeModulesReturned;
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE) && \
     defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
     recordManagedEntryModeCheckpoint(
