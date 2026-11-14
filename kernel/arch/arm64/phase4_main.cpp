@@ -698,14 +698,39 @@ static bool runsafe3b_wait_terminal(uint64_t execution_id, uint64_t owner_id,
     for (;;) {
         gxos_aarch64_el0_task_result current{};
         if (!phase2_el0_task_query(execution_id, owner_id, &current)) return false;
-        if (current.state == expected_state) {
+        if (current.state >= kernel::scheduler::EXECUTION_COMPLETED) {
             *result = current;
-            return true;
+            return current.state == expected_state;
         }
-        if (current.state >= kernel::scheduler::EXECUTION_COMPLETED ||
-            phase3_timer_counter() - start >= timeout_ticks) return false;
+        if (phase3_timer_counter() - start >= timeout_ticks) {
+            *result = current;
+            return false;
+        }
         kernel::scheduler::note_execution();
     }
+}
+
+static void runsafe3b_report_result(
+    const char* scenario, const gxos_aarch64_el0_task_result& result)
+{
+    print("[RUNSAFE3B] DIAGNOSTIC scenario="); print(scenario);
+    print(" state="); phase3_serial_dec(result.state);
+    print(" result_kind="); phase3_serial_dec(result.result_kind);
+    print(" result="); phase3_serial_dec(result.result_value);
+    print(" scheduled_ticks="); phase3_serial_dec(result.scheduled_counter_ticks);
+    print(" budget_ticks="); phase3_serial_dec(result.budget_counter_ticks);
+    print(" preemptions="); phase3_serial_dec(result.preemption_count);
+    print(" timer_irqs="); phase3_serial_dec(result.el0_timer_interrupt_count);
+    print(" entries="); phase3_serial_dec(result.el0_entry_count);
+    print(" resumes="); phase3_serial_dec(result.el0_resume_count);
+    print(" payload_x0="); phase3_serial_hex(result.saved_x0);
+    print(" payload_x9="); phase3_serial_hex(result.saved_x9);
+    print(" ESR="); phase3_serial_hex(result.fault_esr);
+    print(" ELR="); phase3_serial_hex(result.fault_elr);
+    print(" FAR="); phase3_serial_hex(result.fault_far);
+    print(" kernel_root_restored="); phase3_serial_dec(result.kernel_root_restored);
+    print(" cleanup="); phase3_serial_dec(result.resources_cleaned);
+    print("\n");
 }
 
 static bool runsafe3b_isolated_result(
@@ -787,16 +812,21 @@ static bool runsafe3b_run_scheduled_fixtures()
             GXOS_AARCH64_EL0_FIXTURE_FINITE_PREEMPTION, owner_id,
             UINT64_C(5000000), "FINITE", &execution_id)) return false;
     gxos_aarch64_el0_task_result finite{};
-    if (!runsafe3b_wait_terminal(execution_id, owner_id,
-            kernel::scheduler::EXECUTION_COMPLETED, &finite) ||
-        !runsafe3b_isolated_result(finite, owner_id) ||
-        finite.result_kind != kernel::scheduler::EXECUTION_RESULT_EXIT ||
-        finite.result_value != 42 || finite.scheduled_counter_ticks == 0 ||
-        finite.preemption_count == 0 || finite.el0_timer_interrupt_count == 0 ||
-        finite.el0_entry_count != 1 || finite.el0_resume_count == 0 ||
-        !finite.resources_cleaned || !finite.kernel_root_restored ||
-        runsafe3b_work_total() <= kernel_work_before ||
-        !runsafe3b_reap(execution_id, owner_id)) return false;
+    const bool finite_terminal = runsafe3b_wait_terminal(
+        execution_id, owner_id, kernel::scheduler::EXECUTION_COMPLETED, &finite);
+    const bool finite_pass = finite_terminal &&
+        runsafe3b_isolated_result(finite, owner_id) &&
+        finite.result_kind == kernel::scheduler::EXECUTION_RESULT_EXIT &&
+        finite.result_value == 42 && finite.scheduled_counter_ticks != 0 &&
+        finite.preemption_count != 0 && finite.el0_timer_interrupt_count != 0 &&
+        finite.el0_entry_count == 1 && finite.el0_resume_count != 0 &&
+        finite.resources_cleaned && finite.kernel_root_restored &&
+        runsafe3b_work_total() > kernel_work_before &&
+        runsafe3b_reap(execution_id, owner_id);
+    if (!finite_pass) {
+        runsafe3b_report_result("FINITE", finite);
+        return false;
+    }
     print("[RUNSAFE3B] FINITE PASS child="); phase3_serial_dec(finite.execution_id);
     print(" owner="); phase3_serial_dec(finite.owner_id);
     print(" address_space="); phase3_serial_dec(finite.address_space_id);
