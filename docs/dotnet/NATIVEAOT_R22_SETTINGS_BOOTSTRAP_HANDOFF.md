@@ -11,7 +11,7 @@ The one R22 QAC boot reached the new bootstrap-handoff-begin marker, then timed 
 - Branch: v1.1_DOTNET_SUPPORT
 - Starting HEAD: df73239998b45f5d61667e9c071cedff172e0caa
 - Implementation commit: c9905eea25c6b727c60e36c1a93cd94a7fa408bd.
-- Final repository HEAD: the documentation closeout commit immediately above the implementation commit; its exact object ID is in the task completion response.
+- Final repository HEAD: the documentation closeout commit above the implementation commit; its exact object ID is in the task completion response.
 - No push was made.
 
 The three pre-existing modified root object files were preserved, excluded from staging, and not consumed as unverified candidate inputs:
