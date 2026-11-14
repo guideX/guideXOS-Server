@@ -147,6 +147,61 @@ enum class EvidenceResult : uint8_t {
     MonotonicWentBackwards
 };
 
+// NAVHTTPS14's multi-source result is presented to this layer as data only.
+// Assessing it does not transition the OS clock to Authenticated.
+struct AgreementEvidence {
+    bool metadataPresent;
+    bool agreementSatisfied;
+    uint32_t policyIdentity;
+    uint8_t independentSourceCount;
+    int64_t earliestUnixSeconds;
+    int64_t latestUnixSeconds;
+    uint64_t evaluatedAtMonotonicSeconds;
+    uint64_t evidenceAgeAtEvaluationSeconds;
+    uint64_t maximumAgeSeconds;
+    uint64_t uncertaintySeconds;
+};
+
+enum class AgreementEvidenceResult : uint8_t {
+    Accepted,
+    InvalidMetadata,
+    AgreementNotSatisfied,
+    InsufficientIndependentSources,
+    Expired,
+    MonotonicWentBackwards,
+    ExcessiveUncertainty
+};
+
+inline AgreementEvidenceResult assess_agreement_evidence(
+    const AgreementEvidence& evidence,
+    uint64_t nowMonotonicSeconds,
+    uint64_t maximumAllowedUncertaintySeconds)
+{
+    if (!evidence.metadataPresent || evidence.policyIdentity == 0 ||
+        evidence.earliestUnixSeconds < kPlausibleMinimumUnixSeconds ||
+        evidence.latestUnixSeconds >= kPlausibleMaximumUnixSeconds ||
+        evidence.earliestUnixSeconds > evidence.latestUnixSeconds ||
+        evidence.maximumAgeSeconds == 0) {
+        return AgreementEvidenceResult::InvalidMetadata;
+    }
+    if (!evidence.agreementSatisfied) return AgreementEvidenceResult::AgreementNotSatisfied;
+    if (evidence.independentSourceCount < 2) {
+        return AgreementEvidenceResult::InsufficientIndependentSources;
+    }
+    if (evidence.uncertaintySeconds > maximumAllowedUncertaintySeconds) {
+        return AgreementEvidenceResult::ExcessiveUncertainty;
+    }
+    if (nowMonotonicSeconds < evidence.evaluatedAtMonotonicSeconds) {
+        return AgreementEvidenceResult::MonotonicWentBackwards;
+    }
+    const uint64_t ageSinceEvaluation = nowMonotonicSeconds - evidence.evaluatedAtMonotonicSeconds;
+    if (evidence.evidenceAgeAtEvaluationSeconds > evidence.maximumAgeSeconds ||
+        ageSinceEvaluation > evidence.maximumAgeSeconds - evidence.evidenceAgeAtEvaluationSeconds) {
+        return AgreementEvidenceResult::Expired;
+    }
+    return AgreementEvidenceResult::Accepted;
+}
+
 // Contract check for a future authenticated time provider. A caller may set
 // signatureVerified only after cryptographic verification, and nonceMatched
 // only after matching a newly generated request nonce. No current platform

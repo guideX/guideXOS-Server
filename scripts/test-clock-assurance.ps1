@@ -15,7 +15,7 @@ try {
     & $testExe
     if ($LASTEXITCODE -ne 0) { throw "Clock-assurance contract assertions failed with exit code $LASTEXITCODE." }
     Write-Output "CLOCK_ASSURANCE_RESULT: PASS"
-    Write-Output "Assertions: plausible/invalid RTC, rollback, forward jump, source failure, authenticated evidence expiry/freshness/metadata, reboot without continuity, expired/future/valid certificate dates, and insufficient public TLS assurance."
+    Write-Output "Assertions: plausible/invalid RTC, rollback, forward jump, source failure, single-source and multi-source evidence freshness/metadata/uncertainty, reboot without continuity, expired/future/valid certificate dates, and insufficient public TLS assurance."
 }
 finally {
     Remove-Item -LiteralPath $testDir -Recurse -Force -ErrorAction SilentlyContinue

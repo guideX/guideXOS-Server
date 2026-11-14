@@ -66,6 +66,33 @@ int main()
     evidence.nonceMatched = false;
     assert(assess_authenticated_evidence(evidence, 501) == EvidenceResult::NonceMissingOrReplayed);
 
+    AgreementEvidence agreement = {
+        true, true, 0x1401, 2,
+        base - 3, base + 3,
+        500, 10, 60, 3
+    };
+    assert(assess_agreement_evidence(agreement, 550, 5) ==
+        AgreementEvidenceResult::Accepted);
+    assert(assess_agreement_evidence(agreement, 551, 5) ==
+        AgreementEvidenceResult::Expired);
+    assert(assess_agreement_evidence(agreement, 499, 5) ==
+        AgreementEvidenceResult::MonotonicWentBackwards);
+    agreement.independentSourceCount = 1;
+    assert(assess_agreement_evidence(agreement, 500, 5) ==
+        AgreementEvidenceResult::InsufficientIndependentSources);
+    agreement.independentSourceCount = 2;
+    agreement.uncertaintySeconds = 6;
+    assert(assess_agreement_evidence(agreement, 500, 5) ==
+        AgreementEvidenceResult::ExcessiveUncertainty);
+    agreement.uncertaintySeconds = 3;
+    agreement.agreementSatisfied = false;
+    assert(assess_agreement_evidence(agreement, 500, 5) ==
+        AgreementEvidenceResult::AgreementNotSatisfied);
+    agreement.agreementSatisfied = true;
+    agreement.metadataPresent = false;
+    assert(assess_agreement_evidence(agreement, 500, 5) ==
+        AgreementEvidenceResult::InvalidMetadata);
+
     // A new boot has no continuity with the previous tracker and starts only
     // as plausible RTC time; secure cross-boot state is not synthesized.
     WithinBootContinuity afterReboot;

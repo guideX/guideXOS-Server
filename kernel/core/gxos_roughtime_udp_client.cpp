@@ -1,4 +1,5 @@
 #include "include/gxos_roughtime_acquisition.h"
+#include "include/gxos_roughtime_agreement_internal.h"
 
 #include "../../gxos_clock_assurance.h"
 #include "include/kernel/ipv4.h"
@@ -295,6 +296,15 @@ gxos_roughtime_acquisition_status acquire_ipv4(
                 received_ns > (~static_cast<uint64_t>(0) -
                     static_cast<uint64_t>(GXOS_ROUGHTIME_V1_EVIDENCE_MAX_AGE_SECONDS) *
                     1000000000ULL)) {
+                result->status = GXOS_ROUGHTIME_ACQUISITION_CLOCK_EVIDENCE_REJECTED;
+                clear_bytes(&workspace, sizeof(workspace));
+                log_result(result);
+                return result->status;
+            }
+
+            if (!agreement_internal::seal_acquisition_evidence(
+                    result->evidence, result->evidence_expires_monotonic_ns,
+                    &result->agreement_evidence)) {
                 result->status = GXOS_ROUGHTIME_ACQUISITION_CLOCK_EVIDENCE_REJECTED;
                 clear_bytes(&workspace, sizeof(workspace));
                 log_result(result);

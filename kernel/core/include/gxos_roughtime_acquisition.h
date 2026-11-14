@@ -4,10 +4,12 @@
 #include <stdint.h>
 
 #include "gxos_roughtime_v1.h"
+#ifdef __cplusplus
+#include "gxos_roughtime_agreement.h"
+#endif
 
 #define GXOS_ROUGHTIME_V1_UDP_REQUEST_BYTES 1036U
 #define GXOS_ROUGHTIME_V1_MAX_UDP_RESPONSE_BYTES 1024U
-#define GXOS_ROUGHTIME_V1_EVIDENCE_MAX_AGE_SECONDS 300U
 
 #ifdef __cplusplus
 extern "C" {
@@ -41,6 +43,9 @@ typedef struct gxos_roughtime_v1_acquisition_result {
     uint16_t response_bytes;
     uint8_t clock_evidence_contract_valid;
     uint64_t evidence_expires_monotonic_ns;
+#ifdef __cplusplus
+    gxos_roughtime_verified_evidence agreement_evidence;
+#endif
 } gxos_roughtime_v1_acquisition_result;
 
 // Build a complete RFC 10049 v1 UDP request. The message body is 1024 bytes;
