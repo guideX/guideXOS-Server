@@ -178,12 +178,14 @@ def build_request(
         "ZZZZ": b"",
     }
     message = encode_message(fields)
-    padding_length = MAX_PACKET_BYTES - 12 - len(message)
+    # The RFC's 1024-byte recommendation applies to the message body. The
+    # packet wrapper adds another 12 bytes to the UDP payload.
+    padding_length = MAX_REQUEST_PACKET_BYTES - 12 - len(message)
     if padding_length < 0 or padding_length % 4:
         raise RoughtimeError("request fields cannot fit the bounded UDP packet")
     fields["ZZZZ"] = bytes(padding_length)
     packet = _wrap_packet(encode_message(fields))
-    if len(packet) != MAX_PACKET_BYTES:
+    if len(packet) != MAX_REQUEST_PACKET_BYTES:
         raise RoughtimeError("request did not meet the RFC UDP size recommendation")
     return packet, nonce
 

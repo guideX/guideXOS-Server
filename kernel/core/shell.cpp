@@ -24,6 +24,8 @@
 #include "include/kernel/kernel_app.h"
 #include "include/kernel/app_launch_target_resolver.h"
 #include "include/kernel/serial_debug.h"
+#include "include/gxos_roughtime_acquisition.h"
+#include "include/gxos_roughtime_guest_test.h"
 
 // Forward declarations for power functions (defined in desktop.cpp, outside any namespace)
 extern void perform_shutdown();
@@ -38,6 +40,7 @@ namespace shell {
 
 static void uint_hex_to_str(uint32_t value, uint8_t digits, char* buf);
 static void uint_to_str(uint32_t n, char* buf);
+static void uint64_to_str(uint64_t n, char* buf);
 
 
 
@@ -398,6 +401,8 @@ static void cmd_help() {
     output_string("  netstat, ss    - Network connections\n");
     output_string("  nc <ip> <port> - Send UDP datagram\n");
     output_string("  udpstat        - UDP statistics\n");
+    output_string("  roughtime-selftest - Verify immutable Roughtime guest vectors\n");
+    output_string("  roughtime-fetch <ip> <port> <key-hex> - Fetch one pinned v1 response\n");
     output_string("\n");
     output_string("Desktop:\n");
     output_string("  apps           - List applications\n");
@@ -2062,6 +2067,19 @@ static void uint_to_str(uint32_t n, char* buf) {
             buf[i++] = tmp[--j];
         }
     }
+    buf[i] = '\0';
+}
+
+static void uint64_to_str(uint64_t n, char* buf) {
+    char tmp[20];
+    uint32_t digits = 0;
+    do {
+        tmp[digits++] = static_cast<char>('0' + (n % 10U));
+        n /= 10U;
+    } while (n != 0 && digits < sizeof(tmp));
+
+    uint32_t i = 0;
+    while (digits > 0) buf[i++] = tmp[--digits];
     buf[i] = '\0';
 }
 
@@ -6273,7 +6291,133 @@ static void cmd_dhcp(const char* args[], uint32_t argCount) {
 // Command Parser and Executor
 // ============================================================
 
-static void parse_args(const char* cmd, char args[MAX_ARGS][64], uint32_t& argCount) {
+static bool parse_roughtime_port(const char* text, uint16_t* port)
+{
+    if (!text || !port || !text[0]) return false;
+    uint32_t value = 0;
+    for (uint32_t i = 0; text[i]; ++i) {
+        if (text[i] < '0' || text[i] > '9') return false;
+        const uint32_t digit = static_cast<uint32_t>(text[i] - '0');
+        if (value > (65535U - digit) / 10U) return false;
+        value = value * 10U + digit;
+    }
+    if (value == 0) return false;
+    *port = static_cast<uint16_t>(value);
+    return true;
+}
+
+static int roughtime_hex_value(char value)
+{
+    if (value >= '0' && value <= '9') return value - '0';
+    if (value >= 'a' && value <= 'f') return value - 'a' + 10;
+    if (value >= 'A' && value <= 'F') return value - 'A' + 10;
+    return -1;
+}
+
+static bool parse_roughtime_key(const char* text, uint8_t key[32])
+{
+    if (!text || !key) return false;
+    for (uint32_t i = 0; i < 64; ++i) {
+        if (!text[i]) return false;
+        const int high = roughtime_hex_value(text[i]);
+        const int low = roughtime_hex_value(text[i + 1]);
+        if (high < 0 || low < 0) return false;
+        key[i / 2] = static_cast<uint8_t>((high << 4) | low);
+        ++i;
+    }
+    return text[64] == '\0';
+}
+
+static void output_roughtime_seconds(const char* label, uint64_t seconds)
+{
+    char text[21];
+    uint64_to_str(seconds, text);
+    output_string(label);
+    output_string(text);
+}
+
+static void cmd_roughtime_selftest()
+{
+    const int status = gxos_roughtime_guest_selftest();
+    output_string(status == 0
+        ? "NAVHTTPS13 guest verifier vectors: PASS; no time authorization requested.\n"
+        : "NAVHTTPS13 guest verifier vectors: FAIL.\n");
+}
+
+static void cmd_roughtime_fetch(const char* address_text,
+                                const char* port_text,
+                                const char* key_text)
+{
+    uint32_t address = 0;
+    uint16_t port = 0;
+    uint8_t key[32];
+    if (!ipv4::ip_from_string(address_text, &address) ||
+        !parse_roughtime_port(port_text, &port) ||
+        !parse_roughtime_key(key_text, key)) {
+        output_string("Usage: roughtime-fetch <numeric-ipv4> <port> <64-hex-byte-key>\n");
+        output_string("This diagnostic accepts one explicitly pinned RFC 10049 v1 server.\n");
+        return;
+    }
+
+    gxos_roughtime_v1_acquisition_result result;
+    const gxos_roughtime_acquisition_status status =
+        kernel::roughtime::acquire_ipv4(address, port, key, &result);
+    if (status != GXOS_ROUGHTIME_ACQUISITION_SUCCESS) {
+        output_string("Roughtime acquisition rejected: ");
+        output_string(gxos_roughtime_acquisition_status_name(status));
+        output_string("\n");
+        return;
+    }
+
+    char ip_text[16];
+    char number[16];
+    static const char hex[] = "0123456789abcdef";
+    ipv4::ip_to_string(result.server_ipv4, ip_text);
+    output_string("Verified RFC 10049 v1 response\n  endpoint: ");
+    output_string(ip_text);
+    output_string(":");
+    uint_to_str(result.server_port, number);
+    output_string(number);
+    output_string("\n  pinned server key identity: ");
+    for (uint32_t i = 0; i < sizeof(result.evidence.server_key_identity); ++i) {
+        const uint8_t byte = result.evidence.server_key_identity[i];
+        char pair[3] = { hex[byte >> 4], hex[byte & 0x0f], '\0' };
+        output_string(pair);
+    }
+    output_string("\n  request / response bytes: ");
+    uint_to_str(result.request_bytes, number);
+    output_string(number);
+    output_string(" / ");
+    uint_to_str(result.response_bytes, number);
+    output_string(number);
+    output_string("\n");
+    output_roughtime_seconds("  signed midpoint (Unix seconds): ", result.evidence.server_midpoint_unix_seconds);
+    output_string("\n");
+    output_roughtime_seconds("  signed radius (seconds): ", result.evidence.radius_seconds);
+    output_string("\n");
+    output_roughtime_seconds("  verified interval earliest: ", result.evidence.earliest_unix_seconds);
+    output_string("\n");
+    output_roughtime_seconds("  verified interval latest: ", result.evidence.latest_unix_seconds);
+    output_string("\n");
+    output_roughtime_seconds("  estimated midpoint: ", result.evidence.estimated_midpoint_unix_seconds);
+    output_string("\n");
+    output_roughtime_seconds("  estimated uncertainty (seconds): ", result.evidence.estimated_uncertainty_seconds);
+    output_string("\n  monotonic transport delay (ms): ");
+    uint_to_str(static_cast<uint32_t>(result.evidence.measured_transport_delay_ns / 1000000ULL), number);
+    output_string(number);
+    output_string("\n  authenticated source evidence: signature=valid delegation=valid nonce=matched merkle=valid\n");
+    output_string("  freshness receipt / expiry (monotonic seconds): ");
+    uint_to_str(static_cast<uint32_t>(result.evidence.received_monotonic_ns / 1000000000ULL), number);
+    output_string(number);
+    output_string(" / ");
+    uint_to_str(static_cast<uint32_t>(result.evidence_expires_monotonic_ns / 1000000000ULL), number);
+    output_string(number);
+    output_string("\n  NAVHTTPS8 evidence contract: ");
+    output_string(result.clock_evidence_contract_valid ? "valid" : "rejected");
+    output_string("; trusted time: not accepted; OS clock: unchanged; public HTTPS: disabled\n");
+}
+
+static void parse_args(const char* cmd, char args[MAX_ARGS][65], uint32_t& argCount) {
     argCount = 0;
     uint32_t i = 0;
     uint32_t argPos = 0;
@@ -6289,7 +6433,7 @@ static void parse_args(const char* cmd, char args[MAX_ARGS][64], uint32_t& argCo
             }
         } else {
             inArg = true;
-            if (argPos < 63) {
+            if (argPos < 64) {
                 args[argCount][argPos++] = cmd[i];
             }
         }
@@ -6304,7 +6448,7 @@ static void parse_args(const char* cmd, char args[MAX_ARGS][64], uint32_t& argCo
 
 static void execute_command(const char* cmd) {
     // Parse command into arguments
-    char args[MAX_ARGS][64];
+    char args[MAX_ARGS][65];
     uint32_t argCount = 0;
     parse_args(cmd, args, argCount);
     
@@ -6315,7 +6459,19 @@ static void execute_command(const char* cmd) {
     const char* arg1 = (argCount > 1) ? args[1] : "";
     
     // POSIX commands
-    if (str_eq(command, "help") || str_eq(command, "?")) {
+    if (str_eq(command, "roughtime-selftest")) {
+        if (argCount != 1) {
+            output_string("Usage: roughtime-selftest\n");
+        } else {
+            cmd_roughtime_selftest();
+        }
+    } else if (str_eq(command, "roughtime-fetch")) {
+        if (argCount != 4) {
+            output_string("Usage: roughtime-fetch <numeric-ipv4> <port> <64-hex-byte-key>\n");
+        } else {
+            cmd_roughtime_fetch(args[1], args[2], args[3]);
+        }
+    } else if (str_eq(command, "help") || str_eq(command, "?")) {
         cmd_help();
     } else if (str_eq(command, "clear") || str_eq(command, "cls")) {
         cmd_clear();

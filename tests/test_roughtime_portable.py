@@ -9,10 +9,13 @@ import json
 import os
 import random
 import re
+import socket
 import struct
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -27,6 +30,7 @@ from test_roughtime_v1 import (  # noqa: E402
     OTHER_KEY,
     ROOT_KEY,
     make_response,
+    parse_request_nonce,
     u32,
 )
 
@@ -180,8 +184,20 @@ class PortableRoughtimeTests(unittest.TestCase):
             "-o", str(component_obj),
         ]
         subprocess.run(cxx_flags, check=True, capture_output=True, text=True)
+        acquisition_obj = build / "gxos_roughtime_acquisition_core.o"
+        subprocess.run(
+            [gxx, "-std=c++14", "-fno-exceptions", "-fno-rtti", "-fno-builtin",
+             "-ffreestanding", "-O2", "-DGXOS_BARE_METAL", *common_includes,
+             "-c", str(ROOT / "kernel/core/gxos_roughtime_acquisition_core.cpp"),
+             "-o", str(acquisition_obj)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        # The shared harness includes the same request builder and source-bound
+        # response dispatcher used by the kernel UDP adapter.
         link_args = [gxx, "-shared", "-o", str(library_path), str(component_obj),
-                     *(str(obj) for obj in objects)]
+                     str(acquisition_obj), *(str(obj) for obj in objects)]
         if is_windows:
             link_args.append("-Wl,--export-all-symbols")
         else:
@@ -198,6 +214,34 @@ class PortableRoughtimeTests(unittest.TestCase):
             ctypes.POINTER(Workspace), ctypes.POINTER(Evidence),
         ]
         cls.verify_function.restype = ctypes.c_int
+
+        cls.build_request_function = cls.library.gxos_roughtime_v1_build_request
+        cls.build_request_function.argtypes = [
+            ctypes.POINTER(ctypes.c_uint8), ctypes.POINTER(ctypes.c_uint8),
+            ctypes.POINTER(ctypes.c_uint8), ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        cls.build_request_function.restype = ctypes.c_int
+        cls.build_request_random_function = cls.library.gxos_roughtime_v1_build_request_with_random
+        cls.random_fill_callback_type = ctypes.CFUNCTYPE(
+            ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint8), ctypes.c_size_t
+        )
+        cls.build_request_random_function.argtypes = [
+            cls.random_fill_callback_type, ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint8),
+            ctypes.POINTER(ctypes.c_uint8), ctypes.POINTER(ctypes.c_uint8),
+            ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t),
+        ]
+        cls.build_request_random_function.restype = ctypes.c_int
+        cls.dispatch_function = cls.library.gxos_roughtime_v1_dispatch_response
+        cls.dispatch_function.argtypes = [
+            ctypes.POINTER(ctypes.c_uint8), ctypes.c_size_t,
+            ctypes.c_uint32, ctypes.c_uint16, ctypes.c_uint32, ctypes.c_uint16,
+            ctypes.POINTER(ctypes.c_uint8), ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_uint8), ctypes.POINTER(ctypes.c_uint8),
+            ctypes.c_uint64, ctypes.c_uint64,
+            ctypes.POINTER(Workspace), ctypes.POINTER(Evidence),
+        ]
+        cls.dispatch_function.restype = ctypes.c_int
 
     @classmethod
     def tearDownClass(cls):
@@ -218,6 +262,221 @@ class PortableRoughtimeTests(unittest.TestCase):
             rt._unwrap_packet(self.independent_request)
         )["NONC"]
         self.vector = vector
+
+    def build_acquisition_request(self, nonce, key):
+        nonce_arg = (ctypes.c_uint8 * 32).from_buffer_copy(nonce)
+        key_arg = (ctypes.c_uint8 * 32).from_buffer_copy(key)
+        request_arg = (ctypes.c_uint8 * 1036)()
+        request_length = ctypes.c_size_t()
+        status = self.build_request_function(
+            nonce_arg, key_arg, request_arg, len(request_arg), ctypes.byref(request_length)
+        )
+        self.assertEqual(status, 0)
+        return bytes(request_arg[:request_length.value])
+
+    def dispatch_acquisition(self, response, request, nonce, key, *,
+                             actual_ip=0x7F000001, actual_port=5319,
+                             expected_ip=0x7F000001, expected_port=5319):
+        response_arg = (ctypes.c_uint8 * max(1, len(response)))()
+        if response:
+            response_arg[:len(response)] = response
+        request_arg = (ctypes.c_uint8 * len(request)).from_buffer_copy(request)
+        nonce_arg = (ctypes.c_uint8 * 32).from_buffer_copy(nonce)
+        key_arg = (ctypes.c_uint8 * 32).from_buffer_copy(key)
+        workspace = Workspace()
+        result = Evidence()
+        status = self.dispatch_function(
+            response_arg, len(response), actual_ip, actual_port,
+            expected_ip, expected_port, request_arg, len(request),
+            nonce_arg, key_arg, self.sent_ns, self.received_ns,
+            ctypes.byref(workspace), ctypes.byref(result),
+        )
+        return status, result
+
+    def test_kernel_request_builder_matches_hosted_rfc_v1_request(self):
+        nonce = bytes(range(32))
+        request = self.build_acquisition_request(nonce, self.independent_key)
+        hosted_request, hosted_nonce = rt.build_request(
+            self.independent_key, nonce_source=lambda count: nonce
+        )
+        self.assertEqual(hosted_nonce, nonce)
+        self.assertEqual(request, hosted_request)
+        self.assertEqual(len(request), rt.MAX_REQUEST_PACKET_BYTES)
+        fields = rt._parse_message(rt._unwrap_packet(request, max_packet_bytes=rt.MAX_REQUEST_PACKET_BYTES))
+        self.assertEqual(fields["VER"], b"\x01\0\0\0")
+        self.assertEqual(fields["NONC"], nonce)
+        self.assertEqual(fields["TYPE"], b"\0\0\0\0")
+        self.assertEqual(len(fields["ZZZZ"]), 912)
+        self.assertFalse(any(fields["ZZZZ"]))
+
+    def test_guest_vectors_are_copies_of_the_pinned_independent_fixture(self):
+        header = (ROOT / "kernel/core/roughtime_guest_vectors.h").read_text()
+        vector_bytes = {
+            "gxos_roughtime_fixture_request": self.independent_request,
+            "gxos_roughtime_fixture_response": self.independent_response,
+            "gxos_roughtime_fixture_public_key": self.independent_key,
+            "gxos_roughtime_fixture_nonce": self.independent_nonce,
+        }
+        for name, expected in vector_bytes.items():
+            match = re.search(
+                rf"static const uint8_t {name}\[\] = \{{(.*?)\}};",
+                header,
+                flags=re.DOTALL,
+            )
+            self.assertIsNotNone(match, name)
+            actual = bytes(int(value, 16) for value in re.findall(r"0x([0-9a-fA-F]{2})", match.group(1)))
+            self.assertEqual(actual, expected, name)
+
+    def test_kernel_random_failure_produces_no_request(self):
+        key_arg = (ctypes.c_uint8 * 32).from_buffer_copy(self.independent_key)
+        nonce_arg = (ctypes.c_uint8 * 32)(*([0xA5] * 32))
+        request_arg = (ctypes.c_uint8 * 1036)(*([0xA5] * 1036))
+        request_length = ctypes.c_size_t(99)
+
+        @self.random_fill_callback_type
+        def entropy_failure(_context, _output, _length):
+            return 0
+
+        status = self.build_request_random_function(
+            entropy_failure, None, key_arg, nonce_arg, request_arg,
+            len(request_arg), ctypes.byref(request_length),
+        )
+        self.assertEqual(status, 2)
+        self.assertEqual(request_length.value, 0)
+        self.assertEqual(bytes(nonce_arg), bytes(32))
+        self.assertEqual(bytes(request_arg), bytes(1036))
+
+    def test_native_dispatch_covers_key_signature_nonce_source_and_bounds(self):
+        nonce = b"N" * 32
+        request = self.build_acquisition_request(nonce, bytes(ROOT_KEY.public_key().public_bytes_raw()))
+        response = make_response(request, nonce)
+
+        status, result = self.dispatch_acquisition(response, request, nonce,
+            bytes(ROOT_KEY.public_key().public_bytes_raw()))
+        self.assertEqual(status, 0)
+        self.assertTrue(result.signature_verified)
+        self.assertTrue(result.nonce_matched)
+        self.assertTrue(result.merkle_proof_verified)
+        self.assertFalse(result.production_policy_accepted)
+
+        wrong_key = bytes(OTHER_KEY.public_key().public_bytes_raw())
+        status, result = self.dispatch_acquisition(response, request, nonce, wrong_key)
+        self.assertEqual(status, 9)
+        self.assertEqual(result.status, 8)  # request server-key identity mismatch
+
+        signature_offset, _ = _field_bounds(response, "SIG")
+        corrupted = bytearray(response)
+        corrupted[signature_offset] ^= 1
+        status, result = self.dispatch_acquisition(bytes(corrupted), request, nonce,
+            bytes(ROOT_KEY.public_key().public_bytes_raw()))
+        self.assertEqual(status, 9)
+        self.assertEqual(result.status, 10)
+
+        wrong_nonce = b"X" * 32
+        status, result = self.dispatch_acquisition(response, request, wrong_nonce,
+            bytes(ROOT_KEY.public_key().public_bytes_raw()))
+        self.assertEqual(status, 9)
+
+        fresh_nonce = b"F" * 32
+        fresh_request = self.build_acquisition_request(fresh_nonce,
+            bytes(ROOT_KEY.public_key().public_bytes_raw()))
+        status, result = self.dispatch_acquisition(response, fresh_request, fresh_nonce,
+            bytes(ROOT_KEY.public_key().public_bytes_raw()))
+        self.assertEqual(status, 9)  # a signed response to the old request cannot be replayed
+        self.assertEqual(result.status, 9)
+
+        status, _ = self.dispatch_acquisition(response, request, nonce,
+            bytes(ROOT_KEY.public_key().public_bytes_raw()), actual_ip=0x7F000002)
+        self.assertEqual(status, 7)
+
+        status, result = self.dispatch_acquisition(response[:-1], request, nonce,
+            bytes(ROOT_KEY.public_key().public_bytes_raw()))
+        self.assertEqual(status, 9)
+        self.assertEqual(result.status, 3)
+
+        oversized = response + bytes(1025 - len(response))
+        status, _ = self.dispatch_acquisition(oversized, request, nonce,
+            bytes(ROOT_KEY.public_key().public_bytes_raw()))
+        self.assertEqual(status, 8)
+
+        uncertain = make_response(request, nonce, radius=301)
+        status, result = self.dispatch_acquisition(uncertain, request, nonce,
+            bytes(ROOT_KEY.public_key().public_bytes_raw()))
+        self.assertEqual(status, 9)
+        self.assertEqual(result.status, 14)
+
+    def test_native_request_and_dispatch_run_through_controlled_udp_fixture(self):
+        nonce = bytes((index * 7) & 0xFF for index in range(32))
+        key = bytes(ROOT_KEY.public_key().public_bytes_raw())
+        request = self.build_acquisition_request(nonce, key)
+        server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        server.bind(("127.0.0.1", 0))
+        server.settimeout(2.0)
+        endpoint = server.getsockname()
+        fixture_errors = []
+
+        def fixture_once():
+            try:
+                incoming, client_address = server.recvfrom(1472)
+                actual_nonce = parse_request_nonce(incoming)
+                signed_response = make_response(incoming, actual_nonce, midpoint=FIXTURE_TIME, radius=3)
+                server.sendto(signed_response, client_address)
+            except BaseException as error:  # surfaced in the unittest thread
+                fixture_errors.append(error)
+
+        fixture_thread = threading.Thread(target=fixture_once, daemon=True)
+        fixture_thread.start()
+        client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        client.settimeout(2.0)
+        client_fd = client.fileno()
+        server_fd = server.fileno()
+        try:
+            client.sendto(request, endpoint)
+            try:
+                response, source = client.recvfrom(1024)
+            except Exception as receive_error:
+                fixture_thread.join(timeout=2.0)
+                if fixture_errors:
+                    self.fail(f"controlled fixture failed: {fixture_errors[0]!r}")
+                raise receive_error
+            status, evidence = self.dispatch_acquisition(
+                response, request, nonce, key,
+                actual_ip=int.from_bytes(socket.inet_aton(source[0]), "big"),
+                actual_port=source[1], expected_port=endpoint[1],
+            )
+            self.assertEqual(status, 0)
+            self.assertEqual(evidence.server_midpoint_unix_seconds, FIXTURE_TIME)
+            self.assertEqual(evidence.radius_seconds, 3)
+            self.assertTrue(evidence.merkle_proof_verified)
+        finally:
+            client.close()
+            server.close()
+            fixture_thread.join(timeout=2.0)
+        self.assertEqual(client.fileno(), -1)
+        self.assertEqual(server.fileno(), -1)
+        self.assertFalse(fixture_thread.is_alive())
+        self.assertEqual(fixture_errors, [])
+
+    def test_unavailable_controlled_server_times_out_without_retrying(self):
+        key = bytes(ROOT_KEY.public_key().public_bytes_raw())
+        nonce = b"T" * 32
+        request = self.build_acquisition_request(nonce, key)
+        reservation = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        reservation.bind(("127.0.0.1", 0))
+        unused_port = reservation.getsockname()[1]
+        reservation.close()
+
+        client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        client.settimeout(0.05)
+        started = time.monotonic()
+        try:
+            client.sendto(request, ("127.0.0.1", unused_port))
+            with self.assertRaises((socket.timeout, ConnectionResetError)):
+                client.recvfrom(1024)
+        finally:
+            client.close()
+        self.assertLess(time.monotonic() - started, 1.0)
+        self.assertEqual(client.fileno(), -1)
 
     def verify_portable(self, response, request, nonce, key, workspace=None):
         response_arg = (ctypes.c_uint8 * len(response)).from_buffer_copy(response)
@@ -467,10 +726,8 @@ class PortableRoughtimeTests(unittest.TestCase):
     def test_rfc_message_sized_request_and_reusable_workspace(self):
         key = ROOT_KEY.public_key().public_bytes_raw()
         request, nonce = rt.build_request(key, nonce_source=lambda _: b"R" * 32)
-        fields = rt._parse_message(rt._unwrap_packet(request))
-        fields["ZZZZ"] += bytes(12)
-        request = _packet(rt.encode_message(fields))
         self.assertEqual(len(request), 1036)
+        self.assertEqual(struct.unpack_from("<I", request, 8)[0], 1024)
         response = make_response(request, nonce)
         reference = rt.verify_response(
             response, request, nonce, key, source="fixture",

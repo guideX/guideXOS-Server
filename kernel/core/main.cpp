@@ -65,6 +65,13 @@
 #include "include/kernel/secure_random.h"
 #include "include/kernel/virtio_rng.h"
 
+#if defined(GXOS_NAVHTTPS13_GUEST_QUALIFICATION_ACTIVE)
+#include "include/gxos_roughtime_acquisition.h"
+#include "include/gxos_roughtime_guest_test.h"
+#include "roughtime_guest_fixture_key.h"
+#include "roughtime_guest_vectors.h"
+#endif
+
 // Interrupt support
 #include "include/kernel/msi.h"
 
@@ -1173,6 +1180,24 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] done\n");
 #endif
         kernel::serial::puts("[AIDA-PHASE3] checkpoint=main-loop-ready\n");
+#if defined(GXOS_NAVHTTPS13_GUEST_QUALIFICATION_ACTIVE)
+        // This compile-time-only lane deliberately invokes the same verifier
+        // route as the shell diagnostic, then performs one controlled UDP
+        // acquisition against QEMU's host alias. Normal kernels never run it.
+        kernel::serial::puts("[NAVHTTPS13-GUEST] qualification_hook=active\n");
+        const int guestSelftestResult = gxos_roughtime_guest_selftest();
+        kernel::serial::puts("[NAVHTTPS13-GUEST-A] hook_result=");
+        kernel::serial::puts(guestSelftestResult == 0 ? "PASS\n" : "FAIL\n");
+        static gxos_roughtime_v1_acquisition_result guestAcquisitionResult;
+        const gxos_roughtime_acquisition_status guestAcquisitionStatus =
+            kernel::roughtime::acquire_ipv4(
+                0x0a000202U, 5319U, gxos_roughtime_guest_fixture_udp_public_key,
+                &guestAcquisitionResult);
+        kernel::serial::puts("[NAVHTTPS13-GUEST-B] result=");
+        kernel::serial::puts(gxos_roughtime_acquisition_status_name(
+            guestAcquisitionStatus));
+        kernel::serial::putc('\n');
+#endif
         // I219 Stage 8 is the only diagnostic configuration that enables the
         // NIC hardware interrupt mask, and only after the input/main-loop
         // readiness boundary has been published.

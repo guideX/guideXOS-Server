@@ -30,7 +30,9 @@ def u64(value):
 
 
 def parse_request_nonce(request_packet):
-    fields = rt._parse_message(rt._unwrap_packet(request_packet))
+    fields = rt._parse_message(
+        rt._unwrap_packet(request_packet, max_packet_bytes=rt.MAX_REQUEST_PACKET_BYTES)
+    )
     return fields["NONC"]
 
 
@@ -139,8 +141,11 @@ class RoughtimeV1Tests(unittest.TestCase):
         return rt.verify_response(response, self.request, self.nonce, self.server_public_key, **options)
 
     def test_request_is_fresh_nonce_bound_and_udp_bounded(self):
-        self.assertEqual(len(self.request), 1024)
-        fields = rt._parse_message(rt._unwrap_packet(self.request))
+        self.assertEqual(len(self.request), rt.MAX_REQUEST_PACKET_BYTES)
+        self.assertEqual(struct.unpack_from("<I", self.request, 8)[0], 1024)
+        fields = rt._parse_message(
+            rt._unwrap_packet(self.request, max_packet_bytes=rt.MAX_REQUEST_PACKET_BYTES)
+        )
         self.assertEqual(fields["NONC"], b"R" * 32)
         self.assertEqual(fields["TYPE"], u32(0))
         self.assertEqual(fields["VER"], u32(1))
