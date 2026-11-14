@@ -6,17 +6,9 @@
 // fundamental to multitasking - it saves the current thread's
 // register state and restores another thread's state.
 //
-// AMD64 register set:
-//   - 16 general-purpose registers (RAX, RBX, RCX, RDX, RSI, RDI,
-//     RBP, RSP, R8-R15)
-//   - Callee-saved: RBX, RBP, R12-R15
-//   - Caller-saved: RAX, RCX, RDX, RSI, RDI, R8-R11
-//   - RSP = stack pointer
-//   - RIP = instruction pointer (implicitly saved via CALL/RET)
-//
-// For context switch, we only need to save callee-saved registers
-// plus the stack pointer and return address, since the C calling
-// convention handles caller-saved registers.
+// This interface describes a voluntary function-call switch under the
+// Microsoft x64 ABI. It does not represent the interrupt frame required for
+// preemption or the CPU frame required for a CPL3 transition.
 //
 // Copyright (c) 2026 guideXOS Server
 //
@@ -24,83 +16,32 @@
 #pragma once
 
 #include <kernel/types.h>
+#include <stddef.h>
 
 namespace kernel {
 namespace arch {
 namespace amd64 {
 namespace context {
 
-// ================================================================
-// Thread context structure
-//
-// Contains all state needed to resume a thread. This is saved on
-// the kernel stack during context switch.
-//
-// Full context (for exception handling):
-//   - All 16 GPRs
-//   - RFLAGS
-//   - RIP (from interrupt frame)
-//   - Segment registers (CS, SS, DS, ES, FS, GS)
-//
-// Minimal context (for voluntary context switch):
-//   - Callee-saved registers (RBX, RBP, R12-R15)
-//   - Stack pointer (RSP)
-//   - Return address (RIP, implicitly via stack)
-// ================================================================
-
-// Full thread context (used for exceptions/interrupts)
-struct FullContext {
-    // General-purpose registers
-    uint64_t rax;
-    uint64_t rbx;
-    uint64_t rcx;
-    uint64_t rdx;
-    uint64_t rsi;
-    uint64_t rdi;
-    uint64_t rbp;
-    uint64_t rsp;
-    uint64_t r8;
-    uint64_t r9;
-    uint64_t r10;
-    uint64_t r11;
-    uint64_t r12;
-    uint64_t r13;
-    uint64_t r14;
-    uint64_t r15;
-    
-    // Instruction pointer and flags
-    uint64_t rip;
-    uint64_t rflags;
-    
-    // Segment registers
-    uint64_t cs;
-    uint64_t ss;
-    uint64_t ds;
-    uint64_t es;
-    uint64_t fs;
-    uint64_t gs;
-    
-    // FS/GS base addresses (for TLS)
-    uint64_t fs_base;
-    uint64_t gs_base;
-    
-    // Interrupt/exception info
-    uint64_t error_code;
-    uint64_t vector;
-};
-
-// Minimal thread context (used for voluntary context switch)
-// Only callee-saved registers need to be preserved across calls
+// Saved state for an ordinary Microsoft x64 ABI function-call switch.
+// The freestanding build disables MMX/SSE in C/C++; FPU/SIMD task state and
+// arbitrary interrupt frames are outside this context contract.
 struct SwitchContext {
-    uint64_t rbx;    // Callee-saved
-    uint64_t rbp;    // Base pointer / frame pointer
-    uint64_t r12;    // Callee-saved
-    uint64_t r13;    // Callee-saved
-    uint64_t r14;    // Callee-saved
-    uint64_t r15;    // Callee-saved
-    uint64_t rsp;    // Stack pointer
-    uint64_t rip;    // Return address (where to resume)
+    uint64_t rbx;    // Microsoft x64 nonvolatile GPR
+    uint64_t rbp;    // Microsoft x64 nonvolatile GPR
+    uint64_t rdi;    // Microsoft x64 nonvolatile GPR
+    uint64_t rsi;    // Microsoft x64 nonvolatile GPR
+    uint64_t r12;    // Microsoft x64 nonvolatile GPR
+    uint64_t r13;    // Microsoft x64 nonvolatile GPR
+    uint64_t r14;    // Microsoft x64 nonvolatile GPR
+    uint64_t r15;    // Microsoft x64 nonvolatile GPR
+    uint64_t rsp;    // Stack pointer at the resumed call site
+    uint64_t rip;    // Continuation address
 };
+
+static_assert(sizeof(SwitchContext) == 80, "AMD64 switch context layout must match context_switch.asm");
+static_assert(offsetof(SwitchContext, rsp) == 64, "AMD64 context RSP offset mismatch");
+static_assert(offsetof(SwitchContext, rip) == 72, "AMD64 context RIP offset mismatch");
 
 // ================================================================
 // Thread Control Block (TCB) extension for AMD64
@@ -109,14 +50,18 @@ struct SwitchContext {
 // ================================================================
 
 struct ArchThreadData {
-    // Kernel stack pointer (used during context switch)
+    // Caller-owned kernel stack used by this context.
+    uint64_t kernel_stack_base;
+    uint64_t kernel_stack_size;
+
+    // Stack pointer used by this context.
     uint64_t kernel_sp;
     
     // Saved context (points to SwitchContext on stack)
     SwitchContext* context;
     
-    // Floating-point / SSE state pointer
-    // Points to FXSAVE/XSAVE area (must be 16-byte aligned)
+    // Reserved for future FPU state management. Must remain null while the
+    // current no-SIMD context contract is active.
     void* fpu_state;
     
     // FS base (user TLS)
@@ -139,36 +84,29 @@ struct ArchThreadData {
 // switches. The actual register save/restore is done in assembly.
 // ================================================================
 
-// Initialize a new thread's context.
-// Sets up the initial stack frame so the thread starts executing
-// at 'entry_point' with 'arg' as its argument.
+// Initialize a new kernel context within a caller-owned stack. The
+// initial Microsoft x64 entry stack includes the required 32-byte shadow
+// space. The caller must supply at least sizeof(SwitchContext)+40 bytes.
 //
 // Parameters:
-//   stack_top  - Top of the thread's kernel stack
+//   stack_base - Start of the writable stack allocation
+//   stack_size - Size in bytes of the writable stack allocation
 //   entry_point - Function pointer where thread execution begins
 //   arg        - Argument passed to entry_point
 //
 // Returns:
 //   Pointer to the initialized SwitchContext on the stack
-SwitchContext* init_context(uint64_t stack_top, void (*entry_point)(void*), void* arg);
+SwitchContext* init_context(uint64_t stack_base, uint64_t stack_size,
+                            void (*entry_point)(void*), void* arg);
 
-// Perform a context switch from 'old_ctx' to 'new_ctx'.
-// Saves current callee-saved registers to old_ctx and restores
-// from new_ctx, then returns to the new thread.
-//
-// This function is called like a normal function but "returns"
-// in a different thread context.
-//
-// Assembly implementation required.
-extern "C" void switch_context(SwitchContext** old_ctx, SwitchContext* new_ctx);
-
-// Save full context to the provided structure.
-// Used by exception handlers to capture complete thread state.
-extern "C" void save_full_context(FullContext* ctx);
-
-// Restore full context and return from exception.
-// This function does not return - it performs IRETQ.
-extern "C" void restore_full_context(FullContext* ctx);
+// Save and resume ordinary function-call contexts. This is not suitable for
+// switching directly from an IRQ frame; callers use the Microsoft x64 ABI.
+#if defined(__GNUC__) || defined(__clang__)
+#define GXOS_AMD64_SWITCH_ABI __attribute__((ms_abi))
+#else
+#define GXOS_AMD64_SWITCH_ABI
+#endif
+extern "C" void GXOS_AMD64_SWITCH_ABI switch_context(SwitchContext** old_ctx, SwitchContext* new_ctx);
 
 // Get the current stack pointer.
 inline uint64_t get_sp()
@@ -244,7 +182,7 @@ inline void set_fs_base(uint64_t base)
 
 // Called when a new thread is created.
 // Allocates and initializes architecture-specific thread data.
-void arch_thread_create(ArchThreadData* data, uint64_t stack, 
+void arch_thread_create(ArchThreadData* data, uint64_t stack_base, uint64_t stack_size,
                         void (*entry)(void*), void* arg);
 
 // Called when a thread is destroyed.
