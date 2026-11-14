@@ -33194,6 +33194,11 @@ void initializeNativeAotModules() {
     }
 #endif
     if (!g_guideXosNativeAotCodeManagerRegistered) {
+#if defined(GUIDEXOS_NATIVEAOT_C188R23_SETTINGS_PREPARATION_TRACE)
+        // R23 brackets the actual production code-manager registration call.
+        // This read-only callback does not touch runtime state.
+        guidexos_nativeaot_pal_startup_marker(0xC188B006u);
+#endif
     if (!RhRegisterOSModule(
             osModule,
             managedCodeStart,
@@ -33258,6 +33263,11 @@ void initializeNativeAotModules() {
         GX_THREADSTORE_EVENT_MODULE_INITIALIZE_ENTER,
         reinterpret_cast<uintptr_t>(osModule),
         static_cast<uintptr_t>(__modules_z - __modules_a));
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C188R23_SETTINGS_PREPARATION_TRACE)
+    // B006 then B007 prove code-manager registration returned before the
+    // generated five-argument module initializer is called.
+    guidexos_nativeaot_pal_startup_marker(0xC188B007u);
 #endif
     InitializeModules(
         osModule,

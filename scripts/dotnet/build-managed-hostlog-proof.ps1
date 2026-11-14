@@ -30,6 +30,7 @@ param(
     [switch]$C188R12R4R5GcOwnershipProof,
     [switch]$C188R21ManagedSettingsFactory,
     [switch]$C188R22SettingsBootstrapHandoff,
+    [switch]$C188R23SettingsPreparationTrace,
     [switch]$C188R12R4R5R1InitDiagnostics,
     [switch]$C188R12R4R5R3InitReturnContract,
     [switch]$C188R12R4R5R4ThreadStoreReadiness,
@@ -264,6 +265,7 @@ if ($UseGuideXosRuntimePack) {
     if ($C188R12R4R5GcOwnershipProof) { $runtimePackBuildArguments += "-C188R12R4R5GcOwnershipProof" }
     if ($C188R21ManagedSettingsFactory) { $runtimePackBuildArguments += "-C188R21ManagedSettingsFactory" }
     if ($C188R22SettingsBootstrapHandoff) { $runtimePackBuildArguments += "-C188R22SettingsBootstrapHandoff" }
+    if ($C188R23SettingsPreparationTrace) { $runtimePackBuildArguments += "-C188R23SettingsPreparationTrace" }
     if ($C188R12R4R5R1InitDiagnostics) { $runtimePackBuildArguments += "-C188R12R4R5R1InitDiagnostics" }
     if ($C188R12R4R5R3InitReturnContract) { $runtimePackBuildArguments += "-C188R12R4R5R3InitReturnContract" }
     if ($C188R12R4R5R4ThreadStoreReadiness) { $runtimePackBuildArguments += "-C188R12R4R5R4ThreadStoreReadiness" }
@@ -653,6 +655,10 @@ try {
     }
     if ($C188R22SettingsBootstrapHandoff -and -not $C188R21ManagedSettingsFactory) {
         throw 'R22 Settings bootstrap handoff requires the established R21 real Settings factory profile.'
+    }
+    if ($C188R23SettingsPreparationTrace -and
+        (-not $C188R22SettingsBootstrapHandoff -or -not $C188R21ManagedSettingsFactory)) {
+        throw 'R23 preparation trace requires the established R22 handoff and R21 real Settings factory profile.'
     }
     if ($C188R12R4R5R1InitDiagnostics -and
         (-not $C188R12R4R5GcOwnershipProof -or -not $UseGuideXosRuntimePack -or
