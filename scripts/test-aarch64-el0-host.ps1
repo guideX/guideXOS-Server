@@ -106,6 +106,9 @@ foreach ($required in @('scheduled_counter_ticks', 'fault_esr', 'fault_far',
         'address_space_owner_id')) {
     if (!$el0RuntimeText.Contains($required)) { throw "EL0 guest evidence field is missing: $required" }
 }
+if ($el0RuntimeText.Contains('kernel::scheduler::task_count() != 0')) {
+    throw 'EL0 runtime readiness must not require a task before the boot path creates its first scheduler task.'
+}
 foreach ($required in @('RUNSAFE3B] FINITE PASS', 'RUNSAFE3B] TIMEOUT PASS',
         'RUNSAFE3B] CANCEL PASS', 'RUNSAFE3B] FAULT PASS',
         'AARCH64_RUNSAFE3B_PASS')) {

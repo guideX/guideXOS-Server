@@ -307,7 +307,9 @@ extern "C" uint8_t phase2_el0_task_runtime_ready()
     api[4] = reinterpret_cast<uintptr_t>(&phase2_el0_task_reap);
     api[5] = reinterpret_cast<uintptr_t>(&phase2_el0_task_finish_preempted);
     api[6] = reinterpret_cast<uintptr_t>(&phase2_el0_task_finish_exception);
-    return phase3_timer_frequency() != 0 && kernel::scheduler::task_count() != 0 &&
+    // The kernel calls this after scheduler initialization but before its
+    // first task is created. An empty task table is a valid ready state here.
+    return phase3_timer_frequency() != 0 &&
            api[0] != 0 && api[1] != 0 && api[2] != 0 && api[3] != 0 &&
            api[4] != 0 && api[5] != 0 && api[6] != 0;
 }

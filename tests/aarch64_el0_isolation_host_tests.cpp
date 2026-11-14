@@ -491,6 +491,8 @@ static void test_scheduled_el0_runtime_host_simulation()
     };
     expect(kernel::scheduler::initialize(config),
            "common scheduler accepts the hosted EL0 runtime fixture configuration");
+    expect(phase2_el0_task_runtime_ready(),
+           "EL0 runtime is ready after scheduler initialization before the first task exists");
     kernel::scheduler::Task* owner = kernel::scheduler::create_task(
         501, "hosted-owner", kernel_owner_entry, nullptr, true);
     expect(owner != nullptr, "create a kernel task as child launch owner");
