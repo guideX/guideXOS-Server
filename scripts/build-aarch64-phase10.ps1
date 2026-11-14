@@ -99,7 +99,7 @@ if ($El0ScheduledQualification) {
     $revisionHeader = Join-Path $OutputDirectory 'runsafe3b_source_revision.h'
     $revisionHeaderText = '#define GXOS_AARCH64_RUNSAFE3B_SOURCE_REVISION "' + $sourceRevision + '"' + "`r`n"
     [IO.File]::WriteAllText($revisionHeader, $revisionHeaderText, [Text.UTF8Encoding]::new($false))
-    $el0ScheduledRevisionInclude = @('-I',$OutputDirectory)
+    $el0ScheduledRevisionInclude = @('-I' + $OutputDirectory)
     Write-Host "RUNSAFE3-B source revision: $sourceRevision" -ForegroundColor Cyan
 }
 $loaderFlags = @(
