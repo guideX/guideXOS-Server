@@ -6,6 +6,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 from pathlib import Path
+import re
 import unittest
 
 
@@ -196,6 +197,29 @@ class CooperativeContextOutputTests(unittest.TestCase):
         bad_rsc = source.replace("mov r21 = 3 ;;", "mov r21 = 1 ;;", 1)
         with self.assertRaises(runner.GateError):
             runner.validate_cooperative_context_switch_source(bad_rsc)
+
+
+class CooperativeContextSwitchCallerTests(unittest.TestCase):
+    def test_a_and_b_callers_pass_contexts_through_output_registers(self) -> None:
+        source = (ROOT / "tests" / "ia64_cooperative_context_switch" /
+                  "probe_sequence.s").read_text(encoding="utf-8")
+        call_args = re.compile(
+            r"movl r14 = ia64_coop_context_([ab]) ;;\s*"
+            r"mov out0 = r14 ;;\s*"
+            r"movl r14 = ia64_coop_context_([ab]) ;;\s*"
+            r"mov out1 = r14 ;;\s*"
+            r"(?:RECORD_EVENT [^\n]*\s*)?"
+            r"br\.call\.sptk\.many b0 = ia64_coop_context_switch ;;"
+        )
+        callers = (
+            ("ia64_coop_a_test:", "ia64_coop_b_test:", [("a", "b")] * 2),
+            ("ia64_coop_b_test:", "ia64_coop_test_fail:", [("b", "a")] * 2),
+        )
+        for start, end, expected in callers:
+            with self.subTest(caller=start):
+                body = source.split(start, 1)[1].split(end, 1)[0]
+                self.assertIn("alloc r16 = ar.pfs, 6, 4, 2, 0 ;;", body)
+                self.assertEqual(call_args.findall(body), expected)
 
 
 if __name__ == "__main__":

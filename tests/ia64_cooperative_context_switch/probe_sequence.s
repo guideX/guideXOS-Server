@@ -488,7 +488,8 @@ ia64_coop_b_first_entry:
 .type ia64_coop_a_test, @function
 .proc ia64_coop_a_test
 ia64_coop_a_test:
-    alloc r16 = ar.pfs, 6, 4, 0, 0 ;;
+    /* Reserve two outputs for ia64_coop_context_switch(in0, in1). */
+    alloc r16 = ar.pfs, 6, 4, 2, 0 ;;
     mov r34 = b0 ;;
     mov r35 = r16 ;;
     movl r32 = SENTINEL_A ;;
@@ -531,9 +532,9 @@ ia64_coop_a_test:
 
     RECORD_EVENT EVENT_A_TO_B, CTX_A_ID
     movl r14 = ia64_coop_context_a ;;
-    mov r36 = r14 ;;
+    mov out0 = r14 ;;
     movl r14 = ia64_coop_context_b ;;
-    mov r37 = r14 ;;
+    mov out1 = r14 ;;
     br.call.sptk.many b0 = ia64_coop_context_switch ;;
 
     RECORD_EVENT EVENT_A_RESUMED_FIRST, CTX_A_ID
@@ -574,9 +575,9 @@ ia64_coop_a_test:
 
     RECORD_EVENT EVENT_A_TO_B_SECOND, CTX_A_ID
     movl r14 = ia64_coop_context_a ;;
-    mov r36 = r14 ;;
+    mov out0 = r14 ;;
     movl r14 = ia64_coop_context_b ;;
-    mov r37 = r14 ;;
+    mov out1 = r14 ;;
     br.call.sptk.many b0 = ia64_coop_context_switch ;;
 
     RECORD_EVENT EVENT_A_RESUMED_FINAL, CTX_A_ID
@@ -644,7 +645,8 @@ ia64_coop_a_test:
 .type ia64_coop_b_test, @function
 .proc ia64_coop_b_test
 ia64_coop_b_test:
-    alloc r16 = ar.pfs, 6, 4, 0, 0 ;;
+    /* Reserve two outputs for ia64_coop_context_switch(in0, in1). */
+    alloc r16 = ar.pfs, 6, 4, 2, 0 ;;
     mov r34 = b0 ;;
     mov r35 = r16 ;;
     adds r12 = -4096, r12 ;;
@@ -694,9 +696,9 @@ ia64_coop_b_test:
     RECORD_EVENT EVENT_B_FIRST_ENTRY, CTX_B_ID
 
     movl r14 = ia64_coop_context_b ;;
-    mov r36 = r14 ;;
+    mov out0 = r14 ;;
     movl r14 = ia64_coop_context_a ;;
-    mov r37 = r14 ;;
+    mov out1 = r14 ;;
     RECORD_EVENT EVENT_B_TO_A_FIRST, CTX_B_ID
     br.call.sptk.many b0 = ia64_coop_context_switch ;;
 
@@ -737,9 +739,9 @@ ia64_coop_b_test:
 
     RECORD_EVENT EVENT_B_TO_A_SECOND, CTX_B_ID
     movl r14 = ia64_coop_context_b ;;
-    mov r36 = r14 ;;
+    mov out0 = r14 ;;
     movl r14 = ia64_coop_context_a ;;
-    mov r37 = r14 ;;
+    mov out1 = r14 ;;
     br.call.sptk.many b0 = ia64_coop_context_switch ;;
     br.cond.sptk ia64_coop_test_fail ;;
 .endp ia64_coop_b_test
