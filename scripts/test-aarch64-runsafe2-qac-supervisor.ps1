@@ -324,5 +324,7 @@ Assert-Case ($runnerSource.Contains('$script:qmpQuitSent = $true') -and
 Assert-Case ($runnerSource.Contains('if ($script:qmpQuitCommandAttempted) { return $false }') -and
     $runnerSource.Contains('qmp_shutdown_cause_established')) 'Runner does not resend an ambiguous quit and records an observed shutdown cause'
 Assert-Case ($runnerSource.Contains('if ($null -eq $line)')) 'Only true stream EOF is classified as the protocol-permitted missing response'
+Assert-Case ($runnerSource.Contains("Convert-RunSafe3BHex (Get-RecordField `$timeout 'payload_x9')") -and
+    $runnerSource.Contains("Convert-RunSafe3BHex (Get-RecordField `$cancel 'payload_x0')")) 'RUNSAFE3-B payload register evidence is parsed as hexadecimal'
 
 Write-Host "QAC supervision state-machine regressions: PASS ($script:assertions assertions)" -ForegroundColor Green

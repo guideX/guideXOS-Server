@@ -96,8 +96,23 @@ foreach ($required in @('phase2_el0_suspend_for_schedule', 'phase2_el0_resume_fo
     if (!$el0RuntimeText.Contains($required)) { throw "Scheduled EL0 runtime contract is missing: $required" }
 }
 foreach ($required in @('EXECUTION_TIMED_OUT', 'execution_consumed',
-        'timer_interrupt_at', 'request_el0_cancel', 'reap_task', 'PHASE_SCHEDULED')) {
+        'timer_interrupt_at', 'request_el0_cancel', 'reap_task', 'PHASE_SCHEDULED',
+        '64-bit wrapping counter', 'el0_preemption_count', 'el0_timer_interrupt_count',
+        'el0_resume_count')) {
     if (!$schedulerText.Contains($required)) { throw "Scheduler-owned EL0 lifecycle contract is missing: $required" }
+}
+foreach ($required in @('scheduled_counter_ticks', 'fault_esr', 'fault_far',
+        'kernel_root_restored', 'user_page_count', 'page_table_page_count',
+        'address_space_owner_id')) {
+    if (!$el0RuntimeText.Contains($required)) { throw "EL0 guest evidence field is missing: $required" }
+}
+foreach ($required in @('RUNSAFE3B] FINITE PASS', 'RUNSAFE3B] TIMEOUT PASS',
+        'RUNSAFE3B] CANCEL PASS', 'RUNSAFE3B] FAULT PASS',
+        'AARCH64_RUNSAFE3B_PASS')) {
+    if (!$phase4.Contains($required)) { throw "RUNSAFE3-B guest acceptance contract is missing: $required" }
+}
+if ($phase4.Contains('reason=data_abort result=none ESR=0x')) {
+    throw 'RUNSAFE3-B fault output must use the serial helper prefix exactly once.'
 }
 Write-Host 'AARCH64_EL0_SOURCE_CONTRACT_PASS (structural; no hardware permission claim)' -ForegroundColor Green
 Write-Host "Host controls: $testExe" -ForegroundColor Cyan

@@ -9,7 +9,8 @@ param(
     [ValidateRange(1, 3600)] [int]$AdmissionTimeoutSeconds = 1800,
     [ValidateRange(30, 900)] [int]$RuntimeSeconds = 300,
     [ValidateRange(5, 180)] [int]$ChildCleanupSeconds = 45,
-    [ValidateRange(5, 120)] [int]$ReservationCleanupSeconds = 20
+    [ValidateRange(5, 120)] [int]$ReservationCleanupSeconds = 20,
+    [switch]$ScheduledEl0Qualification
 )
 
 $ErrorActionPreference = 'Stop'
@@ -21,8 +22,10 @@ $FirmwareCode = [IO.Path]::GetFullPath($FirmwareCode)
 $FirmwareVarsTemplate = [IO.Path]::GetFullPath($FirmwareVarsTemplate)
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $null = Import-Module (Join-Path $PSScriptRoot 'aarch64-runsafe2-qac-supervisor.psm1') -Force
-$project = 'guideXOSServer-AARCH64-RUNSAFE2-EL0-Negative'
-$sessionId = 'el0-negative-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff')
+$project = if ($ScheduledEl0Qualification) { 'guideXOSServer-AARCH64-RUNSAFE3B-Scheduled-EL0' } else { 'guideXOSServer-AARCH64-RUNSAFE2-EL0-Negative' }
+$sessionPrefix = if ($ScheduledEl0Qualification) { 'runsafe3b-' } else { 'el0-negative-' }
+$sessionId = $sessionPrefix + (Get-Date -Format 'yyyyMMdd-HHmmss-fff')
+$script:scheduledSourceRevision = ''
 $sessionDirectory = Join-Path $ArtifactRoot $sessionId
 $null = New-Item -ItemType Directory -Path $sessionDirectory -Force
 $manifestPath = Join-Path $CandidateDirectory 'candidate-manifest.json'
@@ -572,7 +575,227 @@ function Convert-Hex([string]$Value) {
     return [Convert]::ToUInt64($Value.Substring(2), 16)
 }
 
+function Get-RunSafe3BField([string]$Line, [string]$Name) {
+    $value = Get-RecordField $Line $Name
+    [uint64]$parsed = 0
+    if (!$value -or ![uint64]::TryParse($value, [ref]$parsed)) {
+        throw "RUNSAFE3-B guest field $Name is missing or invalid: $value"
+    }
+    return $parsed
+}
+
+function Convert-RunSafe3BHex([string]$Value) {
+    if ($Value -notmatch '^(?:0x)?[0-9a-fA-F]+$') {
+        throw "RUNSAFE3-B guest hexadecimal field is invalid: $Value"
+    }
+    $digits = if ($Value.StartsWith('0x', [StringComparison]::OrdinalIgnoreCase)) { $Value.Substring(2) } else { $Value }
+    return [Convert]::ToUInt64($digits, 16)
+}
+
+function Assert-ScheduledEl0GuestEvidence([string]$Text) {
+    foreach ($marker in @(
+        'AARCH64_EL0_QUALIFICATION_PASS observed-exit=2a cleanup=PASS',
+        'AARCH64_EL0_NEGATIVE_KERNEL_DATA_PASS',
+        'AARCH64_EL0_NEGATIVE_GICD_PASS',
+        'AARCH64_EL0_NEGATIVE_CONTROLS_PASS')) {
+        if (!$Text.Contains($marker)) { throw "Preserved RUNSAFE2 control marker is missing: $marker" }
+    }
+    if ($Text -match 'AARCH64_EL0_CRITICAL_ISOLATION_FAILURE|AARCH64_EL0_NEGATIVE_.*_FAIL|AARCH64_PHASE[0-9]+_ERROR|\[RUNSAFE3B\].*(ERROR|FAIL)') {
+        throw 'Guest emitted an EL0 isolation, scheduler, or RUNSAFE3-B failure marker.'
+    }
+    $lines = @($Text -split '\r?\n')
+
+    $negativeRecords = @($lines | Where-Object { $_ -match 'AARCH64_EL0_PROBE_RECORD probe=' })
+    if ($negativeRecords.Count -ne 2) { throw 'Preserved RUNSAFE2 guest permission evidence is incomplete.' }
+    $kernelProbe = [string]($negativeRecords | Where-Object { $_ -match 'probe=kernel-data' } | Select-Object -First 1)
+    $gicdProbe = [string]($negativeRecords | Where-Object { $_ -match 'probe=gicd-mmio' } | Select-Object -First 1)
+    if (!$kernelProbe -or !$gicdProbe) { throw 'Kernel data and GICD probes did not produce separate native records.' }
+    foreach ($probe in @(@{ Line = $kernelProbe; Ap = 2; Attr = 1 }, @{ Line = $gicdProbe; Ap = 0; Attr = 0 })) {
+        $line = [string]$probe.Line
+        $esr = Convert-RunSafe3BHex (Get-RecordField $line 'ESR')
+        $target = Convert-RunSafe3BHex (Get-RecordField $line 'target')
+        $far = Convert-RunSafe3BHex (Get-RecordField $line 'FAR')
+        $elr = Convert-RunSafe3BHex (Get-RecordField $line 'ELR')
+        $spsr = Convert-RunSafe3BHex (Get-RecordField $line 'SPSR')
+        $child = Convert-RunSafe3BHex (Get-RecordField $line 'child')
+        $owner = Convert-RunSafe3BHex (Get-RecordField $line 'owner')
+        $descriptor = Convert-RunSafe3BHex (Get-RecordField $line 'descriptor')
+        if ((Get-RecordField $line 'state') -ne 'faulted' -or
+            (Get-RecordField $line 'access') -ne 'denied-or-not-entered' -or
+            (Get-RecordField $line 'kernel-root') -ne 'restored' -or
+            (Get-RecordField $line 'cleanup') -ne 'PASS' -or
+            (Get-RunSafe3BField $line 'released-data-pages') -ne 2 -or
+            (Get-RunSafe3BField $line 'released-table-pages') -ne 4 -or
+            $target -eq 0 -or $far -ne $target -or $elr -eq 0 -or $spsr -ne 0x3c0 -or
+            $child -eq 0 -or $owner -eq 0 -or (($esr -shr 26) -band 0x3f) -ne 0x24 -or
+            ($esr -band 0x7f) -ne 0x0f -or (($esr -shr 6) -band 1) -ne 0 -or
+            (($descriptor -shr 6) -band 3) -ne $probe.Ap -or
+            (($descriptor -shr 2) -band 7) -ne $probe.Attr -or
+            (($descriptor -shr 10) -band 1) -ne 1 -or
+            (($descriptor -shr 53) -band 1) -ne 1 -or
+            (($descriptor -shr 54) -band 1) -ne 1) {
+            throw "RUNSAFE2 permission-denial record failed native validation: $line"
+        }
+    }
+    $readyByScenario = @{}
+    foreach ($line in $lines) {
+        if ($line -match '^\[RUNSAFE3B\] CHILD READY scenario=(\S+)') {
+            $scenario = $Matches[1]
+            if ($readyByScenario.ContainsKey($scenario)) { throw "Duplicate child-ready record for $scenario." }
+            $readyByScenario[$scenario] = $line
+        }
+    }
+    $scenarioNames = @('FINITE', 'TIMEOUT', 'CANCEL', 'FAULT')
+    if ($readyByScenario.Count -ne 4) { throw 'Guest did not report exactly four runnable trusted child fixtures.' }
+    $passLines = @{}
+    foreach ($scenario in $scenarioNames) {
+        $matches = @($lines | Where-Object { $_ -match ('^\[RUNSAFE3B\] ' + [regex]::Escape($scenario) + ' PASS ') })
+        if ($matches.Count -ne 1) { throw "Guest did not produce exactly one $scenario terminal record." }
+        $passLines[$scenario] = [string]$matches[0]
+        if (!$readyByScenario.ContainsKey($scenario)) { throw "$scenario has no matching child-ready record." }
+    }
+
+    $identityRows = @()
+    foreach ($scenario in $scenarioNames) {
+        $ready = [string]$readyByScenario[$scenario]
+        $terminal = [string]$passLines[$scenario]
+        $child = Get-RunSafe3BField $terminal 'child'
+        $owner = Get-RunSafe3BField $terminal 'owner'
+        $readyChild = Get-RunSafe3BField $ready 'child'
+        $readyOwner = Get-RunSafe3BField $ready 'owner'
+        $space = Get-RunSafe3BField $ready 'address_space'
+        $terminalSpace = Get-RunSafe3BField $terminal 'address_space'
+        if ($child -eq 0 -or $owner -eq 0 -or $readyChild -ne $child -or $readyOwner -ne $owner -or
+            $terminalSpace -ne $space -or
+            (Get-RunSafe3BField $ready 'task') -eq 0 -or
+            (Get-RunSafe3BField $ready 'address_space') -eq 0 -or
+            (Get-RunSafe3BField $ready 'space_owner') -ne $child -or
+            (Get-RunSafe3BField $ready 'user_pages') -ne 2 -or
+            (Get-RunSafe3BField $ready 'page_table_pages') -eq 0 -or
+            (Get-RunSafe3BField $terminal 'released_data_pages') -ne 2 -or
+            (Get-RunSafe3BField $terminal 'released_table_pages') -eq 0 -or
+            (Get-RecordField $terminal 'task_record_reclaimed') -ne '1' -or
+            (Get-RecordField $ready 'stack_separate') -ne '1') {
+            throw "$scenario child owner, runnable, address-space, or stack-separation evidence is inconsistent: $terminal"
+        }
+        $identityRows += [pscustomobject]@{ Scenario = $scenario; Child = $child; Owner = $owner; Space = $space }
+    }
+    $owners = @($identityRows | Select-Object -ExpandProperty Owner -Unique)
+    $children = @($identityRows | Select-Object -ExpandProperty Child -Unique)
+    if ($owners.Count -ne 1 -or $children.Count -ne 4) {
+        throw 'The four fixtures do not have one consistent independent owner and four distinct child identities.'
+    }
+    $spaces = @($identityRows | Select-Object -ExpandProperty Space -Unique)
+    if ($spaces.Count -ne 4) { throw 'The four children did not receive distinct private address spaces.' }
+
+    $finite = [string]$passLines['FINITE']
+    if ((Get-RecordField $finite 'state') -ne 'completed' -or
+        (Get-RunSafe3BField $finite 'exit') -ne 42 -or
+        (Get-RunSafe3BField $finite 'scheduled_ticks') -eq 0 -or
+        (Get-RunSafe3BField $finite 'budget_ticks') -le (Get-RunSafe3BField $finite 'scheduled_ticks') -or
+        (Get-RunSafe3BField $finite 'preemptions') -eq 0 -or
+        (Get-RunSafe3BField $finite 'timer_irqs') -eq 0 -or
+        (Get-RunSafe3BField $finite 'entries') -ne 1 -or
+        (Get-RunSafe3BField $finite 'resumes') -eq 0 -or
+        (Get-RunSafe3BField $finite 'kernel_work_delta') -eq 0 -or
+        (Get-RecordField $finite 'root_restored') -ne '1' -or
+        (Get-RecordField $finite 'cleanup') -ne '1' -or
+        (Get-RecordField $finite 'reap') -ne '1' -or
+        (Get-RecordField $finite 'kernel_continues') -ne '1') {
+        throw "Finite child did not prove actual exit 42 after EL0 timer preemption/resumption and cleanup: $finite"
+    }
+
+    $timeout = [string]$passLines['TIMEOUT']
+    if ((Get-RecordField $timeout 'state') -ne 'timed_out' -or
+        (Get-RecordField $timeout 'result') -ne 'none' -or
+        (Get-RecordField $timeout 'no_svc') -ne '1' -or
+        (Get-RunSafe3BField $timeout 'budget_ticks') -eq 0 -or
+        (Get-RunSafe3BField $timeout 'consumed_ticks') -lt (Get-RunSafe3BField $timeout 'budget_ticks') -or
+        (Get-RunSafe3BField $timeout 'consumed_ticks') -eq 0 -or
+        (Get-RunSafe3BField $timeout 'entries') -ne 1 -or
+        (Convert-RunSafe3BHex (Get-RecordField $timeout 'payload_x9')) -eq 0 -or
+        (Get-RunSafe3BField $timeout 'preemptions') -eq 0 -or
+        (Get-RunSafe3BField $timeout 'timer_irqs') -eq 0 -or
+        (Get-RunSafe3BField $timeout 'kernel_work_delta') -eq 0 -or
+        (Get-RecordField $timeout 'kernel_root_restored') -ne '1' -or
+        (Get-RecordField $timeout 'cleanup') -ne '1' -or
+        (Get-RecordField $timeout 'reap') -ne '1' -or
+        (Get-RecordField $timeout 'kernel_continues') -ne '1') {
+        throw "Non-cooperative child did not prove kernel-enforced timeout and cleanup: $timeout"
+    }
+
+    $cancel = [string]$passLines['CANCEL']
+    if ((Get-RecordField $cancel 'state') -ne 'cancelled' -or
+        (Get-RecordField $cancel 'result') -ne 'none' -or
+        (Convert-RunSafe3BHex (Get-RecordField $cancel 'payload_x0')) -ne 0x43 -or
+        (Get-RunSafe3BField $cancel 'scheduled_ticks') -eq 0 -or
+        (Get-RunSafe3BField $cancel 'entries') -ne 1 -or
+        (Get-RunSafe3BField $cancel 'preemptions') -eq 0 -or
+        (Get-RunSafe3BField $cancel 'timer_irqs') -eq 0 -or
+        (Get-RunSafe3BField $cancel 'kernel_work_delta') -eq 0 -or
+        (Get-RecordField $cancel 'requested_by') -ne [string]$identityRows[0].Owner -or
+        (Get-RecordField $cancel 'no_svc') -ne '1' -or
+        (Get-RecordField $cancel 'kernel_root_restored') -ne '1' -or
+        (Get-RecordField $cancel 'cleanup') -ne '1' -or
+        (Get-RecordField $cancel 'reap') -ne '1' -or
+        (Get-RecordField $cancel 'kernel_continues') -ne '1') {
+        throw "Independent owner cancellation lacks active-child execution or cleanup evidence: $cancel"
+    }
+
+    $fault = [string]$passLines['FAULT']
+    $esr = Convert-RunSafe3BHex (Get-RecordField $fault 'ESR')
+    $far = Convert-RunSafe3BHex (Get-RecordField $fault 'FAR')
+    $elr = Convert-RunSafe3BHex (Get-RecordField $fault 'ELR')
+    $spsr = Convert-RunSafe3BHex (Get-RecordField $fault 'SPSR')
+    if ((Get-RecordField $fault 'state') -ne 'faulted' -or
+        (Get-RecordField $fault 'reason') -ne 'data_abort' -or
+        (Get-RecordField $fault 'result') -ne 'none' -or $far -eq 0 -or $elr -eq 0 -or
+        (($esr -shr 26) -band 0x3f) -ne 0x24 -or ($esr -band 0x7f) -ne 0x0f -or
+        (($esr -shr 6) -band 1) -ne 0 -or $spsr -ne 0x340 -or
+        (Get-RunSafe3BField $fault 'kernel_work_delta') -eq 0 -or
+        (Get-RecordField $fault 'kernel_root_restored') -ne '1' -or
+        (Get-RecordField $fault 'cleanup') -ne '1' -or
+        (Get-RecordField $fault 'reap') -ne '1' -or
+        (Get-RecordField $fault 'kernel_continues') -ne '1') {
+        throw "EL0 data abort did not prove expected permission-fault isolation and cleanup: $fault"
+    }
+
+    $continuation = @($lines | Where-Object { $_ -match '^\[RUNSAFE3B\] CONTINUATION PASS ' })
+    $passMarker = @($lines | Where-Object { $_ -match '^AARCH64_RUNSAFE3B_PASS ' })
+    if ($continuation.Count -ne 1 -or $passMarker.Count -ne 1) {
+        throw 'Guest continuation or final RUNSAFE3-B result marker is missing or duplicated.'
+    }
+    $continuationLine = [string]$continuation[0]
+    $finalMarker = [string]$passMarker[0]
+    $source = Get-RecordField $finalMarker 'source'
+    if ($source -notmatch '^[0-9a-f]{40}$' -or $source -ne $script:scheduledSourceRevision -or
+        (Get-RunSafe3BField $finalMarker 'finite_preempts') -ne (Get-RunSafe3BField $finite 'preemptions') -or
+        (Get-RecordField $finalMarker 'timeout_enforced') -ne '1' -or
+        (Get-RecordField $finalMarker 'cancellation_forced') -ne '1' -or
+        (Get-RecordField $finalMarker 'fault_isolated') -ne '1' -or
+        (Get-RecordField $finalMarker 'cleanup') -ne '1' -or
+        (Get-RunSafe3BField $continuationLine 'timer_delta') -eq 0 -or
+        (Get-RunSafe3BField $continuationLine 'context_switch_delta') -eq 0 -or
+        (Get-RunSafe3BField $continuationLine 'kernel_work_delta') -eq 0 -or
+        (Get-RecordField $continuationLine 'unexpected_irqs') -ne '0' -or
+        (Get-RecordField $continuationLine 'exceptions') -ne '0') {
+        throw 'Final result marker does not match the candidate revision or measured guest continuation.'
+    }
+    return [pscustomobject]@{
+        SourceRevision = $source
+        Finite = $finite.Trim(); Timeout = $timeout.Trim(); Cancellation = $cancel.Trim(); Fault = $fault.Trim()
+        Continuation = $continuationLine.Trim(); FinalMarker = $finalMarker.Trim()
+        FinitePreemptions = [uint64](Get-RunSafe3BField $finite 'preemptions')
+        TimerDelta = [uint64](Get-RunSafe3BField $continuationLine 'timer_delta')
+        ContextSwitchDelta = [uint64](Get-RunSafe3BField $continuationLine 'context_switch_delta')
+        UnexpectedIrqs = [uint64](Get-RunSafe3BField $continuationLine 'unexpected_irqs')
+        ExceptionCount = [uint64](Get-RunSafe3BField $continuationLine 'exceptions')
+        Phase12PassMarkers = [regex]::Matches($Text, 'AARCH64_PHASE12_PASS').Count
+    }
+}
+
 function Assert-NativeGuestEvidence([string]$Text) {
+    if ($ScheduledEl0Qualification) { return Assert-ScheduledEl0GuestEvidence $Text }
     foreach ($marker in @(
         'AARCH64_EL0_QUALIFICATION_PASS observed-exit=2a cleanup=PASS',
         'AARCH64_EL0_NEGATIVE_KERNEL_DATA_PASS',
@@ -755,7 +978,28 @@ try {
         if (!(Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required candidate/tool file is missing: $path" }
     }
     $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
-    if ($manifest.profile -ne 'runsafe2-el0-negative-controls' -or
+    if ($ScheduledEl0Qualification) {
+        $payloads = $manifest.artifacts.scheduledEl0Payloads
+        if ($manifest.profile -ne 'runsafe3b-scheduled-el0' -or
+            !$manifest.overlay.el0QualificationDefine -or
+            !$manifest.overlay.el0NegativeQualificationDefine -or
+            !$manifest.overlay.el0ScheduledQualificationDefine -or
+            !$manifest.overlay.studioRunRemainsDisabled -or
+            $manifest.artifacts.el0NegativeProbes.Count -ne 2 -or
+            !$payloads -or
+            $payloads.source -notmatch 'internal phase2_el0_runtime.cpp qualification fixtures') {
+            throw 'Candidate manifest does not identify the scheduled RUNSAFE3-B and preserved RUNSAFE2 diagnostic profile.'
+        }
+        foreach ($payloadName in @('finite', 'timeout', 'cancellation', 'fault')) {
+            if ([string]$payloads.$payloadName -notmatch '^[0-9a-f]{64}$') {
+                throw "Candidate manifest has no valid SHA-256 for the internal $payloadName payload."
+            }
+        }
+        if ([string]$manifest.server.head -notmatch '^[0-9a-f]{40}$') {
+            throw 'Candidate manifest has no committed source revision identity.'
+        }
+        $script:scheduledSourceRevision = [string]$manifest.server.head
+    } elseif ($manifest.profile -ne 'runsafe2-el0-negative-controls' -or
         $manifest.artifacts.el0NegativeProbes.Count -ne 2 -or
         $manifest.artifacts.el0NegativeProbes[0] -ne 'kernel-data-read' -or
         $manifest.artifacts.el0NegativeProbes[1] -ne 'gic-distributor-read') {
@@ -770,6 +1014,9 @@ try {
     $currentHead = (& git -C $repoRoot rev-parse HEAD).Trim()
     $currentBranch = (& git -C $repoRoot branch --show-current).Trim()
     if ($currentBranch -ne $manifest.server.branch) { throw 'Current branch differs from the candidate branch.' }
+    if ($ScheduledEl0Qualification -and $currentHead -ne $script:scheduledSourceRevision) {
+        throw 'RUNSAFE3-B candidate must execute at the exact committed revision embedded in its guest marker.'
+    }
     foreach ($source in $manifest.server.worktree.files) {
         $sourcePath = Join-Path $repoRoot ([string]$source.path)
         if (!(Test-Path -LiteralPath $sourcePath -PathType Leaf) -or
@@ -792,7 +1039,7 @@ try {
     $listener.Start()
     try { $qmpPort = ([Net.IPEndPoint]$listener.LocalEndpoint).Port } finally { $listener.Stop() }
     $record.qmp_port = $qmpPort
-    $before = Get-QacHealth 'RUNSAFE2 R2 pre-admission'
+    $before = Get-QacHealth $(if ($ScheduledEl0Qualification) { 'RUNSAFE3-B R2 pre-admission' } else { 'RUNSAFE2 R2 pre-admission' })
     $record.qac_status_before = $before.Status
     $record.qac_list_before = $before.List
     if ($before.RecoveryRequired -or $before.ProcessCount -ne 0 -or $before.ForeignCount -ne 0 -or
@@ -915,7 +1162,7 @@ try {
         if ($guestText -match 'AARCH64_EL0_CRITICAL_ISOLATION_FAILURE') {
             $record.critical_isolation_failure = $true
             $guestFailureMarker = 'EL0 unexpectedly read a protected kernel or GIC Distributor address.'
-        } elseif ($guestText -match 'AARCH64_EL0_NEGATIVE_.*_FAIL|AARCH64_PHASE[0-9]+_ERROR') {
+        } elseif ($guestText -match 'AARCH64_EL0_NEGATIVE_.*_FAIL|AARCH64_PHASE[0-9]+_ERROR|\[RUNSAFE3B\].*(ERROR|FAIL)') {
             $guestFailureMarker = 'Guest emitted a failure marker before completing the EL0 qualification.'
         }
         try {

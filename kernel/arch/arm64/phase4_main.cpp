@@ -659,6 +659,317 @@ static void print_el0_negative_probe_record(
 
 #if defined(GXOS_AARCH64_PHASE9)
 #if defined(GXOS_AARCH64_PHASE12)
+#if defined(GXOS_AARCH64_RUNSAFE3B_DIAGNOSTICS)
+#ifndef GXOS_AARCH64_RUNSAFE3B_SOURCE_REVISION
+#error RUNSAFE3-B diagnostics require a source revision identity
+#endif
+
+static uint64_t runsafe3b_work_total()
+{
+    return g_work[0].counter + g_work[1].counter + g_work[2].counter;
+}
+
+static uint64_t runsafe3b_timeout_ticks(uint64_t timeout_microseconds)
+{
+    const uint64_t frequency = phase3_timer_frequency();
+    if (frequency == 0) return 0;
+    const uint64_t whole_seconds = timeout_microseconds / UINT64_C(1000000);
+    const uint64_t remainder_us = timeout_microseconds % UINT64_C(1000000);
+    if (whole_seconds != 0 && frequency > UINT64_MAX / whole_seconds)
+        return UINT64_MAX;
+    const uint64_t whole_ticks = frequency * whole_seconds;
+    if (remainder_us != 0 && frequency > UINT64_MAX / remainder_us)
+        return UINT64_MAX;
+    const uint64_t product = frequency * remainder_us;
+    const uint64_t remainder_ticks = product / UINT64_C(1000000) +
+        ((product % UINT64_C(1000000)) != 0 ? 1 : 0);
+    if (remainder_ticks > UINT64_MAX - whole_ticks) return UINT64_MAX;
+    return whole_ticks + remainder_ticks;
+}
+
+static bool runsafe3b_wait_terminal(uint64_t execution_id, uint64_t owner_id,
+                                    uint64_t expected_state,
+                                    gxos_aarch64_el0_task_result* result)
+{
+    if (!result) return false;
+    const uint64_t start = phase3_timer_counter();
+    const uint64_t timeout_ticks = runsafe3b_timeout_ticks(UINT64_C(15000000));
+    if (timeout_ticks == 0) return false;
+    for (;;) {
+        gxos_aarch64_el0_task_result current{};
+        if (!phase2_el0_task_query(execution_id, owner_id, &current)) return false;
+        if (current.state == expected_state) {
+            *result = current;
+            return true;
+        }
+        if (current.state >= kernel::scheduler::EXECUTION_COMPLETED ||
+            phase3_timer_counter() - start >= timeout_ticks) return false;
+        kernel::scheduler::note_execution();
+    }
+}
+
+static bool runsafe3b_isolated_result(
+    const gxos_aarch64_el0_task_result& result, uint64_t owner_id)
+{
+    if (result.execution_id == 0 || result.owner_id != owner_id ||
+        result.address_space_id == 0 || result.scheduler_task_id == 0 ||
+        result.address_space_owner_id != result.execution_id ||
+        result.user_page_count != 2 || result.kernel_stack_size == 0 ||
+        (result.kernel_stack_size & UINT64_C(0xfff)) != 0 ||
+        result.page_table_page_count == 0 ||
+        result.user_stack_pointer < GXOS_AARCH64_EL0_PAGE_SIZE ||
+        result.kernel_stack_base > UINT64_MAX - result.kernel_stack_size) return false;
+    const uint64_t user_stack_base =
+        result.user_stack_pointer - GXOS_AARCH64_EL0_PAGE_SIZE;
+    const uint64_t kernel_stack_end =
+        result.kernel_stack_base + result.kernel_stack_size;
+    return user_stack_base >= kernel_stack_end ||
+           result.kernel_stack_base >= result.user_stack_pointer;
+}
+
+static bool runsafe3b_create_and_start(uint64_t fixture, uint64_t owner_id,
+                                       uint64_t budget_microseconds,
+                                       const char* name, uint64_t* execution_id)
+{
+    if (!execution_id || !phase2_el0_task_create_fixture(
+            fixture, owner_id, budget_microseconds, execution_id)) return false;
+    gxos_aarch64_el0_task_result created{};
+    if (!phase2_el0_task_query(*execution_id, owner_id, &created) ||
+        created.state != kernel::scheduler::EXECUTION_CREATED ||
+        created.owner_id != owner_id || created.address_space_id == 0 ||
+        created.user_page_count != 2 ||
+        !phase2_el0_task_start(*execution_id, owner_id)) return false;
+    gxos_aarch64_el0_task_result ready{};
+    if (!phase2_el0_task_query(*execution_id, owner_id, &ready) ||
+        ready.state != kernel::scheduler::EXECUTION_READY ||
+        !runsafe3b_isolated_result(ready, owner_id)) return false;
+    print("[RUNSAFE3B] CHILD READY scenario=");
+    print(name);
+    print(" child="); phase3_serial_dec(ready.execution_id);
+    print(" owner="); phase3_serial_dec(ready.owner_id);
+    print(" task="); phase3_serial_dec(ready.scheduler_task_id);
+    print(" address_space="); phase3_serial_dec(ready.address_space_id);
+    print(" space_owner="); phase3_serial_dec(ready.address_space_owner_id);
+    print(" user_pages="); phase3_serial_dec(ready.user_page_count);
+    print(" page_table_pages="); phase3_serial_dec(ready.page_table_page_count);
+    print(" kernel_stack="); phase3_serial_hex(ready.kernel_stack_base);
+    print("+"); phase3_serial_dec(ready.kernel_stack_size);
+    print(" user_sp="); phase3_serial_hex(ready.user_stack_pointer);
+    print(" stack_separate=1\n");
+    return true;
+}
+
+static bool runsafe3b_reap(uint64_t execution_id, uint64_t owner_id)
+{
+    const uint32_t task_count_before = kernel::scheduler::task_count();
+    if (!phase2_el0_task_reap(execution_id, owner_id)) return false;
+    if (task_count_before == 0 ||
+        kernel::scheduler::task_count() + 1 != task_count_before) return false;
+    gxos_aarch64_el0_task_result reaped{};
+    return phase2_el0_task_query(execution_id, owner_id, &reaped) &&
+           reaped.state == kernel::scheduler::EXECUTION_REAPED &&
+           reaped.resources_cleaned &&
+           !phase2_el0_task_reap(execution_id, owner_id);
+}
+
+static bool runsafe3b_run_scheduled_fixtures()
+{
+    kernel::scheduler::Task* owner_task = kernel::scheduler::current_task();
+    if (!owner_task || owner_task->execution_kind != kernel::scheduler::EXECUTION_KERNEL ||
+        owner_task->id == 0) return false;
+    const uint64_t owner_id = owner_task->id;
+    uint64_t execution_id = 0;
+
+    // FINITE uses x9 and NZCV across timer preemptions; the loop must resume
+    // with both intact before its actual SVC exit value 42 can be produced.
+    uint64_t kernel_work_before = runsafe3b_work_total();
+    if (!runsafe3b_create_and_start(
+            GXOS_AARCH64_EL0_FIXTURE_FINITE_PREEMPTION, owner_id,
+            UINT64_C(5000000), "FINITE", &execution_id)) return false;
+    gxos_aarch64_el0_task_result finite{};
+    if (!runsafe3b_wait_terminal(execution_id, owner_id,
+            kernel::scheduler::EXECUTION_COMPLETED, &finite) ||
+        !runsafe3b_isolated_result(finite, owner_id) ||
+        finite.result_kind != kernel::scheduler::EXECUTION_RESULT_EXIT ||
+        finite.result_value != 42 || finite.scheduled_counter_ticks == 0 ||
+        finite.preemption_count == 0 || finite.el0_timer_interrupt_count == 0 ||
+        finite.el0_entry_count != 1 || finite.el0_resume_count == 0 ||
+        !finite.resources_cleaned || !finite.kernel_root_restored ||
+        runsafe3b_work_total() <= kernel_work_before ||
+        !runsafe3b_reap(execution_id, owner_id)) return false;
+    print("[RUNSAFE3B] FINITE PASS child="); phase3_serial_dec(finite.execution_id);
+    print(" owner="); phase3_serial_dec(finite.owner_id);
+    print(" address_space="); phase3_serial_dec(finite.address_space_id);
+    print(" state=completed exit="); phase3_serial_dec(finite.result_value);
+    print(" scheduled_ticks="); phase3_serial_dec(finite.scheduled_counter_ticks);
+    print(" budget_ticks="); phase3_serial_dec(finite.budget_counter_ticks);
+    print(" preemptions="); phase3_serial_dec(finite.preemption_count);
+    print(" timer_irqs="); phase3_serial_dec(finite.el0_timer_interrupt_count);
+    print(" entries="); phase3_serial_dec(finite.el0_entry_count);
+    print(" resumes="); phase3_serial_dec(finite.el0_resume_count);
+    print(" kernel_work_delta=");
+    phase3_serial_dec(runsafe3b_work_total() - kernel_work_before);
+    print(" released_data_pages="); phase3_serial_dec(finite.user_page_count);
+    print(" released_table_pages="); phase3_serial_dec(finite.page_table_page_count);
+    print(" root_restored="); phase3_serial_dec(finite.kernel_root_restored);
+    print(" cleanup=1 reap=1 task_record_reclaimed=1 kernel_continues=1\n");
+
+    kernel_work_before = runsafe3b_work_total();
+    if (!runsafe3b_create_and_start(
+            GXOS_AARCH64_EL0_FIXTURE_NONCOOPERATIVE, owner_id,
+            UINT64_C(2000), "TIMEOUT", &execution_id)) return false;
+    gxos_aarch64_el0_task_result timeout{};
+    if (!runsafe3b_wait_terminal(execution_id, owner_id,
+            kernel::scheduler::EXECUTION_TIMED_OUT, &timeout) ||
+        !runsafe3b_isolated_result(timeout, owner_id) ||
+        timeout.result_kind != kernel::scheduler::EXECUTION_RESULT_TIMEOUT ||
+        timeout.result_value != 0 ||
+        timeout.scheduled_counter_ticks < timeout.budget_counter_ticks ||
+        timeout.preemption_count == 0 || timeout.el0_timer_interrupt_count == 0 ||
+        timeout.el0_entry_count != 1 || timeout.saved_x9 == 0 ||
+        timeout.resources_cleaned == 0 ||
+        timeout.kernel_root_restored == 0 ||
+        runsafe3b_work_total() <= kernel_work_before ||
+        !runsafe3b_reap(execution_id, owner_id)) return false;
+    print("[RUNSAFE3B] TIMEOUT PASS child="); phase3_serial_dec(timeout.execution_id);
+    print(" owner="); phase3_serial_dec(timeout.owner_id);
+    print(" address_space="); phase3_serial_dec(timeout.address_space_id);
+    print(" state=timed_out result=none budget_us=2000 budget_ticks=");
+    phase3_serial_dec(timeout.budget_counter_ticks);
+    print(" consumed_ticks="); phase3_serial_dec(timeout.scheduled_counter_ticks);
+    print(" entries="); phase3_serial_dec(timeout.el0_entry_count);
+    print(" payload_x9="); phase3_serial_hex(timeout.saved_x9);
+    print(" preemptions="); phase3_serial_dec(timeout.preemption_count);
+    print(" timer_irqs="); phase3_serial_dec(timeout.el0_timer_interrupt_count);
+    print(" kernel_work_delta=");
+    phase3_serial_dec(runsafe3b_work_total() - kernel_work_before);
+    print(" released_data_pages="); phase3_serial_dec(timeout.user_page_count);
+    print(" released_table_pages="); phase3_serial_dec(timeout.page_table_page_count);
+    print(" no_svc=1 kernel_root_restored=1 cleanup=1 reap=1 task_record_reclaimed=1 kernel_continues=1\n");
+
+    kernel_work_before = runsafe3b_work_total();
+    if (!runsafe3b_create_and_start(
+            GXOS_AARCH64_EL0_FIXTURE_CANCELLATION, owner_id,
+            UINT64_C(10000000), "CANCEL", &execution_id)) return false;
+    gxos_aarch64_el0_task_result cancel_preempted{};
+    const uint64_t cancel_wait_start = phase3_timer_counter();
+    const uint64_t cancel_wait_ticks =
+        runsafe3b_timeout_ticks(UINT64_C(15000000));
+    bool saw_running_payload = false;
+    while (cancel_wait_ticks != 0 &&
+           phase3_timer_counter() - cancel_wait_start < cancel_wait_ticks) {
+        if (!phase2_el0_task_query(execution_id, owner_id, &cancel_preempted))
+            return false;
+        if (cancel_preempted.state == kernel::scheduler::EXECUTION_PREEMPTED &&
+            cancel_preempted.el0_timer_interrupt_count != 0 &&
+            cancel_preempted.saved_x0 == UINT64_C(0x43)) {
+            saw_running_payload = true;
+            break;
+        }
+        if (cancel_preempted.state >= kernel::scheduler::EXECUTION_COMPLETED)
+            return false;
+        kernel::scheduler::note_execution();
+    }
+    if (!saw_running_payload || !phase2_el0_task_cancel(execution_id, owner_id))
+        return false;
+    gxos_aarch64_el0_task_result cancelled{};
+    if (!phase2_el0_task_query(execution_id, owner_id, &cancelled) ||
+        !runsafe3b_isolated_result(cancelled, owner_id) ||
+        cancelled.state != kernel::scheduler::EXECUTION_CANCELLED ||
+        cancelled.result_kind != kernel::scheduler::EXECUTION_RESULT_CANCEL ||
+        cancelled.result_value != 0 || cancelled.saved_x0 != UINT64_C(0x43) ||
+        cancelled.preemption_count == 0 ||
+        cancelled.el0_timer_interrupt_count == 0 || cancelled.el0_entry_count != 1 ||
+        cancelled.resources_cleaned == 0 || cancelled.kernel_root_restored == 0 ||
+        runsafe3b_work_total() <= kernel_work_before ||
+        !runsafe3b_reap(execution_id, owner_id)) return false;
+    print("[RUNSAFE3B] CANCEL PASS child="); phase3_serial_dec(cancelled.execution_id);
+    print(" owner="); phase3_serial_dec(cancelled.owner_id);
+    print(" address_space="); phase3_serial_dec(cancelled.address_space_id);
+    print(" requested_by="); phase3_serial_dec(owner_id);
+    print(" state=cancelled result=none payload_x0=");
+    phase3_serial_hex(cancelled.saved_x0);
+    print(" scheduled_ticks="); phase3_serial_dec(cancelled.scheduled_counter_ticks);
+    print(" budget_ticks="); phase3_serial_dec(cancelled.budget_counter_ticks);
+    print(" entries="); phase3_serial_dec(cancelled.el0_entry_count);
+    print(" resumes="); phase3_serial_dec(cancelled.el0_resume_count);
+    print(" preemptions="); phase3_serial_dec(cancelled.preemption_count);
+    print(" timer_irqs="); phase3_serial_dec(cancelled.el0_timer_interrupt_count);
+    print(" kernel_work_delta=");
+    phase3_serial_dec(runsafe3b_work_total() - kernel_work_before);
+    print(" released_data_pages="); phase3_serial_dec(cancelled.user_page_count);
+    print(" released_table_pages="); phase3_serial_dec(cancelled.page_table_page_count);
+    print(" kernel_root_restored=1 cleanup=1 reap=1 task_record_reclaimed=1 no_svc=1 kernel_continues=1\n");
+
+    kernel_work_before = runsafe3b_work_total();
+    if (!runsafe3b_create_and_start(
+            GXOS_AARCH64_EL0_FIXTURE_PROTECTED_MEMORY_FAULT, owner_id,
+            UINT64_C(5000000), "FAULT", &execution_id)) return false;
+    gxos_aarch64_el0_task_result fault{};
+    if (!runsafe3b_wait_terminal(execution_id, owner_id,
+            kernel::scheduler::EXECUTION_FAULTED, &fault) ||
+        !runsafe3b_isolated_result(fault, owner_id) ||
+        fault.result_kind != kernel::scheduler::EXECUTION_RESULT_FAULT ||
+        fault.result_value != GXOS_AARCH64_EL0_FAULT_DATA_ABORT ||
+        ((fault.fault_esr >> 26) & UINT64_C(0x3f)) != UINT64_C(0x24) ||
+        (fault.fault_esr & UINT64_C(0x7f)) != UINT64_C(0x0f) ||
+        ((fault.fault_esr >> 6) & 1) != 0 || fault.fault_far == 0 ||
+        (fault.fault_spsr & UINT64_C(0x3ff)) != UINT64_C(0x340) ||
+        fault.fault_elr == 0 || fault.resources_cleaned == 0 ||
+        fault.kernel_root_restored == 0 ||
+        runsafe3b_work_total() <= kernel_work_before ||
+        !runsafe3b_reap(execution_id, owner_id)) return false;
+    print("[RUNSAFE3B] FAULT PASS child="); phase3_serial_dec(fault.execution_id);
+    print(" owner="); phase3_serial_dec(fault.owner_id);
+    print(" address_space="); phase3_serial_dec(fault.address_space_id);
+    print(" state=faulted reason=data_abort result=none ESR=");
+    phase3_serial_hex(fault.fault_esr);
+    print(" FAR="); phase3_serial_hex(fault.fault_far);
+    print(" ELR="); phase3_serial_hex(fault.fault_elr);
+    print(" SPSR="); phase3_serial_hex(fault.fault_spsr);
+    print(" preemptions="); phase3_serial_dec(fault.preemption_count);
+    print(" timer_irqs="); phase3_serial_dec(fault.el0_timer_interrupt_count);
+    print(" kernel_work_delta=");
+    phase3_serial_dec(runsafe3b_work_total() - kernel_work_before);
+    print(" released_data_pages="); phase3_serial_dec(fault.user_page_count);
+    print(" released_table_pages="); phase3_serial_dec(fault.page_table_page_count);
+    print(" kernel_root_restored=1 cleanup=1 reap=1 task_record_reclaimed=1 kernel_continues=1\n");
+
+    kernel::scheduler::Stats before{};
+    kernel::scheduler::Stats after{};
+    kernel::scheduler::get_stats(&before);
+    const uint64_t work_before_continuation = runsafe3b_work_total();
+    const uint64_t counter_before_continuation = phase3_timer_counter();
+    const uint64_t continuation_timeout = runsafe3b_timeout_ticks(UINT64_C(2000000));
+    do {
+        kernel::scheduler::get_stats(&after);
+        if (after.timer_ticks > before.timer_ticks &&
+            after.context_switches > before.context_switches &&
+            runsafe3b_work_total() > work_before_continuation) break;
+        kernel::scheduler::note_execution();
+    } while (continuation_timeout != 0 &&
+             phase3_timer_counter() - counter_before_continuation < continuation_timeout);
+    if (after.timer_ticks <= before.timer_ticks ||
+        after.context_switches <= before.context_switches ||
+        runsafe3b_work_total() <= work_before_continuation ||
+        after.unexpected_irqs != 0 || kernel::scheduler::failed() ||
+        phase3_exception_count() != 0) return false;
+    print("[RUNSAFE3B] CONTINUATION PASS timer_delta=");
+    phase3_serial_dec(after.timer_ticks - before.timer_ticks);
+    print(" context_switch_delta=");
+    phase3_serial_dec(after.context_switches - before.context_switches);
+    print(" kernel_work_delta=");
+    phase3_serial_dec(runsafe3b_work_total() - work_before_continuation);
+    print(" unexpected_irqs="); phase3_serial_dec(after.unexpected_irqs);
+    print(" exceptions="); phase3_serial_dec(phase3_exception_count());
+    print("\nAARCH64_RUNSAFE3B_PASS source=");
+    print(GXOS_AARCH64_RUNSAFE3B_SOURCE_REVISION);
+    print(" finite_preempts="); phase3_serial_dec(finite.preemption_count);
+    print(" timeout_enforced=1 cancellation_forced=1 fault_isolated=1 cleanup=1\n");
+    return true;
+}
+#endif
+
 static void phase12_app_task(void*)
 {
     while (!g_graphics_complete && !g_graphics_failure) kernel::scheduler::note_execution();
@@ -737,6 +1048,15 @@ static void phase12_app_task(void*)
         for (;;) kernel::scheduler::note_execution();
     }
     print("[guideXOS] AARCH64_EL0_NEGATIVE_CONTROLS_PASS kernel=permission-fault gicd=permission-fault cleanup=PASS\n");
+#endif
+#if defined(GXOS_AARCH64_RUNSAFE3B_DIAGNOSTICS)
+    if (!runsafe3b_run_scheduled_fixtures()) {
+        g_phase12_failure = 1;
+        g_phase12_complete = 1;
+        g_app_complete = 1;
+        print("[RUNSAFE3B] ERROR scheduled_child_acceptance=failed\n");
+        for (;;) kernel::scheduler::note_execution();
+    }
 #endif
     g_phase12_complete = 1;
     g_app_complete = 1;

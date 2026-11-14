@@ -78,6 +78,10 @@ struct Task {
     uint8_t reserved;
     uint64_t execution_count;
     uint64_t preemption_count;
+    uint64_t el0_preemption_count;
+    uint64_t el0_entry_count;
+    uint64_t el0_resume_count;
+    uint64_t el0_timer_interrupt_count;
     uint64_t wait_count;
     uint64_t wake_count;
     uint64_t execution_id;

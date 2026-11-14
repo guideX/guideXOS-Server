@@ -26,7 +26,7 @@ RUNSAFE3-A does not save SIMD/FPU registers. The Phase 10 freestanding kernel is
 
 ## Budgets and terminal ordering
 
-Budgets are expressed in microseconds at the internal API and converted with checked arithmetic to `CNTFRQ_EL0` ticks. The default is 500 ms; accepted values are 1 ms through 60 s. `CNTpct_EL0` is the monotonic counter. The scheduler charges counter deltas only while an EL0 child is resident, from initial entry/resume until the next timer IRQ. On an SVC/fault return it charges the final interval before accepting a result, so an exit just beyond its budget cannot be reported as successful merely because it arrived between periodic ticks.
+Budgets are expressed in microseconds at the internal API and converted with checked arithmetic to `CNTFRQ_EL0` ticks, rounding a fractional tick up. The default is 500 ms; accepted values are 1 ms through 60 s. `CNTPCT_EL0` is the monotonic counter. The scheduler charges unsigned counter deltas for each child schedule slice, from the initial entry/resume sample through the next timer IRQ sample. The counter continues advancing while other tasks run, but those intervals are not charged to the child. Each slice also includes the small EL1 entry/dispatch work before the timer sample. This is scheduled elapsed counter time; it is neither wall-clock lifetime nor a precise count of CPU cycles. Unsigned subtraction handles a short slice crossing the counter's 64-bit wrap. On an SVC/fault return the scheduler charges the final interval before accepting a result, so an exit just beyond its budget cannot be reported as successful merely because it arrived between periodic ticks.
 
 The existing architectural timer is periodic at 100 microseconds. Timeout is enforced on a timer interrupt after the consumed counter reaches the budget; therefore termination latency is bounded by one timer quantum plus interrupt/dispatch latency, not by a host process timeout. A final SVC/fault sample can also detect that the budget was crossed before the next timer IRQ. Timeout result value is zero with result kind `TIMEOUT`; it never reuses a child exit value. A cancellation request observed while a child is actively running is checked at its next timer boundary; in the current single-core owner model, owner API calls occur after that boundary when the child is already preempted. A completed/faulted child rejects later cancellation. Timer-side cancel/timeout and final-return timeout/cancel both disable the task before cleanup and reaping.
 
@@ -80,7 +80,7 @@ Legacy Phase 9 NativeElf execution still enters at EL1 in the shared kernel tran
 RUNSAFE3-B must build and boot the exact source-matched candidate under the existing QAC supervision workflow. It must obtain guest-originated evidence for all of the following, with real timer deltas and per-task scheduler counters (never constants or host simulation):
 
 ```text
-[RUNSAFE3B] FINITE PASS exit=42 preemptions=<n> timer_irqs=<n> cpu_ticks=<n> cleanup=1 kernel_continues=1
+[RUNSAFE3B] FINITE PASS exit=42 preemptions=<n> timer_irqs=<n> scheduled_ticks=<n> cleanup=1 kernel_continues=1
 [RUNSAFE3B] TIMEOUT PASS state=timed_out result=none budget_ticks=<n> consumed_ticks=<n> timer_irqs=<n> cleanup=1 kernel_continues=1
 [RUNSAFE3B] CANCEL PASS state=cancelled result=none requested_by=<owner-id> timer_irqs=<n> cleanup=1 kernel_continues=1
 [RUNSAFE3B] FAULT PASS state=faulted reason=data_abort far=0x40000000 kernel_root_restored=1 cleanup=1 kernel_continues=1

@@ -137,8 +137,30 @@ struct gxos_aarch64_el0_task_result {
     uint64_t state;
     uint64_t result_kind;
     uint64_t result_value;
-    uint64_t cpu_time_counter_ticks;
+    // Monotonic-counter deltas charged for child schedule slices, sampled
+    // around EL0 entry/resume and timer/final-return boundaries. This includes
+    // small exception-path latency and is not wall time or a cycle count.
+    uint64_t scheduled_counter_ticks;
     uint64_t budget_counter_ticks;
+    uint64_t address_space_id;
+    uint64_t address_space_owner_id;
+    uint64_t scheduler_task_id;
+    uint64_t kernel_stack_base;
+    uint64_t kernel_stack_size;
+    uint64_t user_stack_pointer;
+    uint64_t user_page_count;
+    uint64_t page_table_page_count;
+    uint64_t preemption_count;
+    uint64_t el0_entry_count;
+    uint64_t el0_resume_count;
+    uint64_t el0_timer_interrupt_count;
+    uint64_t saved_x0;
+    uint64_t saved_x9;
+    uint64_t fault_esr;
+    uint64_t fault_elr;
+    uint64_t fault_spsr;
+    uint64_t fault_far;
+    uint64_t kernel_root_restored;
     uint64_t cancel_requested;
     uint64_t resources_cleaned;
 };

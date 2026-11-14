@@ -263,6 +263,10 @@ bool reset_task(Task* task, kernel::arch::thread_entry_t entry, void* argument, 
     task->state = enabled ? TASK_RUNNABLE : TASK_BLOCKED;
     task->execution_count = 0;
     task->preemption_count = 0;
+    task->el0_preemption_count = 0;
+    task->el0_entry_count = 0;
+    task->el0_resume_count = 0;
+    task->el0_timer_interrupt_count = 0;
     task->wait_count = 0;
     task->wake_count = 0;
     task->execution_id = 0;
@@ -294,6 +298,10 @@ bool configure_el0_task(Task* task, uint64_t execution_id, uint64_t owner_id,
     task->execution_budget = budget;
     task->execution_consumed = 0;
     task->execution_started_at = 0;
+    task->el0_preemption_count = 0;
+    task->el0_entry_count = 0;
+    task->el0_resume_count = 0;
+    task->el0_timer_interrupt_count = 0;
     task->execution_result = 0;
     task->execution_context = execution_context;
     task->execution_address_space = address_space;
@@ -336,6 +344,7 @@ bool mark_el0_running(Task* task, uint64_t now)
         task->execution_state != EXECUTION_READY) return false;
     task->execution_state = EXECUTION_RUNNING;
     task->execution_started_at = now;
+    saturating_add(&task->el0_entry_count, 1);
     return true;
 }
 
@@ -346,6 +355,7 @@ bool mark_el0_resumed(Task* task, uint64_t now)
         task->execution_state != EXECUTION_PREEMPTED) return false;
     task->execution_state = EXECUTION_RUNNING;
     task->execution_started_at = now;
+    saturating_add(&task->el0_resume_count, 1);
     return true;
 }
 
@@ -353,8 +363,9 @@ bool mark_el0_returning(Task* task, uint64_t now)
 {
     if (!is_real_task(task) || task != s_current ||
         task->execution_kind != EXECUTION_EL0_CHILD ||
-        task->execution_state != EXECUTION_RUNNING ||
-        now < task->execution_started_at) return false;
+        task->execution_state != EXECUTION_RUNNING) return false;
+    // CNTPCT_EL0 is a 64-bit wrapping counter. Unsigned subtraction preserves
+    // a short resident interval across one wrap of the architectural counter.
     saturating_add(&task->execution_consumed, now - task->execution_started_at);
     task->execution_state = EXECUTION_RETURNING;
     return true;
@@ -582,18 +593,20 @@ void* timer_interrupt_at(void* frame, uint64_t monotonic_now)
     }
 
     Task* current = s_current;
+    const bool interrupted_el0_running =
+        current->execution_kind == EXECUTION_EL0_CHILD &&
+        current->execution_state == EXECUTION_RUNNING;
     if (!frame) {
         mark_failure();
         return 0;
     }
     if (current->execution_kind == EXECUTION_EL0_CHILD &&
         current->execution_state == EXECUTION_RUNNING) {
-        if (
-            !current->execution_context || !current->execution_address_space ||
-            monotonic_now < current->execution_started_at) {
+        if (!current->execution_context || !current->execution_address_space) {
             mark_failure();
             return 0;
         }
+        saturating_add(&current->el0_timer_interrupt_count, 1);
         saturating_add(&current->execution_consumed,
                        monotonic_now - current->execution_started_at);
         current->execution_state = EXECUTION_PREEMPTED;
@@ -619,6 +632,8 @@ void* timer_interrupt_at(void* frame, uint64_t monotonic_now)
         s_stats.preemptions >= s_config.preemption_target && s_completion_task &&
         s_completion_task->enabled && s_completion_task->interrupt_context_valid) {
         s_preemptive_complete = true;
+        if (interrupted_el0_running)
+            saturating_add(&current->el0_preemption_count, 1);
         count_switch(s_completion_task);
         return return_context(s_completion_task);
     }
@@ -634,6 +649,8 @@ void* timer_interrupt_at(void* frame, uint64_t monotonic_now)
             return 0;
         }
     }
+    if (interrupted_el0_running && next != current)
+        saturating_add(&current->el0_preemption_count, 1);
     count_switch(next);
     return return_context(next);
 }

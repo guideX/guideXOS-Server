@@ -28,6 +28,8 @@ struct RuntimeRecord {
     kernel::scheduler::Task* task;
     uint64_t execution_id;
     uint64_t parent_owner_id;
+    uint64_t user_page_count;
+    uint64_t user_table_page_count;
     uint64_t final_state;
     uint64_t final_result_kind;
     uint64_t final_result;
@@ -57,7 +59,9 @@ static const uint8_t g_finite_preemption_payload[] = {
     0x01, 0x00, 0x00, 0xd4  // svc #0
 };
 static const uint8_t g_noncooperative_payload[] = {
-    0x00, 0x00, 0x00, 0x14 // b .
+    0xe9, 0xff, 0x9f, 0xd2, // mov x9, #0xffff
+    0x29, 0x09, 0x00, 0xf1, // subs x9, x9, #2 (odd countdown wraps without reaching zero)
+    0xe1, 0xff, 0xff, 0x54  // b.ne -4
 };
 static const uint8_t g_cancellation_payload[] = {
     0x60, 0x08, 0x80, 0xd2, // mov x0, #0x43 (diagnostic only)
@@ -344,6 +348,8 @@ extern "C" uint8_t phase2_el0_task_create(
         zero_bytes(record, sizeof(*record));
         return 0;
     }
+    record->user_page_count = record->space.page_count;
+    record->user_table_page_count = record->space.table_count;
     zero_bytes(&record->context, sizeof(record->context));
     record->context.sp_el0 = stack_va + GXOS_AARCH64_EL0_PAGE_SIZE;
     record->context.entry_pc = code_va;
@@ -407,16 +413,56 @@ extern "C" uint8_t phase2_el0_task_query(
         result->state = record->task->execution_state;
         result->result_kind = record->task->execution_result_kind;
         result->result_value = record->task->execution_result;
-        result->cpu_time_counter_ticks = record->task->execution_consumed;
+        result->scheduled_counter_ticks = record->task->execution_consumed;
         result->budget_counter_ticks = record->task->execution_budget;
+        result->address_space_id = record->space.identity;
+        result->address_space_owner_id = record->space.owner_id;
+        result->scheduler_task_id = record->task->id;
+        result->kernel_stack_base = record->task->stack_base;
+        result->kernel_stack_size = record->task->stack_size;
+        result->user_stack_pointer = record->context.sp_el0;
+        result->user_page_count = record->user_page_count;
+        result->page_table_page_count = record->user_table_page_count;
+        result->preemption_count = record->task->el0_preemption_count;
+        result->el0_entry_count = record->task->el0_entry_count;
+        result->el0_resume_count = record->task->el0_resume_count;
+        result->el0_timer_interrupt_count = record->task->el0_timer_interrupt_count;
+        result->saved_x0 = record->context.x[0];
+        result->saved_x9 = record->context.x[9];
+        result->fault_esr = record->context.fault_esr;
+        result->fault_elr = record->context.fault_elr;
+        result->fault_spsr = record->context.fault_spsr;
+        result->fault_far = record->context.fault_far;
+        result->kernel_root_restored =
+            phase2_mmu_current_root() == record->space.kernel_root;
         result->cancel_requested = record->task->cancel_requested;
         result->resources_cleaned = record->task->resources_cleaned;
     } else {
         result->state = record->final_state;
         result->result_kind = record->final_result_kind;
         result->result_value = record->final_result;
-        result->cpu_time_counter_ticks = 0;
+        result->scheduled_counter_ticks = 0;
         result->budget_counter_ticks = 0;
+        result->address_space_id = record->space.identity;
+        result->address_space_owner_id = record->space.owner_id;
+        result->scheduler_task_id = 0;
+        result->kernel_stack_base = 0;
+        result->kernel_stack_size = 0;
+        result->user_stack_pointer = 0;
+        result->user_page_count = record->user_page_count;
+        result->page_table_page_count = record->user_table_page_count;
+        result->preemption_count = 0;
+        result->el0_entry_count = 0;
+        result->el0_resume_count = 0;
+        result->el0_timer_interrupt_count = 0;
+        result->saved_x0 = record->context.x[0];
+        result->saved_x9 = record->context.x[9];
+        result->fault_esr = record->context.fault_esr;
+        result->fault_elr = record->context.fault_elr;
+        result->fault_spsr = record->context.fault_spsr;
+        result->fault_far = record->context.fault_far;
+        result->kernel_root_restored =
+            phase2_mmu_current_root() == record->space.kernel_root;
         result->cancel_requested = 0;
         result->resources_cleaned = record->resources_cleaned;
     }

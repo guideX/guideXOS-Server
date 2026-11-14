@@ -7,7 +7,8 @@ param(
     [switch]$Phase12Proof,
     [switch]$StudioGuestQualification,
     [switch]$El0Qualification,
-    [switch]$El0NegativeQualification
+    [switch]$El0NegativeQualification,
+    [switch]$El0ScheduledQualification
 )
 
 $ErrorActionPreference = 'Stop'
@@ -48,6 +49,9 @@ if ($El0Qualification -and !$Phase12Proof) {
 if ($El0NegativeQualification -and !$El0Qualification) {
     throw 'El0NegativeQualification requires the trusted EL0 qualification profile.'
 }
+if ($El0ScheduledQualification -and (!$Phase12Proof -or !$El0Qualification -or !$El0NegativeQualification)) {
+    throw 'El0ScheduledQualification requires Phase12Proof, El0Qualification, and El0NegativeQualification.'
+}
 function Invoke-Checked { param([string]$FilePath, [string[]]$Arguments)
     Write-Host "      $([IO.Path]::GetFileName($FilePath)) $($Arguments -join ' ')" -ForegroundColor DarkGray
     & $FilePath @Arguments
@@ -81,6 +85,20 @@ $phase12Define = if ($Phase12Proof) { '-DGXOS_AARCH64_PHASE12' } else { }
 $studioGuestDefine = if ($StudioGuestQualification) { '-DGXOS_AARCH64_ABI3_STUDIO_GUEST' } else { }
 $el0QualificationDefine = if ($El0Qualification) { '-DGXOS_AARCH64_EL0_QUALIFICATION' } else { }
 $el0NegativeDefine = if ($El0NegativeQualification) { '-DGXOS_AARCH64_EL0_NEGATIVE_QUALIFICATION' } else { }
+$el0ScheduledDefine = if ($El0ScheduledQualification) { '-DGXOS_AARCH64_RUNSAFE3B_DIAGNOSTICS' } else { }
+$el0ScheduledRevisionDefine = $null
+if ($El0ScheduledQualification) {
+    $sourceRevision = (& git -C $repoRoot rev-parse HEAD 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $sourceRevision -notmatch '^[0-9a-f]{40}$') {
+        throw 'Unable to identify the committed source revision for RUNSAFE3-B diagnostics.'
+    }
+    $sourceState = (& git -C $repoRoot status --porcelain=v1 --untracked-files=all 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $sourceState.Length -ne 0) {
+        throw 'RUNSAFE3-B candidate builds require a clean, committed source tree.'
+    }
+    $el0ScheduledRevisionDefine = '-DGXOS_AARCH64_RUNSAFE3B_SOURCE_REVISION="' + $sourceRevision + '"'
+    Write-Host "RUNSAFE3-B source revision: $sourceRevision" -ForegroundColor Cyan
+}
 $loaderFlags = @(
     '--target=aarch64-pc-windows-msvc', '-DGXOS_AARCH64_PHASE4', '-DGXOS_AARCH64_PHASE5', '-DGXOS_AARCH64_PHASE6', '-DGXOS_AARCH64_PHASE7', '-DGXOS_AARCH64_PHASE8', '-DGXOS_AARCH64_PHASE9', '-DGXOS_AARCH64_PHASE10', $phase12Define,
     '-O2', '-ffreestanding', '-fno-builtin', '-fno-stack-protector', '-fno-exceptions', '-fno-rtti', '-fno-unwind-tables', '-fno-asynchronous-unwind-tables', '-fno-ident',
@@ -109,7 +127,7 @@ $kernelFlags = @(
     '--target=aarch64-none-elf','-std=c++14','-march=armv8-a','-O2','-ffreestanding','-nostdlib','-nostdinc++','-fno-builtin','-fno-stack-protector',
     '-fno-exceptions','-fno-rtti','-fno-unwind-tables','-fno-asynchronous-unwind-tables','-fno-pic','-fno-pie','-mcmodel=small',
     '-mgeneral-regs-only','-mstrict-align','-mno-outline-atomics','-ffunction-sections','-fdata-sections','-Wno-c++11-narrowing',
-    '-DGXOS_AARCH64_PHASE4','-DGXOS_AARCH64_PHASE5','-DGXOS_AARCH64_PHASE6','-DGXOS_AARCH64_PHASE7','-DGXOS_AARCH64_PHASE8','-DGXOS_AARCH64_PHASE9','-DGXOS_AARCH64_PHASE10',$phase11Define,$phase12Define,$studioGuestDefine,$el0QualificationDefine,$el0NegativeDefine,
+    '-DGXOS_AARCH64_PHASE4','-DGXOS_AARCH64_PHASE5','-DGXOS_AARCH64_PHASE6','-DGXOS_AARCH64_PHASE7','-DGXOS_AARCH64_PHASE8','-DGXOS_AARCH64_PHASE9','-DGXOS_AARCH64_PHASE10',$phase11Define,$phase12Define,$studioGuestDefine,$el0QualificationDefine,$el0NegativeDefine,$el0ScheduledDefine,$el0ScheduledRevisionDefine,
     '-DGXOS_AARCH64_EL0_ISOLATION',
     '-DGXOS_BARE_METAL','-DKERNEL_HAS_VIRTIO_INPUT','-DKERNEL_HAS_COMMON_INPUT_QUEUE','-I',$repoRoot,'-I',(Join-Path $repoRoot 'kernel'),'-I',(Join-Path $repoRoot 'sdk\include'),'-I',(Join-Path $repoRoot 'kernel\core\include'),
     '-I',(Join-Path $repoRoot 'kernel\core\freestanding'),'-I',(Join-Path $repoRoot 'kernel\arch\arm64\include'))

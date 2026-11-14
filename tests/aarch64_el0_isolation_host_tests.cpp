@@ -565,16 +565,20 @@ static void test_scheduled_el0_runtime_host_simulation()
         static_cast<gxos_aarch64_el0_context*>(finite->execution_context);
     gxos_aarch64_el0_address_space* finite_space =
         static_cast<gxos_aarch64_el0_address_space*>(finite->execution_address_space);
-    expect(phase2_el0_begin_context(finite_space, finite_context, finite_context->owner_id) &&
-           kernel::scheduler::mark_el0_running(finite, g_host_counter),
+    expect(phase2_el0_begin_context(finite_space, finite_context, finite_context->owner_id),
            "validated child activation binds EL0 state to the selected scheduler task");
 
     bool repeated_preemptions = true;
+    // The architectural counter is 64-bit and wraps. A short resident interval
+    // that crosses UINT64_MAX must still be charged as modular elapsed ticks.
+    g_host_counter = UINT64_MAX - UINT64_C(49);
+    expect(kernel::scheduler::mark_el0_running(finite, g_host_counter),
+           "record the initial EL0 entry immediately before counter wrap");
     uint64_t child_registers[31]{};
     child_registers[19] = UINT64_C(0x19191919);
     repeated_preemptions = phase2_el0_suspend_for_schedule(
         child_registers, finite_context->entry_pc, 0x340, finite_context->sp_el0) &&
-        kernel::scheduler::timer_interrupt_at(g_interrupt_frame, 110) != nullptr &&
+        kernel::scheduler::timer_interrupt_at(g_interrupt_frame, UINT64_C(50)) != nullptr &&
         kernel::scheduler::current_task() == owner && finite->execution_consumed == 100;
     g_host_counter = 200;
     void* resumed = kernel::scheduler::timer_interrupt_at(g_interrupt_frame, g_host_counter);
@@ -620,8 +624,12 @@ static void test_scheduled_el0_runtime_host_simulation()
     expect(phase2_el0_task_query(finite_id, owner->id, &result) &&
            result.state == kernel::scheduler::EXECUTION_COMPLETED &&
            result.result_kind == kernel::scheduler::EXECUTION_RESULT_EXIT &&
-           result.result_value == 42 && result.resources_cleaned,
-           "completion reporting preserves the real SVC result 42");
+           result.result_value == 42 && result.resources_cleaned &&
+           result.scheduled_counter_ticks == 500 && result.preemption_count == 2 &&
+           result.el0_timer_interrupt_count == 2 && result.el0_entry_count == 1 &&
+           result.el0_resume_count == 2 && result.address_space_id != 0 &&
+           result.user_page_count == 2 && result.kernel_root_restored,
+           "completion preserves exit 42 and reports wrapped ticks, child preemptions, resumes, and root restoration");
     expect(!phase2_el0_task_cancel(finite_id, owner->id) &&
            !kernel::scheduler::complete_el0_task(
                finite, kernel::scheduler::EXECUTION_COMPLETED,

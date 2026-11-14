@@ -7,7 +7,8 @@ param(
     [switch]$ProductionStudio,
     [switch]$R2B1Workspaces,
     [switch]$El0Qualification,
-    [switch]$El0NegativeQualification
+    [switch]$El0NegativeQualification,
+    [switch]$El0ScheduledQualification
 )
 
 $ErrorActionPreference = 'Stop'
@@ -102,6 +103,8 @@ if ($arm64Entry.Count -ne 1 -or $arm64Entry[0].abi -ne 'guidexos-c-abi-v1-studio
 if ($LASTEXITCODE -ne 0) { throw 'Production Studio Run gate controls failed' }
 & (Join-Path $PSScriptRoot 'test-aarch64-el0-host.ps1') -OutputDirectory $el0HostTestRoot
 if ($LASTEXITCODE -ne 0) { throw 'EL0 hosted structural and source-contract controls failed' }
+& (Join-Path $PSScriptRoot 'test-aarch64-runsafe3b-evidence.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'RUNSAFE3-B native evidence parser controls failed' }
 
 $v05SdkInclude = Join-Path $V05ServerRoot ($alignmentLock.intendedV05Sdk.includeRoot.Replace('/', '\'))
 $kernelBuildParameters = @{
@@ -115,6 +118,12 @@ if ($El0Qualification) { $kernelBuildParameters.El0Qualification = $true }
 if ($El0NegativeQualification) {
     if (!$El0Qualification) { throw 'El0NegativeQualification requires El0Qualification.' }
     $kernelBuildParameters.El0NegativeQualification = $true
+}
+if ($El0ScheduledQualification) {
+    if (!$El0Qualification -or !$El0NegativeQualification) {
+        throw 'El0ScheduledQualification requires both RUNSAFE2 EL0 qualification controls.'
+    }
+    $kernelBuildParameters.El0ScheduledQualification = $true
 }
 & (Join-Path $PSScriptRoot 'build-aarch64-phase10.ps1') @kernelBuildParameters
 
@@ -265,6 +274,11 @@ Write-Host "      output=$OutputDirectory" -ForegroundColor Cyan
 function Get-Sha256Hex([string]$Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
+function Get-ByteArraySha256Hex([byte[]]$Bytes) {
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($algorithm.ComputeHash($Bytes)).Replace('-', '').ToLowerInvariant() }
+    finally { $algorithm.Dispose() }
+}
 function Get-ServerWorktreeFingerprint {
     $statusLines = @(& git -C $repoRoot status --porcelain=v1 --untracked-files=all 2>&1)
     if ($LASTEXITCODE -ne 0) { throw 'Unable to fingerprint the server worktree.' }
@@ -284,13 +298,13 @@ $serverHead = (& git -C $repoRoot rev-parse HEAD 2>&1 | Out-String).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Unable to record the source repository revision.' }
 $serverBranch = (& git -C $repoRoot branch --show-current 2>&1 | Out-String).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Unable to record the source repository branch.' }
-$candidateProfile = if ($El0NegativeQualification) { 'runsafe2-el0-negative-controls' } elseif ($El0Qualification) { 'runsafe2-el0-qualification' } elseif ($ProductionStudio -and $R2B1Workspaces) { 'r2b1-native-build-ui' } elseif ($ProductionStudio) { 'production-ui' } else { 'phase12-smoke' }
+$candidateProfile = if ($El0ScheduledQualification) { 'runsafe3b-scheduled-el0' } elseif ($El0NegativeQualification) { 'runsafe2-el0-negative-controls' } elseif ($El0Qualification) { 'runsafe2-el0-qualification' } elseif ($ProductionStudio -and $R2B1Workspaces) { 'r2b1-native-build-ui' } elseif ($ProductionStudio) { 'production-ui' } else { 'phase12-smoke' }
 $studioSmokeEnabled = !$ProductionStudio
 $studioDriverOverlay = Join-Path $studioSourceCopy 'build.ps1'
 $studioCompatOverlay = Join-Path $studioSourceCopy 'src\studio_v05_compile_compat.h'
 $candidateManifest = [ordered]@{
     schemaVersion = 1
-    candidate = if ($El0NegativeQualification) { 'guideXOS Server ARM64 RUNSAFE2 EL0 Negative Controls' } elseif ($El0Qualification) { 'guideXOS Server ARM64 RUNSAFE2 EL0 Qualification Diagnostic' } else { 'guideXOS Server ARM64 NativeElf Developer Studio' }
+    candidate = if ($El0ScheduledQualification) { 'guideXOS Server ARM64 RUNSAFE3-B Scheduled EL0 Diagnostic' } elseif ($El0NegativeQualification) { 'guideXOS Server ARM64 RUNSAFE2 EL0 Negative Controls' } elseif ($El0Qualification) { 'guideXOS Server ARM64 RUNSAFE2 EL0 Qualification Diagnostic' } else { 'guideXOS Server ARM64 NativeElf Developer Studio' }
     profile = $candidateProfile
     server = [ordered]@{
         branch = $serverBranch
@@ -312,6 +326,8 @@ $candidateManifest = [ordered]@{
         studioSmokeDefine = $studioSmokeEnabled
         el0QualificationDefine = [bool]$El0Qualification
         el0NegativeQualificationDefine = [bool]$El0NegativeQualification
+        el0ScheduledQualificationDefine = [bool]$El0ScheduledQualification
+        studioPayloadExecution = if ($El0Qualification) { 'not-launched; internal EL0 diagnostic path is selected' } else { 'Phase 12 profile runtime' }
         studioRunRemainsDisabled = $true
     }
     guest = [ordered]@{
@@ -333,6 +349,15 @@ $candidateManifest = [ordered]@{
         ramdiskSha256 = (Get-Sha256Hex $ramdisk)
         trustedEl0PayloadSha256 = '9adb67ab60e0329266473bb0c419ff4167df6fb77c59fec2aff1de57421dd442'
         el0NegativeProbes = if ($El0NegativeQualification) { @('kernel-data-read', 'gic-distributor-read') } else { @() }
+        scheduledEl0Payloads = if ($El0ScheduledQualification) {
+            [ordered]@{
+                finite = Get-ByteArraySha256Hex ([byte[]]@(0xe9,0xff,0x9f,0xd2,0x29,0x05,0x00,0xf1,0xe1,0xff,0xff,0x54,0x40,0x05,0x80,0xd2,0x28,0x00,0x80,0xd2,0x01,0x00,0x00,0xd4))
+                timeout = Get-ByteArraySha256Hex ([byte[]]@(0xe9,0xff,0x9f,0xd2,0x29,0x09,0x00,0xf1,0xe1,0xff,0xff,0x54))
+                cancellation = Get-ByteArraySha256Hex ([byte[]]@(0x60,0x08,0x80,0xd2,0xff,0xff,0xff,0x17))
+                fault = Get-ByteArraySha256Hex ([byte[]]@(0x09,0x00,0xa8,0xd2,0x20,0x01,0x40,0xf9))
+                source = 'internal phase2_el0_runtime.cpp qualification fixtures; no Studio ELF is executed'
+            }
+        } else { $null }
     }
     r2b1VfsFailureWorkspace = if ($R2B1Workspaces) {
         [ordered]@{
