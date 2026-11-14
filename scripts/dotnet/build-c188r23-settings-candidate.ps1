@@ -230,7 +230,10 @@ if (-not $linkedUnwind) {
     throw 'NativeAOT link response omitted the hash-verified R20 unwind primitive object.'
 }
 
-$kernelBuildRoot = Join-Path $candidate 'kernel-build'
+# Keep the link command under Windows' CreateProcess command-line limit. The
+# kernel linker expands every object path, so placing this hundreds-of-objects
+# build beneath the long phase/candidate path can exceed that limit.
+$kernelBuildRoot = Join-Path $ArtifactRoot ('r23-kernel-' + [guid]::NewGuid().ToString('N'))
 $kernelBuilder = Join-Path $RepoRoot 'scripts\dotnet\build-c188-candidate-kernel.ps1'
 $kernelArgs = @('-NoProfile','-File',$kernelBuilder,
     '-ArtifactRoot',$ArtifactRoot,'-BuildRoot',$kernelBuildRoot,
@@ -306,6 +309,7 @@ $manifest = [ordered]@{
     branch=$branch
     candidateRoot=$candidate
     artifactRoot=$ArtifactRoot
+    isolatedKernelBuildDirectory=$kernelBuildRoot
     buildProfile='C160Composite+C185+C188R11+C188R12R3+R20WorkstationGC+R21SettingsFactory+R22BootstrapHandoff+R23PreparationTrace'
     managedProjectMode='C160Composite'
     actualManagedSettingsFactory='GuideXosApplicationRegistry selector 5 -> ManagedSettingsCenter'
