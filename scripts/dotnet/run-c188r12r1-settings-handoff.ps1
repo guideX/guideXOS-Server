@@ -34,7 +34,15 @@ if ($candidateRootMatches.Count -ne 1 -or $bootRootMatches.Count -ne 1 -or
 }
 $phaseRoot = $candidateRootMatches[0]
 if (-not (Test-Path -LiteralPath $candidate -PathType Container)) { throw "Candidate root is missing: $candidate" }
-if (Test-Path -LiteralPath $bootRoot) { throw "Guest evidence root already exists: $bootRoot" }
+$precreatedR25EvidenceRoot = $false
+if (Test-Path -LiteralPath $bootRoot) {
+    . (Join-Path $PSScriptRoot 'c188r26-precreated-evidence-root.ps1')
+    $precreatedCheck = Test-C188R26PrecreatedR25EvidenceRoot $bootRoot $candidate
+    if (-not $precreatedCheck.accepted) {
+        throw "Guest evidence root already exists and is not an authorized R25 capture root: $bootRoot ($($precreatedCheck.reason))"
+    }
+    $precreatedR25EvidenceRoot = $true
+}
 
 $ownershipHelpers = Join-Path $PSScriptRoot 'c188r11qac-ownership-predicates.ps1'
 . (Join-Path $PSScriptRoot 'c188r11-runner-predicates.ps1')
@@ -68,7 +76,9 @@ foreach ($relativeMedia in @('kernel.elf','ramdisk.img','EFI\BOOT\BOOTX64.EFI'))
     $sourceMediaHashes[$relativeMedia.Replace('\','/')] =
         (Get-FileHash -LiteralPath (Join-Path $candidateEsp $relativeMedia) -Algorithm SHA256).Hash
 }
-$null = New-Item -ItemType Directory -Path $bootRoot
+if (-not $precreatedR25EvidenceRoot) {
+    $null = New-Item -ItemType Directory -Path $bootRoot
+}
 $runEsp = Join-Path $bootRoot 'esp'
 Copy-Item -LiteralPath $candidateEsp -Destination $runEsp -Recurse
 $copiedMediaHashes = [ordered]@{}
