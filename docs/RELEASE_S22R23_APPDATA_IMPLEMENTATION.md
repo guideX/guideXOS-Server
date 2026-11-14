@@ -1,6 +1,6 @@
 # Server v0.3 — S22R23 Application State Implementation
 
-**Status:** hosted and freestanding implementation validated; local commit and candidate/guest qualification pending.
+**Status:** implementation committed locally; hosted and freestanding validation passed; candidate built and verified; guest outcome A accepted after two QAC-managed cold boots.
 **Work began from:** `main` at `760c708c0cf9a703c61a7c72ee035d98c0c9dec4`.
 **Release profile:** `ServerV03PublicPreviewPacManOnly`.
 
@@ -67,9 +67,11 @@ Each guarded path retains the required 4,096-byte static margin. These are compi
 
 ## Candidate and guest status
 
-This implementation changes the kernel and therefore needs a separately identified candidate. The local implementation commit will be the candidate source. The canonical Public Preview PacMan-only ISO will be built in an isolated artifact clone under `E:\CodexArtifacts\S22R23`, with a release receipt and complete embedded ESP/package/integrity inspection. Candidate ISO, kernel, source commit, tool identities, and exact hashes will be added here after the build.
+The local implementation commit `67dc2e111ea4d6e7208a8d5fac7dbd1a389d8491` was built in an isolated clone with `ServerV03PublicPreviewPacManOnly`; build ID `4c9988cf-5d0d-414d-afe8-81f7351c2706`; source worktree clean at build and packaging. The candidate is `E:\CodexArtifacts\S22R23\candidate-source\out\release-profile\4c9988cf-5d0d-414d-afe8-81f7351c2706\preview-artifacts\guideXOS-Server-v0.3.0-amd64-public-preview-pacman-only-candidate.iso`, 90,245,120 bytes, SHA-256 `8d397659e0a6ec8f1be113ae4f5be14dbcaf1ef22ccda41a6e5ee5014919cf40`. The embedded ESP is 90,177,536 bytes, SHA-256 `e5e48c21df052c38887291f8beb20b55f69ed7adde24667fc70d0d9d16a57101`; all 16 manifest inputs passed the release ESP verifier. Embedded kernel ELF is 2,812,208 bytes, SHA-256 `9d2f17c33f157a566b6ee513196b5b74831bf8532699be78538b5979886fc166`. The release manifest contains only PacMan under `S22R18-PacMan-ReadOnly-Boot-Image-v1`; the build identity and tool versions are recorded in [guest qualification](RELEASE_S22R23_APPDATA_GUEST_QUALIFICATION.md).
 
-The guest qualification document will record two independent QAC-managed cold boots using one dedicated writable copy of the accepted data volume. Until that work completes, no claim is made that the preference has been observed across guest restarts. The accepted S22R22 ISO (`efa290538ef3155d264bf0b26923933bd2c9332aa5574e5be977be9d7a9c948c`) and original S22R22 data image (`3ee67553ab9bece4130e4aa84ec4ed0d341cb29d7fd78798884c5ae3b0b7b148`) remain preserved and are not replaced.
+**Guest outcome A — `APPDATA_PERSISTENCE_GUEST_ACCEPTED`.** Two separate QAC 2.0.0 reservations booted the exact candidate under QEMU 11.0.0 with the same dedicated writable copy of the accepted data volume. Modern Settings saved Ocean, reopened with Ocean selected in the first boot, and the second cold boot restored Ocean in both the desktop and Settings before a second save changed it to Forest. Offline read-only inspection confirmed the final `DESKAPP.CFG` contents and that all five existing document files retained their original sizes and hashes. PacMan passed the approved read-only Native ELF launch, input, frame, clean-return, and live QAC smoke-marker path in both boots. Both guests shut down normally, exited QEMU with code 0, and released their reservations. The accepted S22R22 ISO (`efa290538ef3155d264bf0b26923933bd2c9332aa5574e5be977be9d7a9c948c`) and original S22R22 data image (`3ee67553ab9bece4130e4aa84ec4ed0d341cb29d7fd78798884c5ae3b0b7b148`) remain preserved; the writable test copy and run evidence remain under `E:\CodexArtifacts\S22R23`.
+
+The guest run demonstrates wallpaper/gradient persistence across cold boots. Icon-visibility paths are covered by hosted persistence tests, but were not independently toggled and restored in the guest. No durability claim is made for sudden power loss: the FAT write is in-place, with readback and best-effort rollback rather than atomic replacement. See [the guest qualification record](RELEASE_S22R23_APPDATA_GUEST_QUALIFICATION.md) for QAC identities, serial markers, data-image hashes, file-level results, candidate provenance, and the remaining scope.
 
 ## Coverage limits and owner decisions
 
