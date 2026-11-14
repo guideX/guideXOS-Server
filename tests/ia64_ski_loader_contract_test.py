@@ -323,6 +323,65 @@ class SkiLoaderContractTests(unittest.TestCase):
                 state = "gone"
             self.assertIn(state, ("Z", "gone"), f"simulator child remains running (state={state})")
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "PTY verification is Linux-only")
+    def test_pty_stdin_is_attested_on_the_launched_child(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            simulator = base / "fake-simulator"
+            simulator.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, os, termios, time\n"
+                "attrs = termios.tcgetattr(0)\n"
+                "print(json.dumps({'isatty': os.isatty(0), "
+                "'fd0': os.readlink('/proc/self/fd/0'), "
+                "'termios_readable': bool(attrs)}), flush=True)\n"
+                "print('kernel exited with status 0', flush=True)\n"
+                "time.sleep(0.1)\n",
+                encoding="utf-8",
+            )
+            simulator.chmod(0o755)
+            capture = base / "capture"
+            result = runner.run_simulator(
+                [str(simulator)], 2, capture, "pty-stdin-test", stdin_pty=True)
+            self.assertEqual(result, 0)
+            child_report = json.loads((capture / "stdout.log").read_text(encoding="utf-8").splitlines()[0])
+            self.assertTrue(child_report["isatty"])
+            self.assertTrue(child_report["termios_readable"])
+            metadata = json.loads((capture / "run-result.json").read_text(encoding="utf-8"))
+            observation = metadata["pty_stdin_observation"]
+            self.assertTrue(observation["passed"])
+            self.assertTrue(observation["parent_slave_is_tty"])
+            self.assertTrue(observation["child_fd0_same_device_as_slave"])
+            self.assertFalse(observation["child_fd0_is_dev_null"])
+            self.assertFalse(observation["child_has_controlling_terminal"])
+            self.assertTrue(metadata["pty_master_held_open_until_child_exit"])
+            self.assertEqual(metadata["stdout_stderr_capture"], "regular files")
+
+    def test_smoke_capture_reads_intentional_exit_from_stderr(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            capture = Path(temp)
+            (capture / "stdout.log").write_bytes(
+                b"SKI_SYSTEM_MODE_SMOKE_PASS\r\n")
+            (capture / "stderr.log").write_bytes(
+                b"kernel exited with status 0\n358 insts (0 faults)\n")
+            run_record = {
+                "classification": "SMOKE_QUALIFICATION_FAIL",
+                "exit_code": 0,
+                "timed_out": False,
+                "cleanup_complete": True,
+                "process_group_cleanup_complete": True,
+                "ski_fault_count": 0,
+                "ski_instruction_count": 358,
+                "pty_stdin_observation": {"passed": True},
+            }
+            status = runner.qualify_smoke_capture(capture, run_record)
+            self.assertEqual(status, 0)
+            self.assertEqual(run_record["classification"], "SMOKE_PASS")
+            self.assertEqual(run_record["simulator_classification"], "SMOKE_PASS")
+            self.assertEqual(run_record["ssc_guest_exit_status"], 0)
+            self.assertEqual(run_record["ssc_guest_exit_message_stream"], "stderr.log")
+            self.assertEqual(run_record["qualification_errors"], [])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

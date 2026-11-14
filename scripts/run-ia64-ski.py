@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import signal
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -541,6 +542,68 @@ def _kill_process_group(process: subprocess.Popen[bytes], grace_seconds: float =
     return process.poll() is not None and not _process_group_exists(pgid)
 
 
+def _terminal_mode(fd: int) -> dict[str, bool | int]:
+    """Return only the terminal settings relevant to Ski's SSC console path."""
+    import termios
+
+    attributes = termios.tcgetattr(fd)
+    control_chars = attributes[6]
+    vmin = control_chars[termios.VMIN]
+    vtime = control_chars[termios.VTIME]
+    return {
+        "canonical": bool(attributes[3] & termios.ICANON),
+        "echo": bool(attributes[3] & termios.ECHO),
+        "signals": bool(attributes[3] & termios.ISIG),
+        "vmin": int(vmin if isinstance(vmin, int) else vmin[0]),
+        "vtime": int(vtime if isinstance(vtime, int) else vtime[0]),
+    }
+
+
+def _observe_child_pty_stdin(process: subprocess.Popen[bytes], slave_fd: int) -> dict[str, Any]:
+    """Attest the launched process's fd 0 against the PTY slave passed by the runner."""
+    slave_path = os.ttyname(slave_fd)
+    slave_stat = os.fstat(slave_fd)
+    parent_is_tty = os.isatty(slave_fd)
+    child_fd_path = Path(f"/proc/{process.pid}/fd/0")
+    child_stat_path = Path(f"/proc/{process.pid}/stat")
+    target = None
+    child_is_character_device = False
+    same_device = False
+    is_dev_null = False
+    controlling_tty_number = None
+    observation_error = None
+    try:
+        target = os.readlink(child_fd_path)
+        child_stat = os.stat(child_fd_path)
+        child_is_character_device = stat.S_ISCHR(child_stat.st_mode)
+        same_device = child_is_character_device and child_stat.st_rdev == slave_stat.st_rdev
+        is_dev_null = child_is_character_device and \
+            child_stat.st_rdev == os.stat(os.devnull).st_rdev
+        # /proc/PID/stat field 7 is tty_nr. A zero value means the process has
+        # no controlling terminal; Ski's no-console SSC path only needs tty
+        # ioctls on fd 0, which do not require a controlling terminal.
+        stat_fields = child_stat_path.read_text(encoding="ascii").rsplit(")", 1)[1].split()
+        controlling_tty_number = int(stat_fields[4])
+    except (OSError, IndexError, ValueError) as exc:
+        observation_error = f"{type(exc).__name__}: {exc}"
+    return {
+        "parent_slave_path": slave_path,
+        "parent_slave_is_tty": parent_is_tty,
+        "parent_slave_rdev": slave_stat.st_rdev,
+        "child_fd0_path": str(child_fd_path),
+        "child_fd0_target": target,
+        "child_fd0_is_character_device": child_is_character_device,
+        "child_fd0_same_device_as_slave": same_device,
+        "child_fd0_is_dev_null": is_dev_null,
+        "child_has_controlling_terminal": (
+            controlling_tty_number != 0 if controlling_tty_number is not None else None),
+        "child_tty_number": controlling_tty_number,
+        "observation_error": observation_error,
+        "passed": parent_is_tty and same_device and not is_dev_null and
+                  controlling_tty_number is not None,
+    }
+
+
 def run_simulator(command: list[str], timeout: float, capture_dir: Path,
                   label: str, success_marker: str | None = None,
                   artifact_hash: str | None = None,
@@ -585,28 +648,48 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
     timed_out = False
     stdin_master = None
     stdin_slave = None
-    if stdin_pty:
-        import pty
-        stdin_master, stdin_slave = pty.openpty()
-        stdin_value: int | Any = stdin_slave
-    else:
-        stdin_value = subprocess.DEVNULL
+    pty_stdin_observation = None
+    pty_termios_before = None
+    pty_termios_after = None
+    pty_verification_error = None
     try:
+        if stdin_pty:
+            import pty
+            stdin_master, stdin_slave = pty.openpty()
+            pty_termios_before = _terminal_mode(stdin_slave)
+            stdin_value: int | Any = stdin_slave
+        else:
+            stdin_value = subprocess.DEVNULL
         with stdout_path.open("xb") as stdout_file, stderr_path.open("xb") as stderr_file:
             process = subprocess.Popen(command, stdin=stdin_value,
                                        stdout=stdout_file, stderr=stderr_file,
                                        start_new_session=True, close_fds=True,
                                        preexec_fn=preexec_fn)
             if stdin_slave is not None:
-                os.close(stdin_slave)
-                stdin_slave = None
-            try:
-                process.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                timed_out = True
-            finally:
-                process_group_cleanup_complete = _kill_process_group(process)
+                pty_stdin_observation = _observe_child_pty_stdin(process, stdin_slave)
+                if not pty_stdin_observation["passed"]:
+                    pty_verification_error = "launched process fd 0 did not attest as the PTY slave"
+                    process_group_cleanup_complete = _kill_process_group(process)
+                else:
+                    try:
+                        process.wait(timeout=timeout)
+                    except subprocess.TimeoutExpired:
+                        timed_out = True
+                    finally:
+                        process_group_cleanup_complete = _kill_process_group(process)
+            else:
+                try:
+                    process.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    timed_out = True
+                finally:
+                    process_group_cleanup_complete = _kill_process_group(process)
     finally:
+        if stdin_slave is not None:
+            try:
+                pty_termios_after = _terminal_mode(stdin_slave)
+            except OSError:
+                pty_termios_after = None
         if stdin_slave is not None:
             os.close(stdin_slave)
         if stdin_master is not None:
@@ -638,7 +721,9 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
         (nat_consumption_contract["expected_faults"]
          if nat_consumption_contract else 0))
 
-    if timed_out:
+    if pty_verification_error is not None:
+        classification = "PTY_STDIN_VERIFICATION_FAIL"
+    elif timed_out:
         classification = "TIMEOUT"
     elif break_exception_contract is not None or general_exception_contract is not None or \
             unaligned_reference_contract is not None or nat_consumption_contract is not None:
@@ -813,8 +898,20 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
         "pid": process.pid,
         "pgid": process.pid,
         "stdin": "PTY" if stdin_pty else "DEVNULL",
-        "stdin_is_tty": stdin_pty,
+        "stdin_is_tty": bool(pty_stdin_observation and
+                              pty_stdin_observation.get("parent_slave_is_tty")),
+        "pty_stdin_observation": pty_stdin_observation,
+        "pty_stdin_verification_error": pty_verification_error,
+        "pty_termios_before": pty_termios_before,
+        "pty_termios_after": pty_termios_after,
+        "pty_master_held_open_until_child_exit": stdin_pty,
+        "stdout_stderr_capture": "regular files",
+        "pty_master_used_for_output": False,
         "artifact_sha256": artifact_hash,
+        "simulator_sha256": QUALIFIED_SKI_SHA256,
+        "ski_source_commit": QUALIFIED_SKI_COMMIT,
+        "ski_version": QUALIFIED_SKI_VERSION,
+        "simulator_frontend": Path(command[0]).name,
         "classification": classification,
         "exit_code": return_code,
         "termination_signal": termination_signal,
@@ -974,7 +1071,7 @@ def setup_parser() -> argparse.ArgumentParser:
     cooperative_context_probe.add_argument("--simulator-sha256", required=True)
     cooperative_context_probe.add_argument("--ski-prefix", type=Path, default=DEFAULT_SKI_PREFIX)
     cooperative_context_probe.add_argument("--capture-dir", type=Path)
-    cooperative_context_probe.add_argument("--timeout", type=float, default=60)
+    cooperative_context_probe.add_argument("--timeout", type=float, default=35)
     cooperative_context_probe.add_argument("--mode", choices=("system",), default="system")
     cooperative_context_probe.add_argument(
         "--objdump", default="/home/guidex/src/ia64-2-toolchain-shim/ia64-linux-objdump")
@@ -997,6 +1094,72 @@ def setup_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def qualify_smoke_capture(capture_dir: Path, run_record: dict[str, Any]) -> int:
+    """Qualify a preserved smoke capture; Ski writes SSC_EXIT status to stderr."""
+    stdout_bytes = (capture_dir / "stdout.log").read_bytes()
+    stderr_bytes = (capture_dir / "stderr.log").read_bytes()
+    marker_bytes = SMOKE_MARKER.encode("ascii")
+    marker_occurrences = stdout_bytes.count(marker_bytes)
+    stdout_text = stdout_bytes.decode("utf-8", errors="replace")
+    stderr_text = stderr_bytes.decode("utf-8", errors="replace")
+    combined_text = stdout_text + "\n" + stderr_text
+    guest_exit_match = re.search(
+        r"(?m)^kernel exited with status (-?\d+)\s*$", combined_text)
+    guest_exit_status = int(guest_exit_match.group(1)) if guest_exit_match else None
+    if run_record.get("timed_out") is True:
+        simulator_classification = "TIMEOUT"
+    elif any(marker in combined_text.lower() for marker in FAULT_MARKERS):
+        simulator_classification = "GUEST_FAULT"
+    elif run_record.get("exit_code") != 0:
+        simulator_classification = "SIMULATOR_ERROR"
+    elif marker_bytes not in stdout_bytes:
+        simulator_classification = "SMOKE_MARKER_MISSING"
+    else:
+        simulator_classification = "SMOKE_PASS"
+    qualification_errors: list[str] = []
+    if simulator_classification != "SMOKE_PASS":
+        qualification_errors.append(
+            f"simulator classification was {simulator_classification!r}")
+    if marker_occurrences != 1:
+        qualification_errors.append(
+            f"expected one SSC_PUTCHAR marker, observed {marker_occurrences}")
+    if guest_exit_status != 0:
+        qualification_errors.append("Ski did not report intentional SSC_EXIT status 0")
+    if run_record.get("ski_fault_count") != 0:
+        qualification_errors.append(
+            f"expected zero Ski faults, observed {run_record.get('ski_fault_count')!r}")
+    if run_record.get("ski_instruction_count") is None:
+        qualification_errors.append("Ski instruction count is unavailable")
+    if run_record.get("timed_out") is not False or \
+            run_record.get("cleanup_complete") is not True or \
+            run_record.get("process_group_cleanup_complete") is not True:
+        qualification_errors.append("smoke timeout or process cleanup gate failed")
+    if (run_record.get("pty_stdin_observation") or {}).get("passed") is not True:
+        qualification_errors.append("launched simulator fd 0 was not verified as the PTY slave")
+    run_record.update({
+        "simulator_classification": simulator_classification,
+        "simulator_frontend_arguments": ["-noconsole", "-forcesystem"],
+        "console_initialization": (
+            "PASS: guest returned from SSC_CONSOLE_INIT before emitting the marker"
+            if marker_occurrences == 1 else "not_observed"),
+        "ssc_putchar_marker_ascii": SMOKE_MARKER,
+        "ssc_putchar_marker_hex": marker_bytes.hex(),
+        "ssc_putchar_marker_stream": "stdout.log",
+        "ssc_putchar_marker_occurrences": marker_occurrences,
+        "ssc_exit_function": 66,
+        "ssc_guest_exit_status": guest_exit_status,
+        "ssc_guest_exit_message_stream": (
+            "stdout.log" if "kernel exited with status" in stdout_text else
+            "stderr.log" if "kernel exited with status" in stderr_text else None),
+        "qualification_errors": qualification_errors,
+    })
+    if qualification_errors:
+        run_record["classification"] = "SMOKE_QUALIFICATION_FAIL"
+        return 1
+    run_record["classification"] = "SMOKE_PASS"
+    return 0
+
+
 def run_smoke(args: argparse.Namespace) -> int:
     require_linux()
     if not args.artifact.is_file():
@@ -1012,9 +1175,23 @@ def run_smoke(args: argparse.Namespace) -> int:
     capture_dir = args.capture_dir or Path(tempfile.mkdtemp(prefix="guidexos-ia64-ski-smoke-"))
     with verified_snapshot(args.artifact, args.expected_sha256) as snapshot:
         validate_direct_system_elf(snapshot)
-        command = [str(simulator), "-forcesystem", str(snapshot)]
-        return run_simulator(command, args.timeout, capture_dir, "system-mode-smoke",
-                             SMOKE_MARKER, args.expected_sha256)
+        command = [str(simulator), "-noconsole", "-forcesystem", str(snapshot)]
+        run_simulator(
+            command, args.timeout, capture_dir, "system-mode-smoke",
+            SMOKE_MARKER, args.expected_sha256,
+            resource_limits={
+                "address_space_bytes": 2 * 1024 * 1024 * 1024,
+                "cpu_soft_seconds": 15,
+                "cpu_hard_seconds": 20,
+            },
+            stdin_pty=True)
+
+    result_path = capture_dir / "run-result.json"
+    run_record = read_json(result_path, "system-mode smoke run result")
+    status = qualify_smoke_capture(capture_dir, run_record)
+    result_path.write_text(json.dumps(run_record, indent=2) + "\n", encoding="utf-8")
+    print(f"[{run_record['classification']}] capture={capture_dir}")
+    return status
 
 
 def validate_probe_manifest_fields(manifest: dict[str, Any]) -> None:
@@ -1787,8 +1964,8 @@ def run_cooperative_context_probe(args: argparse.Namespace) -> int:
             artifact_hash=args.expected_sha256,
             resource_limits={
                 "address_space_bytes": 2 * 1024 * 1024 * 1024,
-                "cpu_soft_seconds": 55,
-                "cpu_hard_seconds": 60,
+                "cpu_soft_seconds": 25,
+                "cpu_hard_seconds": 30,
             },
             stdin_pty=True)
 
@@ -1820,9 +1997,11 @@ def run_cooperative_context_probe(args: argparse.Namespace) -> int:
     if console_error:
         console_initialization = "failed"
     elif console_started:
-        console_initialization = "passed; guest startup marker follows SSC_CONSOLE_INIT"
+        console_initialization = (
+            "passed; report marker follows the completed cooperative context sequence")
     else:
-        console_initialization = "not_observed"
+        console_initialization = (
+            "not_observed_in_probe_capture; the standalone PTY console smoke is separate evidence")
     if run_record.get("classification") != "SMOKE_PASS":
         qualification_errors.append(f"simulator classification was {run_record.get('classification')!r}")
     if run_record.get("ski_fault_count") != 0:
@@ -1852,6 +2031,11 @@ def run_cooperative_context_probe(args: argparse.Namespace) -> int:
         "console_options": ["-noconsole"],
         "console_output_stream": "stdout.log",
         "console_initialization": console_initialization,
+        "diagnostic_capture_limitations": [
+            "Ski SSC_PUTCHAR output is captured directly to stdout.log during execution.",
+            "The probe emits its START, transition, context, and preservation records only after ia64_coop_probe_run returns.",
+            "If the batch process is forced to exit before Ski writes -icnt statistics, this frontend may provide no final IP or register snapshot.",
+        ],
         "execution_mode": "-forcesystem",
         "cpu_count": 1,
         "cooperative_context_observations": observations,
