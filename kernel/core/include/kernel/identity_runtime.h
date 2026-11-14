@@ -26,6 +26,8 @@ typedef StoreReadResult (*ReadIdentitySlotFn)(void* context, uint8_t slot,
                                                size_t* outBytes);
 typedef StoreWriteResult (*WriteIdentitySlotFn)(void* context, uint8_t slot,
                                                  const uint8_t* bytes, size_t byteCount);
+typedef Result (*InteractiveContextProviderFn)(void* context,
+                                               IdentityContextV1* output);
 
 struct StorageAdapter {
     void* context;
@@ -45,9 +47,16 @@ public:
     bool initialized() const;
     Result provision(const char* accountName, const char* displayName, UserId* outId);
     Result find(UserId id, UserRecordV1* output) const;
+    Result findRecord(UserId id, UserRecordV1* output) const;
+    Result findByAccountName(const char* accountName, UserRecordV1* output) const;
     Result enumerate(UserRecordV1* output, size_t capacity, size_t* outCount) const;
     Result setStatus(UserId id, AccountStatus status);
+    Result setRole(UserId id, AccountRole role);
+    Result getRole(UserId id, AccountRole* output) const;
+    bool isAdministrator(UserId id) const;
     Result erase(UserId id);
+    void setInteractiveContextProvider(void* context,
+                                       InteractiveContextProviderFn provider);
     Result queryContext(ExecutionDomain domain, IdentityContextV1* output) const;
     Result snapshot(RuntimeSnapshotV1* output) const;
 
@@ -62,6 +71,8 @@ private:
     bool m_initialized;
     bool m_accountCountAvailable;
     bool m_allRecordsDurable;
+    void* m_contextProviderContext;
+    InteractiveContextProviderFn m_contextProvider;
 };
 
 // Native boot installs the VFS adapter after mounting storage. Settings reads

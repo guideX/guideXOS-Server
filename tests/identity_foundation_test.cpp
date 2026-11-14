@@ -133,6 +133,21 @@ int main()
     check(registry.provision("ALICE", "Another Alice", &id) == Result::DuplicateAccountName,
         "account name uniqueness is ASCII case-insensitive");
 
+    AccountRole role{};
+    check(registry.getRole(alice, &role) == Result::Ok &&
+        role == AccountRole::StandardUser && !registry.isAdministrator(alice),
+        "new human accounts begin as standard users and roles are queried by stable ID");
+    check(registry.setRole(alice, AccountRole::Administrator) == Result::Ok &&
+        registry.isAdministrator(alice) && registry.getRole(kSystemIdentityId, &role) == Result::InvalidId,
+        "administrator designation is distinct from the reserved system identity");
+    check(registry.setRole(bob, AccountRole::Administrator) == Result::Ok &&
+        registry.setRole(alice, AccountRole::StandardUser) == Result::Ok &&
+        registry.setRole(bob, AccountRole::StandardUser) == Result::LastAdministrator,
+        "role mutation preserves at least one active administrator");
+    check(registry.setStatus(bob, AccountStatus::Disabled) == Result::LastAdministrator &&
+        registry.erase(bob) == Result::LastAdministrator,
+        "last administrator cannot be disabled or deleted through the identity runtime");
+
     check(!validAccountName("") && !validAccountName("-alice") &&
         !validAccountName("two..dots") && !validAccountName("name/part") &&
         !validAccountName("this-account-name-is-far-too-long-for-the-limit"),
@@ -204,10 +219,29 @@ int main()
     check(restored.load(encoded, encodedBytes - 1u, &generation) == Result::CorruptRecord,
         "truncated serialization is rejected");
     memcpy(corrupt, encoded, encodedBytes);
-    put32(corrupt + 8u, 2u);
+    put32(corrupt + 8u, 3u);
     repairCrc(corrupt, encodedBytes);
     check(restored.load(corrupt, encodedBytes, &generation) == Result::UnsupportedVersion,
         "unsupported store versions are rejected explicitly");
+
+    uint8_t legacy[kIdentityHeaderBytes + kLegacyIdentityRecordBytes + 4u]{};
+    const uint8_t legacyMagic[8] = { 'G','X','O','S','I','D','0','1' };
+    memcpy(legacy, legacyMagic, sizeof(legacyMagic));
+    put32(legacy + 8u, 1u);
+    put32(legacy + 12u, static_cast<uint32_t>(kIdentityHeaderBytes));
+    put64(legacy + 16u, 7u);
+    put64(legacy + 24u, kFirstHumanUserId + 1u);
+    put32(legacy + 32u, 1u);
+    put32(legacy + 36u, static_cast<uint32_t>(kLegacyIdentityRecordBytes));
+    put64(legacy + kIdentityHeaderBytes, kFirstHumanUserId);
+    legacy[kIdentityHeaderBytes + 8u] = static_cast<uint8_t>(AccountStatus::Active);
+    memcpy(legacy + kIdentityHeaderBytes + 9u, "legacy", 6u);
+    memcpy(legacy + kIdentityHeaderBytes + 9u + kAccountNameCapacity, "Legacy User", 11u);
+    repairCrc(legacy, sizeof(legacy));
+    check(restored.load(legacy, sizeof(legacy), &generation) == Result::Ok &&
+        restored.find(kFirstHumanUserId, &found) == Result::Ok &&
+        found.role == AccountRole::StandardUser && generation == 7u,
+        "SECURITY1 version 1 account records remain readable as standard users");
 
     Registry duplicateSource;
     duplicateSource.initializeEmpty();

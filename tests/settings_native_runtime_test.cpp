@@ -100,6 +100,32 @@ int g_testConfigCorruptOnWriteNumber = 0;
 bool g_testConfigFailNextRead = false;
 bool g_testConfigCorruptNextRead = false;
 kernel::vfs::MountPoint g_testConfigMount{};
+uint8_t g_testAuthenticationRandomByte = 1u;
+
+bool testAuthenticationRandom(void*, uint8_t* output, size_t byteCount)
+{
+    if (!output && byteCount != 0u) return false;
+    for (size_t i = 0u; i < byteCount; ++i) output[i] = g_testAuthenticationRandomByte++;
+    return true;
+}
+
+bool testAuthenticationDerive(void*, kernel::authentication::Algorithm algorithm,
+                              uint32_t iterations, const uint8_t* password,
+                              size_t passwordBytes, const uint8_t* salt,
+                              size_t saltBytes, uint8_t* verifier,
+                              size_t verifierBytes)
+{
+    if (algorithm != kernel::authentication::Algorithm::Pbkdf2HmacSha256 ||
+        iterations != kernel::authentication::kPbkdf2HmacSha256Iterations ||
+        !password || passwordBytes == 0u || !salt || saltBytes == 0u ||
+        !verifier || verifierBytes == 0u) return false;
+    for (size_t i = 0u; i < verifierBytes; ++i)
+        verifier[i] = static_cast<uint8_t>(password[i % passwordBytes] ^
+            salt[i % saltBytes] ^ static_cast<uint8_t>(i));
+    return true;
+}
+
+uint64_t testAuthenticationClock(void*) { return 1u; }
 
 void expect(bool condition, const char* name)
 {
@@ -1364,9 +1390,17 @@ int main()
     IdentitySnapshotRequestV1 identityRequest = {
         sizeof(IdentitySnapshotRequestV1), kIdentitySnapshotVersion, 0u
     };
-    IdentitySnapshotV1 identitySnapshot{};
+    IdentitySnapshotV2 identitySnapshot{};
     size_t identitySnapshotSize = 0u;
     uint64_t identitySnapshotRevision = 0u;
+    authentication::CryptoProvider testAuthenticationCrypto{};
+    testAuthenticationCrypto.context = nullptr;
+    testAuthenticationCrypto.randomBytes = testAuthenticationRandom;
+    testAuthenticationCrypto.deriveVerifier = testAuthenticationDerive;
+    testAuthenticationCrypto.clockTicks = testAuthenticationClock;
+    expect(authentication::runtime().initialize(&identity::runtime(), nullptr,
+                &testAuthenticationCrypto, true) == authentication::Result::Ok,
+        "native authentication service initializes against the live identity runtime");
     expect(readIdentitySnapshot(settingsApp, &identityRequest, &identitySnapshot,
                 sizeof(identitySnapshot), &identitySnapshotSize, &identitySnapshotRevision) == SnapshotStatus::Ok &&
             validIdentitySnapshot(identitySnapshot),
@@ -1377,8 +1411,51 @@ int main()
                 kernel::identity::IdentityKind::InteractiveUnassigned) &&
             identitySnapshot.currentUserId == kernel::identity::kInvalidUserId &&
             identitySnapshot.persistenceState == static_cast<uint32_t>(
-                kernel::identity::PersistenceState::Unavailable),
-        "native Users status distinguishes empty registry, no human login, and unavailable persistence");
+                kernel::identity::PersistenceState::Unavailable) &&
+            (identitySnapshot.flags & kIdentityAuthenticationAvailable) != 0u &&
+            (identitySnapshot.flags & kIdentityBootstrapRequired) != 0u &&
+            identitySnapshot.credentialCount == 0u,
+        "native Users status distinguishes empty registry, supported authentication, required bootstrap, no login, and unavailable persistence");
+
+    const char testPassword[] = "Security2Test!Pass";
+    authentication::SessionReference testSession{};
+    const authentication::Result bootstrapResult = bootstrapAdministratorLocal(
+        settingsApp, "security-admin", "Security Administrator", testPassword,
+        sizeof(testPassword) - 1u, &testSession);
+    expect(bootstrapResult == authentication::Result::OkVolatile,
+        "trusted native Settings bootstraps the first administrator with volatile credentials");
+    expect(readIdentitySnapshot(settingsApp, &identityRequest, &identitySnapshot,
+                sizeof(identitySnapshot), &identitySnapshotSize, &identitySnapshotRevision) == SnapshotStatus::Ok &&
+            validIdentitySnapshot(identitySnapshot) &&
+            (identitySnapshot.flags & (kIdentitySessionActive | kIdentityCurrentRoleAvailable)) ==
+                (kIdentitySessionActive | kIdentityCurrentRoleAvailable) &&
+            identitySnapshot.sessionState == static_cast<uint32_t>(authentication::SessionState::Active) &&
+            identitySnapshot.currentRole == static_cast<uint32_t>(identity::AccountRole::Administrator) &&
+            std::string(identitySnapshot.currentDisplayName) == "Security Administrator" &&
+            identitySnapshot.credentialCount == 1u &&
+            identitySnapshot.credentialPersistenceState == static_cast<uint32_t>(
+                identity::PersistenceState::Volatile),
+        "native Settings snapshot reports the authenticated administrator session and display name");
+    expect(signOutLocal(settingsApp) == authentication::Result::Ok,
+        "native Settings sign-out invalidates the active session");
+    expect(readIdentitySnapshot(settingsApp, &identityRequest, &identitySnapshot,
+                sizeof(identitySnapshot), &identitySnapshotSize, &identitySnapshotRevision) == SnapshotStatus::Ok &&
+            validIdentitySnapshot(identitySnapshot) &&
+            (identitySnapshot.flags & kIdentitySessionActive) == 0u &&
+            identitySnapshot.currentContextKind == static_cast<uint32_t>(
+                identity::IdentityKind::InteractiveUnassigned),
+        "native Settings reports the explicit unassigned compatibility context after sign-out");
+    expect(authenticateLocal(settingsApp, "security-admin", "wrong-password",
+                sizeof("wrong-password") - 1u, &testSession) == authentication::Result::InvalidCredentials,
+        "native Settings rejects an incorrect password without opening a session");
+    expect(authenticateLocal(settingsApp, "security-admin", testPassword,
+                sizeof(testPassword) - 1u, &testSession) == authentication::Result::Ok &&
+            readIdentitySnapshot(settingsApp, &identityRequest, &identitySnapshot,
+                sizeof(identitySnapshot), &identitySnapshotSize, &identitySnapshotRevision) == SnapshotStatus::Ok &&
+            (identitySnapshot.flags & kIdentitySessionActive) != 0u,
+        "native Settings authenticates the enrolled account and publishes the active session");
+    expect(signOutLocal(settingsApp) == authentication::Result::Ok,
+        "native Settings can end the session created by its local sign-in action");
     identityRequest.version = kIdentitySnapshotVersion + 1u;
     expect(readIdentitySnapshot(settingsApp, &identityRequest, &identitySnapshot,
                 sizeof(identitySnapshot), &identitySnapshotSize, &identitySnapshotRevision) ==
@@ -2410,6 +2487,10 @@ int main()
            "ordinary launch parameter cannot assign Settings identity");
     expect(g_lastParameter == std::string(kSettingsRuntimeAppId),
            "identity-like text remains ordinary application data");
+    expect(authenticateLocal(otherApp, "security-admin", testPassword,
+                sizeof(testPassword) - 1u, &testSession) == authentication::Result::Unauthorized &&
+            signOutLocal(otherApp) == authentication::Result::Unauthorized,
+        "native authentication and sign-out actions reject non-Settings callers despite spoofed launch data");
     expect(readSystemAboutSnapshot(otherApp, &request, &snapshot, sizeof(snapshot),
                                    &snapshotSize, &snapshotRevision) ==
                SnapshotStatus::Unauthorized,

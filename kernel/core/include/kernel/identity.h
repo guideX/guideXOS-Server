@@ -13,18 +13,26 @@ static const UserId kInvalidUserId = 0u;
 static const UserId kSystemIdentityId = 1u;
 static const UserId kFirstHumanUserId = 0x1000u;
 static const UserId kMaximumUserId = UINT64_MAX - 1u;
-static const uint16_t kUserRecordVersion = 1u;
+static const uint16_t kUserRecordVersion = 2u;
 static const size_t kMaximumUsers = 32u;
 static const size_t kAccountNameCapacity = 32u;
 static const size_t kDisplayNameCapacity = 64u;
 static const size_t kIdentityHeaderBytes = 40u;
-static const size_t kIdentityRecordBytes = 8u + 1u + kAccountNameCapacity + kDisplayNameCapacity;
+static const size_t kLegacyIdentityRecordBytes = 8u + 1u + kAccountNameCapacity + kDisplayNameCapacity;
+static const size_t kIdentityRecordBytes = 8u + 1u + 1u + kAccountNameCapacity + kDisplayNameCapacity;
 static const size_t kMaximumIdentityStoreBytes =
     kIdentityHeaderBytes + kMaximumUsers * kIdentityRecordBytes + 4u;
 
 enum class AccountStatus : uint8_t {
     Active = 1u,
     Disabled = 2u
+};
+
+// Role metadata describes a human account. It does not grant kernel
+// privilege or imply that a runtime operation has been authorized.
+enum class AccountRole : uint8_t {
+    StandardUser = 1u,
+    Administrator = 2u
 };
 
 enum class Result : uint8_t {
@@ -34,6 +42,8 @@ enum class Result : uint8_t {
     NotInitialized,
     InvalidArgument,
     InvalidId,
+    InvalidRole,
+    LastAdministrator,
     DuplicateId,
     DuplicateAccountName,
     NotFound,
@@ -64,6 +74,7 @@ struct UserRecordV1 {
     uint16_t version;
     UserId id;
     AccountStatus status;
+    AccountRole role;
     char accountName[kAccountNameCapacity];
     char displayName[kDisplayNameCapacity];
 };
@@ -107,8 +118,13 @@ public:
 
     Result provision(const char* accountName, const char* displayName, UserId* outId);
     Result find(UserId id, UserRecordV1* output) const;
+    Result findRecord(UserId id, UserRecordV1* output) const;
+    Result findByAccountName(const char* accountName, UserRecordV1* output) const;
     Result enumerate(UserRecordV1* output, size_t capacity, size_t* outCount) const;
     Result setStatus(UserId id, AccountStatus status);
+    Result setRole(UserId id, AccountRole role);
+    Result getRole(UserId id, AccountRole* output) const;
+    bool isAdministrator(UserId id) const;
     Result erase(UserId id);
 
     Result serialize(uint64_t generation, uint8_t* output, size_t capacity,
@@ -124,6 +140,7 @@ private:
 
 bool validAccountName(const char* value);
 bool validDisplayName(const char* value);
+bool validAccountRole(AccountRole role);
 const char* resultName(Result result);
 const char* persistenceStateName(PersistenceState state);
 

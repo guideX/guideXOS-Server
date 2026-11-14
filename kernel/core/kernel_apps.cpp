@@ -16667,6 +16667,7 @@ public:
           m_displayProviderStatus(settings_native::SnapshotStatus::Unavailable),
           m_appearanceProviderStatus(settings_native::SnapshotStatus::Unavailable),
           m_identitySnapshotAvailable(false),
+          m_usersFieldFocus(0u),
           m_snapshotAvailable(false),
           m_appearanceSnapshotAvailable(false),
           m_gradientPresetCount(0u),
@@ -16712,8 +16713,11 @@ public:
         m_providerStatus = settings_native::SnapshotStatus::Unavailable;
         m_displayProviderStatus = settings_native::SnapshotStatus::Unavailable;
         m_appearanceProviderStatus = settings_native::SnapshotStatus::Unavailable;
-        m_identitySnapshot = settings_native::IdentitySnapshotV1{};
+        m_identitySnapshot = settings_native::IdentitySnapshotV2{};
         m_identitySnapshotAvailable = false;
+        clearUsersPassword();
+        m_usersAccountInput[0] = '\0';
+        strcopy(m_usersActionStatus, "Compatibility desktop is available", sizeof(m_usersActionStatus));
         m_snapshot = settings_native::SystemAboutSnapshotV2{};
         m_appearanceSnapshot = settings_native::DesktopAppearanceSnapshotV1{};
         m_appearanceSnapshotAvailable = false;
@@ -16805,6 +16809,7 @@ public:
     void shutdown() override
     {
         m_state = app::AppState::Terminated;
+        clearUsersPassword();
         m_queueHead = 0;
         m_queueCount = 0;
         m_snapshot = settings_native::SystemAboutSnapshotV2{};
@@ -16896,7 +16901,10 @@ public:
 
     void onKeyDownWithModifiers(uint32_t key, uint32_t modifiers) override
     {
-        if (key == 0x1Bu) requestClose();
+        if (key == 0x1Bu) {
+            clearUsersPassword();
+            requestClose();
+        }
         else if (m_presentation.selectedCategory() == settings::CategoryId::Personalization) {
             if (key == '\t' || key == shell::KEY_TAB) {
                 if (m_tabDiagnosticCount < kTabDiagnosticLimit) {
@@ -16935,6 +16943,26 @@ public:
                 }
             } else if (key == '\r' || key == '\n' || key == ' ') {
                 activateFocusedPersonalizationControl();
+            }
+        } else if (m_presentation.selectedCategory() == settings::CategoryId::Users) {
+            if (key == '\t' || key == shell::KEY_TAB) {
+                m_usersFieldFocus = static_cast<uint8_t>(1u - m_usersFieldFocus);
+                invalidate();
+            } else if (key == '\r' || key == '\n') {
+                invokeUsersAction();
+                invalidate();
+            } else if ((key == 8u || key == shell::KEY_DELETE) && m_usersFieldFocus == 0u) {
+                size_t length = 0u;
+                while (length + 1u < sizeof(m_usersAccountInput) &&
+                    m_usersAccountInput[length] != '\0') ++length;
+                if (length != 0u) m_usersAccountInput[length - 1u] = '\0';
+                invalidate();
+            } else if ((key == 8u || key == shell::KEY_DELETE) && m_usersFieldFocus == 1u) {
+                size_t length = 0u;
+                while (length + 1u < sizeof(m_usersPasswordInput) &&
+                    m_usersPasswordInput[length] != '\0') ++length;
+                if (length != 0u) m_usersPasswordInput[length - 1u] = '\0';
+                invalidate();
             }
         }
     }
@@ -16987,6 +17015,7 @@ public:
 
     void onWindowBlur() override
     {
+        clearUsersPassword();
         m_windowFocused = false;
         m_hoverPersonalizationControl = -1;
         m_presentation.setFocusedControl(settings::FocusControl::None);
@@ -17001,7 +17030,7 @@ private:
     settings::SettingsPresentationCore m_presentation;
     settings::SettingsPresentationAdapterV1 m_adapter;
     settings_native::SystemAboutSnapshotV2 m_snapshot{};
-    settings_native::IdentitySnapshotV1 m_identitySnapshot{};
+    settings_native::IdentitySnapshotV2 m_identitySnapshot{};
     settings_native::DesktopAppearanceSnapshotV1 m_appearanceSnapshot{};
     settings_native::DisplaySnapshotRefreshState m_displayRefreshState;
     settings_native::DisplayConfigurationChangeSignal m_displayRefreshSignal;
@@ -17012,6 +17041,10 @@ private:
     settings_native::SnapshotStatus m_displayProviderStatus;
     settings_native::SnapshotStatus m_appearanceProviderStatus;
     bool m_identitySnapshotAvailable;
+    uint8_t m_usersFieldFocus;
+    char m_usersAccountInput[identity::kAccountNameCapacity]{};
+    char m_usersPasswordInput[authentication::kMaximumPasswordBytes + 1u]{};
+    char m_usersActionStatus[96]{};
     bool m_snapshotAvailable;
     bool m_appearanceSnapshotAvailable;
     settings_native::BuiltInGradientPresetV1 m_gradientPresets[
@@ -17228,7 +17261,7 @@ private:
         settings_native::IdentitySnapshotRequestV1 request{};
         request.structureSize = sizeof(request);
         request.version = settings_native::kIdentitySnapshotVersion;
-        settings_native::IdentitySnapshotV1 snapshot{};
+        settings_native::IdentitySnapshotV2 snapshot{};
         size_t snapshotSize = 0u;
         uint64_t revision = 0u;
         const settings_native::SnapshotStatus status =
@@ -17238,7 +17271,7 @@ private:
             snapshotSize == sizeof(snapshot) && snapshot.revision == revision &&
             settings_native::validIdentitySnapshot(snapshot);
         m_identitySnapshot = m_identitySnapshotAvailable
-            ? snapshot : settings_native::IdentitySnapshotV1{};
+            ? snapshot : settings_native::IdentitySnapshotV2{};
         return m_identitySnapshotAvailable;
     }
 
@@ -18085,10 +18118,125 @@ private:
         return false;
     }
 
+    void clearUsersPassword()
+    {
+        volatile char* output = m_usersPasswordInput;
+        for (size_t i = 0u; i < sizeof(m_usersPasswordInput); ++i) output[i] = '\0';
+    }
+
+    void setUsersActionStatus(const char* value)
+    {
+        strcopy(m_usersActionStatus, value ? value : "", sizeof(m_usersActionStatus));
+    }
+
+    void invokeUsersAction()
+    {
+        if (!m_identitySnapshotAvailable) {
+            setUsersActionStatus("Authentication state is unavailable.");
+            clearUsersPassword();
+            return;
+        }
+        authentication::SessionReference reference{};
+        authentication::Result result = authentication::Result::InvalidArgument;
+        const bool signedIn = (m_identitySnapshot.flags &
+            settings_native::kIdentitySessionActive) != 0u;
+        if (signedIn) {
+            result = settings_native::signOutLocal(this);
+            if (result == authentication::Result::Ok)
+                setUsersActionStatus("Signed out. The desktop remains available.");
+            else
+                setUsersActionStatus("Sign out could not be completed.");
+        } else {
+            size_t passwordBytes = 0u;
+            while (passwordBytes < sizeof(m_usersPasswordInput) &&
+                m_usersPasswordInput[passwordBytes] != '\0') ++passwordBytes;
+            const bool bootstrap = (m_identitySnapshot.flags &
+                settings_native::kIdentityBootstrapRequired) != 0u;
+            if (bootstrap) {
+                result = settings_native::bootstrapAdministratorLocal(this,
+                    m_usersAccountInput, m_usersAccountInput,
+                    m_usersPasswordInput, passwordBytes, &reference);
+            } else {
+                result = settings_native::authenticateLocal(this,
+                    m_usersAccountInput, m_usersPasswordInput, passwordBytes, &reference);
+            }
+            if (result == authentication::Result::OkVolatile) {
+                setUsersActionStatus(bootstrap
+                    ? "Administrator created for this boot; setup is volatile."
+                    : "Signed in; account changes are volatile.");
+            } else if (result == authentication::Result::Ok ||
+                       result == authentication::Result::OkPersistent) {
+                setUsersActionStatus(bootstrap
+                    ? "First administrator created and signed in."
+                    : "Signed in.");
+            } else if (result == authentication::Result::EntropyUnavailable ||
+                       result == authentication::Result::CryptoUnavailable) {
+                setUsersActionStatus("Secure entropy or password hashing is unavailable.");
+            } else if (result == authentication::Result::StorageUnavailable ||
+                       result == authentication::Result::StorageCorrupt ||
+                       result == authentication::Result::UnsupportedIdentityFormat ||
+                       result == authentication::Result::UnsupportedCredentialFormat) {
+                setUsersActionStatus("Identity or credential storage is unavailable or needs repair.");
+            } else if (result == authentication::Result::IoError) {
+                setUsersActionStatus("Storage could not verify the update; setup was not confirmed.");
+            } else if (result == authentication::Result::Throttled) {
+                setUsersActionStatus("Too many attempts. Wait briefly and try again.");
+            } else {
+                setUsersActionStatus("Sign-in failed. Check the account name and password.");
+            }
+        }
+        volatile uint8_t* referenceBytes = reference.bytes;
+        for (size_t i = 0u; i < sizeof(reference.bytes); ++i) referenceBytes[i] = 0u;
+        clearUsersPassword();
+        refreshIdentitySnapshot();
+    }
+
+    bool handleUsersClick(int x, int y)
+    {
+        settings_layout::PageLayout page{};
+        if (!settings_layout::calculatePageLayout(m_drawW, m_drawH, &page)) return false;
+        const int top = static_cast<int>(page.card.y) + 42;
+        if (x < static_cast<int>(page.content.x) ||
+            x >= static_cast<int>(page.content.x + page.content.width) || y < top)
+            return false;
+        const int row = (y - top) / 32;
+        if (row == 5 || row == 6) {
+            m_usersFieldFocus = row == 5 ? 0u : 1u;
+            return true;
+        }
+        if (row == 7) {
+            invokeUsersAction();
+            return true;
+        }
+        return false;
+    }
+
     bool processInput(const settings::SettingsInputEvent& event)
     {
         if (event.kind == settings::SettingsInputKind::Text &&
             event.action == settings::SettingsInputAction::Down) {
+            if (m_presentation.selectedCategory() == settings::CategoryId::Users) {
+                const unsigned char typed = static_cast<unsigned char>(event.text);
+                if (typed < 0x20u || typed > 0x7Eu) return false;
+                if (m_usersFieldFocus == 0u) {
+                    size_t length = 0u;
+                    while (length + 1u < sizeof(m_usersAccountInput) &&
+                        m_usersAccountInput[length] != '\0') ++length;
+                    if (length + 1u < sizeof(m_usersAccountInput)) {
+                        m_usersAccountInput[length] = static_cast<char>(typed);
+                        m_usersAccountInput[length + 1u] = '\0';
+                    }
+                } else {
+                    size_t length = 0u;
+                    while (length + 1u < sizeof(m_usersPasswordInput) &&
+                        m_usersPasswordInput[length] != '\0') ++length;
+                    if (length + 1u < sizeof(m_usersPasswordInput)) {
+                        m_usersPasswordInput[length] = static_cast<char>(typed);
+                        m_usersPasswordInput[length + 1u] = '\0';
+                    }
+                }
+                return true;
+            }
             char key = event.text;
             if (key >= 'A' && key <= 'Z') key = static_cast<char>(key - 'A' + 'a');
             if (key == ' ' &&
@@ -18123,6 +18271,8 @@ private:
             if (selected != settings::CategoryId::Count) {
                 return selectSupportedCategory(selected, "mouse");
             }
+            if (m_presentation.selectedCategory() == settings::CategoryId::Users &&
+                handleUsersClick(event.x, event.y)) return true;
             if (m_presentation.selectedCategory() == settings::CategoryId::Personalization &&
                 handlePersonalizationClick(event.x, event.y)) return true;
         }
@@ -18723,14 +18873,15 @@ private:
                                  uint32_t cardY)
     {
         const char* labels[8] = {
-            "Identity infrastructure", "Account records", "Current identity",
-            "Kernel operations", "Authentication", "Record persistence",
-            "Profiles and permissions", "Ownership enforcement"
+            "Identity registry", "Account records", "Current account",
+            "Account role", "Authentication and session", "Account name",
+            "Password", "Action"
         };
-        char accountCount[48] = "Unavailable";
+        char accountCount[80] = "Unavailable";
+        char credentialState[100] = "Authentication unavailable";
         const char* values[8] = {
-            "Unavailable", accountCount, "Unavailable", "Reserved system identity",
-            "Not implemented", "Unavailable", "Not implemented", "Not implemented"
+            "Unavailable", accountCount, "Unavailable", "Unavailable",
+            credentialState, m_usersAccountInput, "", ""
         };
         if (m_identitySnapshotAvailable) {
             values[0] = "Available";
@@ -18741,45 +18892,74 @@ private:
                     m_identitySnapshot.accountCount);
                 appendText(accountCount, sizeof(accountCount),
                     m_identitySnapshot.accountCount == 1u ? " account" : " accounts");
+                appendText(accountCount, sizeof(accountCount), "; ");
+                appendText(accountCount, sizeof(accountCount),
+                    identity::persistenceStateName(static_cast<identity::PersistenceState>(
+                        m_identitySnapshot.persistenceState)));
             }
-            values[2] = m_identitySnapshot.currentContextKind ==
-                static_cast<uint32_t>(identity::IdentityKind::InteractiveUnassigned)
-                    ? "Interactive; no human assigned" : "Authenticated human context";
-            switch (static_cast<identity::PersistenceState>(m_identitySnapshot.persistenceState)) {
-            case identity::PersistenceState::Persistent:
-                values[5] = "Persistent; committed and read back";
-                break;
-            case identity::PersistenceState::Volatile:
-                values[5] = "In memory only";
-                break;
-            case identity::PersistenceState::ReadOnly:
-                values[5] = (m_identitySnapshot.flags &
-                    settings_native::kIdentityRecordsDurable) != 0u
-                    ? "Read-only storage; records loaded" : "Read-only; changes are volatile";
-                break;
-            case identity::PersistenceState::Unavailable:
-                values[5] = (m_identitySnapshot.flags &
-                    settings_native::kIdentityRecordsDurable) != 0u
-                    ? "No writable persistent store" : "In memory only; restart loses changes";
-                break;
-            case identity::PersistenceState::Corrupt:
-                values[5] = "Corrupt store; writes stopped";
-                break;
-            case identity::PersistenceState::Unsupported:
-                values[5] = "Unsupported store version; writes stopped";
-                break;
+            const bool authenticated = (m_identitySnapshot.flags &
+                settings_native::kIdentitySessionActive) != 0u;
+            values[2] = authenticated ? m_identitySnapshot.currentDisplayName
+                : "Not signed in; compatibility desktop";
+            values[3] = authenticated
+                ? (m_identitySnapshot.currentRole == static_cast<uint32_t>(identity::AccountRole::Administrator)
+                    ? "Administrator" : "Standard User")
+                : "No authenticated account";
+            if ((m_identitySnapshot.flags & settings_native::kIdentityAuthenticationAvailable) != 0u) {
+                credentialState[0] = '\0';
+                appendText(credentialState, sizeof(credentialState), authenticated
+                    ? "Signed in; " : "Signed out; ");
+                appendText(credentialState, sizeof(credentialState), "credentials ");
+                appendUnsigned(credentialState, sizeof(credentialState),
+                    m_identitySnapshot.credentialCount);
+                appendText(credentialState, sizeof(credentialState), "; store ");
+                appendText(credentialState, sizeof(credentialState),
+                    identity::persistenceStateName(static_cast<identity::PersistenceState>(
+                        m_identitySnapshot.credentialPersistenceState)));
+                appendText(credentialState, sizeof(credentialState), "; roles informational only");
             }
+            values[4] = credentialState;
         }
 
         const uint32_t valueOffset = 176u;
         const uint32_t valueX = contentX + valueOffset;
         const uint32_t valueWidth = contentW > valueOffset + 16u
             ? contentW - valueOffset - 16u : 1u;
+        char passwordMask[authentication::kMaximumPasswordBytes + 1u]{};
+        size_t passwordLength = 0u;
+        while (passwordLength + 1u < sizeof(m_usersPasswordInput) &&
+            m_usersPasswordInput[passwordLength] != '\0') ++passwordLength;
+        for (size_t i = 0u; i < passwordLength; ++i) passwordMask[i] = '*';
+        passwordMask[passwordLength] = '\0';
+        const bool authenticated = m_identitySnapshotAvailable &&
+            (m_identitySnapshot.flags & settings_native::kIdentitySessionActive) != 0u;
+        const bool bootstrap = m_identitySnapshotAvailable &&
+            (m_identitySnapshot.flags & settings_native::kIdentityBootstrapRequired) != 0u;
+        const char* actionLabel = authenticated ? "Sign out" :
+            (bootstrap ? "Set up first administrator" : "Sign in");
         for (size_t row = 0u; row < 8u; ++row) {
             const uint32_t rowY = cardY + 42u + static_cast<uint32_t>(row) * 32u;
             appDrawText(contentX + 16u, rowY, labels[row], rgb(150, 162, 181));
-            drawWrappedSettingsValue(valueX, rowY, values[row], valueWidth,
-                m_identitySnapshotAvailable ? rgb(243, 245, 250) : rgb(165, 173, 187), true);
+            if (row == 5u || row == 6u) {
+                const uint32_t boxColor = m_windowFocused &&
+                    m_usersFieldFocus == (row == 5u ? 0u : 1u)
+                    ? rgb(115, 166, 245) : rgb(83, 91, 106);
+                framebuffer::fill_rect(valueX, rowY - 2u, valueWidth, 18u, rgb(29, 32, 41));
+                appDrawRect(valueX, rowY - 2u, valueWidth, 18u, boxColor);
+                drawWrappedSettingsValue(valueX + 5u, rowY, row == 5u
+                    ? m_usersAccountInput : passwordMask, valueWidth > 10u
+                    ? valueWidth - 10u : 1u, rgb(243, 245, 250), false);
+            } else if (row == 7u) {
+                const uint32_t buttonColor = authenticated ? rgb(86, 61, 61) : rgb(52, 87, 135);
+                framebuffer::fill_rect(valueX, rowY - 3u,
+                    valueWidth > 8u ? valueWidth - 8u : 1u, 20u, buttonColor);
+                appDrawRect(valueX, rowY - 3u,
+                    valueWidth > 8u ? valueWidth - 8u : 1u, 20u, rgb(115, 166, 245));
+                appDrawText(valueX + 6u, rowY + 2u, actionLabel, rgb(250, 252, 255));
+            } else {
+                drawWrappedSettingsValue(valueX, rowY, values[row], valueWidth,
+                    m_identitySnapshotAvailable ? rgb(243, 245, 250) : rgb(165, 173, 187), true);
+            }
             if (row + 1u < 8u) {
                 framebuffer::fill_rect(contentX + 16u, rowY + 24u,
                     contentW > 32u ? contentW - 32u : 1u, 1u, rgb(55, 61, 74));
@@ -18885,9 +19065,11 @@ private:
                 selected == settings::CategoryId::About);
         }
         appDrawText(contentX + 12u, y + page.footer.y,
-            personalization
-                ? "Tab focus   Arrows select   Enter activate   G/W/I sections"
-                : "S System   D Display   P Personalization   U Users   A About",
+            users ? (m_usersActionStatus[0] ? m_usersActionStatus :
+                "Sign-in is optional; compatibility desktop remains available.")
+                : (personalization
+                    ? "Tab focus   Arrows select   Enter activate   G/W/I sections"
+                    : "S System   D Display   P Personalization   U Users   A About"),
             rgb(145, 151, 163));
     }
 };

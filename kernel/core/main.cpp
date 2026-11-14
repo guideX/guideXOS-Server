@@ -13,6 +13,7 @@
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/process.h"
 #include "include/kernel/identity_runtime.h"
+#include "include/kernel/authentication.h"
 #include "include/kernel/desktop.h"
 #include "include/kernel/desktop_gradient_persistence.h"
 #include "include/kernel/kernel_apps.h"
@@ -34,6 +35,12 @@
 #include "display_configuration_service.h"
 #include "include/kernel/file_clipboard.h"
 #include "include/kernel/native_elf_baremetal.h"
+
+#if defined(GXOS_SECURITY2_AUTH_SMOKE_TEST)
+namespace kernel {
+void runSecurity2AuthenticationGuestSmoke();
+}
+#endif
 
 // Storage subsystem
 #include "include/kernel/block_device.h"
@@ -999,6 +1006,22 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts(" result=");
         kernel::serial::puts(kernel::identity::resultName(identityInit));
         kernel::serial::putc('\n');
+        const kernel::authentication::Result authenticationInit =
+            kernel::authentication::initializeRuntime();
+        kernel::authentication::RuntimeSnapshotV1 authenticationSnapshot{};
+        (void)kernel::authentication::runtime().snapshot(&authenticationSnapshot);
+        kernel::serial::puts("[AUTH] credentialStore=");
+        kernel::serial::puts(authenticationSnapshot.credentialStoreAvailable ? "available" : "unavailable");
+        kernel::serial::puts(" persistence=");
+        kernel::serial::puts(kernel::identity::persistenceStateName(authenticationSnapshot.persistence));
+        kernel::serial::puts(" bootstrapRequired=");
+        kernel::serial::puts(authenticationSnapshot.bootstrapRequired ? "yes" : "no");
+        kernel::serial::puts(" result=");
+        kernel::serial::puts(kernel::authentication::resultName(authenticationInit));
+        kernel::serial::putc('\n');
+#if defined(GXOS_SECURITY2_AUTH_SMOKE_TEST)
+        kernel::runSecurity2AuthenticationGuestSmoke();
+#endif
         kernel::native_elf::log_apps_lifecycle_checkpoint(
             kernel::native_elf::APPS_CHECKPOINT_INITIAL_MOUNT);
 

@@ -3284,6 +3284,15 @@ const char* compute_tls_prerequisites_blocker()
 
 } // namespace
 
+bool gxos_tls_security_crypto_initialize()
+{
+#if defined(GXOS_BARE_METAL) && GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
+    return ensure_psa_initialized();
+#else
+    return false;
+#endif
+}
+
 const char* gxos_tls_backend_status_name(GxosTlsBackendStatus status)
 {
     switch (status) {

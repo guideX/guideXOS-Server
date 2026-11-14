@@ -39,13 +39,13 @@ int main()
     expect(model, state.currentIdentity == UsersInfoState::Unavailable &&
         state.sessionIdentity == UsersInfoState::Unavailable,
         "hosted Settings does not invent a native current identity");
-    expect(model, state.authentication == UsersInfoState::NotImplemented,
-        "authentication is reported as not implemented");
+    expect(model, state.authentication == UsersInfoState::Unavailable,
+        "hosted Settings does not claim native authentication support without its provider");
     expect(model, state.profiles == UsersInfoState::NotImplemented,
         "separate user profiles are reported as not implemented");
-    expect(model, state.sessionManager == UsersInfoState::NotImplemented &&
-        state.sessionActions == UsersInfoState::NotImplemented,
-        "session manager and user-switching actions are not fabricated");
+    expect(model, state.sessionManager == UsersInfoState::Unavailable &&
+        state.sessionActions == UsersInfoState::Unavailable,
+        "hosted Settings does not claim native session controls without its provider");
     expect(model, state.userPermissions == UsersInfoState::NotImplemented &&
         state.fileOwnership == UsersInfoState::NotImplemented &&
         state.userGrantedAppPermissions == UsersInfoState::NotImplemented,
@@ -59,15 +59,19 @@ int main()
     nativeProvider.available = true;
     nativeProvider.accountCountAvailable = true;
     nativeProvider.interactiveContextAvailable = true;
+    nativeProvider.authenticationAvailable = true;
+    nativeProvider.sessionManagerAvailable = true;
     nativeProvider.persistence = UsersPersistenceInfo::Persistent;
     nativeProvider.allRecordsDurable = true;
     const UsersPageState nativeEmpty = buildUsersPageState("Native AMD64", &nativeProvider);
     expect(model, nativeEmpty.accountModel == UsersInfoState::Available &&
         nativeEmpty.accountRecords == UsersInfoState::Absent &&
         nativeEmpty.currentIdentity == UsersInfoState::Unassigned &&
-        nativeEmpty.authentication == UsersInfoState::NotImplemented &&
+        nativeEmpty.authentication == UsersInfoState::Available &&
+        nativeEmpty.sessionManager == UsersInfoState::Available &&
+        nativeEmpty.sessionActions == UsersInfoState::Unavailable &&
         nativeEmpty.persistence == UsersInfoState::Persistent,
-        "native provider distinguishes available infrastructure, empty registry, no login, and persistence");
+        "native provider distinguishes available authentication/session services, empty registry, no login, and persistence");
     nativeProvider.accountCount = 2;
     nativeProvider.persistence = UsersPersistenceInfo::ReadOnly;
     nativeProvider.allRecordsDurable = false;
@@ -76,6 +80,20 @@ int main()
         nativeRecords.currentIdentity == UsersInfoState::Unassigned &&
         nativeRecords.persistence == UsersInfoState::ReadOnly,
         "native provider status remains distinct from authentication and read-only storage");
+
+    nativeProvider.authenticatedHumanAssigned = true;
+    nativeProvider.signOutAvailable = true;
+    nativeProvider.currentRoleAvailable = true;
+    nativeProvider.currentRole = 2u;
+    nativeProvider.currentAccountName = "sysadmin";
+    nativeProvider.currentDisplayName = "System Administrator";
+    const UsersPageState nativeSignedIn = buildUsersPageState("Native AMD64", &nativeProvider);
+    expect(model, nativeSignedIn.currentIdentity == UsersInfoState::Assigned &&
+        nativeSignedIn.sessionActions == UsersInfoState::Available &&
+        nativeSignedIn.currentRoleAvailable && nativeSignedIn.currentRole == 2u &&
+        nativeSignedIn.currentAccountName == "sysadmin" &&
+        nativeSignedIn.currentDisplayName == "System Administrator",
+        "native provider exposes the active account, role metadata, and sign-out only for a signed-in session");
 
     const UsersPageState emptyRuntime = buildUsersPageState("");
     const UsersPageState unavailableRuntime = buildUsersPageState("Hosted runtime details unavailable");

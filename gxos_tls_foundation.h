@@ -350,6 +350,9 @@ const char* gxos_tls_certificate_validation_policy();
 
 bool gxos_tls_prerequisites_ready();
 const char* gxos_tls_prerequisites_blocker_reason();
+// Initializes the shared PSA runtime for native credential derivation. This
+// remains fail-closed when secure entropy or the bounded allocator is absent.
+bool gxos_tls_security_crypto_initialize();
 
 /* Direct PSA ECDSA probes used by the Phase 8J bare-metal crypto rail. */
 bool gxos_tls_run_phase8j_raw_ecdsa_diagnostics();

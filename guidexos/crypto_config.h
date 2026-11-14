@@ -48,6 +48,8 @@ int64_t gxos_mbedtls_time_callback(int64_t* timer);
 #define PSA_WANT_ALG_RSA_PKCS1V15_SIGN 1
 #define PSA_WANT_ALG_RSA_PSS 1
 #define PSA_WANT_ALG_SHA_256 1
+#define PSA_WANT_ALG_HMAC 1
+#define PSA_WANT_ALG_PBKDF2_HMAC 1
 #define PSA_WANT_ALG_SHA_384 1
 #define PSA_WANT_ALG_SHA_512 1
 #define PSA_WANT_ALG_TLS12_PRF 1

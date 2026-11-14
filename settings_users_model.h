@@ -63,6 +63,13 @@ struct UsersIdentityInfo {
     unsigned accountCount{0};
     bool interactiveContextAvailable{false};
     bool authenticatedHumanAssigned{false};
+    bool authenticationAvailable{false};
+    bool sessionManagerAvailable{false};
+    bool signOutAvailable{false};
+    bool currentRoleAvailable{false};
+    unsigned currentRole{0};
+    std::string currentAccountName;
+    std::string currentDisplayName;
     UsersPersistenceInfo persistence{UsersPersistenceInfo::Unavailable};
     bool allRecordsDurable{false};
 };
@@ -72,15 +79,19 @@ struct UsersPageState {
     UsersInfoState accountRecords{UsersInfoState::Unavailable};
     UsersInfoState currentIdentity{UsersInfoState::Unavailable};
     UsersInfoState sessionIdentity{UsersInfoState::Unavailable};
-    UsersInfoState authentication{UsersInfoState::NotImplemented};
+    UsersInfoState authentication{UsersInfoState::Unavailable};
     UsersInfoState profiles{UsersInfoState::NotImplemented};
-    UsersInfoState sessionManager{UsersInfoState::NotImplemented};
-    UsersInfoState sessionActions{UsersInfoState::NotImplemented};
+    UsersInfoState sessionManager{UsersInfoState::Unavailable};
+    UsersInfoState sessionActions{UsersInfoState::Unavailable};
     UsersInfoState userPermissions{UsersInfoState::NotImplemented};
     UsersInfoState fileOwnership{UsersInfoState::NotImplemented};
     UsersInfoState userGrantedAppPermissions{UsersInfoState::NotImplemented};
     UsersInfoState persistence{UsersInfoState::Unavailable};
     UsersInfoState servicePeerAuthentication{UsersInfoState::Unavailable};
+    bool currentRoleAvailable{false};
+    unsigned currentRole{0};
+    std::string currentAccountName;
+    std::string currentDisplayName;
     std::string hostedRuntime{"Unavailable"};
 };
 
@@ -110,6 +121,20 @@ inline UsersPageState buildUsersPageState(
         : (identityProvider->authenticatedHumanAssigned
             ? UsersInfoState::Assigned : UsersInfoState::Unassigned);
     state.sessionIdentity = state.currentIdentity;
+    state.authentication = identityProvider->authenticationAvailable
+        ? UsersInfoState::Available : UsersInfoState::Unavailable;
+    state.sessionManager = identityProvider->sessionManagerAvailable
+        ? UsersInfoState::Available : UsersInfoState::Unavailable;
+    state.sessionActions = identityProvider->signOutAvailable &&
+        identityProvider->authenticatedHumanAssigned
+        ? UsersInfoState::Available : UsersInfoState::Unavailable;
+    state.currentRoleAvailable = identityProvider->currentRoleAvailable &&
+        identityProvider->authenticatedHumanAssigned;
+    state.currentRole = state.currentRoleAvailable ? identityProvider->currentRole : 0u;
+    if (identityProvider->authenticatedHumanAssigned) {
+        state.currentAccountName = boundedSettingValue(identityProvider->currentAccountName, 48);
+        state.currentDisplayName = boundedSettingValue(identityProvider->currentDisplayName, 48);
+    }
     switch (identityProvider->persistence) {
     case UsersPersistenceInfo::Persistent:
         state.persistence = identityProvider->allRecordsDurable

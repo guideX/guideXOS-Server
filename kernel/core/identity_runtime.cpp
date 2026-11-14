@@ -29,7 +29,8 @@ Runtime::Runtime()
     : m_registry(), m_storage{}, m_persistence(PersistenceState::Unavailable),
       m_generation(0u), m_activeSlot(-1), m_initialized(false),
       m_accountCountAvailable(false),
-      m_allRecordsDurable(false)
+      m_allRecordsDurable(false), m_contextProviderContext(nullptr),
+      m_contextProvider(nullptr)
 {
 }
 
@@ -229,6 +230,18 @@ Result Runtime::find(UserId id, UserRecordV1* output) const
     return m_registry.find(id, output);
 }
 
+Result Runtime::findRecord(UserId id, UserRecordV1* output) const
+{
+    if (!m_initialized) return Result::NotInitialized;
+    return m_registry.findRecord(id, output);
+}
+
+Result Runtime::findByAccountName(const char* accountName, UserRecordV1* output) const
+{
+    if (!m_initialized) return Result::NotInitialized;
+    return m_registry.findByAccountName(accountName, output);
+}
+
 Result Runtime::enumerate(UserRecordV1* output, size_t capacity, size_t* outCount) const
 {
     if (!m_initialized) return Result::NotInitialized;
@@ -248,6 +261,32 @@ Result Runtime::setStatus(UserId id, AccountStatus status)
         return Result::OkVolatile;
     }
     return commit(candidate);
+}
+
+Result Runtime::setRole(UserId id, AccountRole role)
+{
+    if (!m_initialized) return Result::NotInitialized;
+    Registry candidate = m_registry;
+    const Result changed = candidate.setRole(id, role);
+    if (changed != Result::Ok) return changed;
+    if (m_persistence == PersistenceState::ReadOnly ||
+        m_persistence == PersistenceState::Unavailable) {
+        m_registry = candidate;
+        m_allRecordsDurable = false;
+        return Result::OkVolatile;
+    }
+    return commit(candidate);
+}
+
+Result Runtime::getRole(UserId id, AccountRole* output) const
+{
+    if (!m_initialized) return Result::NotInitialized;
+    return m_registry.getRole(id, output);
+}
+
+bool Runtime::isAdministrator(UserId id) const
+{
+    return m_initialized && m_registry.isAdministrator(id);
 }
 
 Result Runtime::erase(UserId id)
@@ -277,11 +316,28 @@ Result Runtime::queryContext(ExecutionDomain domain, IdentityContextV1* output) 
     } else if (domain == ExecutionDomain::Interactive) {
         context.kind = IdentityKind::InteractiveUnassigned;
         context.userId = kInvalidUserId;
+        if (m_contextProvider) {
+            IdentityContextV1 authenticated{};
+            if (m_contextProvider(m_contextProviderContext, &authenticated) == Result::Ok &&
+                authenticated.version == 1u &&
+                authenticated.kind == IdentityKind::AuthenticatedHuman &&
+                authenticated.userId >= kFirstHumanUserId &&
+                authenticated.userId <= kMaximumUserId) {
+                context = authenticated;
+            }
+        }
     } else {
         return Result::InvalidArgument;
     }
     *output = context;
     return Result::Ok;
+}
+
+void Runtime::setInteractiveContextProvider(
+    void* context, InteractiveContextProviderFn provider)
+{
+    m_contextProviderContext = provider ? context : nullptr;
+    m_contextProvider = provider;
 }
 
 Result Runtime::snapshot(RuntimeSnapshotV1* output) const

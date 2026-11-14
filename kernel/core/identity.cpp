@@ -7,7 +7,8 @@ namespace identity {
 namespace {
 
 const uint8_t kStoreMagic[8] = { 'G', 'X', 'O', 'S', 'I', 'D', '0', '1' };
-const uint32_t kStoreVersion = 1u;
+const uint32_t kStoreVersion = 2u;
+const uint32_t kLegacyStoreVersion = 1u;
 const uint32_t kStoreHeaderBytes = static_cast<uint32_t>(kIdentityHeaderBytes);
 const uint32_t kStoreRecordBytes = static_cast<uint32_t>(kIdentityRecordBytes);
 const uint32_t kStoreCrcBytes = 4u;
@@ -107,6 +108,21 @@ bool validStatus(AccountStatus status)
     return status == AccountStatus::Active || status == AccountStatus::Disabled;
 }
 
+bool validRole(AccountRole role)
+{
+    return role == AccountRole::StandardUser || role == AccountRole::Administrator;
+}
+
+size_t activeAdministratorCount(const UserRecordV1* records, size_t count)
+{
+    size_t administrators = 0u;
+    for (size_t i = 0u; i < count; ++i) {
+        if (records[i].status == AccountStatus::Active &&
+            records[i].role == AccountRole::Administrator) ++administrators;
+    }
+    return administrators;
+}
+
 } // namespace
 
 bool validAccountName(const char* value)
@@ -145,6 +161,8 @@ bool validDisplayName(const char* value)
     return true;
 }
 
+bool validAccountRole(AccountRole role) { return validRole(role); }
+
 Registry::Registry()
     : m_records{}, m_count(0), m_nextUserId(kFirstHumanUserId), m_initialized(false)
 {
@@ -182,6 +200,7 @@ Result Registry::provision(const char* accountName, const char* displayName, Use
     record.version = kUserRecordVersion;
     record.id = m_nextUserId;
     record.status = AccountStatus::Active;
+    record.role = AccountRole::StandardUser;
     const size_t accountLength = boundedLength(accountName, kAccountNameCapacity);
     const size_t displayLength = boundedLength(displayName, kDisplayNameCapacity);
     memcpy(record.accountName, accountName, accountLength);
@@ -200,6 +219,36 @@ Result Registry::find(UserId id, UserRecordV1* output) const
         id > kMaximumUserId) return Result::InvalidId;
     for (size_t i = 0; i < m_count; ++i) {
         if (m_records[i].id == id) {
+            *output = m_records[i];
+            return m_records[i].status == AccountStatus::Active
+                ? Result::Ok : Result::Inactive;
+        }
+    }
+    return Result::NotFound;
+}
+
+Result Registry::findRecord(UserId id, UserRecordV1* output) const
+{
+    if (!m_initialized) return Result::NotInitialized;
+    if (!output) return Result::InvalidArgument;
+    if (id == kInvalidUserId || id == kSystemIdentityId || id < kFirstHumanUserId ||
+        id > kMaximumUserId) return Result::InvalidId;
+    for (size_t i = 0u; i < m_count; ++i) {
+        if (m_records[i].id == id) {
+            *output = m_records[i];
+            return m_records[i].status == AccountStatus::Active
+                ? Result::Ok : Result::Inactive;
+        }
+    }
+    return Result::NotFound;
+}
+
+Result Registry::findByAccountName(const char* accountName, UserRecordV1* output) const
+{
+    if (!m_initialized) return Result::NotInitialized;
+    if (!output || !validAccountName(accountName)) return Result::InvalidArgument;
+    for (size_t i = 0u; i < m_count; ++i) {
+        if (accountNamesEqual(m_records[i].accountName, accountName)) {
             *output = m_records[i];
             return m_records[i].status == AccountStatus::Active
                 ? Result::Ok : Result::Inactive;
@@ -227,11 +276,57 @@ Result Registry::setStatus(UserId id, AccountStatus status)
     if (!validStatus(status)) return Result::InvalidArgument;
     for (size_t i = 0; i < m_count; ++i) {
         if (m_records[i].id == id) {
+            if (m_records[i].role == AccountRole::Administrator &&
+                status != AccountStatus::Active &&
+                activeAdministratorCount(m_records, m_count) <= 1u)
+                return Result::LastAdministrator;
             m_records[i].status = status;
             return Result::Ok;
         }
     }
     return Result::NotFound;
+}
+
+Result Registry::setRole(UserId id, AccountRole role)
+{
+    if (!m_initialized) return Result::NotInitialized;
+    if (id == kInvalidUserId || id == kSystemIdentityId || id < kFirstHumanUserId ||
+        id > kMaximumUserId) return Result::InvalidId;
+    if (!validRole(role)) return Result::InvalidRole;
+    for (size_t i = 0u; i < m_count; ++i) {
+        if (m_records[i].id != id) continue;
+        if (m_records[i].status == AccountStatus::Active &&
+            m_records[i].role == AccountRole::Administrator &&
+            role != AccountRole::Administrator &&
+            activeAdministratorCount(m_records, m_count) <= 1u)
+            return Result::LastAdministrator;
+        m_records[i].role = role;
+        return Result::Ok;
+    }
+    return Result::NotFound;
+}
+
+Result Registry::getRole(UserId id, AccountRole* output) const
+{
+    if (!m_initialized) return Result::NotInitialized;
+    if (!output) return Result::InvalidArgument;
+    if (id == kInvalidUserId || id == kSystemIdentityId || id < kFirstHumanUserId ||
+        id > kMaximumUserId) return Result::InvalidId;
+    for (size_t i = 0u; i < m_count; ++i) {
+        if (m_records[i].id != id) continue;
+        *output = m_records[i].role;
+        return m_records[i].status == AccountStatus::Active
+            ? Result::Ok : Result::Inactive;
+    }
+    return Result::NotFound;
+}
+
+bool Registry::isAdministrator(UserId id) const
+{
+    if (!m_initialized) return false;
+    for (size_t i = 0u; i < m_count; ++i)
+        if (m_records[i].id == id) return m_records[i].role == AccountRole::Administrator;
+    return false;
 }
 
 Result Registry::erase(UserId id)
@@ -241,6 +336,10 @@ Result Registry::erase(UserId id)
         id > kMaximumUserId) return Result::InvalidId;
     for (size_t i = 0; i < m_count; ++i) {
         if (m_records[i].id != id) continue;
+        if (m_records[i].status == AccountStatus::Active &&
+            m_records[i].role == AccountRole::Administrator &&
+            activeAdministratorCount(m_records, m_count) <= 1u)
+            return Result::LastAdministrator;
         for (size_t move = i + 1; move < m_count; ++move)
             m_records[move - 1] = m_records[move];
         memset(&m_records[m_count - 1], 0, sizeof(m_records[m_count - 1]));
@@ -272,8 +371,9 @@ Result Registry::serialize(uint64_t generation, uint8_t* output, size_t capacity
         const UserRecordV1& record = m_records[i];
         put64(output + offset, record.id);
         output[offset + 8] = static_cast<uint8_t>(record.status);
-        memcpy(output + offset + 9, record.accountName, kAccountNameCapacity);
-        memcpy(output + offset + 9 + kAccountNameCapacity,
+        output[offset + 9] = static_cast<uint8_t>(record.role);
+        memcpy(output + offset + 10, record.accountName, kAccountNameCapacity);
+        memcpy(output + offset + 10 + kAccountNameCapacity,
                record.displayName, kDisplayNameCapacity);
         offset += kIdentityRecordBytes;
     }
@@ -288,8 +388,12 @@ Result Registry::load(const uint8_t* bytes, size_t byteCount, uint64_t* outGener
     if (!bytes || !outGeneration || byteCount < kIdentityHeaderBytes + kStoreCrcBytes)
         return Result::CorruptRecord;
     if (memcmp(bytes, kStoreMagic, sizeof(kStoreMagic)) != 0) return Result::CorruptRecord;
-    if (get32(bytes + 8) != kStoreVersion) return Result::UnsupportedVersion;
-    if (get32(bytes + 12) != kStoreHeaderBytes || get32(bytes + 36) != kStoreRecordBytes)
+    const uint32_t version = get32(bytes + 8);
+    if (version != kStoreVersion && version != kLegacyStoreVersion)
+        return Result::UnsupportedVersion;
+    const uint32_t expectedRecordBytes = version == kLegacyStoreVersion
+        ? static_cast<uint32_t>(kLegacyIdentityRecordBytes) : kStoreRecordBytes;
+    if (get32(bytes + 12) != kStoreHeaderBytes || get32(bytes + 36) != expectedRecordBytes)
         return Result::CorruptRecord;
 
     const uint64_t generation = get64(bytes + 16);
@@ -297,8 +401,10 @@ Result Registry::load(const uint8_t* bytes, size_t byteCount, uint64_t* outGener
     const uint32_t count = get32(bytes + 32);
     if (generation == 0u || count > kMaximumUsers || nextId < kFirstHumanUserId)
         return Result::CorruptRecord;
+    const size_t recordBytes = version == kLegacyStoreVersion
+        ? kLegacyIdentityRecordBytes : kIdentityRecordBytes;
     const size_t expected = kIdentityHeaderBytes +
-        static_cast<size_t>(count) * kIdentityRecordBytes + kStoreCrcBytes;
+        static_cast<size_t>(count) * recordBytes + kStoreCrcBytes;
     if (expected != byteCount || get32(bytes + byteCount - kStoreCrcBytes) !=
         crc32(bytes, byteCount - kStoreCrcBytes)) return Result::CorruptRecord;
 
@@ -314,11 +420,15 @@ Result Registry::load(const uint8_t* bytes, size_t byteCount, uint64_t* outGener
         record.version = kUserRecordVersion;
         record.id = get64(bytes + offset);
         record.status = static_cast<AccountStatus>(bytes[offset + 8]);
-        memcpy(record.accountName, bytes + offset + 9, kAccountNameCapacity);
-        memcpy(record.displayName, bytes + offset + 9 + kAccountNameCapacity,
+        record.role = version == kLegacyStoreVersion
+            ? AccountRole::StandardUser
+            : static_cast<AccountRole>(bytes[offset + 9]);
+        const size_t nameOffset = version == kLegacyStoreVersion ? 9u : 10u;
+        memcpy(record.accountName, bytes + offset + nameOffset, kAccountNameCapacity);
+        memcpy(record.displayName, bytes + offset + nameOffset + kAccountNameCapacity,
                kDisplayNameCapacity);
         if (record.id < kFirstHumanUserId || record.id > kMaximumUserId ||
-            record.id <= previousId || !validStatus(record.status) ||
+            record.id <= previousId || !validStatus(record.status) || !validRole(record.role) ||
             !validAccountArray(record.accountName) || !validDisplayArray(record.displayName))
             return Result::CorruptRecord;
         for (uint32_t prior = 0; prior < i; ++prior) {
@@ -326,7 +436,7 @@ Result Registry::load(const uint8_t* bytes, size_t byteCount, uint64_t* outGener
                 return Result::CorruptRecord;
         }
         previousId = record.id;
-        offset += kIdentityRecordBytes;
+        offset += recordBytes;
     }
     if (count != 0u && nextId <= previousId) return Result::CorruptRecord;
 
@@ -344,6 +454,8 @@ const char* resultName(Result result)
     case Result::NotInitialized: return "NOT_INITIALIZED";
     case Result::InvalidArgument: return "INVALID_ARGUMENT";
     case Result::InvalidId: return "INVALID_ID";
+    case Result::InvalidRole: return "INVALID_ROLE";
+    case Result::LastAdministrator: return "LAST_ADMINISTRATOR";
     case Result::DuplicateId: return "DUPLICATE_ID";
     case Result::DuplicateAccountName: return "DUPLICATE_ACCOUNT_NAME";
     case Result::NotFound: return "NOT_FOUND";

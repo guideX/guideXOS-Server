@@ -243,25 +243,46 @@ SnapshotStatus readSystemAboutSnapshot(
     return SnapshotStatus::Ok;
 }
 
-bool validIdentitySnapshot(const IdentitySnapshotV1& snapshot)
+bool validIdentitySnapshot(const IdentitySnapshotV2& snapshot)
 {
     const uint32_t knownFlags = kIdentityInfrastructureAvailable |
-        kIdentityRecordsDurable | kIdentityAccountCountAvailable;
+        kIdentityRecordsDurable | kIdentityAccountCountAvailable |
+        kIdentityAuthenticationAvailable | kIdentityCredentialStoreAvailable |
+        kIdentityCredentialsDurable | kIdentitySessionActive |
+        kIdentityCurrentRoleAvailable | kIdentityBootstrapRequired;
     const uint32_t contextKind = snapshot.currentContextKind;
+    const bool sessionActive = (snapshot.flags & kIdentitySessionActive) != 0u;
     const bool contextValid =
-        (contextKind == static_cast<uint32_t>(identity::IdentityKind::InteractiveUnassigned) &&
-         snapshot.currentUserId == identity::kInvalidUserId) ||
-        (contextKind == static_cast<uint32_t>(identity::IdentityKind::AuthenticatedHuman) &&
+        (!sessionActive &&
+         contextKind == static_cast<uint32_t>(identity::IdentityKind::InteractiveUnassigned) &&
+         snapshot.currentUserId == identity::kInvalidUserId &&
+         (snapshot.flags & kIdentityCurrentRoleAvailable) == 0u &&
+         snapshot.currentDisplayName[0] == '\0') ||
+        (sessionActive &&
+         contextKind == static_cast<uint32_t>(identity::IdentityKind::AuthenticatedHuman) &&
          snapshot.currentUserId >= identity::kFirstHumanUserId &&
-         snapshot.currentUserId <= identity::kMaximumUserId);
-    return snapshot.structureSize == sizeof(IdentitySnapshotV1) &&
+         snapshot.currentUserId <= identity::kMaximumUserId &&
+         (snapshot.flags & kIdentityCurrentRoleAvailable) != 0u &&
+         identity::validAccountRole(static_cast<identity::AccountRole>(snapshot.currentRole)) &&
+         identity::validDisplayName(snapshot.currentDisplayName));
+    return snapshot.structureSize == sizeof(IdentitySnapshotV2) &&
         snapshot.version == kIdentitySnapshotVersion && snapshot.revision != 0u &&
         (snapshot.flags & kIdentityInfrastructureAvailable) != 0u &&
         (snapshot.flags & ~knownFlags) == 0u &&
         snapshot.accountCount <= identity::kMaximumUsers &&
+        snapshot.credentialCount <= identity::kMaximumUsers &&
         (((snapshot.flags & kIdentityAccountCountAvailable) != 0u) ||
          snapshot.accountCount == 0u) &&
+        (((snapshot.flags & kIdentityCredentialStoreAvailable) != 0u) ||
+         snapshot.credentialCount == 0u) &&
+        (((snapshot.flags & kIdentityAuthenticationAvailable) != 0u) ||
+         ((snapshot.flags & (kIdentityCredentialStoreAvailable | kIdentitySessionActive |
+                             kIdentityBootstrapRequired)) == 0u)) &&
         snapshot.persistenceState <= static_cast<uint32_t>(identity::PersistenceState::Unsupported) &&
+        snapshot.credentialPersistenceState <= static_cast<uint32_t>(identity::PersistenceState::Unsupported) &&
+        snapshot.sessionState <= static_cast<uint32_t>(authentication::SessionState::Invalidated) &&
+        (sessionActive == (snapshot.sessionState ==
+            static_cast<uint32_t>(authentication::SessionState::Active))) &&
         contextValid;
 }
 
@@ -289,16 +310,16 @@ SnapshotStatus readIdentitySnapshot(
         runtimeSnapshot.initialized == 0u) return SnapshotStatus::Unavailable;
     const uint64_t revision = runtimeSnapshot.generation == UINT64_MAX
         ? UINT64_MAX : runtimeSnapshot.generation + 1u;
-    *outSize = sizeof(IdentitySnapshotV1);
+    *outSize = sizeof(IdentitySnapshotV2);
     *outRevision = revision;
-    if (capacity < sizeof(IdentitySnapshotV1)) return SnapshotStatus::BufferTooSmall;
+    if (capacity < sizeof(IdentitySnapshotV2)) return SnapshotStatus::BufferTooSmall;
     if (request->knownRevision != 0u && request->knownRevision != revision)
         return SnapshotStatus::StaleRevision;
 
     identity::IdentityContextV1 context{};
     if (identity::runtime().queryContext(identity::ExecutionDomain::Interactive,
             &context) != identity::Result::Ok) return SnapshotStatus::Unavailable;
-    IdentitySnapshotV1 snapshot{};
+    IdentitySnapshotV2 snapshot{};
     snapshot.structureSize = sizeof(snapshot);
     snapshot.version = kIdentitySnapshotVersion;
     snapshot.revision = revision;
@@ -312,12 +333,70 @@ SnapshotStatus readIdentitySnapshot(
     snapshot.persistenceState = static_cast<uint32_t>(runtimeSnapshot.persistence);
     snapshot.currentContextKind = static_cast<uint32_t>(context.kind);
     snapshot.currentUserId = context.userId;
+    authentication::RuntimeSnapshotV1 authRuntime{};
+    if (authentication::runtime().snapshot(&authRuntime) == authentication::Result::Ok &&
+        authRuntime.initialized != 0u) {
+        snapshot.flags |= kIdentityAuthenticationAvailable;
+        if (authRuntime.credentialStoreAvailable != 0u)
+            snapshot.flags |= kIdentityCredentialStoreAvailable;
+        if (authRuntime.allCredentialsDurable != 0u)
+            snapshot.flags |= kIdentityCredentialsDurable;
+        if (authRuntime.bootstrapRequired != 0u)
+            snapshot.flags |= kIdentityBootstrapRequired;
+        snapshot.credentialCount = authRuntime.credentialStoreAvailable != 0u
+            ? authRuntime.credentialCount : 0u;
+        snapshot.credentialPersistenceState = static_cast<uint32_t>(
+            authRuntime.allCredentialsDurable != 0u ? authRuntime.persistence :
+                identity::PersistenceState::Volatile);
+        authentication::SessionSnapshotV1 session{};
+        if (authentication::runtime().queryCurrentSession(&session) == authentication::Result::Ok) {
+            snapshot.sessionState = static_cast<uint32_t>(session.state);
+            if (session.state == authentication::SessionState::Active) {
+                snapshot.flags |= kIdentitySessionActive | kIdentityCurrentRoleAvailable;
+                snapshot.currentRole = static_cast<uint32_t>(session.role);
+                for (size_t i = 0u; i < sizeof(snapshot.currentDisplayName); ++i)
+                    snapshot.currentDisplayName[i] = session.displayName[i];
+            }
+        }
+    }
     if (!validIdentitySnapshot(snapshot)) return SnapshotStatus::Unavailable;
 
     uint8_t* destination = static_cast<uint8_t*>(output);
     const uint8_t* source = reinterpret_cast<const uint8_t*>(&snapshot);
     for (size_t i = 0u; i < sizeof(snapshot); ++i) destination[i] = source[i];
     return SnapshotStatus::Ok;
+}
+
+authentication::Result authenticateLocal(
+    const app::KernelApp* caller, const char* accountName,
+    const char* password, size_t passwordBytes,
+    authentication::SessionReference* outputSession)
+{
+    if (!caller || !textEquals(caller->getRuntimeAppId(), kSettingsRuntimeAppId))
+        return authentication::Result::Unauthorized;
+    return authentication::runtime().authenticate(accountName, password,
+        passwordBytes, outputSession);
+}
+
+authentication::Result bootstrapAdministratorLocal(
+    const app::KernelApp* caller, const char* accountName,
+    const char* displayName, const char* password, size_t passwordBytes,
+    authentication::SessionReference* outputSession)
+{
+    if (!caller || !textEquals(caller->getRuntimeAppId(), kSettingsRuntimeAppId))
+        return authentication::Result::Unauthorized;
+    authentication::RuntimeSnapshotV1 snapshot{};
+    if (authentication::runtime().snapshot(&snapshot) != authentication::Result::Ok ||
+        snapshot.bootstrapRequired == 0u) return authentication::Result::Unauthorized;
+    return authentication::runtime().bootstrapAdministrator(accountName, displayName,
+        password, passwordBytes, outputSession);
+}
+
+authentication::Result signOutLocal(const app::KernelApp* caller)
+{
+    if (!caller || !textEquals(caller->getRuntimeAppId(), kSettingsRuntimeAppId))
+        return authentication::Result::Unauthorized;
+    return authentication::runtime().signOutCurrent();
 }
 
 static bool validBitsPerPixel(uint32_t bitsPerPixel)

@@ -2,6 +2,7 @@
 #define KERNEL_SETTINGS_NATIVE_PROVIDER_H
 
 #include "kernel_app.h"
+#include "kernel/authentication.h"
 #include "kernel/identity_runtime.h"
 
 #include "../../../../settings_presentation_adapter.h"
@@ -14,7 +15,7 @@ namespace settings_native {
 
 static const uint32_t kSystemAboutSnapshotVersion = 2;
 static const uint64_t kSystemAboutSnapshotRevision = 1;
-static const uint32_t kIdentitySnapshotVersion = 1;
+static const uint32_t kIdentitySnapshotVersion = 2;
 static const uint32_t kDisplaySnapshotVersion = 1;
 static const uint32_t kDesktopAppearanceSnapshotVersion = 1;
 static const uint32_t kBuiltInGradientPresetListVersion = 1;
@@ -72,10 +73,16 @@ struct IdentitySnapshotRequestV1 {
 enum : uint32_t {
     kIdentityInfrastructureAvailable = 1u << 0,
     kIdentityRecordsDurable = 1u << 1,
-    kIdentityAccountCountAvailable = 1u << 2
+    kIdentityAccountCountAvailable = 1u << 2,
+    kIdentityAuthenticationAvailable = 1u << 3,
+    kIdentityCredentialStoreAvailable = 1u << 4,
+    kIdentityCredentialsDurable = 1u << 5,
+    kIdentitySessionActive = 1u << 6,
+    kIdentityCurrentRoleAvailable = 1u << 7,
+    kIdentityBootstrapRequired = 1u << 8
 };
 
-struct IdentitySnapshotV1 {
+struct IdentitySnapshotV2 {
     uint32_t structureSize;
     uint32_t version;
     uint64_t revision;
@@ -84,6 +91,11 @@ struct IdentitySnapshotV1 {
     uint32_t persistenceState;
     uint32_t currentContextKind;
     uint64_t currentUserId;
+    uint32_t currentRole;
+    uint32_t sessionState;
+    uint32_t credentialCount;
+    uint32_t credentialPersistenceState;
+    char currentDisplayName[identity::kDisplayNameCapacity];
 };
 
 // Copies bounded values from kernel-owned product, kernel-version, and
@@ -108,7 +120,7 @@ SnapshotStatus readSystemAboutSnapshot(
     size_t* outSize,
     uint64_t* outRevision);
 
-bool validIdentitySnapshot(const IdentitySnapshotV1& snapshot);
+bool validIdentitySnapshot(const IdentitySnapshotV2& snapshot);
 
 // Reports the live kernel registry and interactive identity context to the
 // native Settings KernelApp. Caller identity comes from KernelApp runtime
@@ -120,6 +132,16 @@ SnapshotStatus readIdentitySnapshot(
     size_t capacity,
     size_t* outSize,
     uint64_t* outRevision);
+
+authentication::Result authenticateLocal(
+    const app::KernelApp* caller, const char* accountName,
+    const char* password, size_t passwordBytes,
+    authentication::SessionReference* outputSession);
+authentication::Result bootstrapAdministratorLocal(
+    const app::KernelApp* caller, const char* accountName,
+    const char* displayName, const char* password, size_t passwordBytes,
+    authentication::SessionReference* outputSession);
+authentication::Result signOutLocal(const app::KernelApp* caller);
 
 struct DisplaySnapshotRequestV1 {
     uint32_t structureSize;
