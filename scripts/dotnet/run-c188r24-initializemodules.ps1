@@ -80,6 +80,16 @@ try {
     }
     $final.candidateIntegrityVerified = $true
 
+    if (Test-Path -LiteralPath $guardRoot -PathType Container) {
+        foreach ($existingGuardPath in @(Get-ChildItem -LiteralPath $guardRoot -File -Filter 'attempt-r24-*.json')) {
+            try { $existingGuard = Get-Content -LiteralPath $existingGuardPath.FullName -Raw | ConvertFrom-Json -ErrorAction Stop }
+            catch { throw "Existing R24 guard is unreadable; refusing a new boot: $($existingGuardPath.FullName)" }
+            if ([System.IO.Path]::GetFullPath([string]$existingGuard.candidateRoot) -eq $candidate) {
+                throw "This exact R24 candidate already has a one-boot guard; automatic retries are forbidden: $($existingGuardPath.FullName)"
+            }
+        }
+    }
+
     foreach ($path in @($bootRoot,$guardPath,$preflightRoot,$evidencePath)) {
         if (Test-Path -LiteralPath $path) { throw "R24 run evidence path already exists: $path" }
     }
