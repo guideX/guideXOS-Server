@@ -29,6 +29,7 @@ param(
     [switch]$C188R12R4FactoryAttribution,
     [switch]$C188R12R4R5GcOwnershipProof,
     [switch]$C188R21ManagedSettingsFactory,
+    [switch]$C188R22SettingsBootstrapHandoff,
     [switch]$C188R12R4R5R1InitDiagnostics,
     [switch]$C188R12R4R5R3InitReturnContract,
     [switch]$C188R12R4R5R4ThreadStoreReadiness,
@@ -262,6 +263,7 @@ if ($UseGuideXosRuntimePack) {
     if ($C188R12R4FactoryAttribution) { $runtimePackBuildArguments += "-C188R12R4FactoryAttribution" }
     if ($C188R12R4R5GcOwnershipProof) { $runtimePackBuildArguments += "-C188R12R4R5GcOwnershipProof" }
     if ($C188R21ManagedSettingsFactory) { $runtimePackBuildArguments += "-C188R21ManagedSettingsFactory" }
+    if ($C188R22SettingsBootstrapHandoff) { $runtimePackBuildArguments += "-C188R22SettingsBootstrapHandoff" }
     if ($C188R12R4R5R1InitDiagnostics) { $runtimePackBuildArguments += "-C188R12R4R5R1InitDiagnostics" }
     if ($C188R12R4R5R3InitReturnContract) { $runtimePackBuildArguments += "-C188R12R4R5R3InitReturnContract" }
     if ($C188R12R4R5R4ThreadStoreReadiness) { $runtimePackBuildArguments += "-C188R12R4R5R4ThreadStoreReadiness" }
@@ -648,6 +650,9 @@ try {
          -not $C188R12R3LifetimeStartAttribution -or
          $C188R12R4FactoryAttribution -or $ThreadStaticLifecycleDiagnostics)) {
         throw 'R21 requires the existing C160 C188 App Model, R11 managed-state provenance, R12R3 lifetime tracing, persistent runtime initialization, and R20 real-GC allocation; bounded-arena allocator attribution is excluded.'
+    }
+    if ($C188R22SettingsBootstrapHandoff -and -not $C188R21ManagedSettingsFactory) {
+        throw 'R22 Settings bootstrap handoff requires the established R21 real Settings factory profile.'
     }
     if ($C188R12R4R5R1InitDiagnostics -and
         (-not $C188R12R4R5GcOwnershipProof -or -not $UseGuideXosRuntimePack -or

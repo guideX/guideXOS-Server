@@ -4,6 +4,8 @@
 #define C188R11_STARTUP_INITIALIZE_BEGIN 0xC188B001u
 #define C188R11_STARTUP_INITIALIZE_READY 0xC188B002u
 #define C188R11_STARTUP_READY_REENTRY 0xC188B003u
+#define C188R11_STARTUP_BOOTSTRAP_BEGIN 0xC188B004u
+#define C188R11_STARTUP_BOOTSTRAP_READY 0xC188B005u
 #endif
 
 // This is the application-owned NativeAOT bootstrap seam.  The production
@@ -23,6 +25,7 @@ extern int guidexos_nativeaot_pal_install_hooks(const void* hooks);
 extern void guidexos_nativeaot_pal_set_startup_marker(void (*marker)(unsigned int stage));
 extern int guidexos_nativeaot_pal_install_hook_table(const void* table);
 extern int guidexos_nativeaot_gc_install_startup_platform_hooks(const void* table);
+extern int guidexos_nativeaot_prepare_managed_entry(void);
 // RhInitialize is a C++ bool-returning NativeAOT ABI.  Keep the C wrapper's
 // declaration one byte wide so a failed startup cannot be widened from stale
 // upper return-register bits into an apparent success.
@@ -100,6 +103,22 @@ GuideXosNativeAotApplicationEntry(void* rawContext)
         return -103;
     }
     if (context->startupMarker != NULL) context->startupMarker(7u);
+#if defined(HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE)
+    if (context->startupMarker != NULL)
+        context->startupMarker(C188R11_STARTUP_BOOTSTRAP_BEGIN);
+#else
+    if (context->startupMarker != NULL) context->startupMarker(8u);
+#endif
+    if (guidexos_nativeaot_prepare_managed_entry() != 0) {
+        g_startupState = kStartupFailed;
+        return -105;
+    }
+#if defined(HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE)
+    if (context->startupMarker != NULL)
+        context->startupMarker(C188R11_STARTUP_BOOTSTRAP_READY);
+#else
+    if (context->startupMarker != NULL) context->startupMarker(9u);
+#endif
     g_startupState = kStartupReady;
 #if defined(HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE)
     if (context->startupMarker != NULL)

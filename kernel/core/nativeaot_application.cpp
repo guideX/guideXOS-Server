@@ -4287,6 +4287,10 @@ void startupMarker(uint32_t stage) {
         if (g_c188r11ReadyReentryCount != UINT32_MAX)
             ++g_c188r11ReadyReentryCount;
         c188r11Stage = "ready-reentry";
+    } else if (stage == 0xC188B004u) {
+        c188r11Stage = "bootstrap-handoff-begin";
+    } else if (stage == 0xC188B005u) {
+        c188r11Stage = "bootstrap-handoff-ready";
     }
     bool traceC188r11HostEvent = c188r11Stage != nullptr;
     if (traceC188r11HostEvent && stage == 0xC188B003u &&

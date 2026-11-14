@@ -43,6 +43,7 @@ $ownershipHelpers = Join-Path $PSScriptRoot 'c188r11qac-ownership-predicates.ps1
 . (Join-Path $PSScriptRoot 'c188r12r2r1-settings-dispatch-predicates.ps1')
 . (Join-Path $PSScriptRoot 'c188r12r3-lifetime-predicates.ps1')
 . (Join-Path $PSScriptRoot 'c188r12r4-factory-predicates.ps1')
+. (Join-Path $PSScriptRoot 'c188r22-bootstrap-handoff-predicates.ps1')
 
 $candidateEsp = Join-Path $candidate 'esp'
 $stagingManifestPath = Join-Path $candidate 'ramdisk-staging.json'
@@ -283,8 +284,7 @@ try {
     } while ((Get-Date) -lt $readyDeadline)
 
     if (-not $ready) {
-        $readinessTimeout = -not $qacRunner.HasExited
-        $failureText = if ($qacRunner.HasExited) { 'guest-runner-exited-before-Notes-readiness' } else { 'Notes-readiness-timeout' }
+        $failureText = 'Notes readiness was not observed before the bounded guest runner completed or timed out.'
     } else {
         $active = Get-Content -LiteralPath $activePath -Raw | ConvertFrom-Json
         $serialText = Read-C188R12R1SharedText $serialPath
@@ -479,6 +479,18 @@ try {
 }
 
 $serialText = Read-C188R12R1SharedText $serialPath
+$qmpControlText = Read-C188R12R1SharedText $qmpControlPath
+$nestedQmpLogPath = Join-Path $bootRoot 'qmp.log'
+$nestedQmpText = Read-C188R12R1SharedText $nestedQmpLogPath
+$terminalQmpText = $qmpControlText + "`n" + $nestedQmpText
+$runnerTerminalEvidence = Get-C188R22RunnerTerminalEvidence `
+    $runnerStdout $runnerStderr $qacRunnerExitCode $terminalQmpText
+$readinessTimeout = [bool]$runnerTerminalEvidence.readinessTimeout
+if (-not $ready -and $runnerTerminalEvidence.terminalCause -eq 'qac-qemu-exited-before-guest-readiness') {
+    $failureText = 'QAC/QEMU exited before guest readiness; see the nested runner output for its exit code.'
+} elseif (-not $ready -and $runnerTerminalEvidence.readinessTimeout) {
+    $failureText = 'The nested guest runner timed out waiting for the kernel input loop, then requested bounded QMP cleanup.'
+}
 $settingsEvidence = Get-C188R12R1SettingsHandoffEvidence $serialText
 $settingsDispatchEvidence = Get-C188R12R2R1SettingsDispatchEvidence $serialText $false
 $qmpControlText = Read-C188R12R1SharedText $qmpControlPath
@@ -563,6 +575,7 @@ $finalEvidence = [ordered]@{
     sourceMediaHashes=$sourceMediaHashes;copiedMediaHashes=$copiedMediaHashes
     originalRamdiskSha256=$stagingManifest.ramdiskSha256.ToUpperInvariant()
     runnerExitCode=$qacRunnerExitCode;runnerStdoutPath=$qacStdoutPath;runnerStderrPath=$qacStderrPath
+    runnerTerminalEvidence=$runnerTerminalEvidence
     bootReady=$ready;readinessTimeout=$readinessTimeout;failure=$failureText
     clickAttempted=$clickAttempted;clickExitCode=$clickExitCode;clickTarget=$clickTarget
     clickEvidence=$clickEvidence;runnerInputEvidence=$runnerInputEvidence
@@ -573,7 +586,7 @@ $finalEvidence = [ordered]@{
     qacOwnershipBeforeCheckpoint=$preCheckpointOwnership
     qacOwnershipBeforeSettingsCheckpoint=$preSettingsCheckpointOwnership
     qacOwnershipBeforeShutdown=$preShutdownOwnership
-    qmpQuitRequested=$qmpQuitRequested;qacReleaseVerified=$qacReleaseVerified
+    qmpQuitRequested=$qmpQuitRequested;nestedQmpLogPath=$nestedQmpLogPath;qacReleaseVerified=$qacReleaseVerified
     serialCaptureState=$serialCaptureState
     serialHashMatchesAcceptanceManifest=$serialHashMatchesManifest
     serialCaptureComplete=$serialCaptureComplete

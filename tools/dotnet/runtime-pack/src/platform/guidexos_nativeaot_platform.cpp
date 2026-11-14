@@ -33563,6 +33563,29 @@ void initializeRuntimeState(unsigned char* block
 
 } // namespace
 
+// The direct guideXOS application entry must reproduce the NativeAOT startup
+// order before entering ManagedMain: install the current TLS block, register
+// the real OS module/code manager, then run the generated InitializeModules
+// entry. RhpReversePInvoke uses this same initializeRuntimeState path, but
+// deferring it until ManagedMain's generated prologue nests module startup
+// inside the application's first reverse transition.
+extern "C" __declspec(dllexport) int __cdecl
+guidexos_nativeaot_prepare_managed_entry(void) {
+#if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
+    unsigned char* block = currentTlsBlock();
+    if (block == nullptr || _tls_index == kFlsOutOfIndexes) {
+        return 1;
+    }
+    if (!g_guideXosNativeAotModulesInitialized) {
+        initializeRuntimeState(block);
+    }
+    return g_guideXosNativeAotModulesInitialized &&
+        g_guideXosNativeAotCodeManagerRegistered ? 0 : 2;
+#else
+    return 0;
+#endif
+}
+
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
 #if !defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION) || \
     !defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS) || \

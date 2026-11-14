@@ -147,7 +147,8 @@ Assert-True ($productionWrapper -match 'extern\s+unsigned\s+char\s+RhInitialize\
 Assert-True ($productionWrapper -match 'if\s*\(!RhInitialize\(0\)\)\s*\{') 'production startup blocks on native false and does not share experimental adapter status'
 $guestRunner = Get-Content -LiteralPath (Join-Path $root 'scripts\dotnet\run-c188r12r4r5-gc-ownership-qac-guest.ps1') -Raw
 Assert-True ($guestRunner -match '\$isInitReturnContract\s*=\s*\[string\]\$candidateManifest\.mode\s+-ceq\s+''InitReturnContract''') 'one-guest runner recognizes the R3 candidate profile'
-Assert-True ($guestRunner -match 'out\\dotnet\\c188r12r4r5r3-init-return-contract') 'R3 uses its own phase-wide one-boot guard root'
+Assert-True ($guestRunner -match '\(Join-Path\s+\$artifactRoot\s+''c188r12r4r5r3-init-return-contract''\)' -and
+    $guestRunner -match 'Join-Path \$repo ''out\\dotnet''') 'R3 uses its own phase-wide one-boot guard root below the default artifact root'
 Assert-True ($guestRunner.Contains('C188R12R4R5R3_INIT\] init_result nativeBool=')) 'one-guest capture requires the separate raw Boolean marker'
 Assert-True ($guestRunner -match '\$serialAnalysis\.explicitReturnMappingConsistent') 'one-guest result requires raw Boolean and adapter-status consistency'
 Assert-True ($guestRunner -match '\[System\.IO\.FileMode\]::CreateNew') 'later guest runner creates its one-boot guard atomically'
