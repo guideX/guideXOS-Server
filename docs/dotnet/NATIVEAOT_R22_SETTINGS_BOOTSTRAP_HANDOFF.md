@@ -120,11 +120,11 @@ E:\CodexArtifacts\guideXOSServerV1.1_DOTNET_SUPPORT\c188r22-settings-bootstrap-h
 - Integrity inventory SHA-256: 32A04E9D5DAE6403019AF973C7EC197A302E443DBCF7681977FBE88F24EC830
 - Managed Settings ELF SHA-256: B49B5D36761B617EC848B5EDDB312E7CA21892D7386C7981FD41D9F6E5589981
 - Kernel ELF SHA-256: 43D6FB68D3EA1311F9CDC178CC0090FA899AEAE830A0C65784D112EEA7044E47
-- Ten source inputs rehashed successfully after the build.
+- The manifest binds ten source input hashes. Final revalidation matched nine exactly; the R22 hosted test script differs only by removal of a blank line at EOF after the candidate build. The script's 29-case test ran before that whitespace-only cleanup, and no executable candidate input changed.
 - The runtime manifest and link map contain the shared preparation symbol, generated InitializeModules path, ManagedMain, real Settings constructor, and R20 unwind implementation.
 - No unverified root object input was consumed.
 
-The candidate was built from the expected starting HEAD plus the listed R22 working-tree inputs. A later independent verification rehashed all 660 inventory files with zero mismatches and rehashed all ten source inputs with zero mismatches.
+The candidate was built from the expected starting HEAD plus the listed R22 working-tree inputs. A later independent verification rehashed all 660 inventory files with zero mismatches. The one source-hash difference is limited to the post-build blank-line cleanup in the hosted test script; the kernel, runtime pack, managed ELF, and other nine source inputs match the candidate manifest.
 
 ## Native qualification
 
