@@ -1,6 +1,7 @@
 #if HOSTLOGPROOF_C188R12R4_FACTORY
 using System;
 using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
 using HostLogProof.Applications;
 
 namespace HostLogProof;
@@ -41,7 +42,7 @@ internal static class C188R12R4FactoryDiagnostics
     }
 #endif
 
-#if !HOSTLOGPROOF_C188R12R4_FACTORY_TESTS
+#if !HOSTLOGPROOF_C188R12R4_FACTORY_TESTS && !HOSTLOGPROOF_C188R21_SETTINGS_FACTORY
     [DllImport("__Internal", EntryPoint = "guideXosC188R12R4BeginFactory")]
     private static extern int NativeBeginFactory(uint invocationId,
         uint selector);
@@ -51,6 +52,13 @@ internal static class C188R12R4FactoryDiagnostics
 
     [DllImport("__Internal", EntryPoint = "guideXosC188R12R4EndFactory")]
     private static extern int NativeEndFactory(uint success);
+#endif
+
+#if HOSTLOGPROOF_C188R21_SETTINGS_FACTORY
+    [DllImport("__Internal", EntryPoint = "PalGetMaximumStackBounds",
+        CallingConvention = CallingConvention.StdCall)]
+    private static extern byte NativeGetMaximumStackBounds(
+        out nint stackLow, out nint stackHigh);
 #endif
 
     private static GuideXosHost s_host;
@@ -68,12 +76,27 @@ internal static class C188R12R4FactoryDiagnostics
         s_operation = 0u;
         s_active = true;
 #if !HOSTLOGPROOF_C188R12R4_FACTORY_TESTS
+#if !HOSTLOGPROOF_C188R21_SETTINGS_FACTORY
         NativeBeginFactory(invocationId, selector);
+#endif
+#endif
+#if HOSTLOGPROOF_C188R21_SETTINGS_FACTORY
+        EmitR21("factory-entry"u8, invocationId, selector, "reached"u8, 0);
 #endif
     }
 
-    internal static ManagedSettingsCenter CreateSettingsCenter()
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    internal static unsafe ManagedSettingsCenter CreateSettingsCenter()
     {
+#if HOSTLOGPROOF_C188R21_SETTINGS_FACTORY
+        Span<byte> stackMarker = stackalloc byte[1];
+        fixed (byte* currentStackPointer = stackMarker)
+        {
+            LogR21StackBudget((nint)currentStackPointer);
+        }
+        EmitR21("factory-body"u8, s_invocationId, s_selector,
+            "initializing"u8, 0);
+#endif
         Emit("type-init-enter"u8, 1u, "begin"u8, 0);
         ManagedSettingsCenter.EnsureFactoryTypeInitializedC188R12R4();
         Emit("type-init-return"u8, 2u, "complete"u8, 0);
@@ -81,6 +104,10 @@ internal static class C188R12R4FactoryDiagnostics
         Emit("object-allocation-request"u8, 2u, "new-expression"u8, 0);
         ManagedSettingsCenter settings = new();
         Emit("object-construction-result"u8, 2u, "complete"u8, 0);
+#if HOSTLOGPROOF_C188R21_SETTINGS_FACTORY
+        EmitR21("factory-result"u8, s_invocationId, s_selector,
+            "constructed"u8, 0);
+#endif
         return settings;
     }
 
@@ -97,7 +124,13 @@ internal static class C188R12R4FactoryDiagnostics
     internal static void EndFactory(bool success)
     {
 #if !HOSTLOGPROOF_C188R12R4_FACTORY_TESTS
+#if !HOSTLOGPROOF_C188R21_SETTINGS_FACTORY
         NativeEndFactory(success ? 1u : 0u);
+#endif
+#endif
+#if HOSTLOGPROOF_C188R21_SETTINGS_FACTORY
+        EmitR21("factory-exit"u8, s_invocationId, s_selector,
+            success ? "created"u8 : "failed"u8, success ? 0 : 1);
 #endif
         s_active = false;
         s_host = null;
@@ -109,7 +142,9 @@ internal static class C188R12R4FactoryDiagnostics
         if (!s_active) return;
         s_operation = operation;
 #if !HOSTLOGPROOF_C188R12R4_FACTORY_TESTS
+#if !HOSTLOGPROOF_C188R21_SETTINGS_FACTORY
         NativeSetOperation(operation);
+#endif
 #endif
         if (s_host == null && !CaptureEnabled) return;
 
@@ -140,6 +175,58 @@ internal static class C188R12R4FactoryDiagnostics
 #endif
         s_host?.TryLog(line[..position]);
     }
+
+#if HOSTLOGPROOF_C188R21_SETTINGS_FACTORY
+    private static void LogR21StackBudget(nint currentStackPointer)
+    {
+        if (s_host == null) return;
+        byte valid = NativeGetMaximumStackBounds(out nint stackLow,
+            out nint stackHigh);
+        if (valid == 0 || currentStackPointer < stackLow ||
+            currentStackPointer > stackHigh || stackHigh <= stackLow)
+        {
+            EmitR21("stack-budget"u8, s_invocationId, s_selector,
+                "invalid-bounds"u8, 1);
+            return;
+        }
+        nuint remaining = (nuint)(currentStackPointer - stackLow);
+        nuint total = (nuint)(stackHigh - stackLow);
+        Span<byte> line = stackalloc byte[112];
+        int position = 0;
+        if (GuideXosText.Append(line, ref position,
+                "C188R21-STACK stage=settings-factory-entry remaining="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position, (uint)remaining) &&
+            GuideXosText.Append(line, ref position, " total="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position, (uint)total) &&
+            GuideXosText.Append(line, ref position, " valid=1"u8))
+        {
+            s_host.TryLog(line[..position]);
+        }
+    }
+
+    private static void EmitR21(ReadOnlySpan<byte> stage, uint invocationId,
+        uint selector, ReadOnlySpan<byte> result, int resultCode)
+    {
+        if (s_host == null) return;
+        Span<byte> line = stackalloc byte[144];
+        int position = 0;
+        if (GuideXosText.Append(line, ref position,
+                "C188R21-FACTORY invocation="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position, invocationId) &&
+            GuideXosText.Append(line, ref position, " selector="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position, selector) &&
+            GuideXosText.Append(line, ref position, " stage="u8) &&
+            GuideXosText.Append(line, ref position, stage) &&
+            GuideXosText.Append(line, ref position, " result="u8) &&
+            GuideXosText.Append(line, ref position, result) &&
+            GuideXosText.Append(line, ref position, " code="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                unchecked((uint)resultCode)))
+        {
+            s_host.TryLog(line[..position]);
+        }
+    }
+#endif
 
     private static bool CaptureEnabled
     {

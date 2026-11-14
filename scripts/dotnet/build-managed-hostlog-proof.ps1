@@ -28,6 +28,7 @@ param(
     [switch]$C188R12R3LifetimeStartAttribution,
     [switch]$C188R12R4FactoryAttribution,
     [switch]$C188R12R4R5GcOwnershipProof,
+    [switch]$C188R21ManagedSettingsFactory,
     [switch]$C188R12R4R5R1InitDiagnostics,
     [switch]$C188R12R4R5R3InitReturnContract,
     [switch]$C188R12R4R5R4ThreadStoreReadiness,
@@ -260,6 +261,7 @@ if ($UseGuideXosRuntimePack) {
     if ($PersistentCompositeLifecycle) { $runtimePackBuildArguments += "-PersistentCompositeLifecycle" }
     if ($C188R12R4FactoryAttribution) { $runtimePackBuildArguments += "-C188R12R4FactoryAttribution" }
     if ($C188R12R4R5GcOwnershipProof) { $runtimePackBuildArguments += "-C188R12R4R5GcOwnershipProof" }
+    if ($C188R21ManagedSettingsFactory) { $runtimePackBuildArguments += "-C188R21ManagedSettingsFactory" }
     if ($C188R12R4R5R1InitDiagnostics) { $runtimePackBuildArguments += "-C188R12R4R5R1InitDiagnostics" }
     if ($C188R12R4R5R3InitReturnContract) { $runtimePackBuildArguments += "-C188R12R4R5R3InitReturnContract" }
     if ($C188R12R4R5R4ThreadStoreReadiness) { $runtimePackBuildArguments += "-C188R12R4R5R4ThreadStoreReadiness" }
@@ -287,6 +289,15 @@ if ($UseGuideXosRuntimePack) {
          [int64]$runtimePackManifestObject.managedHeapBytes -ne 0 -or
          [string]$runtimePackManifestObject.allocationStrategy -ne 'experimental-nativeaot-workstation-gc-object-and-array-allocation-no-c188-arena')) {
         throw 'C188R12R4R5 runtime-pack manifest does not prove an isolated real-GC allocation profile without the C188 arena.'
+    }
+    if ($C188R21ManagedSettingsFactory -and
+        (-not [bool]$runtimePackManifestObject.c188r21ManagedSettingsFactory -or
+         -not [bool]$runtimePackManifestObject.c188r12r4r5GcOwnershipProof -or
+         -not [bool]$runtimePackManifestObject.persistentCompositeLifecycle -or
+         [bool]$runtimePackManifestObject.imageBackedArenaPresent -or
+         [int64]$runtimePackManifestObject.managedHeapBytes -ne 0 -or
+         [string]$runtimePackManifestObject.allocationStrategy -ne 'experimental-nativeaot-workstation-gc-object-and-array-allocation-no-c188-arena')) {
+        throw 'R21 Settings candidate must use the R20 Workstation GC allocation path with persistent runtime lifetime and no image-backed application arena.'
     }
     if ($C188R12R4R5R1InitDiagnostics -and
         (-not [bool]$runtimePackManifestObject.c188r12r4r5r1InitDiagnostics -or
@@ -619,11 +630,24 @@ try {
     if ($C188R12R4R5GcOwnershipProof -and
         (-not $UseGuideXosRuntimePack -or -not $ProductionApplication -or
          $AllocationMode -ne 'Allocating' -or
-         $managedProjectMode -ne 'GcOwnershipProof' -or
-         $PersistentCompositeLifecycle -or $C188R12R4FactoryAttribution -or
-         $C188R12R3LifetimeStartAttribution -or $C188ExternalAppIdentity -or
-         $C187GuestCandidate -or $ThreadStaticLifecycleDiagnostics)) {
-        throw 'C188R12R4R5 requires an isolated ProductionApplication with the real GuideXOS runtime pack, allocating GC path, and GcOwnershipProof project mode; persistent lifecycle, C188 factory/lifetime attribution, app identity, guest campaign, and TLS diagnostics are excluded.'
+         ($managedProjectMode -ne 'GcOwnershipProof' -and -not $C188R21ManagedSettingsFactory) -or
+         ($PersistentCompositeLifecycle -and -not $C188R21ManagedSettingsFactory) -or
+         $C188R12R4FactoryAttribution -or
+         ($C188R12R3LifetimeStartAttribution -and -not $C188R21ManagedSettingsFactory) -or
+         ($C188ExternalAppIdentity -and -not $C188R21ManagedSettingsFactory) -or
+         $C187GuestCandidate -or
+         ($ThreadStaticLifecycleDiagnostics -and -not $C188R21ManagedSettingsFactory))) {
+        throw 'C188R12R4R5 requires its isolated GcOwnershipProof mode; only the separately guarded R21 Settings profile may pair the same real Workstation GC allocator with the C160 managed application and persistent runtime lifecycle.'
+    }
+    if ($C188R21ManagedSettingsFactory -and
+        (-not $C188R12R4R5GcOwnershipProof -or -not $UseGuideXosRuntimePack -or
+         -not $ProductionApplication -or $AllocationMode -ne 'Allocating' -or
+         $managedProjectMode -ne 'C160Composite' -or
+         -not $PersistentCompositeLifecycle -or -not $C188ExternalAppIdentity -or
+         -not $C188R11ManagedStateProvenance -or
+         -not $C188R12R3LifetimeStartAttribution -or
+         $C188R12R4FactoryAttribution -or $ThreadStaticLifecycleDiagnostics)) {
+        throw 'R21 requires the existing C160 C188 App Model, R11 managed-state provenance, R12R3 lifetime tracing, persistent runtime initialization, and R20 real-GC allocation; bounded-arena allocator attribution is excluded.'
     }
     if ($C188R12R4R5R1InitDiagnostics -and
         (-not $C188R12R4R5GcOwnershipProof -or -not $UseGuideXosRuntimePack -or
@@ -809,6 +833,9 @@ try {
     }
     if ($C188R12R4R5GcOwnershipProof) {
         $publishProperties += '-p:HostLogProofC188R12R4R5GcOwnershipProof=true'
+    }
+    if ($C188R21ManagedSettingsFactory) {
+        $publishProperties += '-p:HostLogProofC188R21ManagedSettingsFactory=true'
     }
     if ($C188R12R4R5R4ThreadStoreReadiness) {
         $publishProperties += '-p:HostLogProofC188R12R4R5R4ThreadStoreReadiness=true'

@@ -79,14 +79,17 @@
   <PropertyGroup Condition="'$(HostLogProofC188R12R3LifetimeTests)' == 'true'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188R12R3_LIFETIME_TESTS</DefineConstants>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(HostLogProofC188R12R4FactoryAttribution)' == 'true'">
+  <PropertyGroup Condition="'$(HostLogProofC188R12R4FactoryAttribution)' == 'true' or '$(HostLogProofC188R21ManagedSettingsFactory)' == 'true'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188R12R4_FACTORY</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofC188R21ManagedSettingsFactory)' == 'true'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188R21_SETTINGS_FACTORY</DefineConstants>
   </PropertyGroup>
   <PropertyGroup Condition="'$(HostLogProofC188R12R4FactoryTests)' == 'true'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188R12R4_FACTORY_TESTS</DefineConstants>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(HostLogProofC188R12R4R5GcOwnershipProof)' == 'true'">
+  <PropertyGroup Condition="'$(HostLogProofC188R12R4R5GcOwnershipProof)' == 'true' and '$(HostLogProofC188R21ManagedSettingsFactory)' != 'true'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188R12R4R5_GC_OWNERSHIP_PROOF</DefineConstants>
   </PropertyGroup>
 
@@ -125,7 +128,7 @@
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188R12R4R5_GC_OWNERSHIP_TESTS</DefineConstants>
   </PropertyGroup>
 
-  <ItemGroup Condition="'$(HostLogProofC188R12R4R5GcOwnershipProof)' == 'true' and '$(PublishAot)' == 'true'">
+  <ItemGroup Condition="('$(HostLogProofC188R12R4R5GcOwnershipProof)' == 'true' or '$(HostLogProofC188R21ManagedSettingsFactory)' == 'true') and '$(PublishAot)' == 'true'">
     <DirectPInvoke Include="__Internal" />
   </ItemGroup>
 

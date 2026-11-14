@@ -1,5 +1,6 @@
 param(
     [Parameter(Mandatory=$true)][string]$BuildRoot,
+    [Parameter()][string]$ArtifactRoot = '',
     [Parameter()][switch]$ManagedStateReentry,
     [Parameter()][switch]$ManagedStateProvenance,
     [Parameter()][switch]$FactoryAllocationAttribution
@@ -25,13 +26,16 @@ $artifactRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r3-lifetime-start-attribution')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4-factory-attribution')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r1-diagnostic-link-repair')))
+if (-not [string]::IsNullOrWhiteSpace($ArtifactRoot)) {
+    $artifactRoots += [System.IO.Path]::GetFullPath($ArtifactRoot)
+}
 $buildRootFull = [System.IO.Path]::GetFullPath($BuildRoot)
 $artifactRoot = @($artifactRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $buildRootFull)
     $relative -ne '.' -and -not $relative.StartsWith('..' + [System.IO.Path]::DirectorySeparatorChar) -and
         -not [System.IO.Path]::IsPathRooted($relative)
 } | Select-Object -First 1)
-if ($artifactRoot.Count -eq 0) {
+if ([string]::IsNullOrWhiteSpace([string]$artifactRoot)) {
     throw "BuildRoot must be a unique directory below one of: $($artifactRoots -join ', ')."
 }
 $artifactRoot = $artifactRoot[0]

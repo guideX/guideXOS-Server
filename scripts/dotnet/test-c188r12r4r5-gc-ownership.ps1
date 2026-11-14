@@ -74,7 +74,7 @@ if ($arenaDefinition -lt 0 -or $realGcArenaGuard -lt 0 -or $realGcArenaElse -lt 
 }
 Require-Text $runtimeBuilder 'C188R12R4R5GcOwnershipProof -and[\s\S]{0,300}PersistentCompositeLifecycle' 'proof profile excludes persistent arena lifecycle'
 Require-Text $runtimeBuilder 'imageBackedArenaPresent = -not \[bool\]\$C188R12R4R5GcOwnershipProof' 'runtime manifest arena isolation bit'
-Require-Text $managedBuilder 'C188R12R4R5 requires an isolated ProductionApplication' 'managed candidate isolation constraints'
+Require-Text $managedBuilder 'C188R12R4R5 requires its isolated GcOwnershipProof mode; only the separately guarded R21 Settings profile may pair the same real Workstation GC allocator with the C160 managed application and persistent runtime lifecycle' 'managed candidate isolation constraints with explicit R21 admission'
 Require-Text $csproj 'DirectPInvoke Include="__Internal"' 'direct static diagnostics imports'
 Require-Text $guestRunner "\`$ThreadStoreAttempt -eq 'R2'[\s\S]{0,120}guest-launch-attempt-C188R12R4R5R4R2\.json" 'R4R2 keeps its distinct one-guest guard'
 Require-Text $guestRunner "\`$ThreadStoreAttempt -eq 'R3'[\s\S]{0,120}guest-launch-attempt-C188R12R4R5R4R3\.json" 'R4R3 uses a fresh distinct one-guest guard'

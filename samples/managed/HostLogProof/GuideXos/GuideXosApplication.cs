@@ -1185,6 +1185,14 @@ public static unsafe class GuideXosApplicationRegistry
                 s_c188r10TeardownCalls++;
 #endif
             applicationGeneration = generation;
+#if HOSTLOGPROOF_C188R21_SETTINGS_FACTORY
+            if (selector == 5u &&
+                !VerifyC188R21SettingsManagedRoot(host, selector, generation,
+                    ref application))
+            {
+                return GxAbi.ErrorInvalidApplicationId;
+            }
+#endif
 #if HOSTLOGPROOF_C188R9_REGISTRY_INPUT_REENTRY
             if (selector == 4u)
             {
@@ -1704,6 +1712,73 @@ public static unsafe class GuideXosApplicationRegistry
                 unchecked((uint)(-(long)value)));
         }
         return GuideXosText.AppendUnsigned(buffer, ref position, (uint)value);
+    }
+#endif
+
+#if HOSTLOGPROOF_C188R21_SETTINGS_FACTORY
+    [System.Runtime.CompilerServices.MethodImpl(
+        System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static bool VerifyC188R21SettingsManagedRoot(GuideXosHost host,
+        uint selector, uint generation, ref GuideXosApplication application)
+    {
+        if (application == null || selector != 5u || generation == 0u)
+        {
+            host.TryLog("C188R21-ROOT stage=precondition result=FAIL"u8);
+            return false;
+        }
+
+        var temporaryWeakReference =
+            new WeakReference<GuideXosApplication>(application);
+        application = null;
+        int collectionsBefore = GC.CollectionCount(GC.MaxGeneration);
+        try
+        {
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced,
+                blocking: true, compacting: true);
+        }
+        catch (Exception)
+        {
+            host.TryLog("C188R21-ROOT stage=collect result=FAIL reason=exception"u8);
+            return false;
+        }
+
+        bool weakReferenceAlive = temporaryWeakReference.TryGetTarget(
+            out GuideXosApplication weakTarget);
+        int collectionsAfter = GC.CollectionCount(GC.MaxGeneration);
+        bool ownerFound = s_lifetime.TryGet(selector, generation,
+            out GuideXosApplication resident);
+        bool collectionObserved = collectionsAfter > collectionsBefore;
+        bool sameObject = collectionObserved && weakReferenceAlive && ownerFound &&
+            ReferenceEquals(weakTarget, resident);
+        if (sameObject)
+            application = resident;
+
+        Span<byte> line = stackalloc byte[144];
+        int position = 0;
+        if (GuideXosText.Append(line, ref position,
+                "C188R21-ROOT stage=post-gc selector="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position, selector) &&
+            GuideXosText.Append(line, ref position, " generation="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position, generation) &&
+            GuideXosText.Append(line, ref position, " gc="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                (uint)collectionsAfter) &&
+            GuideXosText.Append(line, ref position, " weak="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                weakReferenceAlive ? 1u : 0u) &&
+            GuideXosText.Append(line, ref position, " owner="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                ownerFound ? 1u : 0u) &&
+            GuideXosText.Append(line, ref position, " same="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                sameObject ? 1u : 0u) &&
+            GuideXosText.Append(line, ref position, " result="u8) &&
+            GuideXosText.Append(line, ref position,
+                sameObject ? "PASS"u8 : "FAIL"u8))
+        {
+            host.TryLog(line[..position]);
+        }
+        return sameObject;
     }
 #endif
 }

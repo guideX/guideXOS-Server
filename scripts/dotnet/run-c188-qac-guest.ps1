@@ -27,7 +27,8 @@ $phaseRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r10-nativeaot-state-reentry')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r11-managed-state-provenance')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r3-lifetime-start-attribution')),
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4r1-diagnostic-link-repair')))
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4r1-diagnostic-link-repair')),
+    [System.IO.Path]::GetFullPath('E:\CodexArtifacts\guideXOSServerV1.1_DOTNET_SUPPORT'))
 $bootRoot = [System.IO.Path]::GetFullPath($BootEvidencePath)
 $phaseRoot = @($phaseRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $bootRoot)
@@ -80,13 +81,17 @@ $isC188R10Boot = $Scenario -eq 'registry-input-reentry' -and
 $c188r11Root = [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r11-managed-state-provenance'))
 $c188r12r3Root = [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r3-lifetime-start-attribution'))
 $c188r12r4r1Root = [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4r1-diagnostic-link-repair'))
+$c188r21Root = [System.IO.Path]::GetFullPath('E:\CodexArtifacts\guideXOSServerV1.1_DOTNET_SUPPORT')
+$isC188R21Boot = $Scenario -eq 'settings-handoff-diagnostic' -and
+    $bootRoot.StartsWith($c188r21Root.TrimEnd('\','/') + [System.IO.Path]::DirectorySeparatorChar,
+        [System.StringComparison]::OrdinalIgnoreCase)
 $isC188R12R4R1Boot = $Scenario -eq 'settings-handoff-diagnostic' -and
     $bootRoot.StartsWith($c188r12r4r1Root.TrimEnd('\','/') + [System.IO.Path]::DirectorySeparatorChar,
         [System.StringComparison]::OrdinalIgnoreCase)
-$isC188R12R3Boot = $isC188R12R4R1Boot -or ($Scenario -eq 'settings-handoff-diagnostic' -and
+$isC188R12R3Boot = $isC188R21Boot -or $isC188R12R4R1Boot -or ($Scenario -eq 'settings-handoff-diagnostic' -and
     $bootRoot.StartsWith($c188r12r3Root.TrimEnd('\','/') + [System.IO.Path]::DirectorySeparatorChar,
         [System.StringComparison]::OrdinalIgnoreCase))
-$isC188R11Boot = $isC188R12R3Boot -or (
+$isC188R11Boot = $isC188R21Boot -or $isC188R12R3Boot -or (
     ($Scenario -eq 'managed-state-provenance' -or $Scenario -eq 'settings-handoff-diagnostic') -and
     $bootRoot.StartsWith($c188r11Root.TrimEnd('\','/') + [System.IO.Path]::DirectorySeparatorChar,
         [System.StringComparison]::OrdinalIgnoreCase))

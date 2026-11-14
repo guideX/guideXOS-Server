@@ -42,7 +42,7 @@ function Get-C188R12R1SettingsHandoffEvidence([string]$SerialText) {
     $registryEntry = [regex]::Match($SerialText,
         '(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state seq=\d+ st=settings-dispatch-entry selector=5 .* n=5 result=-1 gc=0 .*\r?$')
     $registryReturn = [regex]::Match($SerialText,
-        '(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state seq=\d+ st=settings-launch-return selector=5 .* reset=(?<reset>\d+) m=(?<mask>\d+) g=\d+ td=\d+ n=(?<descriptors>\d+) result=(?<result>-?\d+) gc=(?<gc>\d+) w=\d+:\d+\r?$')
+        '(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state seq=\d+ st=settings-launch-return selector=5(?: .*?)? reset=(?<reset>\d+) m=(?<mask>\d+) g=\d+ td=\d+ n=(?<descriptors>\d+) result=(?<result>-?\d+) gc=(?<gc>\d+) w=\d+:\d+\r?$')
     $notesRegistryMemory = [regex]::Match($SerialText,
         '(?m)^\[C102-MANAGED-OUTPUT\] C188R11-MEM seq=\d+ st=instance-start ra=(?<registry>[0-9A-Fa-f]{16}) owner=(?<owner>[0-9A-Fa-f]{16}) slot=(?<slot>[0-9A-Fa-f]{16}) live=(?<live>[0-9A-Fa-f]{16}) held=(?<held>[0-9A-Fa-f]{16}) .* heldLen=5\r?$')
     $settingsRegistryMemory = [regex]::Match($SerialText,
@@ -59,6 +59,20 @@ function Get-C188R12R1SettingsHandoffEvidence([string]$SerialText) {
                 break
             }
         }
+    }
+    $r21Root = [regex]::Match($SerialText,
+        '(?m)^\[C102-MANAGED-OUTPUT\] C188R21-ROOT stage=post-gc selector=5 generation=(?<generation>\d+) gc=(?<gc>\d+) weak=1 owner=1 same=1 result=PASS\r?$')
+    $r21LifetimeExit = [regex]::Match($SerialText,
+        '(?m)^\[C102-MANAGED-OUTPUT\] C188R12R3_LIFETIME invocation=\d+ stage=exit-success selector=5 identity=com\.guidexos\.apps\.managed\.settingscenter count=\d+ mask=\d+ generation=(?<generation>\d+) code=0 state=resident\r?$')
+    $r21RootValid = $r21Root.Success -and $r21LifetimeExit.Success -and
+        $r21Root.Groups['generation'].Value -eq
+            $r21LifetimeExit.Groups['generation'].Value -and
+        [int]$r21Root.Groups['gc'].Value -gt 0
+    if ($r21Root.Success) {
+        # A real compacting Workstation GC may move registry/pool arrays. The
+        # temporary weak reference and selector/generation lookup prove the
+        # Settings instance remains rooted by the App Model.
+        $registryMemoryStable = $r21RootValid
     }
     $heapInitialize = [regex]::Match($SerialText,
         '(?m)^\[NATIVEAOT-HEAP\] action=initialize count=(?<count>[0-9A-Fa-f]{16}) base=(?<base>[0-9A-Fa-f]{16}) bytes=[0-9A-Fa-f]{16} reason=initial-managed-thread-attachment\r?$')
@@ -86,12 +100,23 @@ function Get-C188R12R1SettingsHandoffEvidence([string]$SerialText) {
     $settingsResidentMask = if ($registryReturn.Success) {
         [int]$registryReturn.Groups['mask'].Value
     } else { -1 }
-    $settingsRegistryReturnStateValid = $registryReturn.Success -and
-        $registryReturn.Groups['reset'].Value -eq '0' -and
-        $settingsResidentMask -eq 1 -and
-        $registryReturn.Groups['descriptors'].Value -eq '5' -and
-        $registryReturn.Groups['result'].Value -eq '0' -and
-        $registryReturn.Groups['gc'].Value -eq '0'
+    $settingsRegistryReturnStateValid = if ($r21Root.Success) {
+        $registryReturn.Success -and
+            $registryReturn.Groups['reset'].Value -eq '0' -and
+            $settingsResidentMask -gt 0 -and
+            $registryReturn.Groups['descriptors'].Value -eq '5' -and
+            $registryReturn.Groups['result'].Value -eq '0' -and
+            [int]$registryReturn.Groups['gc'].Value -gt 0 -and
+            $r21RootValid
+    } else {
+        $registryReturn.Success -and
+            $registryReturn.Groups['reset'].Value -eq '0' -and
+            $settingsResidentMask -eq 1 -and
+            $registryReturn.Groups['descriptors'].Value -eq '5' -and
+            $registryReturn.Groups['result'].Value -eq '0' -and
+            $registryReturn.Groups['gc'].Value -eq '0'
+    }
+    if ($r21Root.Success) { $settingsHeapPreserved = $r21RootValid }
     $settingsRegistryPreserved = $settingsRegistryReturnStateValid -and
         $registryMemoryStable -and $settingsHeapPreserved
     $nativeReturn = [regex]::Match($SerialText,
@@ -219,6 +244,8 @@ function Get-C188R12R1SettingsHandoffEvidence([string]$SerialText) {
         persistentHeapPreserved=[bool]$settingsHeapPreserved
         persistentHeapInitializationCount=$heapInitializations.Count
         persistentHeapInitializationRegression=[bool]$heapInitializationRegression
+        r21ManagedRootVerified=[bool]$r21RootValid
+        r21CollectionCount=if ($r21Root.Success) { [int]$r21Root.Groups['gc'].Value } else { $null }
     }
 }
 

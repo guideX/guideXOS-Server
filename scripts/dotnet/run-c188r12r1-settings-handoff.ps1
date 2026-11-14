@@ -13,7 +13,8 @@ $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $phaseRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r11-managed-state-provenance')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r3-lifetime-start-attribution')),
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r1-diagnostic-link-repair')))
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r1-diagnostic-link-repair')),
+    [System.IO.Path]::GetFullPath('E:\CodexArtifacts\guideXOSServerV1.1_DOTNET_SUPPORT'))
 $candidate = [System.IO.Path]::GetFullPath($CandidateRoot)
 $bootRoot = [System.IO.Path]::GetFullPath($BootEvidencePath)
 $candidateRootMatches = @($phaseRoots | Where-Object {
