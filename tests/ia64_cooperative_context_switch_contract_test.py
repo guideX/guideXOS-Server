@@ -17,6 +17,13 @@ assert spec is not None and spec.loader is not None
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 
+DIAGNOSTIC_PATH = ROOT / "scripts" / "diagnose-ia64-coop-switch.py"
+diagnostic_spec = importlib.util.spec_from_file_location(
+    "ia64_coop_diagnostic", DIAGNOSTIC_PATH)
+assert diagnostic_spec is not None and diagnostic_spec.loader is not None
+diagnostic = importlib.util.module_from_spec(diagnostic_spec)
+diagnostic_spec.loader.exec_module(diagnostic)
+
 
 EVENTS = (
     (1, 0xA, "A_TO_B"),
@@ -251,6 +258,61 @@ class CooperativeContextSwitchCallerTests(unittest.TestCase):
                 body = source.split(start, 1)[1].split(end, 1)[0]
                 self.assertIn("alloc r16 = ar.pfs, 6, 4, 2, 0 ;;", body)
                 self.assertEqual(call_args.findall(body), expected)
+
+
+class CooperativeSetupReturnLinkTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.source = (ROOT / "tests" / "ia64_cooperative_context_switch" /
+                       "probe_sequence.s").read_text(encoding="utf-8")
+
+    def test_setup_saves_and_restores_stacked_return_link_and_pfs(self) -> None:
+        runner.validate_cooperative_probe_setup_source(self.source)
+
+    def test_missing_return_link_save_is_rejected(self) -> None:
+        damaged = self.source.replace("mov r33 = b0 ;;", "mov r33 = r16 ;;", 1)
+        with self.assertRaises(runner.GateError):
+            runner.validate_cooperative_probe_setup_source(damaged)
+
+    def test_incorrect_restore_order_is_rejected(self) -> None:
+        damaged = self.source.replace(
+            "mov ar.pfs = r32 ;;\n    mov b0 = r33 ;;",
+            "mov b0 = r33 ;;\n    mov ar.pfs = r32 ;;", 1)
+        with self.assertRaises(runner.GateError):
+            runner.validate_cooperative_probe_setup_source(damaged)
+
+    def test_invalid_branch_continuation_is_rejected(self) -> None:
+        damaged = self.source.replace(
+            "br.ret.sptk.many b0 ;;\n.endp ia64_coop_probe_setup",
+            "br.ret.sptk.many b1 ;;\n.endp ia64_coop_probe_setup", 1)
+        with self.assertRaises(runner.GateError):
+            runner.validate_cooperative_probe_setup_source(damaged)
+
+
+class CooperativeDiagnosticFrontierTests(unittest.TestCase):
+    def test_objdump_slots_map_to_ski_breakpoint_ips(self) -> None:
+        self.assertEqual(diagnostic.ski_breakpoint_ip(0x10DC86), 0x10DC84)
+        self.assertEqual(diagnostic.ski_breakpoint_ip(0x10E19C), 0x10E198)
+        self.assertEqual(diagnostic.ski_breakpoint_ip(0x10AE30), 0x10AE30)
+        with self.assertRaises(diagnostic.DiagnosticError):
+            diagnostic.ski_breakpoint_ip(0x10DC84)
+
+    def test_setup_return_requires_saved_target_and_reached_continuation(self) -> None:
+        breakpoints = (
+            (0x10AB48, "setup final br.ret"),
+            (0x10AE30, "setup caller continuation"),
+        )
+        samples = [
+            {"ip": 0x10AB48, "iip": 0x10AB40, "instructions": 10},
+            {"ip": 0x10AE30, "iip": 0x10AE30, "instructions": 11},
+        ]
+        correct = [{"instructions": 10, "registers": {"b0": 0x10AE30}}]
+        evidence = diagnostic.analyze_runtime_frontiers(
+            samples, correct, breakpoints, 0x10AE30)
+        self.assertTrue(evidence["setup_return"]["verified"])
+        wrong = [{"instructions": 10, "registers": {"b0": 0x10A300}}]
+        evidence = diagnostic.analyze_runtime_frontiers(
+            samples, wrong, breakpoints, 0x10AE30)
+        self.assertFalse(evidence["setup_return"]["verified"])
 
 
 if __name__ == "__main__":

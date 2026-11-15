@@ -197,6 +197,25 @@ class LocalizedFrontierTests(unittest.TestCase):
             samples, registers, snapshots, breakpoints, stdout_bytes=0))
 
 
+class DebuggerInitializationFailureTests(unittest.TestCase):
+    def test_breakpoint_capacity_error_stops_at_zero_instruction_elf_entry(self) -> None:
+        commands = "\n".join(f"bs 0x{0x108000 + index * 0x10:x}"
+                              for index in range(16))
+        samples = [{"iip": 0x108000, "ip": 0x108000, "instructions": 0,
+                    "sample": 0, "slot": 0}]
+        result = diagnostic.analyze_debugger_initialization(
+            "All breakpoints in use\n", commands, samples, 0x108000)
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result["failure_class"], "SIMULATOR_OBSERVATION_LIMITATION")
+        self.assertEqual(result["breakpoints_requested"], 16)
+        self.assertEqual(result["guest_instructions_executed"], 0)
+        self.assertEqual(result["failure_frontier"],
+                         "ELF entry before first guest instruction")
+        self.assertIsNone(diagnostic.analyze_debugger_initialization(
+            "", commands, samples, 0x108000))
+
+
 class CommandFileContractTests(unittest.TestCase):
     def test_command_file_has_finite_staged_steps_and_exit_guards(self) -> None:
         symbols = {
@@ -207,12 +226,62 @@ class CommandFileContractTests(unittest.TestCase):
             "probe_record": 0x112000,
             "switch_entry": 0x10CF90,
             "context_b_first_entry": 0x10AE90,
+            "frontiers": {
+                "setup_entry": 0x10A2D0,
+                "setup_call": 0x10A2D8,
+                "setup_nested_return": 0x10A2E0,
+                "setup_exit": 0x10AB48,
+                "setup_caller_return": 0x10AE00,
+                "switch_entry": 0x10CF90,
+                "context_a_save": 0x10DC84,
+                "rbs_handoff": 0x10DE14,
+                "context_b_first": 0x10AE90,
+                "context_a_resume_first": 0x10B220,
+                "context_b_resume_second": 0x10C820,
+                "context_a_resume_final": 0x10B900,
+                "context_a_final_exit": 0x10B910,
+                "context_b_unexpected_resume": 0x10CF50,
+                "switch_return": 0x10E198,
+            },
         }
         text = diagnostic.make_command_file(Path("/tmp/coop-debug"), symbols)
         diagnostic.validate_command_file(text)
         self.assertNotRegex(text, r"(?im)^\s*(run|cont(?:inue)?|go)(?:\s|$)")
         self.assertEqual(text.splitlines()[-1], "quit")
         self.assertIn("eval psr rsc bsp bspst rnat unat pfs sp gp b0 r32 r33 r42 r43", text)
+        self.assertEqual(sum(line.startswith("bs ") for line in text.splitlines()), 9)
+
+    def test_command_file_rejects_breakpoint_plan_over_ski_capacity(self) -> None:
+        symbols = {
+            "ivt": 0x100000,
+            "text": [0x108000, 0x10E1D0],
+            "context_a": 0x112600,
+            "context_b": 0x112200,
+            "probe_record": 0x112000,
+            "switch_entry": 0x10CF90,
+            "context_b_first_entry": 0x10AE90,
+            "frontiers": {
+                "setup_entry": 0x10A2D0,
+                "setup_call": 0x10A2D8,
+                "setup_nested_return": 0x10A2E0,
+                "setup_exit": 0x10AB48,
+                "setup_caller_return": 0x10AE00,
+                "switch_entry": 0x10CF90,
+                "context_a_save": 0x10DC84,
+                "rbs_handoff": 0x10DE14,
+                "context_b_first": 0x10AE90,
+                "context_a_resume_first": 0x10B220,
+                "context_b_resume_second": 0x10C820,
+                "context_a_resume_final": 0x10B900,
+                "context_a_final_exit": 0x10B910,
+                "context_b_unexpected_resume": 0x10CF50,
+                "switch_return": 0x10E198,
+            },
+        }
+        text = diagnostic.make_command_file(Path("/tmp/coop-debug"), symbols)
+        overloaded = text.replace("step 64\n", "bs 0x108010\nstep 64\n", 1)
+        with self.assertRaisesRegex(diagnostic.DiagnosticError, "capacity of 9"):
+            diagnostic.validate_command_file(overloaded)
 
     def test_command_file_rejects_unbounded_or_missing_quit(self) -> None:
         symbols = {
@@ -223,6 +292,23 @@ class CommandFileContractTests(unittest.TestCase):
             "probe_record": 0x112000,
             "switch_entry": 0x10CF90,
             "context_b_first_entry": 0x10AE90,
+            "frontiers": {
+                "setup_entry": 0x10A2D0,
+                "setup_call": 0x10A2D8,
+                "setup_nested_return": 0x10A2E0,
+                "setup_exit": 0x10AB48,
+                "setup_caller_return": 0x10AE00,
+                "switch_entry": 0x10CF90,
+                "context_a_save": 0x10DC84,
+                "rbs_handoff": 0x10DE14,
+                "context_b_first": 0x10AE90,
+                "context_a_resume_first": 0x10B220,
+                "context_b_resume_second": 0x10C820,
+                "context_a_resume_final": 0x10B900,
+                "context_a_final_exit": 0x10B910,
+                "context_b_unexpected_resume": 0x10CF50,
+                "switch_return": 0x10E198,
+            },
         }
         text = diagnostic.make_command_file(Path("/tmp/coop-debug"), symbols)
         with self.assertRaises(diagnostic.DiagnosticError):

@@ -208,8 +208,17 @@ ia64_coop_nat_saved_b0:  .skip 8
 .type ia64_coop_probe_setup, @function
 .proc ia64_coop_probe_setup
 ia64_coop_probe_setup:
+    /* This non-leaf routine keeps its incoming PFS and return link in its
+       stacked frame; the nested helper owns b0 while it is executing. */
+    alloc r16 = ar.pfs, 0, 2, 0, 0 ;;
+    mov r32 = r16 ;;
+    mov r33 = b0 ;;
     /* NaT is established before any C++ frame, then saved in B's own record. */
+.global ia64_coop_setup_nested_call
+ia64_coop_setup_nested_call:
     br.call.sptk.many b0 = ia64_coop_set_nat8 ;;
+.global ia64_coop_setup_nested_return
+ia64_coop_setup_nested_return:
 
     movl r14 = ia64_coop_context_a ;;
     movl r15 = ia64_coop_stack_a_bottom ;;
@@ -366,6 +375,10 @@ ia64_coop_probe_setup:
     movl r15 = RBS_CANARY_HIGH ;;
     st8 [r14] = r15 ;;
     mf ;;
+.global ia64_coop_setup_exit
+ia64_coop_setup_exit:
+    mov ar.pfs = r32 ;;
+    mov b0 = r33 ;;
     br.ret.sptk.many b0 ;;
 .endp ia64_coop_probe_setup
 .size ia64_coop_probe_setup, .-ia64_coop_probe_setup
@@ -448,6 +461,8 @@ ia64_coop_probe_run:
     mov r33 = b0 ;;
     mov r34 = ar.unat ;;
     br.call.sptk.many b0 = ia64_coop_probe_setup ;;
+.global ia64_coop_probe_after_setup
+ia64_coop_probe_after_setup:
     /* Load B's independently stored NaTed GR8 for A's test frame. */
     mov r20 = ar.unat ;;
     movl r14 = ia64_coop_context_a ;;
@@ -457,6 +472,8 @@ ia64_coop_probe_run:
     adds r28 = C_GR8, r14 ;;
     ld8.fill r8 = [r28] ;;
     br.call.sptk.many b0 = ia64_coop_a_test ;;
+.global ia64_coop_probe_after_a_test
+ia64_coop_probe_after_a_test:
     mov ar.unat = r34 ;;
     mov ar.pfs = r32 ;;
     mov b0 = r33 ;;
@@ -474,6 +491,8 @@ ia64_coop_b_first_entry:
     ld8 r15 = [r28] ;;
     adds r15 = 1, r15 ;;
     st8 [r28] = r15 ;;
+.global ia64_coop_b_first_entry_call
+ia64_coop_b_first_entry_call:
     br.call.sptk.many b0 = ia64_coop_b_test ;;
 1:  hint @pause ;;
     br.sptk 1b ;;
@@ -537,6 +556,8 @@ ia64_coop_a_test:
     mov out1 = r14 ;;
     br.call.sptk.many b0 = ia64_coop_context_switch ;;
 
+.global ia64_coop_a_resumed_first
+ia64_coop_a_resumed_first:
     RECORD_EVENT EVENT_A_RESUMED_FIRST, CTX_A_ID
     tnat.nz p6, p7 = r33 ;;
     (p7) br.cond.sptk ia64_coop_test_fail ;;
@@ -580,6 +601,8 @@ ia64_coop_a_test:
     mov out1 = r14 ;;
     br.call.sptk.many b0 = ia64_coop_context_switch ;;
 
+.global ia64_coop_a_resumed_final
+ia64_coop_a_resumed_final:
     RECORD_EVENT EVENT_A_RESUMED_FINAL, CTX_A_ID
     tnat.nz p6, p7 = r33 ;;
     (p7) br.cond.sptk ia64_coop_test_fail ;;
@@ -636,6 +659,8 @@ ia64_coop_a_test:
     adds r12 = 4096, r12 ;;
     mov ar.pfs = r35 ;;
     mov b0 = r34 ;;
+.global ia64_coop_a_final_exit
+ia64_coop_a_final_exit:
     br.ret.sptk.many b0 ;;
 .endp ia64_coop_a_test
 .size ia64_coop_a_test, .-ia64_coop_a_test
@@ -702,6 +727,8 @@ ia64_coop_b_test:
     RECORD_EVENT EVENT_B_TO_A_FIRST, CTX_B_ID
     br.call.sptk.many b0 = ia64_coop_context_switch ;;
 
+.global ia64_coop_b_resumed
+ia64_coop_b_resumed:
     RECORD_EVENT EVENT_B_RESUMED, CTX_B_ID
     CHECK_PRESERVED_REGS GR4_B, GR5_B, GR6_B, GR7_B, BR1_B, BR2_B, BR3_B, BR4_B, BR5_B
     CHECK_APP_STATE LC_B, EC_B, CCV_B
@@ -743,6 +770,8 @@ ia64_coop_b_test:
     movl r14 = ia64_coop_context_a ;;
     mov out1 = r14 ;;
     br.call.sptk.many b0 = ia64_coop_context_switch ;;
+.global ia64_coop_b_unexpected_resume
+ia64_coop_b_unexpected_resume:
     br.cond.sptk ia64_coop_test_fail ;;
 .endp ia64_coop_b_test
 .size ia64_coop_b_test, .-ia64_coop_b_test

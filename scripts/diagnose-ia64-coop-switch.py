@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-run, instruction-bounded Ski diagnostics for the IA64-5AR3 probe."""
+"""One-run, instruction-bounded Ski diagnostics for the cooperative probe."""
 
 from __future__ import annotations
 
@@ -17,15 +17,15 @@ from typing import Any
 sys.dont_write_bytecode = True
 
 ROOT = Path(__file__).resolve().parents[1]
-PROBE = Path("/home/guidex/src/ia64-5ar1-coop-probe-20261113-r1/ia64-cooperative-context-probe.elf")
+PROBE = Path("/home/guidex/src/ia64-5ar5-coop-probe-20261114-r1/ia64-cooperative-context-probe.elf")
 MANIFEST = PROBE.with_name("ia64-cooperative-context-probe.manifest.json")
 KERNEL = Path("/home/guidex/src/ia64-4g-stacked-nat-rse-kernel-20261111-r3/bin/kernel.elf")
 SKI_PREFIX = Path("/home/guidex/opt/ski-dfc2902")
 OBJDUMP = Path("/home/guidex/src/ia64-2-toolchain-shim/ia64-linux-objdump")
-CAPTURE = Path("/home/guidex/src/ia64-5ar4-coop-instruction-diagnostic-20261114-r1")
+CAPTURE = Path("/home/guidex/src/ia64-5ar5-coop-instruction-diagnostic-20261114-r1")
 
-EXPECTED_PROBE_SHA256 = "76c03f06a33bf219b2aefee2a7cf17fbc3ac31837e4aed592484a562cbfd8cfa"
-EXPECTED_MANIFEST_SHA256 = "0aa278cf89b497b501119c261418caeb3e3869216ec2e6a8dad2c26627cd7a42"
+EXPECTED_PROBE_SHA256 = "ae0fc8fc49e576f37d8d6bf7d9846d0b293603ca7b9d15467afc81730992c74f"
+EXPECTED_MANIFEST_SHA256 = "1dbebf04c3be50909316024fec69e67b1410d55c33a0cf9f17dac3b1c8475585"
 EXPECTED_KERNEL_SHA256 = "ab13fabb6a92ebe039afa2afd9729f6f6ceb2529b63be2b47b0c87cf264d960c"
 EXPECTED_SKI_SHA256 = "ff6b19cb87dbf2db39cda4478d0e49995c9a5ec9ddd05aac83191f4ba1e40b45"
 
@@ -40,11 +40,12 @@ CPU_SOFT_SECONDS = 20
 CPU_HARD_SECONDS = 22
 ADDRESS_SPACE_BYTES = 2 * 1024 * 1024 * 1024
 
-# These addresses are pinned by the exact IA64-5AR3 probe hash above. The
-# setup helper begins with a nested call whose b0 continuation is 0x10a2e0.
-SETUP_RANGE = (0x10A2D0, 0x10AB50)
-SETUP_CALL_CONTINUATION = 0x10A2E0
 LOCALIZATION_MIN_SAMPLES = 32
+AR4_SETUP_RANGE = (0x10A2D0, 0x10AB50)
+AR4_SETUP_CALL_CONTINUATION = 0x10A2E0
+# Kept for the IA64-5AR4 localized-capture contract tests and offline reports.
+SETUP_RANGE = AR4_SETUP_RANGE
+SETUP_CALL_CONTINUATION = AR4_SETUP_CALL_CONTINUATION
 
 CONTEXT_ID_OFFSET = 568
 EVENT_NAMES = (
@@ -89,6 +90,16 @@ def validate_instruction_budget(value: int) -> int:
             f"{STEP_QUANTA} quanta of {STEP_QUANTUM}"
         )
     return value
+
+
+def ski_breakpoint_ip(address: int) -> int:
+    """Map objdump's slot byte address to Ski's bundle/slot instruction IP."""
+    bundle = address & ~0xF
+    offset = address - bundle
+    slots = {0: 0, 6: 4, 12: 8}
+    if offset not in slots:
+        raise DiagnosticError(f"unsupported IA-64 disassembly slot address: {address:#x}")
+    return bundle + slots[offset]
 
 
 def validate_debugger_ip(raw_ip: int, valid_ranges: tuple[tuple[int, int], ...]) -> dict[str, int]:
@@ -327,12 +338,13 @@ def classify_setup_return_cycle(samples: list[dict[str, int]],
         return None
     if len({sample["iip"] for sample in observed}) < 3:
         return None
-    if any(not SETUP_RANGE[0] <= sample["iip"] < SETUP_RANGE[1] for sample in observed):
+    if any(not AR4_SETUP_RANGE[0] <= sample["iip"] < AR4_SETUP_RANGE[1]
+           for sample in observed):
         return None
     for sample in observed:
         registers = registers_by_count.get(sample["instructions"])
         snapshot = snapshots_by_sample.get(sample["sample"])
-        if registers is None or registers.get("b0") != SETUP_CALL_CONTINUATION:
+        if registers is None or registers.get("b0") != AR4_SETUP_CALL_CONTINUATION:
             return None
         if not snapshot or snapshot.get("snapshot_error"):
             return None
@@ -359,8 +371,8 @@ def classify_setup_return_cycle(samples: list[dict[str, int]],
         "corroborating_samples": len(observed),
         "observed_iip_range": [min(item["iip"] for item in observed),
                                max(item["iip"] for item in observed)],
-        "setup_range": list(SETUP_RANGE),
-        "stable_b0": SETUP_CALL_CONTINUATION,
+        "setup_range": list(AR4_SETUP_RANGE),
+        "stable_b0": AR4_SETUP_CALL_CONTINUATION,
         "context_ids": [0xA, 0xB],
         "switch_events": 0,
         "switch_entry_or_rse_handoff_breakpoints": 0,
@@ -369,6 +381,83 @@ def classify_setup_return_cycle(samples: list[dict[str, int]],
             "which overwrites b0 with its 0x10a2e0 continuation; setup later "
             "executes br.ret b0 at 0x10ab4c without restoring its caller's b0."
         ),
+    }
+
+
+def analyze_runtime_frontiers(samples: list[dict[str, int]],
+                              register_states: list[dict[str, Any]],
+                              breakpoints: tuple[tuple[int, str], ...],
+                              expected_setup_return: int) -> dict[str, Any]:
+    observations = {
+        label: [sample for sample in samples if sample["ip"] == address]
+        for address, label in breakpoints
+    }
+    registers_by_count = {item["instructions"]: item.get("registers", {})
+                          for item in register_states}
+    setup_exit = observations.get("setup final br.ret", [])
+    setup_b0 = None
+    if setup_exit:
+        setup_b0 = registers_by_count.get(setup_exit[0]["instructions"], {}).get("b0")
+    caller_hits = observations.get("setup caller continuation", [])
+    returned_at_caller = bool(setup_exit and any(
+        hit["instructions"] > setup_exit[0]["instructions"] for hit in caller_hits))
+    setup_return_verified = setup_b0 == expected_setup_return and returned_at_caller
+    observed_breakpoints = [
+        {"label": label, "instructions": max(item["instructions"] for item in hits)}
+        for label, hits in observations.items() if hits
+    ]
+    furthest = max(observed_breakpoints, key=lambda item: item["instructions"]
+                   ) if observed_breakpoints else None
+    return {
+        "breakpoint_observations": observations,
+        "setup_return": {
+            "setup_exit_hit": bool(setup_exit),
+            "b0_at_setup_br_ret": setup_b0,
+            "expected_caller_continuation": expected_setup_return,
+            "caller_continuation_hit_after_br_ret": returned_at_caller,
+            "verified": setup_return_verified,
+        },
+        "furthest_proven_frontier": furthest["label"] if furthest else None,
+        "furthest_proven_instruction_count": furthest["instructions"] if furthest else None,
+        "switch_entry_hits": len(observations.get("first switch entry", [])),
+        "context_save_flushrs_hits": len(observations.get("first context save flushrs", [])),
+        "incoming_bspstore_handoff_hits": len(observations.get(
+            "incoming ar.bspstore handoff", [])),
+        "context_b_first_entry_hits": len(observations.get(
+            "Context B first-entry bootstrap", [])),
+        "context_a_first_resume_hits": len(observations.get("return to Context A", [])),
+        "context_b_second_resume_hits": len(observations.get(
+            "second Context B resumption", [])),
+        "context_a_final_resume_hits": len(observations.get(
+            "final Context A continuation", [])),
+        "context_a_final_exit_hits": len(observations.get("final Context A exit", [])),
+        "unexpected_context_b_resume_hits": len(observations.get(
+            "unexpected Context B resumption", [])),
+    }
+
+
+def analyze_debugger_initialization(stderr_text: str, command_text: str,
+                                   samples: list[dict[str, int]],
+                                   elf_entry: int) -> dict[str, Any] | None:
+    if "All breakpoints in use" not in stderr_text:
+        return None
+    requested = sum(line.strip().startswith("bs ")
+                    for line in command_text.splitlines())
+    initial_sample = samples[0] if samples else None
+    return {
+        "failure_class": "SIMULATOR_OBSERVATION_LIMITATION",
+        "reason": "Ski reported 'All breakpoints in use' while installing the debugger plan",
+        "breakpoints_requested": requested,
+        "elf_entry": elf_entry,
+        "guest_instructions_executed": (
+            initial_sample["instructions"] if initial_sample is not None else None),
+        "failure_frontier": (
+            "ELF entry before first guest instruction"
+            if initial_sample is not None and initial_sample["instructions"] == 0
+            and initial_sample["iip"] == elf_entry else "debugger initialization"),
+        "setup_return_observed": False,
+        "context_switch_observed": False,
+        "fault_count_available": False,
     }
 
 
@@ -388,6 +477,20 @@ def _format_eval_and_snapshot(lines: list[str], index: int, label: str,
     lines.append("if $exited$ quit")
 
 
+def cooperative_breakpoints(frontiers: dict[str, int]) -> tuple[tuple[int, str], ...]:
+    return (
+        (0x1080C8, "SSC_CONSOLE_INIT break.i slot 2"),
+        (frontiers["setup_entry"], "ia64_coop_probe_setup entry"),
+        (frontiers["setup_nested_return"], "return from ia64_coop_set_nat8"),
+        (frontiers["setup_exit"], "setup final br.ret"),
+        (frontiers["setup_caller_return"], "setup caller continuation"),
+        (frontiers["switch_entry"], "first switch entry"),
+        (frontiers["context_a_save"], "first context save flushrs"),
+        (frontiers["rbs_handoff"], "incoming ar.bspstore handoff"),
+        (frontiers["context_b_first"], "Context B first-entry bootstrap"),
+    )
+
+
 def make_command_file(root: Path, symbols: dict[str, Any],
                       instruction_budget: int = SUPPORTED_INSTRUCTION_BUDGET) -> str:
     validate_instruction_budget(instruction_budget)
@@ -396,18 +499,7 @@ def make_command_file(root: Path, symbols: dict[str, Any],
             raise DiagnosticError("Ski command-file paths cannot contain whitespace")
     text_start, text_end = symbols["text"]
     ivt = symbols["ivt"]
-    text_entry = symbols["text"][0]
-    breakpoints = (
-        (0x1080C8, "SSC_CONSOLE_INIT break.i slot 2"),
-        (symbols["switch_entry"], "ia64_coop_context_switch entry"),
-        (0x10DC84, "flushrs slot 1"),
-        (0x10DE14, "incoming ar.bspstore write slot 1"),
-        (symbols["context_b_first_entry"], "Context B first-entry bootstrap"),
-        (0x10B220, "Context A first return continuation"),
-        (0x10C820, "Context B resume continuation"),
-        (0x10B900, "Context A final return continuation"),
-        (0x10E198, "switch br.ret slot 2"),
-    )
+    breakpoints = cooperative_breakpoints(symbols["frontiers"])
     for address, label in breakpoints:
         if address & 3 or not (ivt <= address < 0x108000 or text_start <= address < text_end):
             raise DiagnosticError(f"breakpoint {label} is outside aligned IVT/text: {address:#x}")
@@ -450,6 +542,10 @@ def validate_command_file(command_text: str) -> None:
     lowered = [line.lower() for line in commands]
     if any(re.match(r"^(run|cont(?:inue)?|go)(?:\s|$)", line) for line in lowered):
         raise DiagnosticError("unbounded run/continue command is prohibited")
+    breakpoint_count = sum(line.startswith("bs ") for line in commands)
+    if breakpoint_count > 9:
+        raise DiagnosticError(
+            f"Ski breakpoint plan exceeds the demonstrated capacity of 9: {breakpoint_count}")
     if commands[-1] != "quit":
         raise DiagnosticError("command file must end with clean quit")
     if commands.count("if $exited$ quit") != STEP_QUANTA + 2:
@@ -491,10 +587,28 @@ def preflight(args: argparse.Namespace) -> tuple[Any, Path, dict[str, Any], dict
     symbols["probe_record"] = elf.symbols["ia64_coop_probe_record"]["value"]
     if not load_ranges or not (symbols["text"][0] <= elf.entry < symbols["text"][1]):
         raise DiagnosticError("ELF entry does not match the probe text range")
+    symbols["frontiers"] = {
+        "setup_entry": ski_breakpoint_ip(symbols["setup"]),
+        "setup_call": ski_breakpoint_ip(symbols["setup_call_instruction"]),
+        "setup_nested_return": ski_breakpoint_ip(symbols["setup_nested_return"]),
+        "setup_exit": ski_breakpoint_ip(symbols["setup_return_instruction"]),
+        "setup_caller_return": ski_breakpoint_ip(symbols["probe_after_setup"]),
+        "switch_entry": ski_breakpoint_ip(symbols["switch_entry"]),
+        "context_a_save": ski_breakpoint_ip(symbols["switch_flushrs"]),
+        "rbs_handoff": ski_breakpoint_ip(symbols["switch_bspstore"]),
+        "context_b_first": ski_breakpoint_ip(symbols["context_b_first_entry"]),
+        "context_a_resume_first": ski_breakpoint_ip(symbols["a_resume_first"]),
+        "context_b_resume_second": ski_breakpoint_ip(symbols["b_resume_second"]),
+        "context_a_resume_final": ski_breakpoint_ip(symbols["a_resume_final"]),
+        "context_a_final_exit": ski_breakpoint_ip(symbols["a_final_exit"]),
+        "context_b_unexpected_resume": ski_breakpoint_ip(symbols["b_unexpected_resume"]),
+        "switch_return": ski_breakpoint_ip(symbols["switch_return"]),
+    }
     validate_instruction_budget(args.instruction_budget)
     if args.capture_dir.exists():
         raise DiagnosticError(f"capture root already exists; refusing to overwrite: {args.capture_dir}")
-    return runner, simulator, symbols, {"elf_entry": elf.entry, "load_ranges": load_ranges}
+    return runner, simulator, symbols, {"elf_entry": elf.entry, "load_ranges": load_ranges,
+                                        "frontiers": symbols["frontiers"]}
 
 
 def write_json_new(path: Path, value: dict[str, Any]) -> None:
@@ -593,6 +707,12 @@ def main(argv: list[str] | None = None) -> int:
                               "kernel_sha256": EXPECTED_KERNEL_SHA256,
                               "elf_entry": elf_facts["elf_entry"],
                               "text": symbols["text"],
+                              "frontiers": elf_facts["frontiers"],
+                              "setup_call_instruction": symbols["setup_call_instruction"],
+                              "setup_return_instruction": symbols["setup_return_instruction"],
+                              "context_a_save_instruction": symbols["switch_flushrs"],
+                              "incoming_bspstore_instruction": symbols["switch_bspstore"],
+                              "switch_return_instruction": symbols["switch_return"],
                               "step_quanta": STEP_QUANTA,
                               "step_quantum": STEP_QUANTUM,
                               "post_ssc_instruction_budget": args.instruction_budget,
@@ -677,8 +797,14 @@ def main(argv: list[str] | None = None) -> int:
         memory_analysis = analyze_snapshot_files(
             args.capture_dir, samples, run_started_ns,
             symbols["context_a"], symbols["context_b"], symbols["probe_record"])
+        breakpoints = cooperative_breakpoints(symbols["frontiers"])
+        runtime_frontiers = analyze_runtime_frontiers(
+            samples, register_states, breakpoints,
+            symbols["probe_after_setup"])
+        debugger_initialization = analyze_debugger_initialization(
+            stderr_text, command_text, samples, elf_facts["elf_entry"])
         analysis = {
-            "outcome": "IA64_COOPERATIVE_DIAGNOSTICS_BLOCKED",
+            "outcome": "IA64_COOPERATIVE_REQUALIFICATION_BLOCKED",
             "probe_sha256": args.expected_sha256,
             "manifest_sha256": EXPECTED_MANIFEST_SHA256,
             "simulator_sha256": args.simulator_sha256,
@@ -695,37 +821,44 @@ def main(argv: list[str] | None = None) -> int:
                 "post_ssc_maximum": args.instruction_budget,
                 "absolute_maximum": MAX_STEPPED_INSTRUCTIONS,
             },
+            "debugger_frontiers": {
+                key: {"ski_ip": value, "objdump_address": symbols.get(raw_key)}
+                for key, value, raw_key in (
+                    ("elf_entry", elf_facts["elf_entry"], None),
+                    ("setup_entry", symbols["frontiers"]["setup_entry"], "setup"),
+                    ("nested_call", symbols["frontiers"]["setup_call"],
+                     "setup_call_instruction"),
+                    ("nested_return", symbols["frontiers"]["setup_nested_return"],
+                     "setup_nested_return"),
+                    ("setup_exit", symbols["frontiers"]["setup_exit"],
+                     "setup_return_instruction"),
+                    ("setup_caller_continuation",
+                     symbols["frontiers"]["setup_caller_return"], "probe_after_setup"),
+                    ("first_switch_entry", symbols["frontiers"]["switch_entry"],
+                     "switch_entry"),
+                    ("context_a_save", symbols["frontiers"]["context_a_save"],
+                     "switch_flushrs"),
+                    ("context_b_first_entry", symbols["frontiers"]["context_b_first"],
+                     "context_b_first_entry"),
+                    ("return_to_context_a", symbols["frontiers"]["context_a_resume_first"],
+                     "a_resume_first"),
+                    ("second_context_b_resumption",
+                     symbols["frontiers"]["context_b_resume_second"], "b_resume_second"),
+                    ("final_context_a_exit", symbols["frontiers"]["context_a_final_exit"],
+                     "a_final_exit"),
+                )
+            },
             "breakpoint_contract": [
-                {"address": 0x1080C8, "label": "SSC_CONSOLE_INIT break.i slot 2"},
-                {"address": symbols["switch_entry"], "label": "ia64_coop_context_switch entry"},
-                {"address": 0x10DC84, "label": "flushrs slot 1"},
-                {"address": 0x10DE14, "label": "incoming ar.bspstore write slot 1"},
-                {"address": symbols["context_b_first_entry"],
-                 "label": "Context B first-entry bootstrap"},
-                {"address": 0x10B220, "label": "Context A first return continuation"},
-                {"address": 0x10C820, "label": "Context B resume continuation"},
-                {"address": 0x10B900, "label": "Context A final return continuation"},
-                {"address": 0x10E198, "label": "switch br.ret slot 2"},
+                {"address": address, "label": label}
+                for address, label in breakpoints
             ],
             "probe_stdout_bytes": len(stdout_text.encode("utf-8", errors="replace")),
             "debugger_progress_samples": samples,
             "debugger_progress_error": progress_error,
             "debugger_register_evaluations": register_states,
             "debugger_register_evaluation_error": register_state_error,
-            "breakpoint_observations": {
-                label: [sample for sample in samples if sample["ip"] == address]
-                for address, label in (
-                    (0x1080C8, "SSC_CONSOLE_INIT break.i slot 2"),
-                    (symbols["switch_entry"], "ia64_coop_context_switch entry"),
-                    (0x10DC84, "flushrs slot 1"),
-                    (0x10DE14, "incoming ar.bspstore write slot 1"),
-                    (symbols["context_b_first_entry"], "Context B first-entry bootstrap"),
-                    (0x10B220, "Context A first return continuation"),
-                    (0x10C820, "Context B resume continuation"),
-                    (0x10B900, "Context A final return continuation"),
-                    (0x10E198, "switch br.ret slot 2"),
-                )
-            },
+            "runtime_frontier_analysis": runtime_frontiers,
+            "debugger_initialization_failure": debugger_initialization,
             "register_snapshot_count": len(sample_files),
             "register_snapshot_freshness_error": freshness_error,
             "context_and_event_snapshots": memory_analysis["snapshots"],
@@ -735,17 +868,31 @@ def main(argv: list[str] | None = None) -> int:
         }
         try:
             output = runner.validate_cooperative_context_probe_output(stdout_text)
-            analysis["outcome"] = "IA64_COOPERATIVE_PROBE_QUALIFIED"
             analysis["probe_output_validation"] = output
         except runner.GateError as exc:
             analysis["probe_output_validation_error"] = str(exc)
-        if analysis["outcome"] != "IA64_COOPERATIVE_PROBE_QUALIFIED":
-            localized = classify_setup_return_cycle(
-                samples, register_states, memory_analysis["snapshots"],
-                analysis["breakpoint_observations"], analysis["probe_stdout_bytes"])
-            if localized is not None:
-                analysis["outcome"] = localized["classification"]
-                analysis["localized_stall"] = localized
+        output_valid = "probe_output_validation" in analysis
+        intentional_exit = (
+            result.get("classification") == "GUEST_EXIT_ZERO" and
+            result.get("ski_fault_count") == 0 and
+            result.get("ski_instruction_count") is not None and
+            result.get("timed_out") is False and
+            result.get("cleanup_complete") is True and
+            result.get("process_group_cleanup_complete") is True and
+            (result.get("pty_stdin_observation") or {}).get("passed") is True
+        )
+        analysis["setup_return_evidence"] = runtime_frontiers["setup_return"]
+        analysis["intentional_exit_verified"] = intentional_exit
+        analysis["furthest_proven_frontier"] = (
+            debugger_initialization["failure_frontier"]
+            if debugger_initialization is not None else
+            runtime_frontiers["furthest_proven_frontier"])
+        if output_valid and intentional_exit:
+            analysis["outcome"] = "IA64_COOPERATIVE_PROBE_QUALIFIED"
+        elif runtime_frontiers["setup_return"]["verified"]:
+            analysis["outcome"] = "IA64_COOPERATIVE_FRONTIER_ADVANCED"
+        else:
+            analysis["outcome"] = "IA64_COOPERATIVE_REQUALIFICATION_BLOCKED"
         write_json_new(args.capture_dir / "analysis.json", analysis)
         print(json.dumps({"analysis": str(args.capture_dir / "analysis.json"),
                           "outcome": analysis["outcome"],

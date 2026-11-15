@@ -1647,6 +1647,89 @@ def validate_cooperative_context_probe_manifest(manifest: dict[str, Any]) -> Non
         raise GateError("cooperative context probe manifest contract failed: " + "; ".join(mismatches))
 
 
+def validate_cooperative_probe_setup_source(sequence_source: str) -> None:
+    """Require setup's caller link and PFS to survive its nested helper call."""
+    start = sequence_source.find("ia64_coop_probe_setup:")
+    end = sequence_source.find(".endp ia64_coop_probe_setup", start)
+    if start < 0 or end < 0:
+        raise GateError("cooperative probe setup procedure is missing")
+    body = sequence_source[start:end]
+    body = re.sub(r"/\*.*?\*/|//[^\n]*", "", body, flags=re.DOTALL)
+    compact = re.sub(r"\s+", "", body).lower()
+    required = (
+        "allocr16=ar.pfs,0,2,0,0;;",
+        "movr32=r16;;",
+        "movr33=b0;;",
+        "br.call.sptk.manyb0=ia64_coop_set_nat8;;",
+        "movar.pfs=r32;;",
+        "movb0=r33;;",
+        "br.ret.sptk.manyb0;;",
+    )
+    positions = [compact.find(instruction) for instruction in required]
+    if min(positions) < 0 or positions != sorted(positions):
+        raise GateError(
+            "probe setup must save PFS and incoming b0 in stacked locals before its helper, "
+            "then restore both before returning"
+        )
+    if len(re.findall(r"br\.call\b", body, re.IGNORECASE)) != 1 or \
+            len(re.findall(r"br\.ret\b", body, re.IGNORECASE)) != 1:
+        raise GateError("probe setup must have one nested call and one final return")
+    call_end = positions[3] + len(required[3])
+    pfs_restore = positions[4]
+    if re.search(r"movr(?:32|33)=", compact[call_end:pfs_restore]):
+        raise GateError("probe setup overwrites a saved stacked continuation across its helper")
+    return_match = re.search(r"movb0=r33;;br\.ret\.sptk\.manyb0;;$", compact)
+    if return_match is None:
+        raise GateError("probe setup final return does not branch through the restored incoming b0")
+
+    setup_fields = (
+        "ia64_coop_set_nat8", "ia64_coop_context_a", "ia64_coop_context_b",
+        "c_stack_base", "c_stack_limit", "c_rbs_base", "c_rbs_limit", "c_sp",
+        "c_bsp", "c_bspstore", "c_rp", "c_pfs", "c_rsc", "c_rnat",
+        "c_first_entry", "c_context_id", "c_profile_magic", "c_code_base",
+        "c_code_limit", "ia64_coop_b_first_entry", "ia64_coop_stack_a_guard_low",
+        "ia64_coop_stack_b_guard_high", "ia64_coop_rbs_a_guard_low",
+        "ia64_coop_rbs_b_guard_high",
+    )
+    missing = [field for field in setup_fields if field.lower() not in body.lower()]
+    if missing:
+        raise GateError("probe setup lost required A/B initialization: " + ", ".join(missing))
+
+
+def validate_cooperative_probe_setup_disassembly(disassembly: str) -> None:
+    """Check the linked IA-64 instructions preserve setup's return link and PFS."""
+    start = disassembly.find("<ia64_coop_probe_setup>:")
+    end = disassembly.find("<ia64_coop_set_nat8>:", start)
+    body = disassembly[start:end if end >= 0 else None] if start >= 0 else ""
+    patterns = (
+        r"\balloc\s+r16\s*=\s*ar\.pfs,\s*2,\s*2,\s*0\b",
+        r"\bmov(?:\.i)?\s+r32\s*=\s*r16\b",
+        r"\bmov(?:\.i)?\s+r33\s*=\s*b0\b",
+        r"\bbr\.call[^\n]*ia64_coop_set_nat8\b",
+        r"\bmov(?:\.i)?\s+ar\.pfs\s*=\s*r32\b",
+        r"\bmov(?:\.i)?\s+b0\s*=\s*r33\b",
+        r"\bbr\.ret[^\n]*\bb0\b",
+    )
+    positions = [re.search(pattern, body, re.IGNORECASE) for pattern in patterns]
+    if not body or any(match is None for match in positions):
+        raise GateError("target setup disassembly lacks the required stacked b0/PFS save and restore")
+    offsets = [match.start() for match in positions if match is not None]
+    if offsets != sorted(offsets):
+        raise GateError("target setup disassembly restores PFS or b0 in an invalid order")
+    if len(re.findall(r"\bbr\.call\b", body, re.IGNORECASE)) != 1 or \
+            len(re.findall(r"\bbr\.ret\b", body, re.IGNORECASE)) != 1:
+        raise GateError("target setup disassembly has unexpected call/return control flow")
+
+
+def cooperative_disassembly_instruction_address(disassembly: str, pattern: str,
+                                                label: str) -> int:
+    for line in disassembly.splitlines():
+        match = re.match(r"\s*([0-9a-fA-F]+):\s+.*", line)
+        if match is not None and re.search(pattern, line, re.IGNORECASE):
+            return int(match.group(1), 16)
+    raise GateError(f"target switch disassembly lacks the {label} instruction")
+
+
 def validate_cooperative_context_switch_source(switch_source: str) -> None:
     if "STORE64 C_PFS, r16" not in switch_source or "mov ar.pfs = r22" not in switch_source:
         raise GateError("switch source does not save and restore PFS")
@@ -1705,7 +1788,13 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
 
     names = (
         "_start", "ia64_coop_context_switch", "ia64_coop_probe_run",
-        "ia64_coop_a_test", "ia64_coop_b_first_entry", "ia64_coop_b_test",
+        "ia64_coop_probe_setup", "ia64_coop_setup_nested_call",
+        "ia64_coop_setup_nested_return", "ia64_coop_setup_exit",
+        "ia64_coop_probe_after_setup", "ia64_coop_probe_after_a_test",
+        "ia64_coop_a_test", "ia64_coop_a_resumed_first",
+        "ia64_coop_a_resumed_final", "ia64_coop_a_final_exit",
+        "ia64_coop_b_first_entry", "ia64_coop_b_test", "ia64_coop_b_resumed",
+        "ia64_coop_b_unexpected_resume",
         "__text_start", "__text_end",
         "ia64_coop_context_a", "ia64_coop_context_b", "ia64_coop_probe_record",
         "ia64_coop_stack_a_guard_low", "ia64_coop_stack_a_bottom",
@@ -1773,6 +1862,7 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
         raise GateError("switch source is missing required state/order operations: " +
                         ", ".join(missing_terms))
     validate_cooperative_context_switch_source(switch_source)
+    validate_cooperative_probe_setup_source(sequence_source)
     source_order = (
         "flushrs", "mf", "mov.m ar.rsc = r0", "mov r24 = ar.rnat", "invala",
         "mov ar.bspstore = r20", "mov ar.rnat = r21", "mov ar.pfs = r22",
@@ -1818,6 +1908,27 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
             raise GateError(f"target switch disassembly is missing or reorders {term!r}")
     if "rfi" in disassembly:
         raise GateError("synchronous switch disassembly unexpectedly contains RFI")
+    switch_flushrs = cooperative_disassembly_instruction_address(
+        disassembly, r"\bflushrs\b", "Context A RSE save")
+    switch_bspstore = cooperative_disassembly_instruction_address(
+        disassembly, r"\bmov\.m\s+ar\.bspstore\s*=\s*r20\b", "incoming BSPSTORE handoff")
+    switch_return = cooperative_disassembly_instruction_address(
+        disassembly, r"\bbr\.ret\.sptk\.many\s+b0\b", "switch return")
+    try:
+        setup_result = subprocess.run(
+            [str(objdump_path), "-dr", "--disassemble=ia64_coop_probe_setup", str(artifact)],
+            check=True, capture_output=True, text=True)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise GateError(f"cannot inspect target setup disassembly: {exc}") from exc
+    setup_disassembly = setup_result.stdout
+    validate_cooperative_probe_setup_disassembly(setup_disassembly)
+    setup_start = setup_disassembly.find("<ia64_coop_probe_setup>:")
+    setup_end = setup_disassembly.find("<ia64_coop_set_nat8>:", setup_start)
+    setup_body = setup_disassembly[setup_start:setup_end if setup_end >= 0 else None]
+    setup_call_instruction = cooperative_disassembly_instruction_address(
+        setup_body, r"\bbr\.call[^\n]*ia64_coop_set_nat8", "setup nested call")
+    setup_return_instruction = cooperative_disassembly_instruction_address(
+        setup_body, r"\bbr\.ret\.sptk\.many\s+b0\b", "setup return")
     return {"ivt": ivt["addr"], "text": [symbol("__text_start"), symbol("__text_end")],
             "context_a": symbol("ia64_coop_context_a"),
             "context_b": symbol("ia64_coop_context_b"),
@@ -1825,6 +1936,23 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
             "stack_b": [symbol("ia64_coop_stack_b_bottom"), symbol("ia64_coop_stack_b_top")],
             "rbs_a": [symbol("ia64_coop_rbs_a_base"), symbol("ia64_coop_rbs_a_limit")],
             "rbs_b": [symbol("ia64_coop_rbs_b_base"), symbol("ia64_coop_rbs_b_limit")],
+            "setup": symbol("ia64_coop_probe_setup"),
+            "setup_nested_call": symbol("ia64_coop_setup_nested_call"),
+            "setup_nested_return": symbol("ia64_coop_setup_nested_return"),
+            "setup_exit": symbol("ia64_coop_setup_exit"),
+            "setup_call_instruction": setup_call_instruction,
+            "setup_return_instruction": setup_return_instruction,
+            "probe_after_setup": symbol("ia64_coop_probe_after_setup"),
+            "probe_after_a_test": symbol("ia64_coop_probe_after_a_test"),
+            "a_resume_first": symbol("ia64_coop_a_resumed_first"),
+            "b_resume_second": symbol("ia64_coop_b_resumed"),
+            "a_resume_final": symbol("ia64_coop_a_resumed_final"),
+            "a_final_exit": symbol("ia64_coop_a_final_exit"),
+            "b_unexpected_resume": symbol("ia64_coop_b_unexpected_resume"),
+            "switch_flushrs": switch_flushrs,
+            "switch_bspstore": switch_bspstore,
+            "switch_return": switch_return,
+            "setup_disassembly": setup_disassembly,
             "switch_source": str((script_dir / "context_switch.s").resolve())}
 
 
