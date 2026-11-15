@@ -376,6 +376,7 @@
     <ClInclude Include="png_codec.h" />
     <ClInclude Include="process.h" />
     <ClInclude Include="right_click_menu.h" />
+    <ClInclude Include="taskbar_application_model.h" />
     <ClInclude Include="sdk\include\guidexos\abi.h" />
     <ClInclude Include="sdk\include\guidexos\build.h" />
     <ClInclude Include="sdk\include\guidexos\app.h" />

@@ -77,6 +77,8 @@ namespace gxos { namespace gui {
         // Canonical App Model identities parallel to pinned. An empty identity
         // is reserved for fixed shell actions and path targets.
         std::vector<std::string> pinnedAppIds;
+        // Taskbar pins are independent of Start Menu pins and use canonical IDs.
+        std::vector<std::string> taskbarPinnedAppIds;
         std::vector<std::string> recent;
         // Canonical App Model identities parallel to recent.
         std::vector<std::string> recentAppIds;
@@ -129,6 +131,7 @@ namespace gxos { namespace gui {
             if(!out.use24HourTime && extractSection(txt, "desktop.clock.use24Hour", section)){ size_t i=0; skipWS(section,i); parseJSONBool(section, i, out.use24HourTime); }
             if(extractSection(txt, "pinned", section) && !parseStringArray(section, out.pinned, kDesktopConfigMaxPinnedEntries, kDesktopConfigMaxPinnedLabelBytes)) { err = "invalid or oversized pinned launch list"; return false; }
             if(extractSection(txt, "pinnedAppIds", section) && !parseStringArray(section, out.pinnedAppIds, kDesktopConfigMaxPinnedEntries, kDesktopConfigMaxLaunchIdBytes)) { err = "invalid or oversized pinned App Model identity list"; return false; }
+            if(extractSection(txt, "taskbarPinnedAppIds", section) && !parseStringArray(section, out.taskbarPinnedAppIds, kDesktopConfigMaxPinnedEntries, kDesktopConfigMaxLaunchIdBytes)) { err = "invalid or oversized taskbar App Model identity list"; return false; }
             if(extractSection(txt, "recent", section) && !parseStringArray(section, out.recent, kDesktopConfigMaxRecentEntries, kDesktopConfigMaxRecentLabelBytes)) { err = "invalid or oversized recent launch list"; return false; }
             if(extractSection(txt, "recentAppIds", section) && !parseStringArray(section, out.recentAppIds, kDesktopConfigMaxRecentEntries, kDesktopConfigMaxLaunchIdBytes)) { err = "invalid or oversized recent App Model identity list"; return false; }
             if (extractSection(txt, "pinnedAppIds", section) && out.pinnedAppIds.size() != out.pinned.size()) {
@@ -183,6 +186,7 @@ namespace gxos { namespace gui {
                 data.recent.size() > kDesktopConfigMaxRecentEntries ||
                 data.desktopShortcuts.size() > kDesktopConfigMaxShortcutEntries ||
                 data.pinnedAppIds.size() > kDesktopConfigMaxPinnedEntries ||
+                data.taskbarPinnedAppIds.size() > kDesktopConfigMaxPinnedEntries ||
                 data.recentAppIds.size() > kDesktopConfigMaxRecentEntries ||
                 (!data.pinnedAppIds.empty() && data.pinnedAppIds.size() != data.pinned.size()) ||
                 (!data.recentAppIds.empty() && data.recentAppIds.size() != data.recent.size())) {
@@ -196,6 +200,7 @@ namespace gxos { namespace gui {
             for (const std::string& value : data.pinned) if (value.size() > kDesktopConfigMaxPinnedLabelBytes || value.find('\0') != std::string::npos || hasControl(value)) { err = "pinned launch label exceeds its byte or character limit"; return false; }
             for (const std::string& value : data.recent) if (value.size() > kDesktopConfigMaxRecentLabelBytes || value.find('\0') != std::string::npos || hasControl(value)) { err = "recent launch label exceeds its byte or character limit"; return false; }
             for (const std::string& value : data.pinnedAppIds) if (value.size() > kDesktopConfigMaxLaunchIdBytes || value.find('\0') != std::string::npos || hasControl(value)) { err = "pinned App Model identity exceeds its byte or character limit"; return false; }
+            for (const std::string& value : data.taskbarPinnedAppIds) if (value.empty() || value.size() > kDesktopConfigMaxLaunchIdBytes || value.find('\0') != std::string::npos || hasControl(value)) { err = "taskbar App Model identity exceeds its byte or character limit"; return false; }
             for (const std::string& value : data.recentAppIds) if (value.size() > kDesktopConfigMaxLaunchIdBytes || value.find('\0') != std::string::npos || hasControl(value)) { err = "recent App Model identity exceeds its byte or character limit"; return false; }
             for (const DesktopShortcutRec& shortcut : data.desktopShortcuts) {
                 const bool appTarget = shortcut.shortcutType == "App" && !shortcut.targetAppId.empty() && shortcut.targetPath.empty();
@@ -229,6 +234,7 @@ namespace gxos { namespace gui {
             f << "  \"desktop.clock.use24HourTime\": " << (data.use24HourTime ? "true" : "false") << ",\n";
             f << "  \"pinned\": ["; for(size_t i=0;i<data.pinned.size();++i){ if(i) f<<","; f<<jsonEscape(data.pinned[i]);} f << "],\n";
             f << "  \"pinnedAppIds\": ["; for(size_t i=0;i<data.pinned.size();++i){ if(i) f<<","; f<<jsonEscape(i < data.pinnedAppIds.size() ? data.pinnedAppIds[i] : std::string());} f << "],\n";
+            f << "  \"taskbarPinnedAppIds\": ["; for(size_t i=0;i<data.taskbarPinnedAppIds.size();++i){ if(i) f<<","; f<<jsonEscape(data.taskbarPinnedAppIds[i]);} f << "],\n";
             f << "  \"recent\": ["; for(size_t i=0;i<data.recent.size();++i){ if(i) f<<","; f<<jsonEscape(data.recent[i]);} f << "],\n";
             f << "  \"recentAppIds\": ["; for(size_t i=0;i<data.recent.size();++i){ if(i) f<<","; f<<jsonEscape(i < data.recentAppIds.size() ? data.recentAppIds[i] : std::string());} f << "],\n";
             f << "  \"desktopShortcuts\": [\n";
