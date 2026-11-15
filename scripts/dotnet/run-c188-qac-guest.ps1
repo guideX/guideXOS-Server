@@ -39,7 +39,7 @@ if (Test-Path -LiteralPath $r25CaptureConfigPath -PathType Leaf) {
     catch { throw 'R25 fail-fast capture configuration is malformed; no QAC guest was launched.' }
     if ($r25CaptureConfig.schema -cne 'GUIDEXOS_C188R25_FAILFAST_CAPTURE_CONFIG_V1' -or
         [string]$r25CaptureConfig.recordAddress -notmatch '^0x[0-9A-Fa-f]{8,16}$' -or
-        [int]$r25CaptureConfig.recordBytes -ne 80) {
+        [int]$r25CaptureConfig.recordBytes -notin @(80,144)) {
         throw 'R25 fail-fast capture configuration failed validation; no QAC guest was launched.'
     }
 }
@@ -314,16 +314,18 @@ function Save-C188R25FailFastOriginSnapshot([string]$Trigger) {
         $registerPath = Join-Path $bootRoot "r25-failfast-origin-$Trigger-registers.txt"
         Set-Content -LiteralPath $registerPath -Value $snapshot.registersText -Encoding utf8
         $snapshot.registersSha256 = (Get-FileHash -LiteralPath $registerPath -Algorithm SHA256).Hash
-        $snapshot.recordResponse = Invoke-Qmp 'human-monitor-command' ([ordered]@{'command-line'=('x/10gx ' + [string]$r25CaptureConfig.recordAddress)})
+        $recordWordCount = [int]$r25CaptureConfig.recordBytes / 8
+        $snapshot.recordResponse = Invoke-Qmp 'human-monitor-command' ([ordered]@{'command-line'=('x/{0}gx {1}' -f $recordWordCount,[string]$r25CaptureConfig.recordAddress)})
         $snapshot.recordText = [string]([string]$snapshot.recordResponse | ConvertFrom-Json -ErrorAction Stop).return
         $words = @(Get-C188R25HmpWords $snapshot.recordText)
         $snapshot.recordWords = @($words | ForEach-Object { '0x{0:X16}' -f $_ })
-        if ($words.Count -eq 10) {
+        if ($words.Count -eq $recordWordCount) {
+            $expectedSchema = if ($r25CaptureConfig.recordBytes -eq 144) { 2 } else { 1 }
             $snapshot.recordValid = $words[0] -eq 0x4738523235464154 -and
-                $words[1] -eq 1 -and $words[2] -eq 80 -and
-                $words[4] -eq 7 -and $words[9] -eq 0x5055424C49534844 -and $words[5] -ne 0
+                $words[1] -eq $expectedSchema -and $words[2] -eq $r25CaptureConfig.recordBytes -and
+                $words[4] -eq 7 -and $words[$words.Count - 1] -eq 0x5055424C49534844 -and $words[5] -ne 0
             if (-not $snapshot.recordValid) { $snapshot.recordError='record words failed magic/schema/size/published/caller validation' }
-        } else { $snapshot.recordError='QEMU returned other than ten fixed-width record words' }
+        } else { $snapshot.recordError='QEMU returned a record with an unexpected fixed-width word count' }
         $rspMatch = [regex]::Match($snapshot.registersText,'(?i)\bRSP\s*=\s*([0-9a-f]{8,16})')
         if ($rspMatch.Success) {
             $snapshot.stackAddress = '0x' + $rspMatch.Groups[1].Value

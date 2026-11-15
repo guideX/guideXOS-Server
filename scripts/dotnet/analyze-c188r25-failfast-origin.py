@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded parser for R25's ten-word first-failure record and R24 snapshot."""
+"""Bounded parser for legacy R25 and discriminating R28 first-failure records."""
 
 from __future__ import annotations
 
@@ -12,10 +12,68 @@ from pathlib import Path
 MAGIC = 0x4738523235464154
 SCHEMA = 1
 RECORD_BYTES = 80
+R28_SCHEMA = 2
+R28_RECORD_BYTES = 144
 PUBLISHED = 0x5055424C49534844
 FAST_FAIL_FATAL_APP_EXIT = 7
 MAX_INITIALIZATION_STAGE = 3
 EXPECTED_RECORD_FLAGS = 0x7
+R28_SUBCONDITIONS = {
+    0: "NONE",
+    1: "GC_STATE_READ_FAILED",
+    2: "GC_THREAD_IDENTITY_MISMATCH",
+    3: "GC_HEAP_IDENTITY_MISMATCH",
+}
+R28_PREDICATES = {0, 1, 2}
+
+
+def signed64(value: int) -> int:
+    return value - (1 << 64) if value & (1 << 63) else value
+
+
+def validate_r28_guard_words(words: list[int]) -> tuple[bool, str, dict[str, object]]:
+    if len(words) != R28_RECORD_BYTES // 8:
+        return False, "record_word_count_invalid", {}
+    subcondition = words[9]
+    read_status = signed64(words[10])
+    thread_result, heap_result = words[11], words[12]
+    expected_thread, observed_thread = words[13], words[14]
+    expected_heap, observed_heap = words[15], words[16]
+    evidence: dict[str, object] = {
+        "firstFailedSubcondition": R28_SUBCONDITIONS.get(subcondition, "UNKNOWN"),
+        "gcStateReadStatus": read_status,
+        "threadIdentityResult": thread_result,
+        "heapIdentityResult": heap_result,
+        "expectedCurrentThread": f"0x{expected_thread:016X}",
+        "observedCurrentThread": f"0x{observed_thread:016X}",
+        "expectedGcHeap": f"0x{expected_heap:016X}",
+        "observedGcHeap": f"0x{observed_heap:016X}",
+    }
+    if subcondition not in R28_SUBCONDITIONS:
+        return False, "guard_subcondition_invalid", evidence
+    if thread_result not in R28_PREDICATES or heap_result not in R28_PREDICATES:
+        return False, "guard_predicate_result_invalid", evidence
+    if (subcondition == 0 and read_status == 0 and thread_result == 0 and
+        heap_result == 0 and expected_thread == 0 and observed_thread == 0 and
+        expected_heap == 0 and observed_heap == 0):
+        return True, "guard_evidence_not_applicable", evidence
+    if read_status != 0:
+        valid = (subcondition == 1 and thread_result == 0 and heap_result == 0
+                 and observed_thread == 0 and observed_heap == 0)
+        return valid, (R28_SUBCONDITIONS[subcondition] if valid else
+                       "gc_state_read_failure_record_inconsistent"), evidence
+    if thread_result == 0 or heap_result == 0:
+        return False, "successful_read_missing_identity_predicate", evidence
+    thread_mismatch = expected_thread != observed_thread
+    heap_mismatch = expected_heap != observed_heap
+    if thread_result != (2 if thread_mismatch else 1) or heap_result != (2 if heap_mismatch else 1):
+        return False, "identity_predicate_values_conflict", evidence
+    expected_subcondition = 2 if thread_mismatch else 3 if heap_mismatch else 0
+    if subcondition != expected_subcondition:
+        return False, "first_failed_subcondition_conflicts_with_predicates", evidence
+    if subcondition == 0:
+        return True, "guard_predicates_all_match", evidence
+    return True, R28_SUBCONDITIONS[subcondition], evidence
 
 
 def parse_hmp_words(text: str) -> list[int]:
@@ -28,7 +86,26 @@ def parse_hmp_words(text: str) -> list[int]:
 
 
 def validate_words(words: list[int]) -> tuple[bool, str]:
-    if len(words) != 10:
+    if len(words) == R28_RECORD_BYTES // 8 and words[1] == R28_SCHEMA:
+        if words[0] != MAGIC:
+            return False, "record_magic_invalid"
+        if words[2] != R28_RECORD_BYTES:
+            return False, "record_size_invalid"
+        if words[4] != FAST_FAIL_FATAL_APP_EXIT:
+            return False, "fast_fail_code_unexpected"
+        if words[5] == 0:
+            return False, "caller_capture_address_missing"
+        if words[6] == 0:
+            return False, "failfast_implementation_address_missing"
+        if words[7] > MAX_INITIALIZATION_STAGE:
+            return False, "initialization_stage_invalid"
+        if words[8] != EXPECTED_RECORD_FLAGS:
+            return False, "record_flags_invalid"
+        if words[17] != PUBLISHED:
+            return False, "record_not_published"
+        valid, classification, _evidence = validate_r28_guard_words(words)
+        return valid, classification
+    if len(words) != RECORD_BYTES // 8:
         return False, "record_word_count_invalid"
     if words[0] != MAGIC:
         return False, "record_magic_invalid"
@@ -104,6 +181,38 @@ def map_function_address(map_text: str, symbol_fragment: str) -> int:
     return int(match.group(2), 16)
 
 
+def has_direct_call_to_function(
+    elf: bytes,
+    segments: list[tuple[int, int, int, int, int]],
+    map_text: str,
+    source_fragment: str,
+    target_fragment: str,
+) -> bool:
+    source = map_function_address(map_text, source_fragment)
+    target = map_function_address(map_text, target_fragment)
+    function_addresses: list[int] = []
+    for line in map_text.splitlines():
+        match = re.match(r"\s*\S+\s+\S+\s+([0-9A-Fa-f]{16})\s+f\s+", line)
+        if match:
+            address = int(match.group(1), 16)
+            if address > source:
+                function_addresses.append(address)
+    end = min(function_addresses, default=source + 0x4000)
+    size = min(end - source, 0x4000)
+    if size < 5:
+        return False
+    try:
+        code = read_va(elf, segments, source, size)
+    except ValueError:
+        return False
+    for offset in range(size - 4):
+        if code[offset] == 0xE8:
+            displacement = struct.unpack_from("<i", code, offset + 1)[0]
+            if source + offset + 5 + displacement == target:
+                return True
+    return False
+
+
 def resolve_caller(candidate: Path, caller_pc: int) -> dict[str, object]:
     manifest = json.loads((candidate / "candidate-manifest.json").read_text(encoding="utf-8-sig"))
     map_text = Path(manifest["managedMap"]).read_text(encoding="utf-8", errors="replace")
@@ -155,23 +264,58 @@ def verify_candidate(candidate: Path) -> dict[str, object]:
     capture_helper = map_function_address(map_text, "guideXosNativeAotR25CaptureCallerReturnAddress")
     failfast_implementation = map_function_address(map_text, "guideXosFailFastImpl")
     segments = read_load_segments(elf)
-    writable = any(start <= record and record + RECORD_BYTES <= start + memsz and flags & 2
+    r28_enabled = runtime_manifest.get("c188r28GcStateGuardDiscriminator") is True
+    expected_schema = R28_SCHEMA if r28_enabled else SCHEMA
+    expected_bytes = R28_RECORD_BYTES if r28_enabled else RECORD_BYTES
+    actual_schema = runtime_manifest.get("failFastOriginRecordSchema", SCHEMA)
+    actual_bytes = runtime_manifest.get("failFastOriginRecordBytes", RECORD_BYTES)
+    writable = any(start <= record and record + expected_bytes <= start + memsz and flags & 2
                    for start, _offset, _filesz, memsz, flags in segments)
     helper_executable = any(start <= capture_helper < start + memsz and flags & 1
                              for start, _offset, _filesz, memsz, flags in segments)
     failfast_executable = any(start <= failfast_implementation < start + memsz and flags & 1
                               for start, _offset, _filesz, memsz, flags in segments)
-    if not runtime_manifest.get("c188r25FailFastOriginCapture") or not writable or not helper_executable or not failfast_executable:
+    if (not runtime_manifest.get("c188r25FailFastOriginCapture") or
+        actual_schema != expected_schema or
+        actual_bytes != expected_bytes or
+        (r28_enabled and runtime_manifest.get("c188r28GcStateGuardDiscriminatorMarker") !=
+            "GUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR") or
+        not writable or not helper_executable or not failfast_executable):
         raise ValueError("R25 record/functions are not enabled in the linked writable/executable ELF segments")
+    r28_symbols: dict[str, str] = {}
+    if r28_enabled:
+        symbols = runtime_manifest.get("renamedRuntimeSymbols", {})
+        if symbols.get("RhpNewArray") != "guideXosStockRhpNewArray":
+            raise ValueError("R28 candidate does not link the pinned stock array allocator as its delegate")
+        wrapper_address = map_function_address(map_text, "RhpNewArray")
+        stock_array_address = map_function_address(map_text, "guideXosStockRhpNewArray")
+        gc_state_address = map_function_address(map_text, "guidexos_nativeaot_gc_read_state")
+        r28_helper_address = map_function_address(map_text, "guideXosNativeAotR28FailFastGcStateGuard")
+        if not has_direct_call_to_function(
+            elf, segments, map_text, "RhpNewArray", "guideXosNativeAotR28FailFastGcStateGuard"
+        ):
+            raise ValueError("R28 linked RhpNewArray does not directly call the discriminator fail-fast path")
+        if not all(any(start <= address < start + memsz and flags & 1
+                       for start, _offset, _filesz, memsz, flags in segments)
+                   for address in (wrapper_address, stock_array_address, gc_state_address, r28_helper_address)):
+            raise ValueError("R28 array wrapper, stock allocator, state reader, or capture helper is not executable")
+        r28_symbols = {
+            "rhpNewArrayWrapperAddress": f"0x{wrapper_address:016X}",
+            "stockArrayAllocatorAddress": f"0x{stock_array_address:016X}",
+            "gcStateReaderAddress": f"0x{gc_state_address:016X}",
+            "guardFailureHelperAddress": f"0x{r28_helper_address:016X}",
+        }
     return {
         "result": "PASS",
         "recordAddress": f"0x{record:016X}",
-        "recordBytes": RECORD_BYTES,
+        "recordBytes": expected_bytes,
+        "recordSchema": expected_schema,
         "recordSectionWritable": writable,
         "captureHelperAddress": f"0x{capture_helper:016X}",
         "failFastImplementationAddress": f"0x{failfast_implementation:016X}",
         "runtimeProfile": runtime_manifest.get("identity"),
         "managedElfSha256": manifest.get("managedElfSha256"),
+        **r28_symbols,
     }
 
 
@@ -209,10 +353,13 @@ def main() -> int:
         if args.candidate_root and valid and words[6] != int(str(result["candidate"]["failFastImplementationAddress"]), 16):
             result["recordValid"] = False
             result["recordClassification"] = "failfast_implementation_address_mismatch"
-        if len(words) == RECORD_BYTES // 8:
+        if len(words) in (RECORD_BYTES // 8, R28_RECORD_BYTES // 8):
             result["originalReason"] = f"0x{words[3]:016X}"
             result["fastFailCode"] = words[4]
             result["fastFailCodeName"] = "FAST_FAIL_FATAL_APP_EXIT" if words[4] == FAST_FAIL_FATAL_APP_EXIT else "unknown"
+        if len(words) == R28_RECORD_BYTES // 8 and words[1] == R28_SCHEMA:
+            _valid, _classification, guard_evidence = validate_r28_guard_words(words)
+            result["gcStateGuard"] = guard_evidence
         if args.candidate_root and result["recordValid"]:
             result["caller"] = resolve_caller(args.candidate_root.resolve(), words[5])
     if args.registers:

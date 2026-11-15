@@ -55,13 +55,14 @@ try {
         throw 'R24 phase, candidate result, integrity hash, or runtime-address evidence is invalid.'
     }
     $r25Manifest = $null
+    $r25RecordBytes = 0
     if ($isR25) {
         $R25ManifestPath = [System.IO.Path]::GetFullPath($R25ManifestPath)
         $r25Manifest = Get-Content -LiteralPath $R25ManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
         if ($r25Manifest.schema -cne 'GUIDEXOS_C188R25_CANDIDATE_V1' -or
             [System.IO.Path]::GetFullPath([string]$r25Manifest.candidateRoot) -cne $candidate -or
             [string]$r25Manifest.diagnostics.recordAddress -notmatch '^0x[0-9A-Fa-f]{8,16}$' -or
-            [int]$r25Manifest.diagnostics.recordBytes -ne 80 -or
+            [int]$r25Manifest.diagnostics.recordBytes -notin @(80,144) -or
             (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash -ine [string]$r25Manifest.candidateManifestSha256 -or
             (Get-FileHash -LiteralPath $integrityPath -Algorithm SHA256).Hash -ine [string]$r25Manifest.candidateIntegritySha256 -or
             [System.IO.Path]::GetFullPath([string]$r25Manifest.runtimePackManifest) -cne
@@ -75,9 +76,11 @@ try {
         $r25Qualification = & $python $r25Analyzer '--candidate-root' $candidate 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) { throw "R25 linked candidate qualification failed: $r25Qualification" }
         $r25QualificationObject = $r25Qualification | ConvertFrom-Json -ErrorAction Stop
-        if ([string]$r25QualificationObject.candidate.recordAddress -ine [string]$r25Manifest.diagnostics.recordAddress) {
+        if ([string]$r25QualificationObject.candidate.recordAddress -ine [string]$r25Manifest.diagnostics.recordAddress -or
+            [int]$r25QualificationObject.candidate.recordBytes -ne [int]$r25Manifest.diagnostics.recordBytes) {
             throw 'R25 record address differs from the linked candidate symbol.'
         }
+        $r25RecordBytes = [int]$r25Manifest.diagnostics.recordBytes
         $final.r25ManifestPath=$R25ManifestPath
         $final.r25RecordAddress=[string]$r25Manifest.diagnostics.recordAddress
     }
@@ -175,7 +178,7 @@ try {
     $guard | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $guardPath -Encoding utf8
     if ($isR25) {
         $null = New-Item -ItemType Directory -Path $bootRoot -Force
-        [ordered]@{schema='GUIDEXOS_C188R25_FAILFAST_CAPTURE_CONFIG_V1';recordAddress=[string]$r25Manifest.diagnostics.recordAddress;recordBytes=80;candidateManifestSha256=(Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash} |
+        [ordered]@{schema='GUIDEXOS_C188R25_FAILFAST_CAPTURE_CONFIG_V1';recordAddress=[string]$r25Manifest.diagnostics.recordAddress;recordBytes=$r25RecordBytes;candidateManifestSha256=(Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash} |
             ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $bootRoot 'r25-failfast-capture.json') -Encoding utf8
     }
     $runnerStdoutPath = Join-Path $phaseRoot ($runPrefix + '-runner-' + $runId + '.stdout.log')

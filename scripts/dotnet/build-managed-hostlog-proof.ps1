@@ -40,6 +40,7 @@ param(
     [switch]$C188R12R4R5R2R2R4SafeHandoff,
     [switch]$C188R12R4R5R2R3InitializeModulesAttribution,
     [switch]$C188R25FailFastOriginCapture,
+    [switch]$C188R28GcStateGuardDiscriminator,
     [switch]$C188R12R4R5R2R3ManagedEntryProbe,
     [switch]$C188R12R4R5R2R3ManagedSettingsObjectProbe,
     [switch]$C188R13ManagedGcRootProbe,
@@ -276,6 +277,7 @@ if ($UseGuideXosRuntimePack) {
     if ($C188R12R4R5R2R2R4SafeHandoff) { $runtimePackBuildArguments += "-C188R12R4R5R2R2R4SafeHandoff" }
     if ($C188R12R4R5R2R3InitializeModulesAttribution) { $runtimePackBuildArguments += "-C188R12R4R5R2R3InitializeModulesAttribution" }
     if ($C188R25FailFastOriginCapture) { $runtimePackBuildArguments += "-C188R25FailFastOriginCapture" }
+    if ($C188R28GcStateGuardDiscriminator) { $runtimePackBuildArguments += "-C188R28GcStateGuardDiscriminator" }
     if ($C188R12R4R5R2R3ManagedEntryProbe) { $runtimePackBuildArguments += "-C188R12R4R5R2R3ManagedEntryProbe" }
     if ($C188R12R4R5R2R3ManagedSettingsObjectProbe -or $C188R13ManagedGcRootProbe) { $runtimePackBuildArguments += "-C188R12R4R5R2R3ManagedSettingsObjectProbe" }
     if ($ThreadStaticLifecycleDiagnostics) { $runtimePackBuildArguments += "-ThreadStaticLifecycleDiagnostics" }
@@ -368,6 +370,14 @@ if ($UseGuideXosRuntimePack) {
         (-not [bool]$runtimePackManifestObject.c188r25FailFastOriginCapture -or
          [string]$runtimePackManifestObject.c188r25FailFastOriginCaptureMarker -cne 'GUIDEXOS_NATIVEAOT_C188R25_FAILFAST_ORIGIN')) {
         throw 'R25 requires the linked first-failure diagnostic runtime-pack profile.'
+    }
+    if ($C188R28GcStateGuardDiscriminator -and
+        (-not $C188R25FailFastOriginCapture -or
+         -not [bool]$runtimePackManifestObject.c188r28GcStateGuardDiscriminator -or
+         [string]$runtimePackManifestObject.c188r28GcStateGuardDiscriminatorMarker -cne 'GUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR' -or
+         [string]$runtimePackManifestObject.runtimeIdentity.gc -cne 'Workstation' -or
+         [bool]$runtimePackManifestObject.imageBackedArenaPresent)) {
+        throw 'R28 requires the first-failure discriminator on the pinned Workstation GC path without an image-backed arena.'
     }
     if ($C188R12R4R5R2R3ManagedEntryProbe -and
         (-not $C188R12R4R5R2R3InitializeModulesAttribution -or

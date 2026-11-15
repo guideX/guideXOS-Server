@@ -7,6 +7,9 @@
 #include <stddef.h>
 #if defined(GUIDEXOS_NATIVEAOT_C188R25_FAILFAST_ORIGIN)
 #include "guidexos_nativeaot_failfast_origin.h"
+#if defined(GUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR)
+#include "guidexos_nativeaot_gc_state_guard.h"
+#endif
 extern "C" __declspec(dllexport) volatile GuideXosR25FailFastOriginRecord
     g_guideXosR25FailFastOriginRecord = {};
 extern "C" volatile uint32_t g_guideXosR25InitializationStage =
@@ -17,10 +20,21 @@ guideXosNativeAotR25CaptureCallerReturnAddress();
 [[noreturn]] void guideXosFailFastImpl(uint32_t reason);
 [[noreturn]] __declspec(noinline) void __cdecl guideXosNativeAotR25FailFast(
     uint32_t reason, uintptr_t callerCaptureReturnAddress);
+#if defined(GUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR)
+[[noreturn]] __declspec(noinline) void __cdecl
+guideXosNativeAotR28FailFastGcStateGuard(
+    uint32_t reason, const GuideXosR28GcStateGuardEvidence& evidence,
+    uintptr_t callerCaptureReturnAddress);
+#endif
 }
 #define guideXosFailFast(reason) \
     guideXosNativeAotR25FailFast( \
         (reason), guideXosNativeAotR25CaptureCallerReturnAddress())
+#if defined(GUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR)
+#define guideXosFailFastGcStateGuard(evidence) \
+    guideXosNativeAotR28FailFastGcStateGuard( \
+        8u, (evidence), guideXosNativeAotR25CaptureCallerReturnAddress())
+#endif
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
 #include "guidexos_nativeaot_transition_attribution.h"
@@ -32803,14 +32817,24 @@ void guideXosR25TryEmitCapturedMarker() {
         auto& record = g_guideXosR25FailFastOriginRecord;
         record.magic = kGuideXosR25FailFastOriginMagic;
         record.schemaVersion = kGuideXosR25FailFastOriginSchema;
-        record.recordBytes = sizeof(GuideXosR25FailFastOriginRecord);
+        record.recordBytes = kGuideXosR25FailFastOriginRecordBytes;
         record.originalReason = reason;
         record.fastFailCode = kGuideXosR25FailFastFastFailCode;
         record.callerCaptureReturnAddress = callerCaptureReturnAddress;
         record.failFastImplementationAddress = reinterpret_cast<uintptr_t>(
             &guideXosFailFastImpl);
         record.initializationStage = g_guideXosR25InitializationStage;
-        record.flags = 0x7u; // call-site PC captured; no runtime thread state; reason is the only ABI value
+        record.flags = 0x7u;
+#if defined(GUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR)
+        record.guardFailureSubcondition = kGuideXosR28GuardSubconditionNone;
+        record.gcStateReadStatus = 0u;
+        record.threadIdentityResult = kGuideXosR28PredicateNotEvaluated;
+        record.heapIdentityResult = kGuideXosR28PredicateNotEvaluated;
+        record.expectedCurrentThread = 0u;
+        record.observedCurrentThread = 0u;
+        record.expectedGcHeap = 0u;
+        record.observedGcHeap = 0u;
+#endif
         _InterlockedExchange64(
             reinterpret_cast<volatile __int64*>(&record.published),
             static_cast<__int64>(kGuideXosR25FailFastOriginPublished));
@@ -32818,6 +32842,40 @@ void guideXosR25TryEmitCapturedMarker() {
     }
     guideXosFailFastImpl(reason);
 }
+
+#if defined(GUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR)
+[[noreturn]] __declspec(noinline) void __cdecl
+guideXosNativeAotR28FailFastGcStateGuard(
+    uint32_t reason, const GuideXosR28GcStateGuardEvidence& evidence,
+    uintptr_t callerCaptureReturnAddress) {
+    if (_InterlockedCompareExchange(&g_guideXosR25FailFastClaim, 1, 0) == 0) {
+        auto& record = g_guideXosR25FailFastOriginRecord;
+        record.magic = kGuideXosR25FailFastOriginMagic;
+        record.schemaVersion = kGuideXosR25FailFastOriginSchema;
+        record.recordBytes = kGuideXosR25FailFastOriginRecordBytes;
+        record.originalReason = reason;
+        record.fastFailCode = kGuideXosR25FailFastFastFailCode;
+        record.callerCaptureReturnAddress = callerCaptureReturnAddress;
+        record.failFastImplementationAddress = reinterpret_cast<uintptr_t>(
+            &guideXosFailFastImpl);
+        record.initializationStage = g_guideXosR25InitializationStage;
+        record.flags = 0x7u;
+        record.guardFailureSubcondition = evidence.firstFailedSubcondition;
+        record.gcStateReadStatus = evidence.gcStateReadStatus;
+        record.threadIdentityResult = evidence.threadIdentityResult;
+        record.heapIdentityResult = evidence.heapIdentityResult;
+        record.expectedCurrentThread = evidence.expectedCurrentThread;
+        record.observedCurrentThread = evidence.observedCurrentThread;
+        record.expectedGcHeap = evidence.expectedGcHeap;
+        record.observedGcHeap = evidence.observedGcHeap;
+        _InterlockedExchange64(
+            reinterpret_cast<volatile __int64*>(&record.published),
+            static_cast<__int64>(kGuideXosR25FailFastOriginPublished));
+        guideXosR25TryEmitCapturedMarker();
+    }
+    guideXosFailFastImpl(reason);
+}
+#endif
 #endif
 
 unsigned char* currentTlsBlock() {
@@ -34780,17 +34838,32 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
     gx_uintptr contextIdentityAfter = 0;
     gx_uintptr allocBytesAfter = 0;
     gx_uintptr allocBytesUohAfter = 0;
-    if (guidexos_nativeaot_gc_read_state(
+    const int32_t gcStateReadResult = guidexos_nativeaot_gc_read_state(
             &allocationPointerAfter, &allocationLimitAfter, &currentThreadAfter,
             &gcHeapAfter, &gcCountAfter, &gcBytesAfter, &finalizableAfter,
             &gcInProgressAfter, &gcModeAfter, &contextIdentityAfter,
-            &allocBytesAfter, &allocBytesUohAfter) != 0 || currentThreadAfter != currentThread ||
+#if defined(GUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR)
+            &allocBytesAfter, &allocBytesUohAfter);
+    const GuideXosR28GcStateGuardEvidence guardEvidence =
+        guideXosR28ClassifyGcStateGuard(
+            gcStateReadResult, currentThread, currentThreadAfter,
+            gcHeap, gcHeapAfter);
+    if (guardEvidence.firstFailedSubcondition !=
+        kGuideXosR28GuardSubconditionNone) {
+#else
+            &allocBytesAfter, &allocBytesUohAfter);
+    if (gcStateReadResult != 0 || currentThreadAfter != currentThread ||
         gcHeapAfter != gcHeap) {
+#endif
         ++g_guideXosAllocationDiagnostics.pointerContractFailures;
         recordAllocationStage(GUIDEXOS_NATIVEAOT_ALLOC_STAGE_FAILFAST_GC_STATE,
                               eeType, length, objectSize, allocationPointerAfter,
                               allocationLimitAfter, currentThreadAfter);
+#if defined(GUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR)
+        guideXosFailFastGcStateGuard(guardEvidence);
+#else
         guideXosFailFast(8u);
+#endif
     }
 #if defined(GUIDEXOS_NATIVEAOT_C011EC62_POST_PROMOTION_REFILL_TOPOLOGY)
     guideXosNativeAotC011EC62ManagedAllocationReturned(

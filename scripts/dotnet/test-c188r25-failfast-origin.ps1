@@ -17,7 +17,8 @@ function Assert-R25([bool]$Condition,[string]$Name) {
     if (-not $Condition) { throw "R25 fail-fast assertion failed: $Name" }
 }
 
-Assert-R25 ($header -match 'sizeof\(GuideXosR25FailFastOriginRecord\) == 80u') 'fixed ten-word record size'
+Assert-R25 ($header -match 'kGuideXosR25FailFastOriginRecordBytes = 80u' -and
+    $header -match 'kGuideXosR25FailFastOriginRecordBytes = 144u') 'versioned bounded R25/R28 record sizes'
 Assert-R25 ($header -match 'kGuideXosR25FailFastFastFailCode = 7u') 'exact FAST_FAIL_FATAL_APP_EXIT mapping'
 Assert-R25 ($source -match 'return reinterpret_cast<uintptr_t>\(_ReturnAddress\(\)\)') 'caller capture helper uses compiler return-address intrinsic'
 Assert-R25 ($source -match '_InterlockedCompareExchange\(&g_guideXosR25FailFastClaim, 1, 0\) == 0') 'first failure claims record once'
@@ -37,15 +38,15 @@ Assert-R25 ($source.IndexOf('#define guideXosFailFast(reason)') -ge 0 -and
 Assert-R25 ($header -match 'originalReason' -and $header -match 'callerCaptureReturnAddress' -and
     $header -match 'failFastImplementationAddress' -and $header -match 'initializationStage' -and
     $header -match 'published') 'bounded record carries reason, caller, implementation, stage, and validity fields'
-Assert-R25 ($guestRunner -match 'r25CaptureConfig\.recordBytes\s*-ne 80' -and
+Assert-R25 ($guestRunner -match 'r25CaptureConfig\.recordBytes\s*-notin @\(80,144\)' -and
     $guestRunner -match 'Get-C188R25HmpWords \$snapshot\.recordText' -and
-    $guestRunner -match 'x/10gx ' -and $guestRunner -match 'x/8gx ' ) 'guest capture validates the configured record size and bounds record/stack reads'
+    $guestRunner -match 'x/\{0\}gx' -and $guestRunner -match 'x/8gx ' ) 'guest capture validates the configured record size and bounds record/stack reads'
 $pauseIndex = $guestRunner.IndexOf("Invoke-Qmp 'stop'")
 $registerIndex = $guestRunner.IndexOf("Invoke-Qmp 'human-monitor-command' ([ordered]@{'command-line'='info registers'})")
-$recordReadIndex = $guestRunner.IndexOf("'x/10gx '")
+$recordReadIndex = $guestRunner.IndexOf('x/{0}gx')
 Assert-R25 ($pauseIndex -ge 0 -and $registerIndex -gt $pauseIndex -and $recordReadIndex -gt $registerIndex) 'QMP confirms pause before register and first-failure memory capture'
 Assert-R25 ($guestRunner -match 'Refusing to overwrite R25 fail-fast evidence' -and
-    $guestRunner -match 'record\.published|words\[9\] -eq 0x5055424C49534844') 'capture refuses evidence overwrite and validates last-word publication'
+    $guestRunner -match 'words\[\$words\.Count - 1\] -eq 0x5055424C49534844') 'capture refuses evidence overwrite and validates last-word publication'
 Assert-R25 ($guestRunner.IndexOf('$text.Contains(''[C188R25-FAILFAST-CAPTURED]'')') -ge 0 -and
     $guestRunner.IndexOf("Save-C188R25FailFastOriginSnapshot 'fatal-marker'") -lt
     $guestRunner.IndexOf("throw 'R25 captured a published first-failure record and paused CPU/stack evidence.'")) 'an explicit fatal marker captures before the runner exits its readiness monitor'

@@ -2,7 +2,8 @@ param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
     [string]$ArtifactRoot = 'E:\CodexArtifacts\guideXOSServerV1.1_DOTNET_SUPPORT',
     [string]$CandidateRoot = '',
-    [switch]$C188R25FailFastOriginCapture
+    [switch]$C188R25FailFastOriginCapture,
+    [switch]$C188R28GcStateGuardDiscriminator
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -163,6 +164,12 @@ $managedArgs = @(
     '-ManagedProjectMode','C160Composite')
 if ($C188R25FailFastOriginCapture) {
     $managedArgs += '-C188R25FailFastOriginCapture'
+}
+if ($C188R28GcStateGuardDiscriminator) {
+    if (-not $C188R25FailFastOriginCapture) {
+        throw 'R28 discriminator requires the R25 first-failure capture profile.'
+    }
+    $managedArgs += '-C188R28GcStateGuardDiscriminator'
 }
 $pwsh = (Get-Command 'pwsh.exe' -ErrorAction Stop | Select-Object -First 1).Source
 $r22Test = Join-Path $RepoRoot 'scripts\dotnet\test-c188r22-settings-bootstrap-handoff.ps1'
