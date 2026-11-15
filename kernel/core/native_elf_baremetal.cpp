@@ -24,6 +24,7 @@
 #include "sdk/include/guidexos/app.h"
 #include "include/kernel/native_elf_security_policy.h"
 #include "include/kernel/authentication.h"
+#include "include/kernel/managed_execution.h"
 #if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
 #include <psa/crypto.h>
 #endif
@@ -874,6 +875,18 @@ static bool begin_launch_attribution(const Package* package) {
     }
     s_lastLaunchAttribution = attribution;
     return true;
+}
+
+static const char* launch_owner_name(LaunchOwnerKind owner)
+{
+    switch (owner) {
+        case LaunchOwnerKind::TrustedKernelSystem: return "system";
+        case LaunchOwnerKind::AuthenticatedAdministrator: return "administrator";
+        case LaunchOwnerKind::AuthenticatedStandardUser: return "standard-user";
+        case LaunchOwnerKind::InteractiveUnassigned: return "unassigned";
+        case LaunchOwnerKind::InvalidOrUnavailable: return "unavailable";
+        default: return "invalid";
+    }
 }
 
 #if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
@@ -2817,6 +2830,51 @@ static bool run_package(Package* package) {
 #if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
     serial::puts("[NATIVE-ELF-PREVIEW] decision=ALLOW package=com.guidexos.pacman entry=immediate\n");
 #endif
+    managed_execution::Handle executionHandle{};
+    managed_execution::Runtime& executions = managed_execution::runtime();
+    const managed_execution::Result createExecution =
+        executions.beginNativeElf(package->id, &executionHandle);
+    if (createExecution != managed_execution::Result::Ok) {
+        delete[] runtime.stack;
+        delete[] runtime.image;
+        delete[] runtime.verifiedElf;
+        runtime.stack = nullptr;
+        runtime.image = nullptr;
+        runtime.verifiedElf = nullptr;
+        serial::puts("[NATIVE-ELF] managed execution creation failed result=");
+        serial::puts(managed_execution::resultName(createExecution));
+        serial::putc('\n');
+        return false;
+    }
+    const managed_execution::Result startExecution = executions.markRunning(executionHandle);
+    if (startExecution != managed_execution::Result::Ok) {
+        (void)executions.discardBeforeEntry(executionHandle);
+        delete[] runtime.stack;
+        delete[] runtime.image;
+        delete[] runtime.verifiedElf;
+        runtime.stack = nullptr;
+        runtime.image = nullptr;
+        runtime.verifiedElf = nullptr;
+        serial::puts("[NATIVE-ELF] managed execution start failed result=");
+        serial::puts(managed_execution::resultName(startExecution));
+        serial::putc('\n');
+        return false;
+    }
+    serial::puts("[MANAGED-EXECUTION] id=0x");
+    serial::put_hex64(executionHandle.runtimeId);
+    serial::puts(" generation=0x");
+    serial::put_hex32(executionHandle.generation);
+    serial::puts(" kind=managed-native-elf state=Running appId=");
+    serial::puts(package->id);
+    serial::puts(" launchAttributionId=0x");
+    serial::put_hex64(s_lastLaunchAttribution.launchInstanceId);
+    serial::puts(" owner=");
+    serial::puts(launch_owner_name(s_lastLaunchAttribution.ownerKind));
+    serial::puts(" userId=0x");
+    serial::put_hex64(s_lastLaunchAttribution.userId);
+    serial::puts(" sessionGeneration=0x");
+    serial::put_hex64(s_lastLaunchAttribution.sessionGeneration);
+    serial::putc('\n');
     s_lastLaunchAttribution.state = LaunchLifecycleState::Running;
     s_activeRuntime = &runtime;
     log_breadcrumb(&runtime, "04 GX_MAIN_ENTER");
@@ -2865,8 +2923,37 @@ static bool run_package(Package* package) {
     delete[] runtime.verifiedElf;
     runtime.stack = nullptr;
     runtime.image = nullptr;
+    runtime.verifiedElf = nullptr;
     s_activeRuntime = nullptr;
     gxos_native_set_fault_recovery(0, 0);
+    const managed_execution::Result completedExecution = executions.complete(
+        executionHandle, runtime.faulted, !runtime.faulted,
+        static_cast<uint32_t>(result), static_cast<uint32_t>(runtime.faultVector),
+        static_cast<uint32_t>(runtime.faultErrorCode), true);
+    if (completedExecution != managed_execution::Result::Ok) {
+        serial::puts("[NATIVE-ELF] managed execution completion failed result=");
+        serial::puts(managed_execution::resultName(completedExecution));
+        serial::putc('\n');
+    } else {
+        serial::puts("[MANAGED-EXECUTION] id=0x");
+        serial::put_hex64(executionHandle.runtimeId);
+        serial::puts(" generation=0x");
+        serial::put_hex32(executionHandle.generation);
+        serial::puts(" state=");
+        serial::puts(runtime.faulted ? "Faulted" : "Exited");
+        serial::puts(" hasExitStatus=");
+        serial::puts(runtime.faulted ? "no" : "yes");
+        if (!runtime.faulted) {
+            serial::puts(" exitStatus=0x");
+            serial::put_hex32(static_cast<uint32_t>(result));
+        } else {
+            serial::puts(" faultVector=0x");
+            serial::put_hex32(static_cast<uint32_t>(runtime.faultVector));
+            serial::puts(" faultErrorCode=0x");
+            serial::put_hex32(static_cast<uint32_t>(runtime.faultErrorCode));
+        }
+        serial::puts(" resourcesReleased=yes\n");
+    }
     log_runtime(&runtime, result == GX_OK ? "lifecycle PASS window/resource cleanup complete" : "lifecycle FAIL app-returned-error");
 #if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
     if (pacmanSmokePassed) {
@@ -2909,6 +2996,23 @@ bool queryLastLaunchAttribution(LaunchAttributionV1* output) {
     if (!output || s_lastLaunchAttribution.version != 1u) return false;
     *output = s_lastLaunchAttribution;
     return true;
+}
+
+managed_execution::Result queryExecutionInstance(
+    const managed_execution::Handle& handle,
+    managed_execution::SnapshotV1* output) {
+    return managed_execution::runtime().query(handle, output);
+}
+
+managed_execution::Result enumerateExecutionInstances(
+    managed_execution::SnapshotV1* output, size_t outputCapacity,
+    size_t* outputCount) {
+    return managed_execution::runtime().enumerate(output, outputCapacity, outputCount);
+}
+
+managed_execution::Result requestExecutionTermination(
+    const managed_execution::Handle& handle) {
+    return managed_execution::runtime().requestTermination(handle);
 }
 
 // Kernel slide base for audio DMA translation (see audio_virt_to_phys).
@@ -2983,6 +3087,22 @@ void log_apps_lifecycle_checkpoint(AppsLifecycleCheckpoint, bool, bool, uint32_t
 void discover() {}
 bool launch(const char*) { return false; }
 bool queryLastLaunchAttribution(LaunchAttributionV1*) { return false; }
+managed_execution::Result queryExecutionInstance(
+    const managed_execution::Handle&, managed_execution::SnapshotV1*) {
+    return managed_execution::Result::NotFound;
+}
+managed_execution::Result enumerateExecutionInstances(
+    managed_execution::SnapshotV1* output, size_t outputCapacity,
+    size_t* outputCount) {
+    if (!outputCount || (outputCapacity != 0u && !output))
+        return managed_execution::Result::InvalidArgument;
+    *outputCount = 0u;
+    return managed_execution::Result::Ok;
+}
+managed_execution::Result requestExecutionTermination(
+    const managed_execution::Handle&) {
+    return managed_execution::Result::TerminationUnsupported;
+}
 bool is_available(const char*) { return false; }
 const PackageInfo* lookup_package(const char*) { return nullptr; }
 const PackageInfo* registered_package(const char*) { return nullptr; }

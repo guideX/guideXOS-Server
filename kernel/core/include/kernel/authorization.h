@@ -25,7 +25,9 @@ enum class Operation : uint16_t {
     FilesystemModifyProtectedConfiguration,
     FilesystemModifyIdentityCredentialData,
     FilesystemAdministrativeChange,
-    ApplicationLaunchRestricted
+    ApplicationLaunchRestricted,
+    ProcessQuery,
+    ProcessTerminateOwn
 };
 
 enum class ContextKind : uint8_t {
@@ -104,6 +106,8 @@ inline bool validOperation(Operation operation)
         case Operation::ApplicationChangeTrustPolicy:
         case Operation::ApplicationRegisterSystemWide:
         case Operation::ApplicationLaunchRestricted:
+        case Operation::ProcessQuery:
+        case Operation::ProcessTerminateOwn:
         case Operation::ProcessTerminateOther:
         case Operation::ProcessPrivilegedManagement:
         case Operation::ProcessAccessProtectedControls:
@@ -140,8 +144,16 @@ inline DecisionResult evaluate(const SecurityContext& context,
             result.reason = Reason::AdministratorRole;
             return result;
         case ContextKind::AuthenticatedStandardUser:
+            if (operation == Operation::ProcessQuery &&
+                context.subject != identity::kInvalidUserId &&
+                context.subject == target) {
+                result.decision = Decision::Allowed;
+                result.reason = Reason::SelfService;
+                return result;
+            }
             if ((operation == Operation::AccountChangeOwnCredential ||
-                 operation == Operation::AccountEnrollCredential) &&
+                 operation == Operation::AccountEnrollCredential ||
+                 operation == Operation::ProcessTerminateOwn) &&
                 context.subject != identity::kInvalidUserId &&
                 context.subject == target) {
                 result.decision = Decision::Allowed;
@@ -150,10 +162,18 @@ inline DecisionResult evaluate(const SecurityContext& context,
             }
             result.decision = Decision::InsufficientPrivileges;
             result.reason = (operation == Operation::AccountChangeOwnCredential ||
-                operation == Operation::AccountEnrollCredential)
+                operation == Operation::AccountEnrollCredential ||
+                operation == Operation::ProcessTerminateOwn ||
+                operation == Operation::ProcessQuery)
                 ? Reason::TargetMismatch : Reason::RoleInsufficient;
             return result;
         case ContextKind::InteractiveUnassigned:
+            if (operation == Operation::ProcessQuery &&
+                target == identity::kInvalidUserId) {
+                result.decision = Decision::Allowed;
+                result.reason = Reason::SelfService;
+                return result;
+            }
             result.decision = Decision::NoAuthenticatedIdentity;
             result.reason = Reason::NoSession;
             return result;

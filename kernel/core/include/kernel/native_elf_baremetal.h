@@ -8,8 +8,10 @@
 #ifndef KERNEL_NATIVE_ELF_BAREMETAL_H
 #define KERNEL_NATIVE_ELF_BAREMETAL_H
 
+#include <stddef.h>
 #include <stdint.h>
 #include "kernel/application_execution_policy.h"
+#include "kernel/managed_execution.h"
 #include "kernel/native_elf_security_policy.h"
 
 namespace kernel {
@@ -97,6 +99,18 @@ bool launch(const char* appName);
 // fields are captured by the authentication runtime; this query cannot set
 // ownership and the session generation is not an authorization token.
 bool queryLastLaunchAttribution(LaunchAttributionV1* output);
+
+// Bounded value-snapshot interface for actual managed Native ELF execution
+// instances. These records are distinct from launch attribution and do not
+// imply independent scheduling or safe termination.
+managed_execution::Result queryExecutionInstance(
+    const managed_execution::Handle& handle,
+    managed_execution::SnapshotV1* output);
+managed_execution::Result enumerateExecutionInstances(
+    managed_execution::SnapshotV1* output, size_t outputCapacity,
+    size_t* outputCount);
+managed_execution::Result requestExecutionTermination(
+    const managed_execution::Handle& handle);
 
 // Whether a supported external NativeElf package was discovered.
 bool is_available(const char* appName);
