@@ -298,20 +298,31 @@ class CooperativeDiagnosticFrontierTests(unittest.TestCase):
 
     def test_setup_return_requires_saved_target_and_reached_continuation(self) -> None:
         breakpoints = (
+            (0x10A2D0, "ia64_coop_probe_setup entry"),
+            (0x10A300, "return from ia64_coop_set_nat8"),
             (0x10AB48, "setup final br.ret"),
             (0x10AE30, "setup caller continuation"),
         )
         samples = [
-            {"ip": 0x10AB48, "iip": 0x10AB40, "instructions": 10},
-            {"ip": 0x10AE30, "iip": 0x10AE30, "instructions": 11},
+            {"ip": 0x10A2D0, "iip": 0x10A2D0, "instructions": 8},
+            {"ip": 0x10A300, "iip": 0x10A300, "instructions": 20},
+            {"ip": 0x10AB48, "iip": 0x10AB40, "instructions": 30},
+            {"ip": 0x10AE30, "iip": 0x10AE30, "instructions": 31},
         ]
-        correct = [{"instructions": 10, "registers": {"b0": 0x10AE30}}]
+        correct = [
+            {"instructions": 8, "registers": {"b0": 0x10AE30, "pfs": 0x123456}},
+            {"instructions": 20, "registers": {
+                "b0": 0x10A300, "r32": 0x123456, "r33": 0x10AE30}},
+            {"instructions": 30, "registers": {"b0": 0x10AE30, "pfs": 0x123456}},
+        ]
         evidence = diagnostic.analyze_runtime_frontiers(
-            samples, correct, breakpoints, 0x10AE30)
+            samples, correct, breakpoints, 0x10AE30, 0x10A300)
         self.assertTrue(evidence["setup_return"]["verified"])
-        wrong = [{"instructions": 10, "registers": {"b0": 0x10A300}}]
+        wrong = list(correct)
+        wrong[1] = {"instructions": 20, "registers": {
+            "b0": 0x10A300, "r32": 0x123456, "r33": 0x10A300}}
         evidence = diagnostic.analyze_runtime_frontiers(
-            samples, wrong, breakpoints, 0x10AE30)
+            samples, wrong, breakpoints, 0x10AE30, 0x10A300)
         self.assertFalse(evidence["setup_return"]["verified"])
 
 

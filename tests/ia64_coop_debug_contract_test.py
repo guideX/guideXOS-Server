@@ -208,7 +208,8 @@ class DebuggerInitializationFailureTests(unittest.TestCase):
         self.assertIsNotNone(result)
         assert result is not None
         self.assertEqual(result["failure_class"], "SIMULATOR_OBSERVATION_LIMITATION")
-        self.assertEqual(result["breakpoints_requested"], 16)
+        self.assertEqual(result["breakpoint_set_commands"], 16)
+        self.assertEqual(result["unique_breakpoint_targets"], 16)
         self.assertEqual(result["guest_instructions_executed"], 0)
         self.assertEqual(result["failure_frontier"],
                          "ELF entry before first guest instruction")
@@ -216,105 +217,185 @@ class DebuggerInitializationFailureTests(unittest.TestCase):
             "", commands, samples, 0x108000))
 
 
-class CommandFileContractTests(unittest.TestCase):
-    def test_command_file_has_finite_staged_steps_and_exit_guards(self) -> None:
-        symbols = {
-            "ivt": 0x100000,
-            "text": [0x108000, 0x10E1D0],
-            "context_a": 0x112600,
-            "context_b": 0x112200,
-            "probe_record": 0x112000,
-            "switch_entry": 0x10CF90,
-            "context_b_first_entry": 0x10AE90,
-            "frontiers": {
-                "setup_entry": 0x10A2D0,
-                "setup_call": 0x10A2D8,
-                "setup_nested_return": 0x10A2E0,
-                "setup_exit": 0x10AB48,
-                "setup_caller_return": 0x10AE00,
-                "switch_entry": 0x10CF90,
-                "context_a_save": 0x10DC84,
-                "rbs_handoff": 0x10DE14,
-                "context_b_first": 0x10AE90,
-                "context_a_resume_first": 0x10B220,
-                "context_b_resume_second": 0x10C820,
-                "context_a_resume_final": 0x10B900,
-                "context_a_final_exit": 0x10B910,
-                "context_b_unexpected_resume": 0x10CF50,
-                "switch_return": 0x10E198,
-            },
-        }
-        text = diagnostic.make_command_file(Path("/tmp/coop-debug"), symbols)
-        diagnostic.validate_command_file(text)
-        self.assertNotRegex(text, r"(?im)^\s*(run|cont(?:inue)?|go)(?:\s|$)")
-        self.assertEqual(text.splitlines()[-1], "quit")
-        self.assertIn("eval psr rsc bsp bspst rnat unat pfs sp gp b0 r32 r33 r42 r43", text)
-        self.assertEqual(sum(line.startswith("bs ") for line in text.splitlines()), 9)
+class InstalledBreakpointListTests(unittest.TestCase):
+    def test_bl_output_captures_real_slot_numbers_modes_and_addresses(self) -> None:
+        text = """   #    Address                   Command
+   0  P 000000000010a2d0  IA-64
+   1  P 000000000010a300  IA-64
+   2  P 000000000010ab78  IA-64
+   3  P 000000000010ae30  IA-64
+   4  P 000000000010cfc0  IA-64
+   5  P 000000000010de44  IA-64
+   6  P 000000000010aec0  IA-64
+   7  P 000000000010b250  IA-64
+"""
+        installed = diagnostic.parse_installed_program_breakpoints(text)
+        self.assertEqual([item["number"] for item in installed], list(range(8)))
+        self.assertEqual([item["address"] for item in installed], [
+            0x10A2D0, 0x10A300, 0x10AB78, 0x10AE30,
+            0x10CFC0, 0x10DE44, 0x10AEC0, 0x10B250,
+        ])
+        self.assertTrue(all(item["address_mode"] == "physical" and
+                            item["address_exact"] and
+                            item["architecture"] == "IA-64" for item in installed))
+        comparison = diagnostic.compare_installed_program_breakpoints(
+            installed,
+            [0x10A2D0, 0x10A300, 0x10AB78, 0x10AE30,
+             0x10CFC0, 0x10DE44, 0x10AEC0, 0x10B250],
+            8)
+        self.assertEqual(comparison, {
+            "count_matches": True,
+            "slots_match": True,
+            "addresses_match": True,
+            "matches_plan": True,
+        })
 
-    def test_command_file_rejects_breakpoint_plan_over_ski_capacity(self) -> None:
-        symbols = {
+    def test_bl_output_preserves_symbolized_truncated_locations(self) -> None:
+        text = """   #    Address                   Command
+   0  P ia64_coop_probe* IA-64
+   1  P ia64_coop_setup* IA-64
+   2  P ia64_coop_*+0018 IA-64
+   3  P ia64_coop_probe* IA-64
+   4  P ia64_coop_conte* IA-64
+   5  P ia64_coop_*+0e84 IA-64
+   6  P ia64_coop_b_fir* IA-64
+   7  P ia64_coop_a_res* IA-64
+"""
+        installed = diagnostic.parse_installed_program_breakpoints(text)
+        self.assertEqual([item["number"] for item in installed], list(range(8)))
+        self.assertEqual([item["location"] for item in installed], [
+            "ia64_coop_probe*", "ia64_coop_setup*", "ia64_coop_*+0018",
+            "ia64_coop_probe*", "ia64_coop_conte*", "ia64_coop_*+0e84",
+            "ia64_coop_b_fir*", "ia64_coop_a_res*",
+        ])
+        self.assertTrue(all(item["address"] is None and not item["address_exact"]
+                            for item in installed))
+        comparison = diagnostic.compare_installed_program_breakpoints(
+            installed, [0x10A2D0, 0x10A300, 0x10AB78, 0x10AE30,
+                        0x10CFC0, 0x10DE44, 0x10AEC0, 0x10B250], 8)
+        self.assertEqual(comparison, {
+            "count_matches": True,
+            "slots_match": True,
+            "addresses_match": None,
+            "matches_plan": True,
+        })
+
+    def test_non_program_breakpoint_output_is_not_counted(self) -> None:
+        self.assertEqual(diagnostic.parse_installed_program_breakpoints(
+            "No breakpoints set\nData breakpoint #0 at 0x112200\n"), [])
+
+
+class CommandFileContractTests(unittest.TestCase):
+    @staticmethod
+    def symbols() -> dict[str, object]:
+        return {
             "ivt": 0x100000,
-            "text": [0x108000, 0x10E1D0],
+            "text": [0x108000, 0x10E200],
             "context_a": 0x112600,
             "context_b": 0x112200,
             "probe_record": 0x112000,
-            "switch_entry": 0x10CF90,
-            "context_b_first_entry": 0x10AE90,
+            "switch_entry": 0x10CFC0,
+            "context_b_first_entry": 0x10AEC0,
             "frontiers": {
                 "setup_entry": 0x10A2D0,
-                "setup_call": 0x10A2D8,
-                "setup_nested_return": 0x10A2E0,
-                "setup_exit": 0x10AB48,
-                "setup_caller_return": 0x10AE00,
-                "switch_entry": 0x10CF90,
-                "context_a_save": 0x10DC84,
-                "rbs_handoff": 0x10DE14,
-                "context_b_first": 0x10AE90,
-                "context_a_resume_first": 0x10B220,
-                "context_b_resume_second": 0x10C820,
-                "context_a_resume_final": 0x10B900,
-                "context_a_final_exit": 0x10B910,
+                "setup_call": 0x10A2F8,
+                "setup_nested_return": 0x10A300,
+                "setup_exit": 0x10AB78,
+                "setup_caller_return": 0x10AE30,
+                "switch_entry": 0x10CFC0,
+                "context_a_save": 0x10DCB4,
+                "rbs_handoff": 0x10DE44,
+                "context_b_first": 0x10AEC0,
+                "context_a_resume_first": 0x10B250,
+                "context_b_resume_second": 0x10C850,
+                "context_a_resume_final": 0x10B930,
+                "context_a_final_exit": 0x10C060,
                 "context_b_unexpected_resume": 0x10CF50,
-                "switch_return": 0x10E198,
+                "switch_return": 0x10E1C8,
             },
         }
+
+    def test_eight_unique_breakpoints_pass_and_capture_the_installed_list(self) -> None:
+        symbols = self.symbols()
+        frontiers = symbols["frontiers"]
         text = diagnostic.make_command_file(Path("/tmp/coop-debug"), symbols)
-        overloaded = text.replace("step 64\n", "bs 0x108010\nstep 64\n", 1)
-        with self.assertRaisesRegex(diagnostic.DiagnosticError, "capacity of 9"):
-            diagnostic.validate_command_file(overloaded)
+        plan = diagnostic.validate_command_file(
+            text, RANGES, diagnostic.cooperative_breakpoints(frontiers))
+        self.assertEqual(plan["breakpoint_set_commands"], 8)
+        self.assertEqual(plan["maximum_simultaneous_programmed"], 8)
+        self.assertEqual(plan["unused_slots_at_peak"], 2)
+        self.assertEqual(sum(line.startswith("bs ") for line in text.splitlines()), 8)
+        self.assertIn("bl\nstep 64", text)
+        self.assertIn("eval psr rsc bsp bspst rnat unat pfs sp gp b0 r32 r33 r42 r43", text)
+        self.assertEqual(text.splitlines()[-1], "quit")
+
+    def test_actual_ia64_5ar5_sixteen_address_plan_fails_host_preflight(self) -> None:
+        # Exact addresses from the preserved IA64-5AR5 command file; all 16
+        # resolve to distinct Ski program-breakpoint slots.
+        old_addresses = (
+            0x1080C8, 0x10A2D0, 0x10A2F8, 0x10A300,
+            0x10AB78, 0x10AE30, 0x10CFC0, 0x10DCB4,
+            0x10DE44, 0x10AEC0, 0x10B250, 0x10C850,
+            0x10B930, 0x10C060, 0x10CF50, 0x10E1C8,
+        )
+        original = diagnostic.collect_breakpoint_targets(
+            "\n".join(f"bs 0x{address:x}" for address in old_addresses))
+        self.assertEqual(original["breakpoint_set_commands"], 16)
+        self.assertEqual(original["unique_breakpoint_targets"], 16)
+
+        base = diagnostic.make_command_file(Path("/tmp/coop-debug"), self.symbols())
+        lines = [line for line in base.splitlines() if not line.startswith("bs ")]
+        insertion = lines.index("bl")
+        lines[insertion:insertion] = [f"bs 0x{address:x}" for address in old_addresses]
+        reproduced = "\n".join(lines) + "\n"
+        with self.assertRaisesRegex(diagnostic.DiagnosticError, "limit of 8"):
+            diagnostic.validate_command_file(reproduced, RANGES)
+
+    def test_equivalent_address_alias_does_not_consume_another_slot(self) -> None:
+        symbols = self.symbols()
+        expected = diagnostic.cooperative_breakpoints(symbols["frontiers"])
+        base = diagnostic.make_command_file(Path("/tmp/coop-debug"), symbols)
+        aliased = base.replace("bs 0x10a2d0\n", "bs 0x10a2d0\nbs 0x10a2d1\n", 1)
+        plan = diagnostic.validate_command_file(aliased, RANGES, expected)
+        self.assertEqual(plan["breakpoint_set_commands"], 9)
+        self.assertEqual(plan["unique_breakpoint_targets"], 8)
+        self.assertEqual(plan["duplicate_or_equivalent_addresses"], [
+            {"command_address": 0x10A2D1, "resolved_address": 0x10A2D0}])
+
+    def test_breakpoint_addresses_must_be_resolved_in_range_and_valid_slots(self) -> None:
+        base = diagnostic.make_command_file(Path("/tmp/coop-debug"), self.symbols())
+        invalid_cases = (
+            ("bs 0x10a2d0", "bs ia64_coop_probe_setup"),
+            ("bs 0x10a2d0", "bs 0x10a2dc"),
+            ("bs 0x10a2d0", "bs 0x200000"),
+            ("bs 0x10a2d0", "bs 0x10a2d4"),
+        )
+        messages = ("resolved numeric addresses", "illegal IA-64 slot", "outside", "frontiers")
+        for (old, replacement), message in zip(invalid_cases, messages):
+            with self.subTest(replacement=replacement), self.assertRaisesRegex(
+                    diagnostic.DiagnosticError, message):
+                diagnostic.validate_command_file(
+                    base.replace(old, replacement, 1), RANGES,
+                    diagnostic.cooperative_breakpoints(self.symbols()["frontiers"]))
 
     def test_command_file_rejects_unbounded_or_missing_quit(self) -> None:
-        symbols = {
-            "ivt": 0x100000,
-            "text": [0x108000, 0x10E1D0],
-            "context_a": 0x112600,
-            "context_b": 0x112200,
-            "probe_record": 0x112000,
-            "switch_entry": 0x10CF90,
-            "context_b_first_entry": 0x10AE90,
-            "frontiers": {
-                "setup_entry": 0x10A2D0,
-                "setup_call": 0x10A2D8,
-                "setup_nested_return": 0x10A2E0,
-                "setup_exit": 0x10AB48,
-                "setup_caller_return": 0x10AE00,
-                "switch_entry": 0x10CF90,
-                "context_a_save": 0x10DC84,
-                "rbs_handoff": 0x10DE14,
-                "context_b_first": 0x10AE90,
-                "context_a_resume_first": 0x10B220,
-                "context_b_resume_second": 0x10C820,
-                "context_a_resume_final": 0x10B900,
-                "context_a_final_exit": 0x10B910,
-                "context_b_unexpected_resume": 0x10CF50,
-                "switch_return": 0x10E198,
-            },
-        }
-        text = diagnostic.make_command_file(Path("/tmp/coop-debug"), symbols)
+        text = diagnostic.make_command_file(Path("/tmp/coop-debug"), self.symbols())
         with self.assertRaises(diagnostic.DiagnosticError):
             diagnostic.validate_command_file(text.replace("step 64", "run", 1))
         with self.assertRaises(diagnostic.DiagnosticError):
             diagnostic.validate_command_file(text.removesuffix("quit\n"))
+        with self.assertRaisesRegex(diagnostic.DiagnosticError, "installed breakpoints"):
+            diagnostic.validate_command_file(text.replace("bl\n", "", 1))
+        with self.assertRaisesRegex(diagnostic.DiagnosticError, "dynamic breakpoint"):
+            diagnostic.validate_command_file(text.replace("bl\n", "bd 0\nbl\n", 1))
+
+    def test_only_supported_debugger_commands_and_expressions_are_accepted(self) -> None:
+        text = diagnostic.make_command_file(Path("/tmp/coop-debug"), self.symbols())
+        with self.assertRaisesRegex(diagnostic.DiagnosticError, "unsupported.*command"):
+            diagnostic.validate_command_file(text.replace("bl\n", "xyz\nbl\n", 1))
+        with self.assertRaisesRegex(diagnostic.DiagnosticError, "unresolved/unsupported"):
+            diagnostic.validate_command_file(text.replace("eval ip+0 $insts$",
+                                                          "eval unknown_symbol", 1))
 
 
 if __name__ == "__main__":

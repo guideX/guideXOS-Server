@@ -22,19 +22,22 @@ MANIFEST = PROBE.with_name("ia64-cooperative-context-probe.manifest.json")
 KERNEL = Path("/home/guidex/src/ia64-4g-stacked-nat-rse-kernel-20261111-r3/bin/kernel.elf")
 SKI_PREFIX = Path("/home/guidex/opt/ski-dfc2902")
 OBJDUMP = Path("/home/guidex/src/ia64-2-toolchain-shim/ia64-linux-objdump")
-CAPTURE = Path("/home/guidex/src/ia64-5ar5-coop-instruction-diagnostic-20261114-r1")
+CAPTURE = Path("/home/guidex/src/ia64-5ar6-coop-breakpoint-safe-qualification-20261114-r1")
 
 EXPECTED_PROBE_SHA256 = "ae0fc8fc49e576f37d8d6bf7d9846d0b293603ca7b9d15467afc81730992c74f"
 EXPECTED_MANIFEST_SHA256 = "1dbebf04c3be50909316024fec69e67b1410d55c33a0cf9f17dac3b1c8475585"
 EXPECTED_KERNEL_SHA256 = "ab13fabb6a92ebe039afa2afd9729f6f6ceb2529b63be2b47b0c87cf264d960c"
 EXPECTED_SKI_SHA256 = "ff6b19cb87dbf2db39cda4478d0e49995c9a5ec9ddd05aac83191f4ba1e40b45"
 
-PRE_SSC_BUDGET = 64
-SSC_INSTRUCTION_BUDGET = 1
+MAX_SIMULTANEOUS_PROGRAM_BREAKPOINTS = 8
+SKI_PROGRAM_BREAKPOINT_CAPACITY = 10
+INITIAL_STEP_BUDGET = 64
+INITIAL_FOLLOWUP_STEP_BUDGET = 1
 STEP_QUANTUM = 512
 STEP_QUANTA = 469
 SUPPORTED_INSTRUCTION_BUDGET = STEP_QUANTUM * STEP_QUANTA
-MAX_STEPPED_INSTRUCTIONS = PRE_SSC_BUDGET + SSC_INSTRUCTION_BUDGET + SUPPORTED_INSTRUCTION_BUDGET
+MAX_STEPPED_INSTRUCTIONS = (
+    INITIAL_STEP_BUDGET + INITIAL_FOLLOWUP_STEP_BUDGET + SUPPORTED_INSTRUCTION_BUDGET)
 MAX_WALL_SECONDS = 30
 CPU_SOFT_SECONDS = 20
 CPU_HARD_SECONDS = 22
@@ -86,7 +89,7 @@ def validate_instruction_budget(value: int) -> int:
     if value != SUPPORTED_INSTRUCTION_BUDGET:
         raise DiagnosticError(
             f"unsupported instruction budget {value}; this command file is fixed at "
-            f"{SUPPORTED_INSTRUCTION_BUDGET} post-SSC instructions in "
+            f"{SUPPORTED_INSTRUCTION_BUDGET} post-startup instructions in "
             f"{STEP_QUANTA} quanta of {STEP_QUANTUM}"
         )
     return value
@@ -161,6 +164,59 @@ def parse_eval_register_samples(stderr_text: str) -> list[dict[str, Any]]:
             state[key] = int(raw, 16)
         observations.append({"instructions": int(match.group(1)), "registers": state})
     return observations
+
+
+def parse_installed_program_breakpoints(stderr_text: str) -> list[dict[str, Any]]:
+    """Read Ski's `bl` rows, retaining symbolic or truncated locations."""
+    pattern = re.compile(
+        r"^\s*(?P<number>[0-9]+)\s+(?P<mode>[PV])\s+"
+        r"(?P<location>\S+)\s+IA-64(?:\s|$)")
+    entries = []
+    for line in stderr_text.splitlines():
+        match = pattern.match(line)
+        if match is None:
+            continue
+        location = match.group("location")
+        address_exact = re.fullmatch(r"[0-9a-fA-F]{1,16}", location) is not None
+        entries.append({
+            "number": int(match.group("number")),
+            "address_mode": "physical" if match.group("mode") == "P" else "virtual",
+            "location": location,
+            "address": int(location, 16) if address_exact else None,
+            "address_exact": address_exact,
+            "architecture": "IA-64",
+        })
+    return entries
+
+
+def compare_installed_program_breakpoints(
+        entries: list[dict[str, Any]], expected_addresses: list[int],
+        expected_count: int) -> dict[str, bool | None]:
+    """Compare Ski's list with a statically preflighted command plan.
+
+    When Ski abbreviates symbol names, the listing still proves that the
+    expected number of program slots was allocated. Exact addresses remain
+    inconclusive; the validated command file supplies that address binding.
+    """
+    ids = {item["number"] for item in entries}
+    count_matches = len(entries) == expected_count and len(ids) == len(entries)
+    slots_match = (
+        count_matches and ids == set(range(expected_count)) and
+        all(item["address_mode"] == "physical" for item in entries)
+    )
+    addresses = [item["address"] for item in entries]
+    if not slots_match:
+        addresses_match: bool | None = False
+    elif any(address is None for address in addresses):
+        addresses_match = None
+    else:
+        addresses_match = set(addresses) == set(expected_addresses)
+    return {
+        "count_matches": count_matches,
+        "slots_match": slots_match,
+        "addresses_match": addresses_match,
+        "matches_plan": slots_match and addresses_match is not False,
+    }
 
 
 def parse_dd_words(text: str, expected_base: int, expected_size: int) -> list[int]:
@@ -387,7 +443,8 @@ def classify_setup_return_cycle(samples: list[dict[str, int]],
 def analyze_runtime_frontiers(samples: list[dict[str, int]],
                               register_states: list[dict[str, Any]],
                               breakpoints: tuple[tuple[int, str], ...],
-                              expected_setup_return: int) -> dict[str, Any]:
+                              expected_setup_return: int,
+                              expected_setup_nested_return: int | None = None) -> dict[str, Any]:
     observations = {
         label: [sample for sample in samples if sample["ip"] == address]
         for address, label in breakpoints
@@ -395,13 +452,38 @@ def analyze_runtime_frontiers(samples: list[dict[str, int]],
     registers_by_count = {item["instructions"]: item.get("registers", {})
                           for item in register_states}
     setup_exit = observations.get("setup final br.ret", [])
-    setup_b0 = None
-    if setup_exit:
-        setup_b0 = registers_by_count.get(setup_exit[0]["instructions"], {}).get("b0")
+    entry_hits = observations.get("ia64_coop_probe_setup entry", [])
+    nested_hits = observations.get("return from ia64_coop_set_nat8", [])
+    entry_registers = (registers_by_count.get(entry_hits[0]["instructions"], {})
+                       if entry_hits else {})
+    nested_registers = (registers_by_count.get(nested_hits[0]["instructions"], {})
+                        if nested_hits else {})
+    exit_registers = (registers_by_count.get(setup_exit[0]["instructions"], {})
+                      if setup_exit else {})
+    entry_b0 = entry_registers.get("b0")
+    entry_pfs = entry_registers.get("pfs")
+    nested_b0 = nested_registers.get("b0")
+    saved_pfs = nested_registers.get("r32")
+    saved_b0 = nested_registers.get("r33")
+    setup_b0 = exit_registers.get("b0")
+    setup_pfs = exit_registers.get("pfs")
     caller_hits = observations.get("setup caller continuation", [])
     returned_at_caller = bool(setup_exit and any(
         hit["instructions"] > setup_exit[0]["instructions"] for hit in caller_hits))
-    setup_return_verified = setup_b0 == expected_setup_return and returned_at_caller
+    checks = {
+        "setup_entry_observed": bool(entry_hits),
+        "incoming_b0_is_caller_continuation": entry_b0 == expected_setup_return,
+        "nested_return_observed": bool(nested_hits),
+        "nested_call_b0_is_its_continuation": (
+            expected_setup_nested_return is None or nested_b0 == expected_setup_nested_return),
+        "saved_pfs_matches_setup_entry": entry_pfs is not None and saved_pfs == entry_pfs,
+        "saved_b0_matches_setup_entry": entry_b0 is not None and saved_b0 == entry_b0,
+        "setup_exit_observed": bool(setup_exit),
+        "restored_b0_is_caller_continuation": setup_b0 == expected_setup_return,
+        "restored_pfs_matches_setup_entry": entry_pfs is not None and setup_pfs == entry_pfs,
+        "caller_continuation_observed_after_br_ret": returned_at_caller,
+    }
+    setup_return_verified = all(checks.values())
     observed_breakpoints = [
         {"label": label, "instructions": max(item["instructions"] for item in hits)}
         for label, hits in observations.items() if hits
@@ -411,8 +493,15 @@ def analyze_runtime_frontiers(samples: list[dict[str, int]],
     return {
         "breakpoint_observations": observations,
         "setup_return": {
+            "checks": checks,
+            "incoming_b0_at_setup_entry": entry_b0,
+            "incoming_pfs_at_setup_entry": entry_pfs,
+            "nested_b0_at_helper_return": nested_b0,
+            "saved_incoming_pfs_r32_at_helper_return": saved_pfs,
+            "saved_incoming_b0_r33_at_helper_return": saved_b0,
             "setup_exit_hit": bool(setup_exit),
             "b0_at_setup_br_ret": setup_b0,
+            "pfs_at_setup_br_ret": setup_pfs,
             "expected_caller_continuation": expected_setup_return,
             "caller_continuation_hit_after_br_ret": returned_at_caller,
             "verified": setup_return_verified,
@@ -441,13 +530,12 @@ def analyze_debugger_initialization(stderr_text: str, command_text: str,
                                    elf_entry: int) -> dict[str, Any] | None:
     if "All breakpoints in use" not in stderr_text:
         return None
-    requested = sum(line.strip().startswith("bs ")
-                    for line in command_text.splitlines())
+    plan = collect_breakpoint_targets(command_text)
     initial_sample = samples[0] if samples else None
     return {
         "failure_class": "SIMULATOR_OBSERVATION_LIMITATION",
         "reason": "Ski reported 'All breakpoints in use' while installing the debugger plan",
-        "breakpoints_requested": requested,
+        **plan,
         "elf_entry": elf_entry,
         "guest_instructions_executed": (
             initial_sample["instructions"] if initial_sample is not None else None),
@@ -479,15 +567,14 @@ def _format_eval_and_snapshot(lines: list[str], index: int, label: str,
 
 def cooperative_breakpoints(frontiers: dict[str, int]) -> tuple[tuple[int, str], ...]:
     return (
-        (0x1080C8, "SSC_CONSOLE_INIT break.i slot 2"),
         (frontiers["setup_entry"], "ia64_coop_probe_setup entry"),
         (frontiers["setup_nested_return"], "return from ia64_coop_set_nat8"),
         (frontiers["setup_exit"], "setup final br.ret"),
         (frontiers["setup_caller_return"], "setup caller continuation"),
         (frontiers["switch_entry"], "first switch entry"),
-        (frontiers["context_a_save"], "first context save flushrs"),
         (frontiers["rbs_handoff"], "incoming ar.bspstore handoff"),
         (frontiers["context_b_first"], "Context B first-entry bootstrap"),
+        (frontiers["context_a_resume_first"], "return to Context A"),
     )
 
 
@@ -500,18 +587,16 @@ def make_command_file(root: Path, symbols: dict[str, Any],
     text_start, text_end = symbols["text"]
     ivt = symbols["ivt"]
     breakpoints = cooperative_breakpoints(symbols["frontiers"])
-    for address, label in breakpoints:
-        if address & 3 or not (ivt <= address < 0x108000 or text_start <= address < text_end):
-            raise DiagnosticError(f"breakpoint {label} is outside aligned IVT/text: {address:#x}")
     lines = ["eval ip+0 $insts$",
              f"rd {root / 'registers' / '0000-initial.txt'}"]
     lines.extend(f"bs 0x{address:x}" for address, _ in breakpoints)
-    lines.append(f"step {PRE_SSC_BUDGET}")
-    _format_eval_and_snapshot(lines, 1, "ssc-frontier", root,
+    lines.append("bl")
+    lines.append(f"step {INITIAL_STEP_BUDGET}")
+    _format_eval_and_snapshot(lines, 1, "startup-frontier", root,
                               symbols["context_a"], symbols["context_b"],
                               symbols["probe_record"])
-    lines.append(f"step {SSC_INSTRUCTION_BUDGET}")
-    _format_eval_and_snapshot(lines, 2, "ssc-returned", root,
+    lines.append(f"step {INITIAL_FOLLOWUP_STEP_BUDGET}")
+    _format_eval_and_snapshot(lines, 2, "startup-followup", root,
                               symbols["context_a"], symbols["context_b"],
                               symbols["probe_record"])
     for quantum in range(1, STEP_QUANTA + 1):
@@ -520,13 +605,124 @@ def make_command_file(root: Path, symbols: dict[str, Any],
                                   symbols["context_a"], symbols["context_b"],
                                   symbols["probe_record"])
     lines.append("quit")
-    validate_command_file("\n".join(lines) + "\n")
+    validate_command_file(
+        "\n".join(lines) + "\n",
+        valid_ranges=((ivt, 0x108000), (text_start, text_end)),
+        expected_breakpoints=breakpoints,
+        load_ranges=tuple(symbols.get("load_ranges", ())),
+    )
     return "\n".join(lines) + "\n"
 
 
-def validate_command_file(command_text: str) -> None:
+def collect_breakpoint_targets(command_text: str) -> dict[str, Any]:
+    """Resolve IA-64 breakpoint aliases using Ski's low-two-bit slot rule."""
     commands = [line.strip() for line in command_text.splitlines() if line.strip()]
-    steps = [line for line in commands if line.startswith("step ")]
+    raw_addresses: list[int] = []
+    for line in commands:
+        if not line.startswith("bs "):
+            continue
+        match = re.fullmatch(r"bs (0[xX][0-9a-fA-F]+)", line)
+        if match is None:
+            continue
+        raw_addresses.append(int(match.group(1), 16))
+    canonical = [address & ~0x3 for address in raw_addresses]
+    unique = sorted(set(canonical))
+    return {
+        "breakpoint_set_commands": len(raw_addresses),
+        "unique_breakpoint_targets": len(unique),
+        "duplicate_or_equivalent_addresses": [
+            {"command_address": raw, "resolved_address": resolved}
+            for index, (raw, resolved) in enumerate(zip(raw_addresses, canonical))
+            if resolved in canonical[:index]
+        ],
+        "resolved_breakpoint_addresses": unique,
+    }
+
+
+def _validate_breakpoint_address(raw_address: int,
+                                 valid_ranges: tuple[tuple[int, int], ...]) -> int:
+    if raw_address < 0 or raw_address >= (1 << 64):
+        raise DiagnosticError(f"breakpoint address is outside the 64-bit range: {raw_address}")
+    address = raw_address & ~0x3
+    slot_field = address & 0xF
+    if slot_field not in (0, 4, 8):
+        raise DiagnosticError(
+            f"breakpoint address has an illegal IA-64 slot field: {raw_address:#x}")
+    bundle = address & ~0xF
+    if valid_ranges and not any(start <= bundle < end for start, end in valid_ranges):
+        raise DiagnosticError(
+            f"breakpoint address is outside the candidate ELF IVT/text: {raw_address:#x}")
+    return address
+
+
+def _validate_memory_dump(start: int, end: int, load_ranges: tuple[tuple[int, int], ...],
+                          path: str) -> None:
+    if start < 0 or end < start or end >= (1 << 64):
+        raise DiagnosticError(f"invalid debugger memory-dump range: {start:#x}..{end:#x}")
+    if load_ranges and not any(region_start <= start <= end < region_end
+                               for region_start, region_end in load_ranges):
+        raise DiagnosticError(
+            f"debugger memory dump is outside candidate ELF load ranges: {path}")
+
+
+def validate_command_file(command_text: str,
+                          valid_ranges: tuple[tuple[int, int], ...] = (),
+                          expected_breakpoints: tuple[tuple[int, str], ...] | None = None,
+                          load_ranges: tuple[tuple[int, int], ...] = ()) -> dict[str, Any]:
+    try:
+        command_text.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise DiagnosticError("Ski debugger command file must be ASCII") from exc
+    if "\r" in command_text or "\0" in command_text:
+        raise DiagnosticError("Ski debugger command file contains an invalid control character")
+    commands = [line.strip() for line in command_text.splitlines() if line.strip()]
+    if not commands:
+        raise DiagnosticError("Ski debugger command file is empty")
+
+    allowed_eval = {
+        "eval ip+0 $insts$",
+        "eval psr rsc bsp bspst rnat unat pfs sp gp b0 r32 r33 r42 r43",
+    }
+    steps: list[str] = []
+    breakpoint_addresses: list[int] = []
+    breakpoint_line_indexes: list[int] = []
+    bl_line_indexes: list[int] = []
+    checkpoint_guards = 0
+    for index, line in enumerate(commands):
+        if line.startswith("eval "):
+            if line not in allowed_eval:
+                raise DiagnosticError(f"debugger eval contains an unresolved/unsupported expression: {line}")
+        elif line.startswith("rd "):
+            if re.fullmatch(r"rd \S+", line) is None:
+                raise DiagnosticError(f"malformed Ski register-dump command: {line}")
+        elif line.startswith("dd "):
+            match = re.fullmatch(r"dd (0[xX][0-9a-fA-F]+) (0[xX][0-9a-fA-F]+) (\S+)", line)
+            if match is None:
+                raise DiagnosticError(f"malformed Ski memory-dump command: {line}")
+            _validate_memory_dump(int(match.group(1), 16), int(match.group(2), 16),
+                                  load_ranges, match.group(3))
+        elif line.startswith("bs "):
+            match = re.fullmatch(r"bs (0[xX][0-9a-fA-F]+)", line)
+            if match is None:
+                raise DiagnosticError(f"breakpoints must use resolved numeric addresses: {line}")
+            breakpoint_addresses.append(_validate_breakpoint_address(
+                int(match.group(1), 16), valid_ranges))
+            breakpoint_line_indexes.append(index)
+        elif line == "bl":
+            bl_line_indexes.append(index)
+        elif line.startswith("step "):
+            steps.append(line)
+        elif line == "if $exited$ quit":
+            checkpoint_guards += 1
+        elif line in ("bD",) or line.startswith("bd "):
+            raise DiagnosticError(
+                "dynamic breakpoint replacement is not used by this static debugger plan")
+        elif line == "quit":
+            pass
+        else:
+            command = line.split(None, 1)[0]
+            raise DiagnosticError(f"unsupported or malformed Ski debugger command: {command}")
+
     if len(steps) != STEP_QUANTA + 2:
         raise DiagnosticError("command file does not contain the fixed staged step count")
     step_counts: list[int] = []
@@ -535,21 +731,48 @@ def validate_command_file(command_text: str) -> None:
         if match is None:
             raise DiagnosticError(f"command file contains a non-finite step command: {line}")
         step_counts.append(int(match.group(1)))
-    if step_counts[:2] != [PRE_SSC_BUDGET, SSC_INSTRUCTION_BUDGET] or \
+    if step_counts[:2] != [INITIAL_STEP_BUDGET, INITIAL_FOLLOWUP_STEP_BUDGET] or \
             step_counts[2:] != [STEP_QUANTUM] * STEP_QUANTA or \
             sum(step_counts) != MAX_STEPPED_INSTRUCTIONS:
         raise DiagnosticError("command file step totals do not match the fixed instruction budget")
-    lowered = [line.lower() for line in commands]
-    if any(re.match(r"^(run|cont(?:inue)?|go)(?:\s|$)", line) for line in lowered):
-        raise DiagnosticError("unbounded run/continue command is prohibited")
-    breakpoint_count = sum(line.startswith("bs ") for line in commands)
-    if breakpoint_count > 9:
-        raise DiagnosticError(
-            f"Ski breakpoint plan exceeds the demonstrated capacity of 9: {breakpoint_count}")
     if commands[-1] != "quit":
         raise DiagnosticError("command file must end with clean quit")
-    if commands.count("if $exited$ quit") != STEP_QUANTA + 2:
+    if commands.count("quit") != 1:
+        raise DiagnosticError("command file must contain exactly one final quit")
+    if checkpoint_guards != STEP_QUANTA + 2:
         raise DiagnosticError("each stepped checkpoint must guard guest exit")
+    if len(bl_line_indexes) != 1 or not breakpoint_line_indexes or \
+            bl_line_indexes[0] <= breakpoint_line_indexes[-1] or \
+            bl_line_indexes[0] >= commands.index(steps[0]):
+        raise DiagnosticError(
+            "command file must list installed breakpoints after setup and before guest stepping")
+
+    plan = collect_breakpoint_targets(command_text)
+    if plan["unique_breakpoint_targets"] > MAX_SIMULTANEOUS_PROGRAM_BREAKPOINTS:
+        raise DiagnosticError(
+            "Ski breakpoint plan exceeds the conservative limit of "
+            f"{MAX_SIMULTANEOUS_PROGRAM_BREAKPOINTS} simultaneously active program breakpoints: "
+            f"{plan['unique_breakpoint_targets']} unique targets from "
+            f"{plan['breakpoint_set_commands']} set commands")
+    if expected_breakpoints is not None:
+        expected = sorted({
+            _validate_breakpoint_address(address, valid_ranges)
+            for address, _ in expected_breakpoints
+        })
+        if plan["resolved_breakpoint_addresses"] != expected:
+            raise DiagnosticError(
+                "debugger breakpoint targets do not match the expected ELF disassembly frontiers")
+    plan.update({
+        "maximum_simultaneous_programmed": plan["unique_breakpoint_targets"],
+        "ski_source_capacity": SKI_PROGRAM_BREAKPOINT_CAPACITY,
+        "conservative_capacity": MAX_SIMULTANEOUS_PROGRAM_BREAKPOINTS,
+        "unused_slots_at_peak": max(
+            0, SKI_PROGRAM_BREAKPOINT_CAPACITY - plan["unique_breakpoint_targets"]),
+        "finite_step_commands": len(step_counts),
+        "maximum_stepped_instructions": sum(step_counts),
+        "bounded_execution": True,
+    })
+    return plan
 
 
 def preflight(args: argparse.Namespace) -> tuple[Any, Path, dict[str, Any], dict[str, Any]]:
@@ -571,7 +794,7 @@ def preflight(args: argparse.Namespace) -> tuple[Any, Path, dict[str, Any], dict
         if actual != expected:
             raise DiagnosticError(f"{label} identity mismatch: {actual}")
     if args.expected_sha256 != EXPECTED_PROBE_SHA256:
-        raise DiagnosticError("this diagnostic is pinned to the unmodified IA64-5AR3 probe")
+        raise DiagnosticError("this diagnostic is pinned to the repaired IA64-5AR5 probe")
     if args.simulator_sha256 != EXPECTED_SKI_SHA256:
         raise DiagnosticError("this diagnostic is pinned to the qualified Ski 1.5.1 executable")
     if sha256(args.manifest) != EXPECTED_MANIFEST_SHA256:
@@ -582,6 +805,8 @@ def preflight(args: argparse.Namespace) -> tuple[Any, Path, dict[str, Any], dict
     simulator = runner.verify_ski(args.ski_prefix, args.simulator_sha256)
     elf = runner.ELF_VALIDATOR.Elf64(args.artifact)
     symbols = dict(symbols)
+    symbols["load_ranges"] = tuple((region["start"], region["end"])
+                                   for region in load_ranges)
     symbols["switch_entry"] = elf.symbols["ia64_coop_context_switch"]["value"]
     symbols["context_b_first_entry"] = elf.symbols["ia64_coop_b_first_entry"]["value"]
     symbols["probe_record"] = elf.symbols["ia64_coop_probe_record"]["value"]
@@ -660,11 +885,131 @@ def run_no_guest_parser_smoke(runner: Any, simulator: Path, root: Path) -> dict[
     if len(progress) != 1 or len(register_states) != 1 or \
             not required_registers <= register_states[0]["registers"].keys():
         raise DiagnosticError("pinned bskinc eval syntax did not return the required raw registers")
+    breakpoint_smoke = run_no_guest_breakpoint_smokes(runner, simulator, smoke_root)
     return {"runner_status": status, "simulator_exit_code": result.get("exit_code"),
             "classification": result.get("classification"),
             "command_sha256": sha256(command_file),
             "capture": str(smoke_root), "initial_progress": progress[0],
-            "register_evaluation": register_states[0]}
+            "register_evaluation": register_states[0],
+            "program_breakpoint_capacity_smoke": breakpoint_smoke}
+
+
+def run_no_guest_breakpoint_smokes(runner: Any, simulator: Path,
+                                   smoke_root: Path) -> dict[str, Any]:
+    """Exercise breakpoint allocation and errors with no guest ELF loaded."""
+    management_root = smoke_root / "breakpoint-management"
+    management_root.mkdir()
+    management_file = management_root / "commands.txt"
+    management_commands = ["bl", "bs 0x108000", "bs 0x108001"]
+    management_commands.extend(f"bs 0x{0x108000 + index * 0x10:x}"
+                               for index in range(1, SKI_PROGRAM_BREAKPOINT_CAPACITY))
+    management_commands.extend(("bl", "bd 4", "bs 0x1080a0", "bl", "bD", "bl", "quit"))
+    management_text = "\n".join(management_commands) + "\n"
+    management_file.write_text(management_text, encoding="ascii", newline="\n")
+    if re.search(r"(?im)^\s*(run|cont(?:inue)?|go|step)(?:\s|$)", management_text):
+        raise DiagnosticError("breakpoint management smoke must not execute a guest")
+    management_capture = management_root / "simulator"
+    runner.run_simulator(
+        [str(simulator), "-noconsole", "-forcesystem", "-i", str(management_file)],
+        8, management_capture, "ia64-coop-breakpoint-management-no-guest-smoke",
+        resource_limits={"address_space_bytes": ADDRESS_SPACE_BYTES,
+                         "cpu_soft_seconds": 5, "cpu_hard_seconds": 6},
+        stdin_pty=True,
+    )
+    management_result = runner.read_json(
+        management_capture / "run-result.json", "breakpoint management smoke result")
+    management_log = "\n".join(
+        (management_capture / name).read_text(encoding="utf-8", errors="replace")
+        for name in ("stdout.log", "stderr.log"))
+    required_management_output = (
+        "No breakpoints set", "Breakpoint already set at that location",
+        "Breakpoint #4", "deleted", "All breakpoints deleted",
+    )
+    if management_result.get("exit_code") != 0 or management_result.get("timed_out") or \
+            management_result.get("cleanup_complete") is not True or \
+            management_result.get("process_group_cleanup_complete") is not True or \
+            management_result.get("pty_stdin_observation", {}).get("passed") is not True or \
+            any(message not in management_log for message in required_management_output):
+        raise DiagnosticError(
+            "pinned Ski no-guest breakpoint listing, duplicate, delete, or reuse smoke failed")
+    rows = re.findall(r"(?m)^\s*(\d+)\s+[PV]\s+.*?IA-64", management_log)
+    if len(rows) < 20 or set(map(int, rows[:10])) != set(range(10)):
+        raise DiagnosticError(
+            "pinned Ski breakpoint list did not show slots 0 through 9 before and after reuse")
+
+    capacity_root = smoke_root / "breakpoint-capacity"
+    capacity_root.mkdir()
+    capacity_file = capacity_root / "commands.txt"
+    capacity_text = "\n".join(
+        [f"bs 0x{0x108000 + index * 0x10:x}"
+         for index in range(SKI_PROGRAM_BREAKPOINT_CAPACITY + 1)]
+    ) + "\n"
+    capacity_file.write_text(capacity_text, encoding="ascii", newline="\n")
+    if re.search(r"(?im)^\s*(run|cont(?:inue)?|go|step)(?:\s|$)", capacity_text):
+        raise DiagnosticError("breakpoint capacity smoke must not execute a guest")
+    capacity_capture = capacity_root / "simulator"
+    runner.run_simulator(
+        [str(simulator), "-noconsole", "-forcesystem", "-i", str(capacity_file)],
+        8, capacity_capture, "ia64-coop-breakpoint-capacity-no-guest-smoke",
+        resource_limits={"address_space_bytes": ADDRESS_SPACE_BYTES,
+                         "cpu_soft_seconds": 5, "cpu_hard_seconds": 6},
+        stdin_pty=True,
+    )
+    capacity_result = runner.read_json(
+        capacity_capture / "run-result.json", "breakpoint capacity smoke result")
+    capacity_log = "\n".join(
+        (capacity_capture / name).read_text(encoding="utf-8", errors="replace")
+        for name in ("stdout.log", "stderr.log"))
+    if "All breakpoints in use" not in capacity_log or \
+            capacity_result.get("exit_code") == 0 or capacity_result.get("timed_out") or \
+            capacity_result.get("cleanup_complete") is not True or \
+            capacity_result.get("process_group_cleanup_complete") is not True:
+        raise DiagnosticError(
+            "pinned Ski did not reject the 11th distinct program breakpoint before execution")
+
+    slot_root = smoke_root / "breakpoint-slot-validation"
+    slot_root.mkdir()
+    slot_file = slot_root / "commands.txt"
+    slot_text = "bs 0x10800c\n"
+    slot_file.write_text(slot_text, encoding="ascii", newline="\n")
+    slot_capture = slot_root / "simulator"
+    runner.run_simulator(
+        [str(simulator), "-noconsole", "-forcesystem", "-i", str(slot_file)],
+        8, slot_capture, "ia64-coop-breakpoint-slot-no-guest-smoke",
+        resource_limits={"address_space_bytes": ADDRESS_SPACE_BYTES,
+                         "cpu_soft_seconds": 5, "cpu_hard_seconds": 6},
+        stdin_pty=True,
+    )
+    slot_result = runner.read_json(slot_capture / "run-result.json", "breakpoint slot smoke result")
+    slot_log = "\n".join(
+        (slot_capture / name).read_text(encoding="utf-8", errors="replace")
+        for name in ("stdout.log", "stderr.log"))
+    if "Illegal slot field in breakpoint address" not in slot_log or \
+            slot_result.get("exit_code") == 0 or slot_result.get("timed_out") or \
+            slot_result.get("cleanup_complete") is not True or \
+            slot_result.get("process_group_cleanup_complete") is not True:
+        raise DiagnosticError("pinned Ski did not reject IA-64 slot 3 in the no-guest smoke")
+
+    return {
+        "program_breakpoint_capacity": SKI_PROGRAM_BREAKPOINT_CAPACITY,
+        "management_command_sha256": sha256(management_file),
+        "management_capture": str(management_capture),
+        "management_exit_code": management_result.get("exit_code"),
+        "management_breakpoint_list_rows": len(rows),
+        "management_slot_numbers_observed": sorted(set(map(int, rows))),
+        "duplicate_alias_warning_observed": True,
+        "bd_delete_and_lowest_slot_reuse_observed": True,
+        "bD_delete_all_observed": True,
+        "capacity_command_sha256": sha256(capacity_file),
+        "capacity_capture": str(capacity_capture),
+        "capacity_exit_code": capacity_result.get("exit_code"),
+        "eleventh_unique_breakpoint_rejected": True,
+        "invalid_slot_command_sha256": sha256(slot_file),
+        "invalid_slot_capture": str(slot_capture),
+        "slot_three_rejected": True,
+        "guest_elf_loaded": False,
+        "guest_instructions_executed": 0,
+    }
 
 
 def validate_smoke_command_file(command_text: str) -> None:
@@ -699,6 +1044,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         runner, simulator, symbols, elf_facts = preflight(args)
         command_text = make_command_file(args.capture_dir, symbols, args.instruction_budget)
+        debugger_plan = validate_command_file(
+            command_text,
+            valid_ranges=((symbols["ivt"], 0x108000), tuple(symbols["text"])),
+            expected_breakpoints=cooperative_breakpoints(symbols["frontiers"]),
+            load_ranges=symbols["load_ranges"],
+        )
         if args.preflight_only:
             print(json.dumps({"preflight": "PASS", "simulator": str(simulator),
                               "simulator_sha256": args.simulator_sha256,
@@ -713,15 +1064,19 @@ def main(argv: list[str] | None = None) -> int:
                               "context_a_save_instruction": symbols["switch_flushrs"],
                               "incoming_bspstore_instruction": symbols["switch_bspstore"],
                               "switch_return_instruction": symbols["switch_return"],
+                              "breakpoint_plan": debugger_plan,
+                              "command_file_sha256": hashlib.sha256(
+                                  command_text.encode("ascii")).hexdigest(),
                               "step_quanta": STEP_QUANTA,
                               "step_quantum": STEP_QUANTUM,
-                              "post_ssc_instruction_budget": args.instruction_budget,
+                              "post_startup_instruction_budget": args.instruction_budget,
                               "maximum_guest_instructions": MAX_STEPPED_INSTRUCTIONS},
                              sort_keys=True))
             return 0
         if args.no_guest_parser_smoke_only:
             args.capture_dir.mkdir(parents=True, exist_ok=False)
             smoke = run_no_guest_parser_smoke(runner, simulator, args.capture_dir)
+            write_json_new(args.capture_dir / "no-guest-parser-smoke-summary.json", smoke)
             print(json.dumps({"no_guest_parser_smoke": "PASS", **smoke}, sort_keys=True))
             return 0
         if not args.authorize_one_diagnostic_guest_execution:
@@ -740,12 +1095,13 @@ def main(argv: list[str] | None = None) -> int:
             "manifest_sha256": EXPECTED_MANIFEST_SHA256,
             "simulator_sha256": args.simulator_sha256,
             "command_file_sha256": sha256(command_file),
+            "breakpoint_plan": debugger_plan,
             "no_guest_parser_smoke": smoke,
-            "pre_ssc_steps": PRE_SSC_BUDGET,
-            "ssc_step": SSC_INSTRUCTION_BUDGET,
+            "initial_startup_step": INITIAL_STEP_BUDGET,
+            "initial_followup_step": INITIAL_FOLLOWUP_STEP_BUDGET,
             "quantum": STEP_QUANTUM,
             "quanta": STEP_QUANTA,
-            "post_ssc_budget": args.instruction_budget,
+            "post_startup_budget": args.instruction_budget,
             "maximum_guest_instructions": MAX_STEPPED_INSTRUCTIONS,
             "wall_limit_seconds": MAX_WALL_SECONDS,
             "cpu_soft_seconds": CPU_SOFT_SECONDS,
@@ -788,6 +1144,18 @@ def main(argv: list[str] | None = None) -> int:
         except DiagnosticError as exc:
             register_states = []
             register_state_error = str(exc)
+        installed_breakpoints = parse_installed_program_breakpoints(stderr_text)
+        installed_breakpoint_comparison = compare_installed_program_breakpoints(
+            installed_breakpoints, debugger_plan["resolved_breakpoint_addresses"],
+            debugger_plan["unique_breakpoint_targets"])
+        installed_breakpoint_count_matches_plan = installed_breakpoint_comparison[
+            "count_matches"]
+        installed_breakpoint_slots_match_plan = installed_breakpoint_comparison[
+            "slots_match"]
+        installed_breakpoint_addresses_match_plan = installed_breakpoint_comparison[
+            "addresses_match"]
+        installed_breakpoints_match_plan = installed_breakpoint_comparison[
+            "matches_plan"]
         sample_files = sorted((args.capture_dir / "registers").glob("*.txt"))
         freshness_error: str | None = None
         try:
@@ -800,11 +1168,12 @@ def main(argv: list[str] | None = None) -> int:
         breakpoints = cooperative_breakpoints(symbols["frontiers"])
         runtime_frontiers = analyze_runtime_frontiers(
             samples, register_states, breakpoints,
-            symbols["probe_after_setup"])
+            symbols["probe_after_setup"],
+            symbols["frontiers"]["setup_nested_return"])
         debugger_initialization = analyze_debugger_initialization(
             stderr_text, command_text, samples, elf_facts["elf_entry"])
         analysis = {
-            "outcome": "IA64_COOPERATIVE_REQUALIFICATION_BLOCKED",
+            "outcome": "IA64_COOPERATIVE_DEBUGGER_BLOCKED",
             "probe_sha256": args.expected_sha256,
             "manifest_sha256": EXPECTED_MANIFEST_SHA256,
             "simulator_sha256": args.simulator_sha256,
@@ -814,13 +1183,19 @@ def main(argv: list[str] | None = None) -> int:
             "guest_execution_count": 1,
             "kernel_execution_count": 0,
             "instruction_budget": {
-                "pre_ssc_step": PRE_SSC_BUDGET,
-                "ssc_instruction": SSC_INSTRUCTION_BUDGET,
+                "initial_startup_step": INITIAL_STEP_BUDGET,
+                "initial_followup_step": INITIAL_FOLLOWUP_STEP_BUDGET,
                 "quantum": STEP_QUANTUM,
                 "quanta": STEP_QUANTA,
-                "post_ssc_maximum": args.instruction_budget,
+                "post_startup_maximum": args.instruction_budget,
                 "absolute_maximum": MAX_STEPPED_INSTRUCTIONS,
             },
+            "breakpoint_plan": debugger_plan,
+            "installed_program_breakpoints": installed_breakpoints,
+            "installed_breakpoint_count_matches_plan": installed_breakpoint_count_matches_plan,
+            "installed_breakpoint_slots_match_plan": installed_breakpoint_slots_match_plan,
+            "installed_breakpoint_addresses_match_plan": installed_breakpoint_addresses_match_plan,
+            "installed_breakpoints_match_plan": installed_breakpoints_match_plan,
             "debugger_frontiers": {
                 key: {"ski_ip": value, "objdump_address": symbols.get(raw_key)}
                 for key, value, raw_key in (
@@ -887,12 +1262,13 @@ def main(argv: list[str] | None = None) -> int:
             debugger_initialization["failure_frontier"]
             if debugger_initialization is not None else
             runtime_frontiers["furthest_proven_frontier"])
-        if output_valid and intentional_exit:
+        if output_valid and intentional_exit and installed_breakpoints_match_plan:
             analysis["outcome"] = "IA64_COOPERATIVE_PROBE_QUALIFIED"
-        elif runtime_frontiers["setup_return"]["verified"]:
+        elif runtime_frontiers["setup_return"]["verified"] or any(
+                sample["instructions"] > 0 for sample in samples):
             analysis["outcome"] = "IA64_COOPERATIVE_FRONTIER_ADVANCED"
         else:
-            analysis["outcome"] = "IA64_COOPERATIVE_REQUALIFICATION_BLOCKED"
+            analysis["outcome"] = "IA64_COOPERATIVE_DEBUGGER_BLOCKED"
         write_json_new(args.capture_dir / "analysis.json", analysis)
         print(json.dumps({"analysis": str(args.capture_dir / "analysis.json"),
                           "outcome": analysis["outcome"],
