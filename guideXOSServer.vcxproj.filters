@@ -624,6 +624,9 @@
     <ClInclude Include="navigator_javascript\navigator_script_host.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="navigator_javascript\object_storage.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="navigator_javascript\parser.h">
       <Filter>Header Files</Filter>
     </ClInclude>

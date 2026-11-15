@@ -166,7 +166,7 @@ $metadata = [pscustomobject]@{
         environmentRecord = 24
         binding = 40
         portableCallFrame = 72
-        portableExecutionCore = 296
+        portableExecutionCore = 304
     }
     recordAlignments = [pscustomobject]@{
         value = 8

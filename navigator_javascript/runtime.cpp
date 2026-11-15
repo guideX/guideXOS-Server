@@ -5667,6 +5667,26 @@ RuntimeErrorCode RuntimeContext::mapPortableExecutionError(
         return RuntimeErrorCode::AllocationFailure;
     case PortableExecutionErrorCode::IllegalReturn:
         return RuntimeErrorCode::IllegalReturn;
+    case PortableExecutionErrorCode::PropertyCapacityExhausted:
+        return RuntimeErrorCode::PropertyLimitExceeded;
+    case PortableExecutionErrorCode::ObjectCapacityExhausted:
+        return RuntimeErrorCode::ObjectLimitExceeded;
+    case PortableExecutionErrorCode::ArrayCapacityExhausted:
+        return RuntimeErrorCode::ArrayLimitExceeded;
+    case PortableExecutionErrorCode::InvalidObjectReference:
+        return RuntimeErrorCode::NotObject;
+    case PortableExecutionErrorCode::StaleObjectReference:
+        return RuntimeErrorCode::StaleObjectReference;
+    case PortableExecutionErrorCode::InvalidPropertyReference:
+        return RuntimeErrorCode::InvalidPropertyKey;
+    case PortableExecutionErrorCode::PropertyNameTooLong:
+        return RuntimeErrorCode::PropertyNameTooLong;
+    case PortableExecutionErrorCode::InvalidArrayIndex:
+        return RuntimeErrorCode::ArrayIndexOutOfRange;
+    case PortableExecutionErrorCode::InvalidArrayLength:
+        return RuntimeErrorCode::InvalidArrayLength;
+    case PortableExecutionErrorCode::PrototypeDepthExceeded:
+        return RuntimeErrorCode::PrototypeChainExceeded;
     }
     return RuntimeErrorCode::InvalidAstState;
 }
@@ -8083,6 +8103,8 @@ const char* runtimeErrorCodeName(RuntimeErrorCode code)
         return "TooManyArguments";
     case RuntimeErrorCode::PortableCapacityExceeded:
         return "PortableCapacityExceeded";
+    case RuntimeErrorCode::StaleObjectReference:
+        return "StaleObjectReference";
     case RuntimeErrorCode::DocumentLookupLimitExceeded:
         return "DocumentLookupLimitExceeded";
     case RuntimeErrorCode::DocumentTextLimitExceeded:

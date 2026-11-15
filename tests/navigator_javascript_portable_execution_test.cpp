@@ -18,6 +18,10 @@ constexpr std::size_t kTestStringBytes = 256u * 1024u;
 constexpr std::size_t kTestFunctionCapacity = 4096u;
 constexpr std::size_t kTestFrameCapacity = 64u;
 constexpr std::size_t kTestArgumentCapacity = 512u;
+constexpr std::size_t kTestObjectCapacity = 1024u;
+constexpr std::size_t kTestPropertyCapacity = 4096u;
+constexpr std::size_t kTestArrayElementCapacity = 4096u;
+constexpr std::size_t kTestPropertyNameBytes = 256u * 1024u;
 
 Token tokenStorage[kDefaultMaxJavaScriptTokens];
 AstNode astNodeStorage[kDefaultMaxJavaScriptAstNodes];
@@ -32,6 +36,11 @@ char stringStorage[kTestStringBytes];
 FunctionRecord functionStorage[kTestFunctionCapacity];
 PortableCallFrame callFrameStorage[kTestFrameCapacity];
 Value argumentStorage[kTestArgumentCapacity];
+PortableObjectRecord objectRecordStorage[kTestObjectCapacity];
+PortablePropertyRecord portablePropertyStorage[kTestPropertyCapacity];
+PortableArrayElementRecord portableArrayElementStorage[
+    kTestArrayElementCapacity];
+char portablePropertyNameStorage[kTestPropertyNameBytes];
 
 Token secondaryTokenStorage[128u];
 AstNode secondaryAstNodes[256u];
@@ -48,6 +57,10 @@ struct UsageHighWater {
     std::size_t stringValues = 0u;
     std::size_t stringBytes = 0u;
     std::size_t functions = 0u;
+    std::size_t objects = 0u;
+    std::size_t properties = 0u;
+    std::size_t propertyNameBytes = 0u;
+    std::size_t arrayElements = 0u;
     std::size_t callDepth = 0u;
     std::size_t argumentValues = 0u;
 } usageHighWater;
@@ -77,6 +90,7 @@ struct TestOptions {
     std::size_t functionCapacity = kTestFunctionCapacity;
     std::size_t frameCapacity = kTestFrameCapacity;
     std::size_t argumentCapacity = kTestArgumentCapacity;
+    PortableObjectLimits objectLimits;
 };
 
 struct TestRun {
@@ -88,11 +102,13 @@ struct TestRun {
     EnvironmentStore environments;
     RuntimeStringStore strings;
     FunctionStore functions;
+    PortableObjectStore objects;
     EnvironmentId root = kInvalidEnvironmentId;
     PortableExecutionResult result;
     Value finalValue = Value::undefined();
     std::size_t steps = 0u;
     RuntimeGeneration generation = kInvalidRuntimeGeneration;
+    bool configured = false;
 
     TestRun() : ast(SourceView(), AstStorageView{astNodeStorage,
             kDefaultMaxJavaScriptAstNodes, astChildStorage,
@@ -138,22 +154,39 @@ struct TestRun {
                 options.functionCapacity == 0u ? nullptr : functionStorage,
                 options.functionCapacity}, generation, 0u, functionError))
             return false;
-        return environments.createRoot(EnvironmentLimits{256u, 256u}, root,
-            environmentError);
+        PortableObjectError objectError;
+        if (!objects.configure(PortableObjectStorageView{
+                options.objectLimits.maxObjects == 0u ? nullptr
+                    : objectRecordStorage,
+                options.objectLimits.maxObjects,
+                options.objectLimits.maxProperties == 0u ? nullptr
+                    : portablePropertyStorage,
+                options.objectLimits.maxProperties,
+                options.objectLimits.maxTotalArrayElements == 0u ? nullptr
+                    : portableArrayElementStorage,
+                options.objectLimits.maxTotalArrayElements,
+                options.objectLimits.maxPropertyNameBytes == 0u ? nullptr
+                    : portablePropertyNameStorage,
+                options.objectLimits.maxPropertyNameBytes},
+                options.objectLimits, generation, objectError)) return false;
+        if (!environments.createRoot(EnvironmentLimits{256u, 256u}, root,
+                environmentError)) return false;
+        configured = true;
+        return true;
     }
 
     bool execute(AstNodeId rootNode, const TestOptions& options,
         EnvironmentId environment = kInvalidEnvironmentId)
     {
-        if (!configure(options)) return false;
+        if (!configured && !configure(options)) return false;
         if (environment == kInvalidEnvironmentId) environment = root;
         const PortableExecutionStorageView storage{
             options.frameCapacity == 0u ? nullptr : callFrameStorage,
             options.frameCapacity,
             options.argumentCapacity == 0u ? nullptr : argumentStorage,
             options.argumentCapacity};
-        PortableExecutionCore core(ast, strings, environments, functions,
-            storage, options.limits, steps);
+        PortableObjectExecutionCore core(ast, strings, environments, functions,
+            objects, storage, options.limits, steps);
         succeeded = core.run(rootNode, environment, finalValue, result);
         if (environments.environmentCount() > usageHighWater.environments)
             usageHighWater.environments = environments.environmentCount();
@@ -165,6 +198,16 @@ struct TestRun {
             usageHighWater.stringBytes = strings.bytesUsed();
         if (functions.count() > usageHighWater.functions)
             usageHighWater.functions = functions.count();
+        if (objects.objectCount() > usageHighWater.objects)
+            usageHighWater.objects = objects.objectCount();
+        if (objects.propertyCount() > usageHighWater.properties)
+            usageHighWater.properties = objects.propertyCount();
+        if (objects.propertyNameBytesUsed() >
+                usageHighWater.propertyNameBytes)
+            usageHighWater.propertyNameBytes =
+                objects.propertyNameBytesUsed();
+        if (objects.arrayElementCount() > usageHighWater.arrayElements)
+            usageHighWater.arrayElements = objects.arrayElementCount();
         if (result.callDepthHighWater > usageHighWater.callDepth)
             usageHighWater.callDepth = result.callDepthHighWater;
         if (result.argumentValuesHighWater > usageHighWater.argumentValues)
@@ -374,6 +417,371 @@ void testFunctionsAndClosures()
         "argument scratch: capacity reported without truncation");
 }
 
+void testObjectsAndArrays()
+{
+    TestRun person;
+    check(executeSource(person,
+        "const person = { name: 'Navigator', version: 120 };"
+        " const result = person.version; result;"),
+        "object literal and named property: parse and execute");
+    check(isNumber(person.finalValue, 120.0),
+        "object literal and named property: reads version 120");
+    Value personValue;
+    bool found = false;
+    PortableObjectError objectError;
+    check(person.read("person", personValue) && personValue.isObject() &&
+            person.objects.getOwnProperty(personValue.objectId(),
+                SourceView("name", 4u), person.finalValue, found,
+                objectError) && found && person.finalValue.isString(),
+        "object property: copied property name and value handle retained");
+
+    TestRun write;
+    check(executeSource(write,
+        "const state = {}; state.value = 15; state.value;"),
+        "object property write: parse and execute");
+    check(isNumber(write.finalValue, 15.0),
+        "object property write: assignment result and later read");
+
+    TestRun array;
+    check(executeSource(array,
+        "const numbers = [4, 8, 12]; numbers[1] = 10;"
+        " numbers[0] + numbers[1] + numbers[2];"),
+        "Array literal and indexed mutation: parse and execute");
+    check(isNumber(array.finalValue, 26.0),
+        "Array literal and indexed mutation: result is 26");
+
+    TestRun interactions;
+    check(executeSource(interactions,
+        "const key = 'value'; const state = { value: 7 };"
+        " function read(target) { return target[key]; }"
+        " read(state);"),
+        "computed key and object argument: parse and execute");
+    check(isNumber(interactions.finalValue, 7.0),
+        "computed key and object argument: function reads same object");
+
+    TestRun closure;
+    check(executeSource(closure,
+        "function make() { const saved = { value: 9 };"
+        " return () => saved.value; } const reader = make(); reader();"),
+        "object captured by closure: parse and execute");
+    check(isNumber(closure.finalValue, 9.0),
+        "object captured by closure: identity survives creator return");
+
+    TestRun arrayArgument;
+    check(executeSource(arrayArgument,
+        "function second(items) { return items[1]; }"
+        " second([3, 5]);"),
+        "Array passed to function: parse and execute");
+    check(isNumber(arrayArgument.finalValue, 5.0),
+        "Array passed to function: indexed value is retained");
+
+    TestRun returnedObject;
+    check(executeSource(returnedObject,
+        "function makeObject() { return { value: 6 }; }"
+        " makeObject().value;"),
+        "function returning object: parse and execute");
+    check(isNumber(returnedObject.finalValue, 6.0),
+        "function returning object: member read uses returned identity");
+
+    TestRun returnedArray;
+    check(executeSource(returnedArray,
+        "function makeArray() { return [4, 5]; } makeArray()[1];"),
+        "function returning Array: parse and execute");
+    check(isNumber(returnedArray.finalValue, 5.0),
+        "function returning Array: computed read");
+
+    TestRun identity;
+    check(executeSource(identity,
+        "const first = {}; const second = first; first === second;"),
+        "object identity: parse and execute");
+    check(identity.finalValue.isBoolean() && identity.finalValue.booleanValue(),
+        "object identity: copied Values compare by handle");
+
+    TestRun safeProto;
+    check(executeSource(safeProto,
+        "const safe = { '__proto__': 5 }; safe.__proto__;"),
+        "__proto__ property: parse and execute as data");
+    check(isNumber(safeProto.finalValue, 5.0),
+        "__proto__ property: preserved as an own data property");
+
+    TestRun assignmentOrder;
+    check(executeSource(assignmentOrder,
+        "let order = 0; const target = {};"
+        " function receiver() { order = order * 10 + 1; return target; }"
+        " function key() { order = order * 10 + 2; return 0; }"
+        " function right() { order = order * 10 + 3; return 9; }"
+        " receiver()[key()] = right(); order;"),
+        "property assignment order: parse and execute");
+    check(isNumber(assignmentOrder.finalValue, 123.0),
+        "property assignment order: receiver and key evaluate once before RHS");
+
+    TestRun sparse;
+    check(executeSource(sparse,
+        "const values = []; values[2] = 9; values[1] = undefined;"
+        " const object = { '': 1, alpha: 2 }; object.alpha;"),
+        "sparse Array and empty key: parse and execute");
+    check(isNumber(sparse.finalValue, 2.0),
+        "empty key and insertion order: named value read");
+    Value valuesValue;
+    Value objectValue;
+    std::size_t arrayLength = 0u;
+    bool own0 = true;
+    bool own1 = false;
+    Value element;
+    check(sparse.read("values", valuesValue) && valuesValue.isObject() &&
+            sparse.objects.arrayLength(valuesValue.objectId(), arrayLength,
+                objectError) && arrayLength == 3u &&
+            sparse.objects.hasOwnArrayElement(valuesValue.objectId(), 0u,
+                own0, objectError) && !own0 &&
+            sparse.objects.getOwnArrayElement(valuesValue.objectId(), 1u,
+                element, own1, objectError) && own1 && element.isUndefined(),
+        "sparse Array: hole differs from explicit undefined and length is three");
+    PortablePropertyEntry arrayEntry;
+    check(sparse.objects.getOwnPropertyAt(valuesValue.objectId(), 0u,
+            arrayEntry, found, objectError) && found &&
+            arrayEntry.isArrayElement && arrayEntry.arrayIndex == 1u &&
+            sparse.objects.getOwnPropertyAt(valuesValue.objectId(), 1u,
+                arrayEntry, found, objectError) && found &&
+            arrayEntry.isArrayElement && arrayEntry.arrayIndex == 2u &&
+            sparse.objects.getOwnPropertyAt(valuesValue.objectId(), 2u,
+                arrayEntry, found, objectError) && found &&
+            arrayEntry.isArrayLength && arrayEntry.attributes == 0x01u,
+        "Array own-key enumeration: sorted indices precede non-enumerable length");
+    bool deleted = false;
+    check(sparse.objects.deleteArrayElement(valuesValue.objectId(), 2u,
+            deleted, objectError) && deleted &&
+            sparse.objects.arrayLength(valuesValue.objectId(), arrayLength,
+                objectError) && arrayLength == 3u &&
+            sparse.objects.hasOwnArrayElement(valuesValue.objectId(), 2u,
+                own0, objectError) && !own0,
+        "Array deletion: frees slot while preserving logical length");
+    check(sparse.objects.setArrayElement(valuesValue.objectId(), 2u,
+            Value::number(11.0), objectError) &&
+            sparse.objects.getOwnArrayElement(valuesValue.objectId(), 2u,
+                element, own0, objectError) && own0 &&
+            isNumber(element, 11.0),
+        "Array deletion: slot can be reassigned");
+    check(sparse.objects.setOwnProperty(valuesValue.objectId(),
+            SourceView("length", 6u), Value::number(1.0), objectError) &&
+            sparse.objects.arrayLength(valuesValue.objectId(), arrayLength,
+                objectError) && arrayLength == 1u &&
+            sparse.objects.setArrayLength(valuesValue.objectId(), 3u,
+                objectError) &&
+            sparse.objects.arrayLength(valuesValue.objectId(), arrayLength,
+                objectError) && arrayLength == 3u &&
+            sparse.objects.hasOwnArrayElement(valuesValue.objectId(), 1u,
+                own0, objectError) && !own0,
+        "Array length mutation: shrink deletes slots and expansion creates holes");
+
+    check(sparse.read("object", objectValue) && objectValue.isObject() &&
+            sparse.objects.hasOwnProperty(objectValue.objectId(),
+                SourceView("", 0u), found, objectError) && found &&
+            sparse.objects.deleteOwnProperty(objectValue.objectId(),
+                SourceView("", 0u), deleted, objectError) && deleted &&
+            sparse.objects.hasOwnProperty(objectValue.objectId(),
+                SourceView("", 0u), found, objectError) && !found,
+        "own-property existence and deletion: empty property name");
+    PortablePropertyEntry propertyEntry;
+    check(sparse.objects.getOwnPropertyAt(objectValue.objectId(), 0u,
+            propertyEntry, found, objectError) && found &&
+            propertyEntry.key.length == 5u &&
+            propertyEntry.key.data[0] == 'a' &&
+            propertyEntry.key.data[4] == 'a',
+        "property enumeration: deleting first entry preserves next name");
+
+    const std::size_t nameBytesBefore =
+        sparse.objects.propertyNameBytesUsed();
+    char temporaryName[] = {'r', 'e', 't', 'a', 'i', 'n'};
+    check(sparse.objects.setOwnProperty(objectValue.objectId(),
+            SourceView(temporaryName, sizeof(temporaryName)),
+            Value::number(13.0), objectError),
+        "property name ownership: insert from mutable source");
+    for (char& character : temporaryName) character = 'x';
+    check(sparse.objects.getOwnProperty(objectValue.objectId(),
+            SourceView("retain", 6u), element, found, objectError) && found &&
+            isNumber(element, 13.0) &&
+            sparse.objects.propertyNameBytesUsed() == nameBytesBefore + 6u,
+        "property name ownership: bytes survive source-buffer replacement");
+    char maximumName[256];
+    for (char& character : maximumName) character = 'n';
+    check(sparse.objects.setOwnProperty(objectValue.objectId(),
+            SourceView(maximumName, sizeof(maximumName)),
+            Value::number(1.0), objectError) &&
+            sparse.objects.getOwnProperty(objectValue.objectId(),
+                SourceView(maximumName, sizeof(maximumName)), element,
+                found, objectError) && found && isNumber(element, 1.0),
+        "property name limit: longest accepted name is copied and readable");
+
+    check(sparse.objects.setOwnProperty(objectValue.objectId(),
+            SourceView("locked", 6u), Value::number(1.0), objectError,
+            0x03u) &&
+            sparse.objects.deleteOwnProperty(objectValue.objectId(),
+                SourceView("locked", 6u), deleted, objectError) && !deleted,
+        "property deletion: non-configurable data stays own");
+    check(sparse.objects.setOwnProperty(objectValue.objectId(),
+            SourceView("retain", 6u), Value::number(14.0), objectError) &&
+            sparse.objects.getOwnProperty(objectValue.objectId(),
+                SourceView("retain", 6u), element, found, objectError) &&
+            found && isNumber(element, 14.0),
+        "duplicate property assignment: update preserves one owned key");
+    check(sparse.objects.setOwnProperty(objectValue.objectId(),
+            SourceView("explicitUndefined", 17u), Value::undefined(),
+            objectError) &&
+            sparse.objects.getOwnProperty(objectValue.objectId(),
+                SourceView("explicitUndefined", 17u), element, found,
+                objectError) && found && element.isUndefined() &&
+            sparse.objects.getOwnProperty(objectValue.objectId(),
+                SourceView("missing", 7u), element, found, objectError) &&
+            !found && element.isUndefined(),
+        "object lookup: missing differs from an own undefined value");
+
+    RuntimeObjectId prototype = kInvalidRuntimeObjectId;
+    RuntimeObjectId child = kInvalidRuntimeObjectId;
+    check(sparse.objects.createObject(kInvalidRuntimeObjectId, prototype,
+            objectError) &&
+            sparse.objects.setOwnProperty(prototype, SourceView("4", 1u),
+                Value::number(44.0), objectError) &&
+            sparse.objects.createObject(prototype, child, objectError) &&
+            sparse.objects.getProperty(child, SourceView("4", 1u), element,
+                found, objectError) && found && isNumber(element, 44.0) &&
+            sparse.objects.hasOwnProperty(child, SourceView("4", 1u), found,
+                objectError) && !found,
+        "prototype lookup: inherited numeric-looking key stays inherited");
+    check(!sparse.objects.setPrototype(prototype, child, objectError) &&
+            objectError.code == PortableObjectErrorCode::PrototypeCycle,
+        "prototype mutation: cycle rejected");
+
+    RuntimeObjectId ordered = kInvalidRuntimeObjectId;
+    check(sparse.objects.createObject(kInvalidRuntimeObjectId, ordered,
+            objectError) &&
+            sparse.objects.setOwnProperty(ordered, SourceView("10", 2u),
+                Value::number(10.0), objectError) &&
+            sparse.objects.setOwnProperty(ordered, SourceView("2", 1u),
+                Value::number(2.0), objectError) &&
+            sparse.objects.setOwnProperty(ordered, SourceView("name", 4u),
+                Value::number(1.0), objectError) &&
+            sparse.objects.getOwnPropertyAt(ordered, 0u, propertyEntry,
+                found, objectError) && found && propertyEntry.key.length == 1u &&
+            propertyEntry.key.data[0] == '2' &&
+            sparse.objects.getOwnPropertyAt(ordered, 1u, propertyEntry,
+                found, objectError) && found && propertyEntry.key.length == 2u &&
+            propertyEntry.key.data[0] == '1' &&
+            sparse.objects.getOwnPropertyAt(ordered, 2u, propertyEntry,
+                found, objectError) && found && propertyEntry.key.length == 4u &&
+            propertyEntry.key.data[0] == 'n',
+        "object own-key enumeration: integer keys sort before insertion-ordered names");
+
+    TestOptions propertyLimit;
+    propertyLimit.objectLimits.maxProperties = 1u;
+    propertyLimit.objectLimits.maxPropertiesPerObject = 1u;
+    TestRun exhaustedProperty;
+    check(executeSource(exhaustedProperty,
+            "let prior = 0; const limited = { first: (prior = 1), second: 2 };",
+            propertyLimit) &&
+            !exhaustedProperty.succeeded &&
+            exhaustedProperty.result.error.code ==
+                PortableExecutionErrorCode::PropertyCapacityExhausted,
+        "property capacity: explicit failure without truncation");
+    Value partialObject = Value::object(makeRuntimeHandle(
+        exhaustedProperty.generation, 0u));
+    Value partialFirst;
+    Value partialSecond;
+    bool partialFound = false;
+    check(readNumber(exhaustedProperty, "prior", 1.0) &&
+            exhaustedProperty.objects.getOwnProperty(partialObject.objectId(),
+                SourceView("first", 5u), partialFirst, partialFound,
+                objectError) && partialFound && isNumber(partialFirst, 1.0) &&
+            exhaustedProperty.objects.getOwnProperty(partialObject.objectId(),
+                SourceView("second", 6u), partialSecond, partialFound,
+                objectError) && !partialFound &&
+            exhaustedProperty.objects.propertyCount() == 1u,
+        "partial object literal: completed side effects and first property remain valid");
+
+    TestOptions nameLimit;
+    nameLimit.objectLimits.maxPropertyNameLength = 3u;
+    TestRun longPropertyName;
+    check(executeSource(longPropertyName,
+            "const named = { long: 1 };", nameLimit) &&
+            !longPropertyName.succeeded &&
+            longPropertyName.result.error.code ==
+                PortableExecutionErrorCode::PropertyNameTooLong,
+        "property-name limit: overlong key has an explicit error");
+
+    TestOptions nameStorageLimit;
+    nameStorageLimit.objectLimits.maxPropertyNameLength = 2u;
+    nameStorageLimit.objectLimits.maxPropertyNameBytes = 2u;
+    TestRun exhaustedNames;
+    check(executeSource(exhaustedNames,
+            "const named = { a: 1, bc: 2 };", nameStorageLimit) &&
+            !exhaustedNames.succeeded &&
+            exhaustedNames.result.error.code ==
+                PortableExecutionErrorCode::PropertyCapacityExhausted,
+        "property-name arena: total byte capacity is explicit");
+
+    TestOptions objectLimit;
+    objectLimit.objectLimits.maxObjects = 0u;
+    TestRun exhaustedObject;
+    check(executeSource(exhaustedObject,
+            "let prior = 0; const limited = { value: (prior = 1) };",
+            objectLimit) && !exhaustedObject.succeeded &&
+            exhaustedObject.result.error.code ==
+                PortableExecutionErrorCode::ObjectCapacityExhausted &&
+            readNumber(exhaustedObject, "prior", 0.0) &&
+            exhaustedObject.objects.objectCount() == 0u,
+        "object capacity: creation fails before property side effects");
+
+    TestOptions arrayLimit;
+    arrayLimit.objectLimits.maxArrayElements = 0u;
+    arrayLimit.objectLimits.maxTotalArrayElements = 0u;
+    TestRun exhaustedArray;
+    check(executeSource(exhaustedArray,
+            "let prior = 0; const limited = [(prior = 1)];", arrayLimit) &&
+            !exhaustedArray.succeeded &&
+            exhaustedArray.result.error.code ==
+                PortableExecutionErrorCode::ArrayCapacityExhausted &&
+            readNumber(exhaustedArray, "prior", 1.0),
+        "Array element capacity: explicit failure");
+    const RuntimeObjectId partialArray = makeRuntimeHandle(
+        exhaustedArray.generation, 0u);
+    std::size_t partialLength = 0u;
+    bool partialElement = true;
+    check(exhaustedArray.objects.arrayLength(partialArray, partialLength,
+            objectError) && partialLength == 1u &&
+            exhaustedArray.objects.hasOwnArrayElement(partialArray, 0u,
+                partialElement, objectError) && !partialElement,
+        "partial Array literal: logical length remains, failed slot is a hole");
+
+    TestRun badIndex;
+    check(executeSource(badIndex,
+            "const limited = []; limited[1024] = 1;"),
+        "Array index boundary: parser and store configure");
+    check(!badIndex.succeeded && badIndex.result.error.code ==
+            PortableExecutionErrorCode::InvalidArrayIndex,
+        "Array index boundary: out-of-range index rejected");
+
+    const RuntimeObjectId oldObject = objectValue.objectId();
+    check(sparse.objects.reset(static_cast<RuntimeGeneration>(
+                sparse.generation + 1u), objectError) &&
+            !sparse.objects.validObject(oldObject, objectError) &&
+            objectError.code == PortableObjectErrorCode::StaleGeneration,
+        "realm reset: stale object handle rejected");
+
+    TestRun repeated;
+    AstNodeId firstRoot = kInvalidAstNodeId;
+    check(repeated.parse("const persistent = { value: 10 };", firstRoot),
+        "same realm objects: first source parses");
+    TestOptions defaults;
+    check(repeated.execute(firstRoot, defaults) && repeated.succeeded,
+        "same realm objects: first source executes");
+    AstNodeId secondRoot = kInvalidAstNodeId;
+    check(repeated.parse("persistent.value = 17; persistent.value;",
+            secondRoot),
+        "same realm objects: second source parses");
+    check(repeated.execute(secondRoot, defaults) && repeated.succeeded &&
+            isNumber(repeated.finalValue, 17.0),
+        "same realm objects: mutation survives successive scripts");
+}
+
 void testBudgetsAndRecovery()
 {
     TestOptions stepLimit;
@@ -476,25 +884,35 @@ int main()
     testBindingsAndPrimitiveExpressions();
     testBindingErrorsAndCapacity();
     testFunctionsAndClosures();
+    testObjectsAndArrays();
     testBudgetsAndRecovery();
     testRealmResetStaleHandles();
     if (failureCount != 0u) {
-        std::printf("JS119 portable execution tests FAIL (%zu/%zu)\n",
+        std::printf("Portable execution tests FAIL (%zu/%zu)\n",
             failureCount, checkCount);
         return 1;
     }
     std::printf("Navigator JavaScript portable execution checks: %zu/%zu passed\n",
         checkCount, checkCount);
     std::printf("Value=%zu FunctionRecord=%zu EnvironmentRecord=%zu "
-        "Binding=%zu PortableCallFrame=%zu PortableExecutionCore=%zu\n",
+        "Binding=%zu ObjectRecord=%zu PropertyRecord=%zu "
+        "ArrayElementRecord=%zu PortableObjectStore=%zu "
+        "PortableCallFrame=%zu PortableObjectExecutionCore=%zu\n",
         sizeof(Value),
         sizeof(FunctionRecord), sizeof(EnvironmentRecord), sizeof(Binding),
-        sizeof(PortableCallFrame), sizeof(PortableExecutionCore));
+        sizeof(PortableObjectRecord), sizeof(PortablePropertyRecord),
+        sizeof(PortableArrayElementRecord), sizeof(PortableObjectStore),
+        sizeof(PortableCallFrame),
+        sizeof(PortableObjectExecutionCore));
     std::printf("Observed high-water: environments=%zu bindings=%zu strings=%zu "
         "stringBytes=%zu functions=%zu callDepth=%zu arguments=%zu\n",
         usageHighWater.environments, usageHighWater.bindings,
         usageHighWater.stringValues, usageHighWater.stringBytes,
         usageHighWater.functions, usageHighWater.callDepth,
         usageHighWater.argumentValues);
+    std::printf("Observed object high-water: objects=%zu properties=%zu "
+        "propertyNameBytes=%zu arrayElements=%zu\n",
+        usageHighWater.objects, usageHighWater.properties,
+        usageHighWater.propertyNameBytes, usageHighWater.arrayElements);
     return 0;
 }

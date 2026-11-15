@@ -12,7 +12,7 @@ static_assert(sizeof(EnvironmentRecord) == 24u,
 static_assert(sizeof(Binding) == 40u, "JS119 AMD64 binding size");
 static_assert(sizeof(PortableCallFrame) == 72u,
     "JS119 AMD64 portable call frame size");
-static_assert(sizeof(PortableExecutionCore) == 296u,
+static_assert(sizeof(PortableExecutionCore) == 304u,
     "JS119 AMD64 portable execution context size");
 static_assert(alignof(Value) == 8u, "JS119 AMD64 Value alignment");
 static_assert(alignof(FunctionRecord) == 8u,

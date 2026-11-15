@@ -86,6 +86,7 @@ enum class RuntimeErrorCode : std::uint8_t {
     SyntaxError,
     JsonNestingLimitExceeded,
     PortableCapacityExceeded,
+    StaleObjectReference,
 };
 
 struct RuntimeError {

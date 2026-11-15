@@ -3,6 +3,7 @@
 #include "ast.h"
 #include "environment.h"
 #include "function_storage.h"
+#include "object_storage.h"
 #include "runtime_string_storage.h"
 
 #include <cstddef>
@@ -35,6 +36,16 @@ enum class PortableExecutionErrorCode : std::uint8_t {
     CallDepthExhausted,
     AllocationFailure,
     IllegalReturn,
+    ObjectCapacityExhausted,
+    PropertyCapacityExhausted,
+    ArrayCapacityExhausted,
+    InvalidObjectReference,
+    StaleObjectReference,
+    InvalidPropertyReference,
+    PropertyNameTooLong,
+    InvalidArrayIndex,
+    InvalidArrayLength,
+    PrototypeDepthExceeded,
     InternalInvariantFailure,
 };
 
@@ -85,9 +96,10 @@ struct PortableExecutionStorageView {
 // consumes the same AST, Value, RuntimeStringStore and EnvironmentStore as
 // RuntimeContext. Persistent storage and invocation scratch are caller-owned;
 // this class never allocates and does not depend on the hosted runtime.
-class PortableExecutionCore {
+template <bool EnableObjectOperations>
+class PortableExecutionCoreImpl {
 public:
-    PortableExecutionCore(Ast& ast, RuntimeStringStore& strings,
+    PortableExecutionCoreImpl(Ast& ast, RuntimeStringStore& strings,
         EnvironmentStore& environments, FunctionStore& functions,
         PortableExecutionStorageView storage,
         PortableExecutionLimits limits, std::size_t& sharedExecutionSteps)
@@ -95,8 +107,23 @@ public:
           functions_(functions), storage_(storage), limits_(limits),
           sharedExecutionSteps_(sharedExecutionSteps) {}
 
+    PortableExecutionCoreImpl(Ast& ast, RuntimeStringStore& strings,
+        EnvironmentStore& environments, FunctionStore& functions,
+        PortableObjectStore& objects, PortableExecutionStorageView storage,
+        PortableExecutionLimits limits, std::size_t& sharedExecutionSteps)
+        : ast_(ast), strings_(strings), environments_(environments),
+          functions_(functions), objects_(&objects), storage_(storage),
+          limits_(limits), sharedExecutionSteps_(sharedExecutionSteps) {}
+
     static bool supports(const Ast& ast, AstNodeId root,
         std::size_t maxCallArguments, std::size_t maxAstDepth = 256u)
+    {
+        return supports(ast, root, maxCallArguments, maxAstDepth, false);
+    }
+
+    static bool supports(const Ast& ast, AstNodeId root,
+        std::size_t maxCallArguments, std::size_t maxAstDepth,
+        bool allowObjectsAndArrays)
     {
         if (!validNode(ast, root) || ast.node(root).kind != AstNodeKind::Program)
             return false;
@@ -116,7 +143,7 @@ public:
         // can be shared without changing its observable spelling.
         if (hasString && hasAddition) return false;
         return supportsStatement(ast, root, maxCallArguments, maxAstDepth, 0u,
-            true, false);
+            true, false, allowObjectsAndArrays);
     }
 
     bool run(AstNodeId root, EnvironmentId globalEnvironment,
@@ -129,6 +156,7 @@ public:
         if (strings_.generation() == kInvalidRuntimeGeneration ||
             !environments_.configured() ||
             !functions_.configured() ||
+            (objects_ != nullptr && !objects_->configured()) ||
             (storage_.frameCapacity != 0u && storage_.frames == nullptr) ||
             (storage_.argumentCapacity != 0u &&
                 storage_.argumentValues == nullptr)) {
@@ -137,7 +165,8 @@ public:
             return finish(result, finalValue);
         }
         if (!supports(ast_, root, limits_.maxCallArguments,
-                limits_.maxAstDepth)) {
+                limits_.maxAstDepth,
+                EnableObjectOperations && objects_ != nullptr)) {
             fail(PortableExecutionErrorCode::UnsupportedOperation,
                 validNode(ast_, root) ? ast_.node(root).location
                     : SourceLocation());
@@ -186,17 +215,19 @@ private:
 
     class EnvironmentRestore {
     public:
-        EnvironmentRestore(PortableExecutionCore& core, EnvironmentId previous)
+        EnvironmentRestore(PortableExecutionCoreImpl& core,
+            EnvironmentId previous)
             : core_(core), previous_(previous) {}
         ~EnvironmentRestore() { core_.currentEnvironment_ = previous_; }
     private:
-        PortableExecutionCore& core_;
+        PortableExecutionCoreImpl& core_;
         EnvironmentId previous_;
     };
 
     class CallRestore {
     public:
-        CallRestore(PortableExecutionCore& core, EnvironmentId previousEnvironment,
+        CallRestore(PortableExecutionCoreImpl& core,
+            EnvironmentId previousEnvironment,
             Value previousThis, std::size_t previousArgumentTop)
             : core_(core), previousEnvironment_(previousEnvironment),
               previousThis_(previousThis), previousArgumentTop_(previousArgumentTop) {}
@@ -208,7 +239,7 @@ private:
             if (core_.callDepth_ != 0u) --core_.callDepth_;
         }
     private:
-        PortableExecutionCore& core_;
+        PortableExecutionCoreImpl& core_;
         EnvironmentId previousEnvironment_;
         Value previousThis_;
         std::size_t previousArgumentTop_;
@@ -353,7 +384,8 @@ private:
     }
 
     static bool supportsFunction(const Ast& ast, AstNodeId id,
-        std::size_t maxArgs, std::size_t maxDepth, std::size_t depth)
+        std::size_t maxArgs, std::size_t maxDepth, std::size_t depth,
+        bool allowObjects)
     {
         if (depth > maxDepth || !validNode(ast, id) ||
             !simpleParameters(ast, id)) return false;
@@ -362,18 +394,19 @@ private:
             function.body == kInvalidAstNodeId) {
             return function.expression != kInvalidAstNodeId &&
                 supportsExpression(ast, function.expression, maxArgs, maxDepth,
-                    depth + 1u);
+                    depth + 1u, allowObjects);
         }
         if (function.body == kInvalidAstNodeId ||
             !validNode(ast, function.body) ||
             ast.node(function.body).kind != AstNodeKind::BlockStatement)
             return false;
         return supportsStatementList(ast, function.body, maxArgs, maxDepth,
-            depth + 1u, true, true);
+            depth + 1u, true, true, allowObjects);
     }
 
     static bool supportsExpression(const Ast& ast, AstNodeId id,
-        std::size_t maxArgs, std::size_t maxDepth, std::size_t depth)
+        std::size_t maxArgs, std::size_t maxDepth, std::size_t depth,
+        bool allowObjects)
     {
         if (depth > maxDepth || !validNode(ast, id)) return false;
         const AstNode& node = ast.node(id);
@@ -388,27 +421,31 @@ private:
         case AstNodeKind::UnaryExpression:
             return node.argument != kInvalidAstNodeId &&
                 supportsExpression(ast, node.argument, maxArgs, maxDepth,
-                    depth + 1u);
+                    depth + 1u, allowObjects);
         case AstNodeKind::BinaryExpression:
             return node.binaryOperator != AstBinaryOperator::Remainder &&
                 validNode(ast, node.left) && validNode(ast, node.right) &&
                 supportsExpression(ast, node.left, maxArgs, maxDepth,
-                    depth + 1u) &&
+                    depth + 1u, allowObjects) &&
                 supportsExpression(ast, node.right, maxArgs, maxDepth,
-                    depth + 1u);
+                    depth + 1u, allowObjects);
         case AstNodeKind::LogicalExpression:
             return validNode(ast, node.left) && validNode(ast, node.right) &&
                 supportsExpression(ast, node.left, maxArgs, maxDepth,
-                    depth + 1u) &&
+                    depth + 1u, allowObjects) &&
                 supportsExpression(ast, node.right, maxArgs, maxDepth,
-                    depth + 1u);
+                    depth + 1u, allowObjects);
         case AstNodeKind::AssignmentExpression:
             return node.assignmentOperator != AstAssignmentOperator::Remainder &&
-                validNode(ast, node.left) &&
-                ast.node(node.left).kind == AstNodeKind::Identifier &&
-                validNode(ast, node.right) &&
+                validNode(ast, node.left) && validNode(ast, node.right) &&
+                ((ast.node(node.left).kind == AstNodeKind::Identifier) ||
+                    (allowObjects &&
+                        node.assignmentOperator == AstAssignmentOperator::Assign &&
+                        ast.node(node.left).kind == AstNodeKind::MemberExpression)) &&
+                supportsExpression(ast, node.left, maxArgs, maxDepth,
+                    depth + 1u, allowObjects) &&
                 supportsExpression(ast, node.right, maxArgs, maxDepth,
-                    depth + 1u);
+                    depth + 1u, allowObjects);
         case AstNodeKind::CallExpression: {
             if (!validNode(ast, node.callee) ||
                 ast.node(node.callee).kind != AstNodeKind::Identifier ||
@@ -418,13 +455,49 @@ private:
                 !declaredFunctionLike(ast, name)) return false;
             for (std::size_t index = 0u; index < node.childCount; ++index) {
                 if (!supportsExpression(ast, ast.childAt(id, index), maxArgs,
-                        maxDepth, depth + 1u)) return false;
+                        maxDepth, depth + 1u, allowObjects)) return false;
             }
             return true;
         }
         case AstNodeKind::FunctionExpression:
         case AstNodeKind::ArrowFunctionExpression:
-            return supportsFunction(ast, id, maxArgs, maxDepth, depth + 1u);
+            return supportsFunction(ast, id, maxArgs, maxDepth, depth + 1u,
+                allowObjects);
+        case AstNodeKind::MemberExpression:
+            return allowObjects && validNode(ast, node.object) &&
+                validNode(ast, node.property) &&
+                supportsExpression(ast, node.object, maxArgs, maxDepth,
+                    depth + 1u, allowObjects) &&
+                (node.computed
+                    ? supportsExpression(ast, node.property, maxArgs, maxDepth,
+                        depth + 1u, allowObjects)
+                    : ast.node(node.property).kind == AstNodeKind::Identifier);
+        case AstNodeKind::ObjectLiteral:
+            if (!allowObjects) return false;
+            for (std::size_t index = 0u; index < node.childCount; ++index) {
+                const AstNodeId propertyId = ast.childAt(id, index);
+                if (!validNode(ast, propertyId) ||
+                    ast.node(propertyId).kind != AstNodeKind::ObjectProperty)
+                    return false;
+                const AstNode& property = ast.node(propertyId);
+                if (!validNode(ast, property.key) ||
+                    !validNode(ast, property.initializer) ||
+                    (ast.node(property.key).kind != AstNodeKind::Identifier &&
+                        ast.node(property.key).kind != AstNodeKind::StringLiteral) ||
+                    !supportsExpression(ast, property.initializer, maxArgs,
+                        maxDepth, depth + 1u, allowObjects)) return false;
+            }
+            return true;
+        case AstNodeKind::ArrayLiteral:
+            if (!allowObjects) return false;
+            for (std::size_t index = 0u; index < node.childCount; ++index) {
+                const AstNodeId element = ast.childAt(id, index);
+                if (!validNode(ast, element)) return false;
+                if (ast.node(element).kind != AstNodeKind::ArrayElision &&
+                    !supportsExpression(ast, element, maxArgs, maxDepth,
+                        depth + 1u, allowObjects)) return false;
+            }
+            return true;
         default:
             return false;
         }
@@ -432,37 +505,38 @@ private:
 
     static bool supportsStatementList(const Ast& ast, AstNodeId id,
         std::size_t maxArgs, std::size_t maxDepth, std::size_t depth,
-        bool allowFunctionDeclarations, bool inFunction)
+        bool allowFunctionDeclarations, bool inFunction, bool allowObjects)
     {
         if (!validNode(ast, id) || depth > maxDepth) return false;
         const AstNode& list = ast.node(id);
         for (std::size_t index = 0u; index < list.childCount; ++index) {
             const AstNodeId child = ast.childAt(id, index);
             if (!supportsStatement(ast, child, maxArgs, maxDepth, depth + 1u,
-                    allowFunctionDeclarations, inFunction)) return false;
+                    allowFunctionDeclarations, inFunction,
+                    allowObjects)) return false;
         }
         return true;
     }
 
     static bool supportsStatement(const Ast& ast, AstNodeId id,
         std::size_t maxArgs, std::size_t maxDepth, std::size_t depth,
-        bool allowFunctionDeclarations, bool inFunction)
+        bool allowFunctionDeclarations, bool inFunction, bool allowObjects)
     {
         if (!validNode(ast, id) || depth > maxDepth) return false;
         const AstNode& node = ast.node(id);
         switch (node.kind) {
         case AstNodeKind::Program:
             return supportsStatementList(ast, id, maxArgs, maxDepth, depth + 1u,
-                true, false);
+                true, false, allowObjects);
         case AstNodeKind::BlockStatement:
             return supportsStatementList(ast, id, maxArgs, maxDepth, depth + 1u,
-                false, inFunction);
+                false, inFunction, allowObjects);
         case AstNodeKind::EmptyStatement:
             return true;
         case AstNodeKind::ExpressionStatement:
             return node.expression != kInvalidAstNodeId &&
                 supportsExpression(ast, node.expression, maxArgs, maxDepth,
-                    depth + 1u);
+                    depth + 1u, allowObjects);
         case AstNodeKind::VariableDeclaration:
             if (node.declarationKind == AstDeclarationKind::Var) return false;
             for (std::size_t index = 0u; index < node.childCount; ++index) {
@@ -475,16 +549,17 @@ private:
                 const AstNodeId initializer = ast.node(declaration).initializer;
                 if (initializer != kInvalidAstNodeId &&
                     !supportsExpression(ast, initializer, maxArgs, maxDepth,
-                        depth + 1u)) return false;
+                        depth + 1u, allowObjects)) return false;
             }
             return true;
         case AstNodeKind::ReturnStatement:
             return node.expression == kInvalidAstNodeId ||
                 supportsExpression(ast, node.expression, maxArgs, maxDepth,
-                    depth + 1u);
+                    depth + 1u, allowObjects);
         case AstNodeKind::FunctionDeclaration:
             return allowFunctionDeclarations &&
-                supportsFunction(ast, id, maxArgs, maxDepth, depth + 1u);
+                supportsFunction(ast, id, maxArgs, maxDepth, depth + 1u,
+                    allowObjects);
         default:
             return false;
         }
@@ -496,6 +571,138 @@ private:
         result_.error.code = code;
         result_.error.location = location;
         result_.executionSteps = sharedExecutionSteps_;
+    }
+
+    void failObject(const PortableObjectError& error, SourceLocation location)
+    {
+        PortableExecutionErrorCode code =
+            PortableExecutionErrorCode::InternalInvariantFailure;
+        switch (error.code) {
+        case PortableObjectErrorCode::None:
+            code = PortableExecutionErrorCode::None;
+            break;
+        case PortableObjectErrorCode::InvalidStorage:
+        case PortableObjectErrorCode::InternalInvariantFailure:
+            code = PortableExecutionErrorCode::InternalInvariantFailure;
+            break;
+        case PortableObjectErrorCode::InvalidObject:
+        case PortableObjectErrorCode::InvalidPrototype:
+        case PortableObjectErrorCode::PrototypeCycle:
+            code = PortableExecutionErrorCode::InvalidObjectReference;
+            break;
+        case PortableObjectErrorCode::StaleGeneration:
+            code = PortableExecutionErrorCode::StaleObjectReference;
+            break;
+        case PortableObjectErrorCode::InvalidArray:
+            code = PortableExecutionErrorCode::TypeError;
+            break;
+        case PortableObjectErrorCode::InvalidProperty:
+            code = PortableExecutionErrorCode::InvalidPropertyReference;
+            break;
+        case PortableObjectErrorCode::InvalidIndex:
+            code = PortableExecutionErrorCode::InvalidArrayIndex;
+            break;
+        case PortableObjectErrorCode::InvalidLength:
+            code = PortableExecutionErrorCode::InvalidArrayLength;
+            break;
+        case PortableObjectErrorCode::PrototypeDepthExceeded:
+            code = PortableExecutionErrorCode::PrototypeDepthExceeded;
+            break;
+        case PortableObjectErrorCode::PropertyCapacityExceeded:
+        case PortableObjectErrorCode::NameStorageExhausted:
+            code = PortableExecutionErrorCode::PropertyCapacityExhausted;
+            break;
+        case PortableObjectErrorCode::NameTooLong:
+            code = PortableExecutionErrorCode::PropertyNameTooLong;
+            break;
+        case PortableObjectErrorCode::ObjectCapacityExceeded:
+            code = PortableExecutionErrorCode::ObjectCapacityExhausted;
+            break;
+        case PortableObjectErrorCode::ArrayCapacityExceeded:
+            code = PortableExecutionErrorCode::ArrayCapacityExhausted;
+            break;
+        case PortableObjectErrorCode::ArithmeticOverflow:
+            code = PortableExecutionErrorCode::InvalidArrayIndex;
+            break;
+        }
+        if (code != PortableExecutionErrorCode::None) fail(code, location);
+    }
+
+    struct PropertyReference {
+        RuntimeObjectId object = kInvalidRuntimeObjectId;
+        SourceView key;
+        char numberKey[24]{};
+    };
+
+    bool propertyKeyFromValue(const Value& value, PropertyReference& reference,
+        SourceLocation location)
+    {
+        if (value.isString()) {
+            RuntimeStringError error;
+            if (!strings_.view(value.stringId(), reference.key, error)) {
+                fail(error.code == RuntimeStringErrorCode::StaleGeneration
+                        ? PortableExecutionErrorCode::StaleReference
+                        : PortableExecutionErrorCode::InternalInvariantFailure,
+                    location);
+                return false;
+            }
+            return true;
+        }
+        if (!value.isNumber()) {
+            fail(PortableExecutionErrorCode::UnsupportedOperation, location);
+            return false;
+        }
+        const double number = value.numberValue();
+        if (!(number >= 0.0) || number > 4294967294.0) {
+            fail(PortableExecutionErrorCode::UnsupportedOperation, location);
+            return false;
+        }
+        std::uint64_t integer = static_cast<std::uint64_t>(number);
+        if (static_cast<double>(integer) != number) {
+            fail(PortableExecutionErrorCode::UnsupportedOperation, location);
+            return false;
+        }
+        char reversed[24]{};
+        std::size_t digits = 0u;
+        do {
+            reversed[digits++] = static_cast<char>('0' + integer % 10u);
+            integer /= 10u;
+        } while (integer != 0u && digits < sizeof(reversed));
+        for (std::size_t index = 0u; index < digits; ++index)
+            reference.numberKey[index] = reversed[digits - index - 1u];
+        reference.key = SourceView(reference.numberKey, digits);
+        return true;
+    }
+
+    bool evalPropertyReference(AstNodeId id, PropertyReference& reference)
+    {
+        if (objects_ == nullptr || !validNode(ast_, id) ||
+            ast_.node(id).kind != AstNodeKind::MemberExpression) {
+            fail(PortableExecutionErrorCode::InvalidAssignmentTarget,
+                validNode(ast_, id) ? ast_.node(id).location
+                    : SourceLocation());
+            return false;
+        }
+        const AstNode& node = ast_.node(id);
+        Value receiver;
+        if (!evalExpression(node.object, receiver)) return false;
+        if (!receiver.isObject()) {
+            fail(PortableExecutionErrorCode::TypeError, node.location);
+            return false;
+        }
+        reference.object = receiver.objectId();
+        if (node.computed) {
+            Value key;
+            if (!evalExpression(node.property, key)) return false;
+            return propertyKeyFromValue(key, reference, node.location);
+        }
+        if (!validNode(ast_, node.property) ||
+            ast_.node(node.property).kind != AstNodeKind::Identifier) {
+            fail(PortableExecutionErrorCode::InvalidAst, node.location);
+            return false;
+        }
+        reference.key = ast_.nodeText(node.property);
+        return true;
     }
 
     bool finish(PortableExecutionResult& output, Value& finalValue)
@@ -945,6 +1152,30 @@ private:
             return evalLogical(node, value);
         case AstNodeKind::AssignmentExpression:
             return evalAssignment(node, value);
+        case AstNodeKind::MemberExpression:
+            if constexpr (EnableObjectOperations)
+                return evalMemberExpression(id, node, value);
+            else {
+                fail(PortableExecutionErrorCode::UnsupportedOperation,
+                    node.location);
+                return false;
+            }
+        case AstNodeKind::ObjectLiteral:
+            if constexpr (EnableObjectOperations)
+                return evalObjectLiteral(id, node, value);
+            else {
+                fail(PortableExecutionErrorCode::UnsupportedOperation,
+                    node.location);
+                return false;
+            }
+        case AstNodeKind::ArrayLiteral:
+            if constexpr (EnableObjectOperations)
+                return evalArrayLiteral(id, node, value);
+            else {
+                fail(PortableExecutionErrorCode::UnsupportedOperation,
+                    node.location);
+                return false;
+            }
         case AstNodeKind::CallExpression:
             return evalCall(id, node, value);
         case AstNodeKind::FunctionExpression:
@@ -954,6 +1185,122 @@ private:
             fail(PortableExecutionErrorCode::UnsupportedOperation, node.location);
             return false;
         }
+    }
+
+    bool evalMemberExpression(AstNodeId id, const AstNode& node,
+        Value& value)
+    {
+        PropertyReference reference;
+        if (!evalPropertyReference(id, reference)) return false;
+        bool found = false;
+        PortableObjectError error;
+        if (!objects_->getProperty(reference.object, reference.key, value,
+                found, error)) {
+            failObject(error, node.location);
+            return false;
+        }
+        return true;
+    }
+
+    bool evalObjectLiteral(AstNodeId id, const AstNode& node, Value& value)
+    {
+        if (objects_ == nullptr) {
+            fail(PortableExecutionErrorCode::UnsupportedOperation,
+                node.location);
+            return false;
+        }
+        RuntimeObjectId object = kInvalidRuntimeObjectId;
+        PortableObjectError error;
+        if (!objects_->createObject(kInvalidRuntimeObjectId, object, error)) {
+            failObject(error, node.location);
+            return false;
+        }
+        value = Value::object(object);
+        for (std::size_t index = 0u; index < node.childCount; ++index) {
+            const AstNodeId propertyId = ast_.childAt(id, index);
+            if (!validNode(ast_, propertyId) ||
+                ast_.node(propertyId).kind != AstNodeKind::ObjectProperty) {
+                fail(PortableExecutionErrorCode::InvalidAst,
+                    node.location);
+                return false;
+            }
+            const AstNode& property = ast_.node(propertyId);
+            if (!consumeStep(property.location)) return false;
+            SourceView key;
+            const AstNode& keyNode = ast_.node(property.key);
+            if (keyNode.kind == AstNodeKind::Identifier) {
+                key = ast_.nodeText(property.key);
+            } else if (keyNode.kind == AstNodeKind::StringLiteral) {
+                RuntimeStringId decoded = kInvalidRuntimeStringId;
+                RuntimeStringError stringError;
+                if (!strings_.createDecodedStringLiteral(
+                        ast_.nodeText(property.key),
+                        limits_.maxRuntimeStringLength, decoded,
+                        stringError)) {
+                    fail(stringError.code ==
+                            RuntimeStringErrorCode::CapacityExceeded
+                            ? PortableExecutionErrorCode::StringCapacityExhausted
+                            : stringError.code ==
+                                RuntimeStringErrorCode::StaleGeneration
+                                ? PortableExecutionErrorCode::StaleReference
+                                : PortableExecutionErrorCode::InternalInvariantFailure,
+                        property.location);
+                    return false;
+                }
+                if (!strings_.view(decoded, key, stringError)) {
+                    fail(PortableExecutionErrorCode::InternalInvariantFailure,
+                        property.location);
+                    return false;
+                }
+            } else {
+                fail(PortableExecutionErrorCode::InvalidAst,
+                    property.location);
+                return false;
+            }
+            Value propertyValue;
+            if (!evalExpression(property.initializer, propertyValue))
+                return false;
+            if (!objects_->setOwnProperty(object, key, propertyValue, error)) {
+                failObject(error, property.location);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool evalArrayLiteral(AstNodeId id, const AstNode& node, Value& value)
+    {
+        if (objects_ == nullptr) {
+            fail(PortableExecutionErrorCode::UnsupportedOperation,
+                node.location);
+            return false;
+        }
+        RuntimeObjectId array = kInvalidRuntimeObjectId;
+        PortableObjectError error;
+        if (!objects_->createArray(node.childCount,
+                kInvalidRuntimeObjectId, array, error)) {
+            failObject(error, node.location);
+            return false;
+        }
+        value = Value::object(array);
+        for (std::size_t index = 0u; index < node.childCount; ++index) {
+            const AstNodeId element = ast_.childAt(id, index);
+            if (!validNode(ast_, element)) {
+                fail(PortableExecutionErrorCode::InvalidAst,
+                    node.location);
+                return false;
+            }
+            if (ast_.node(element).kind == AstNodeKind::ArrayElision)
+                continue;
+            Value elementValue;
+            if (!evalExpression(element, elementValue)) return false;
+            if (!objects_->setArrayElement(array, index, elementValue,
+                    error)) {
+                failObject(error, ast_.node(element).location);
+                return false;
+            }
+        }
+        return true;
     }
 
     static bool parseNumber(SourceView input, double& result)
@@ -1278,6 +1625,23 @@ private:
 
     bool evalAssignment(const AstNode& node, Value& result)
     {
+        if constexpr (EnableObjectOperations) {
+            if (validNode(ast_, node.left) &&
+                ast_.node(node.left).kind == AstNodeKind::MemberExpression) {
+                PropertyReference reference;
+                if (!evalPropertyReference(node.left, reference)) return false;
+                Value right;
+                if (!evalExpression(node.right, right)) return false;
+                PortableObjectError objectError;
+                if (!objects_->setOwnProperty(reference.object, reference.key,
+                        right, objectError)) {
+                    failObject(objectError, node.location);
+                    return false;
+                }
+                result = right;
+                return true;
+            }
+        }
         SourceView name;
         if (!nodeName(node.left, name, ast_.node(node.left).location))
             return false;
@@ -1517,6 +1881,7 @@ private:
     RuntimeStringStore& strings_;
     EnvironmentStore& environments_;
     FunctionStore& functions_;
+    PortableObjectStore* objects_ = nullptr;
     PortableExecutionStorageView storage_;
     PortableExecutionLimits limits_;
     std::size_t& sharedExecutionSteps_;
@@ -1527,6 +1892,9 @@ private:
     std::size_t callDepth_ = 0u;
     std::size_t argumentTop_ = 0u;
 };
+
+using PortableExecutionCore = PortableExecutionCoreImpl<false>;
+using PortableObjectExecutionCore = PortableExecutionCoreImpl<true>;
 
 } // namespace javascript
 } // namespace gxos

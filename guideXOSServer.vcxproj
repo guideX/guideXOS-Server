@@ -343,6 +343,7 @@
     <ClInclude Include="navigator_javascript\host.h" />
     <ClInclude Include="navigator_javascript\lexer.h" />
     <ClInclude Include="navigator_javascript\navigator_script_host.h" />
+    <ClInclude Include="navigator_javascript\object_storage.h" />
     <ClInclude Include="navigator_javascript\parser.h" />
     <ClInclude Include="navigator_javascript\runtime.h" />
     <ClInclude Include="navigator_javascript\source.h" />

@@ -14215,3 +14215,36 @@ dispatch and parser have explicit depth limits, but no aggregate stack bound
 or boot-stack safety claim is established. See the
 [JS119 portable execution report](NAVIGATOR_JAVASCRIPT_JS119_PORTABLE_EXECUTION.md)
 for storage accounting, stack measurements, gates, and remaining work.
+
+### JS120 portable object and Array storage — partial
+
+JS120 adds a caller-backed bounded `PortableObjectStore` and an object-enabled
+specialization of the JS119 evaluator. The 109-check portable harness covers
+object and Array literals, identity, named/indexed reads and writes, sparse
+holes, undefined-versus-missing, deletion, length changes, prototype lookup,
+copied key ownership, closures, and capacity errors. The AMD64 freestanding
+component compiles and links with no undefined symbols or runtime/platform
+imports.
+
+The full JavaScript matrix passed **112/112 lanes** with **17,765/17,765
+assertions** across 71 assertion-reporting lanes, including JS94–JS110. The
+strict C++17 production build passed and its separately saved candidate is
+9,262,740 B (SHA-256
+`B118DB238B6183B09D387BC707D7F3AEA116E09BCD92DA81436AE8C60C5665D0`). The
+dedicated JS109 and JS110 hosted page checks passed on that candidate. The full
+hosted Navigator smoke returned 767/774 checks with the same seven established
+CSS failures (phases 3C, 3G, 6A, three checks in 6B, and 6C); no JavaScript
+check failed. The protected 8,398,274-byte executable was restored and its
+SHA-256 reverified as
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`. All 42
+generated fixtures still match the preflight manifest (458,372 B), and `.phase`
+remains absent. No QEMU, QAC, or guest execution was performed.
+
+JS120 is **Outcome B — `JS120_PORTABLE_OBJECT_ARRAY_PARTIAL`** because the
+hosted `RuntimeContext` still owns its vector-backed object and property model;
+the new store is not yet its adapter. The object-enabled evaluator therefore
+qualifies the portable subset without claiming that one authoritative storage
+model now serves both hosted and freestanding execution. See the
+[JS120 portable objects and Arrays report](NAVIGATOR_JAVASCRIPT_JS120_PORTABLE_OBJECTS_ARRAYS.md)
+for final regression results, memory/stack analysis, gate status, and the
+recommended JS121 hosted adapter work.
