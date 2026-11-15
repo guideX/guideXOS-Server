@@ -85,6 +85,7 @@ $sourcePaths = @(
     'scripts/dotnet/run-c188-qac-guest.ps1',
     'scripts/dotnet/run-c188r24-initializemodules.ps1',
     'scripts/dotnet/run-c188r25-failfast-origin.ps1',
+    'scripts/dotnet/c188r26-precreated-evidence-root.ps1',
     'scripts/dotnet/c188r25-failfast-runner-predicates.ps1',
     'scripts/dotnet/analyze-c188r25-failfast-origin.py',
     'scripts/dotnet/test-c188r25-failfast-origin.ps1',

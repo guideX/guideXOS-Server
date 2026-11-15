@@ -38,6 +38,66 @@ try {
     $validMetadata = Test-C188R26PrecreatedR25EvidenceRoot $evidence $candidate $guardPath
     Assert-R26 ([bool]$validMetadata.accepted) 'parent-authorized R25 capture metadata is accepted'
 
+    $candidateR28 = Join-Path $tempRoot 'candidate-r28'
+    $evidenceR28 = Join-Path $tempRoot 'evidence-r28'
+    $null = New-Item -ItemType Directory -Path $candidateR28,$evidenceR28
+    $runtimeManifestR28 = Join-Path $candidateR28 'runtime-pack.manifest.json'
+    [ordered]@{
+        c188r25FailFastOriginCapture=$true
+        c188r28GcStateGuardDiscriminator=$true
+        c188r28GcStateGuardDiscriminatorMarker='GUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR'
+        failFastOriginRecordSchema=2
+        failFastOriginRecordBytes=144
+    } | ConvertTo-Json | Set-Content -LiteralPath $runtimeManifestR28 -Encoding utf8
+    $candidateManifestR28 = Join-Path $candidateR28 'candidate-manifest.json'
+    [ordered]@{candidate='frozen-r28';runtimePackManifest=$runtimeManifestR28} |
+        ConvertTo-Json | Set-Content -LiteralPath $candidateManifestR28 -Encoding utf8
+    $candidateIntegrityR28 = Join-Path $candidateR28 'candidate-integrity.json'
+    Set-Content -LiteralPath $candidateIntegrityR28 -Value '{"candidate":"frozen-r28-integrity"}' -Encoding utf8
+    $manifestHashR28 = (Get-FileHash -LiteralPath $candidateManifestR28 -Algorithm SHA256).Hash
+    $integrityHashR28 = (Get-FileHash -LiteralPath $candidateIntegrityR28 -Algorithm SHA256).Hash
+    $guardPathR28 = Join-Path $guardRoot ('attempt-r25-' + [guid]::NewGuid().ToString('N') + '.json')
+    $recordAddressR28 = '0x00000001001E14E0'
+    [ordered]@{
+        schema='GUIDEXOS_C188R25_ONE_BOOT_GUARD_V1';candidateRoot=$candidateR28
+        candidateManifestSha256=$manifestHashR28;candidateIntegritySha256=$integrityHashR28
+        bootEvidencePath=$evidenceR28;attemptNumber=1;maxGuestBoots=1
+        automaticRetry=$false;retryAllowed=$false;consumed=$true
+    } | ConvertTo-Json | Set-Content -LiteralPath $guardPathR28 -Encoding utf8
+    [ordered]@{
+        schema='GUIDEXOS_C188R25_CANDIDATE_V1'
+        candidateRoot=$candidateR28
+        candidateManifestSha256=$manifestHashR28
+        runtimePackManifest=$runtimeManifestR28
+        diagnostics=[ordered]@{
+            recordAddress=$recordAddressR28;recordBytes=144;schemaVersion=2
+            gcStateGuardDiscriminator=$true
+        }
+    } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $tempRoot 'candidate-r28-r25-candidate-manifest.json') -Encoding utf8
+    $capturePathR28 = Join-Path $evidenceR28 'r25-failfast-capture.json'
+    [ordered]@{
+        schema='GUIDEXOS_C188R25_FAILFAST_CAPTURE_CONFIG_V1'
+        recordAddress=$recordAddressR28;recordBytes=144
+        candidateManifestSha256=$manifestHashR28
+    } | ConvertTo-Json | Set-Content -LiteralPath $capturePathR28 -Encoding utf8
+    $validR28 = Test-C188R26PrecreatedR25EvidenceRoot $evidenceR28 $candidateR28 $guardPathR28
+    Assert-R26 ([bool]$validR28.accepted) 'R28 capture is accepted when its 144-byte record is bound to both candidate manifests'
+
+    $captureR28 = Get-Content -LiteralPath $capturePathR28 -Raw | ConvertFrom-Json
+    $captureR28.recordBytes = 80
+    $captureR28 | ConvertTo-Json | Set-Content -LiteralPath $capturePathR28 -Encoding utf8
+    $legacyOnR28 = Test-C188R26PrecreatedR25EvidenceRoot $evidenceR28 $candidateR28 $guardPathR28
+    Assert-R26 (-not [bool]$legacyOnR28.accepted) 'R28 candidates cannot use the legacy 80-byte capture schema'
+
+    $captureR28.recordBytes = 144
+    $captureR28 | ConvertTo-Json | Set-Content -LiteralPath $capturePathR28 -Encoding utf8
+    $r25ManifestR28Path = Join-Path $tempRoot 'candidate-r28-r25-candidate-manifest.json'
+    $r25ManifestR28 = Get-Content -LiteralPath $r25ManifestR28Path -Raw | ConvertFrom-Json
+    $r25ManifestR28.diagnostics.recordAddress = '0x00000001001E14E1'
+    $r25ManifestR28 | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $r25ManifestR28Path -Encoding utf8
+    $wrongR28Address = Test-C188R26PrecreatedR25EvidenceRoot $evidenceR28 $candidateR28 $guardPathR28
+    Assert-R26 (-not [bool]$wrongR28Address.accepted) 'R28 capture address must agree with the R25 candidate manifest'
+
     Remove-Item -LiteralPath $configPath -Force
     $empty = Test-C188R26PrecreatedR25EvidenceRoot $evidence $candidate $guardPath
     Assert-R26 ([bool]$empty.accepted -and $empty.reason -match 'empty evidence root') 'an empty sibling evidence directory is accepted only with its bound consumed guard'
