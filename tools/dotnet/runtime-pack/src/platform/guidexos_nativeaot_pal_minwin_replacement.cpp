@@ -1,5 +1,6 @@
 #include "guidexos_nativeaot_pal_contract.h"
-#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS) || \
+    defined(GUIDEXOS_NATIVEAOT_C188R30_THREAD_ATTACHMENT_TRACE)
 #include "guidexos_nativeaot_threadstore_readiness.h"
 #endif
 #include "guidexos_nativeaot_init_trace.h"
@@ -119,7 +120,8 @@ GUIDEXOS_NATIVEAOT_PAL_EXPORT bool GUIDEXOS_NATIVEAOT_PAL_API PalInit() {
     guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_PAL_FLS);
 #endif
     g_flsIndex = guidexos_nativeaot_pal_fls_alloc(FiberDetachCallback);
-#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS) || \
+    defined(GUIDEXOS_NATIVEAOT_C188R30_THREAD_ATTACHMENT_TRACE)
     GuideXosNativeAotThreadReadinessMark(
         GX_THREADSTORE_EVENT_PAL_FLS_ALLOCATE,
         static_cast<uintptr_t>(g_flsIndex),
@@ -156,7 +158,8 @@ GUIDEXOS_NATIVEAOT_PAL_EXPORT bool GUIDEXOS_NATIVEAOT_PAL_API PalInit() {
 
 GUIDEXOS_NATIVEAOT_PAL_EXPORT void GUIDEXOS_NATIVEAOT_PAL_API
 PalAttachThread(void* thread) {
-#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS) || \
+    defined(GUIDEXOS_NATIVEAOT_C188R30_THREAD_ATTACHMENT_TRACE)
     GuideXosNativeAotThreadReadinessMark(
         GX_THREADSTORE_EVENT_PAL_ATTACH_ENTER,
         reinterpret_cast<uintptr_t>(thread), static_cast<uintptr_t>(g_flsIndex));
@@ -165,7 +168,8 @@ PalAttachThread(void* thread) {
         guidexos_nativeaot_pal_fail_fast(0x50414C01u);
     }
     void* existing = guidexos_nativeaot_pal_fls_get(g_flsIndex);
-#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS) || \
+    defined(GUIDEXOS_NATIVEAOT_C188R30_THREAD_ATTACHMENT_TRACE)
     GuideXosNativeAotThreadReadinessMark(
         GX_THREADSTORE_EVENT_PAL_ATTACH_EXISTING,
         reinterpret_cast<uintptr_t>(existing), reinterpret_cast<uintptr_t>(thread));
@@ -177,7 +181,14 @@ PalAttachThread(void* thread) {
     if (setResult != 0) {
         guidexos_nativeaot_pal_fail_fast(0x50414C03u);
     }
-#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS) || \
+    defined(GUIDEXOS_NATIVEAOT_C188R30_THREAD_ATTACHMENT_TRACE)
+    GuideXosNativeAotThreadReadinessMark(
+        GX_THREADSTORE_EVENT_PAL_FLS_SET_VALUE,
+        static_cast<uintptr_t>(g_flsIndex), reinterpret_cast<uintptr_t>(thread));
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS) || \
+    defined(GUIDEXOS_NATIVEAOT_C188R30_THREAD_ATTACHMENT_TRACE)
     GuideXosNativeAotThreadReadinessMark(
         GX_THREADSTORE_EVENT_PAL_ATTACH_COMPLETE,
         reinterpret_cast<uintptr_t>(thread), static_cast<uintptr_t>(setResult));
@@ -185,6 +196,19 @@ PalAttachThread(void* thread) {
 }
 
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
+extern "C" uint32_t __cdecl
+GuideXosNativeAotTransitionGetPalFlsIndex(void) {
+    return g_flsIndex;
+}
+
+extern "C" void* __cdecl
+GuideXosNativeAotTransitionGetPalFlsValue(void) {
+    return g_flsIndex == kFlsOutOfIndexes
+        ? nullptr : guidexos_nativeaot_pal_fls_get(g_flsIndex);
+}
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C188R30_THREAD_ATTACHMENT_TRACE) && \
+    !defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
 extern "C" uint32_t __cdecl
 GuideXosNativeAotTransitionGetPalFlsIndex(void) {
     return g_flsIndex;
@@ -237,7 +261,8 @@ GUIDEXOS_NATIVEAOT_PAL_EXPORT uint64_t PalQueryPerformanceFrequency() {
 GUIDEXOS_NATIVEAOT_PAL_EXPORT uint64_t PalGetCurrentOSThreadId() {
     uint64_t value = 0;
     const int result = guidexos_nativeaot_pal_current_thread_id(&value);
-#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS) || \
+    defined(GUIDEXOS_NATIVEAOT_C188R30_THREAD_ATTACHMENT_TRACE)
     GuideXosNativeAotThreadReadinessMark(
         GX_THREADSTORE_EVENT_PAL_THREAD_ID,
         static_cast<uintptr_t>(value), static_cast<uintptr_t>(result));

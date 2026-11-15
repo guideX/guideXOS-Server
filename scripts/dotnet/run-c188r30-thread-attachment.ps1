@@ -75,10 +75,12 @@ if ([System.IO.Path]::GetFullPath([string]$r25Manifest.candidateRoot) -cne $cand
 }
 $runtimeManifest = Get-Content -LiteralPath ([string]$manifest.runtimePackManifestPath) -Raw | ConvertFrom-Json -ErrorAction Stop
 if (-not [bool]$runtimeManifest.c188r29PreallocationGcStateGuard -or
+    [string]$runtimeManifest.identity -cne 'guidexos-nativeaot-runtime-pack-amd64-c188r30-thread-attachment-trace-v1' -or
     [string]$runtimeManifest.c188r29PreallocationGcStateGuardMarker -cne 'GUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD' -or
-    -not [bool]$runtimeManifest.c188r12r4r5r4ThreadStoreReadiness -or
-    [string]$runtimeManifest.c188r12r4r5r4ThreadStoreReadinessSourceCommit -cne '9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3' -or
-    -not [bool]$runtimeManifest.c188r12r4r5r2r3InitializeModulesAttribution -or
+    -not [bool]$runtimeManifest.c188r30ThreadAttachmentTrace -or
+    [string]$runtimeManifest.c188r30ThreadAttachmentTraceMarker -cne 'GUIDEXOS_NATIVEAOT_C188R30_THREAD_ATTACHMENT_TRACE' -or
+    [bool]$runtimeManifest.c188r12r4r5r4ThreadStoreReadiness -or
+    [bool]$runtimeManifest.c188r12r4r5r2r3InitializeModulesAttribution -or
     [int]$runtimeManifest.failFastOriginRecordSchema -ne 3 -or
     [int]$runtimeManifest.failFastOriginRecordBytes -ne 192) {
     throw 'R30 runtime-pack manifest is not bound to the schema-3 pre-allocation guard.'
@@ -117,7 +119,8 @@ if ([int]$qualification.candidate.recordBytes -ne 192 -or
 }
 $linkedQualificationText = Get-Content -LiteralPath ([string]$manifest.linkedQualificationPath) -Raw
 if ($linkedQualificationText -notmatch 'R30_THREAD_ATTACHMENT_TESTS=\d+ RESULT=PASS' -or
-    -not [bool]$runtimeManifest.c188r12r4r5r2r3InitializeModulesAttribution) {
+    -not [bool]$runtimeManifest.c188r30ThreadAttachmentTrace -or
+    [bool]$runtimeManifest.c188r12r4r5r2r3InitializeModulesAttribution) {
     throw 'R30 attachment linkage and bounded TLS/FLS transition qualification is missing.'
 }
 
@@ -259,18 +262,6 @@ function Get-R30ThreadEvent([string]$Text, [string]$Name) {
         Raw1Hex=$match.Groups[3].Value.ToUpperInvariant()
     }
 }
-function Get-R30FlsSetValue([string]$Text) {
-    $match = [regex]::Match($Text,
-        '(?m)^\[C188R12R4R5R4_FLS\](?: seq=([0-9A-Fa-f]{8}))? event=pal_fls_set_value raw0=([0-9A-Fa-f]{16}) raw1=([0-9A-Fa-f]{16})\s*$')
-    if (-not $match.Success) { return $null }
-    [pscustomobject]@{
-        Sequence=if ($match.Groups[1].Success) { [Convert]::ToUInt64($match.Groups[1].Value,16) } else { 0 }
-        Raw0=[Convert]::ToUInt64($match.Groups[2].Value,16)
-        Raw1=[Convert]::ToUInt64($match.Groups[3].Value,16)
-        Raw0Hex=$match.Groups[2].Value.ToUpperInvariant()
-        Raw1Hex=$match.Groups[3].Value.ToUpperInvariant()
-    }
-}
 $subcondition = ''
 $guardEvidence = $null
 if ($null -ne $analysis -and $null -ne $analysis.PSObject.Properties['gcStateGuard'] -and
@@ -325,7 +316,7 @@ $arrayStateValidEvent = Get-R30ThreadEvent $serialText 'rhp_array_gc_state_valid
 $arrayStockEnterEvent = Get-R30ThreadEvent $serialText 'rhp_array_stock_enter'
 $arrayStockReturnEvent = Get-R30ThreadEvent $serialText 'rhp_array_stock_return'
 $moduleInitializeCompleteEvent = Get-R30ThreadEvent $serialText 'module_initialize_complete'
-$palFlsSetEvent = Get-R30FlsSetValue $serialText
+$palFlsSetEvent = Get-R30ThreadEvent $serialText 'pal_fls_set_value'
 $m4Pointer = $null -ne $transitionEnterEvent -and
     $transitionEnterEvent.Raw1 -ne 0 -and
     $null -ne $currentThreadEvent -and
@@ -362,6 +353,12 @@ if ($null -ne $analysis -and [bool]$analysis.recordValid -and
 }
 $guardFailureCaptured = $specificSubcondition -or
     $null -ne $transitionAttachIncompleteEvent
+$threadUnavailable = $specificSubcondition -and
+    $subcondition -eq 'THREADSTORE_CURRENT_THREAD_UNAVAILABLE'
+$palAttachmentIncomplete = $null -ne $palAttachEnterEvent -and
+    $null -eq $palAttachCompleteEvent
+$exactAttachmentFailure = $threadUnavailable -or
+    $null -ne $transitionAttachIncompleteEvent -or $palAttachmentIncomplete
 $r30Milestones = [ordered]@{
     M1=(($null -ne $runtimeInitializedEvent -and $runtimeInitializedEvent.Raw0 -ne 0) -or
         (Test-R25Milestone $r25Milestones 'M1'))
@@ -370,10 +367,10 @@ $r30Milestones = [ordered]@{
         $null -ne $transitionAttachCompleteEvent -or
         $null -ne $transitionAttachIncompleteEvent)
     M4=$threadAttachmentContractVerified
-    M5=($null -ne $arrayStateValidEvent -or $threadUnavailable)
+    M5=($null -ne $arrayStateValidEvent -or $exactAttachmentFailure)
     M6=($null -ne $arrayStockEnterEvent)
     M7=($null -ne $arrayStockReturnEvent)
-    M8=($null -ne $arrayStockReturnEvent)
+    M8=($null -ne (Get-R30ThreadEvent $serialText 'rhp_array_return'))
     M9=($null -ne $moduleInitializeCompleteEvent -or
         (Test-R25Milestone $r25Milestones 'M7'))
     M10=(Test-R25Milestone $r25Milestones 'M10')
@@ -384,8 +381,6 @@ $r30Milestones = [ordered]@{
 $factorySuccess = [bool]$r30Milestones.M10 -and [bool]$r30Milestones.M11
 $nativeRepairVerified = [bool]$r30Milestones.M4 -and
     [bool]$r30Milestones.M5 -and [bool]$r30Milestones.M6
-$threadUnavailable = $specificSubcondition -and
-    $subcondition -eq 'THREADSTORE_CURRENT_THREAD_UNAVAILABLE'
 $attachmentFailureStage = if ($null -ne $transitionAttachIncompleteEvent) {
     'transition_attach_incomplete'
 } elseif ($threadUnavailable) {

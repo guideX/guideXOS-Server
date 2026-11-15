@@ -2,7 +2,8 @@
 #include "guidexos_nativeaot_gc_startup_platform_contract.h"
 #include "guidexos_nativeaot_rh_initialize_contract.h"
 #include "../platform/guidexos_nativeaot_init_trace.h"
-#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS) || \
+    defined(GUIDEXOS_NATIVEAOT_C188R30_THREAD_ATTACHMENT_TRACE)
 #include "../platform/guidexos_nativeaot_threadstore_readiness.h"
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5_GC_INIT_PROBES)
@@ -350,7 +351,8 @@ GuideXosNativeAotGcStartupInstallPlatformHooks(
 }
 
 extern "C" __declspec(dllexport) int __cdecl GuideXosNativeAotGcStartupMain(void) {
-#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS) || \
+    defined(GUIDEXOS_NATIVEAOT_C188R30_THREAD_ATTACHMENT_TRACE)
     uintptr_t entryLocal = 0u;
     GuideXosNativeAotThreadReadinessMark(
         GX_THREADSTORE_EVENT_ADAPTER_ENTER,
@@ -367,7 +369,8 @@ extern "C" __declspec(dllexport) int __cdecl GuideXosNativeAotGcStartupMain(void
         guidexos_nativeaot_observe_rh_initialize(nativeResult);
     g_rhInitializeRawResult = observation.native_boolean;
     g_startupResult = static_cast<unsigned int>(observation.adapter_status);
-#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS) || \
+    defined(GUIDEXOS_NATIVEAOT_C188R30_THREAD_ATTACHMENT_TRACE)
     GuideXosNativeAotThreadReadinessMark(
         GX_THREADSTORE_EVENT_RHINITIALIZE_RETURN,
         static_cast<uintptr_t>(g_rhInitializeRawResult),

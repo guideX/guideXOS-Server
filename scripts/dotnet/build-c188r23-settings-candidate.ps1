@@ -3,6 +3,7 @@ param(
     [string]$ArtifactRoot = 'E:\CodexArtifacts\guideXOSServerV1.1_DOTNET_SUPPORT',
     [string]$CandidateRoot = '',
     [switch]$C188R12R4R5R4ThreadStoreReadiness,
+    [switch]$C188R30ThreadAttachmentTrace,
     [switch]$C188R25FailFastOriginCapture,
     [switch]$C188R28GcStateGuardDiscriminator,
     [switch]$C188R29PreallocationGcStateGuard
@@ -169,6 +170,9 @@ if ($C188R25FailFastOriginCapture) {
 }
 if ($C188R12R4R5R4ThreadStoreReadiness) {
     $managedArgs += '-C188R12R4R5R4ThreadStoreReadiness'
+}
+if ($C188R30ThreadAttachmentTrace) {
+    $managedArgs += '-C188R30ThreadAttachmentTrace'
 }
 if ($C188R28GcStateGuardDiscriminator) {
     if (-not $C188R25FailFastOriginCapture) {

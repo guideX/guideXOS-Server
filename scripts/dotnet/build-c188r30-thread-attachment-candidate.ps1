@@ -24,7 +24,7 @@ $python = (Get-Command python.exe -ErrorAction Stop | Select-Object -First 1).So
 $builder = Join-Path $RepoRoot 'scripts\dotnet\build-c188r25-failfast-origin-candidate.ps1'
 $builderOutput = & $pwsh -NoProfile -File $builder -RepoRoot $RepoRoot `
     -ArtifactRoot $ArtifactRoot -CandidateRoot $candidate `
-    -C188R12R4R5R4ThreadStoreReadiness `
+    -C188R30ThreadAttachmentTrace `
     -C188R28GcStateGuardDiscriminator -C188R29PreallocationGcStateGuard 2>&1 | Out-String
 $builderExit = $LASTEXITCODE
 $buildLog = Join-Path $phaseRoot ('r30-build-' + [guid]::NewGuid().ToString('N') + '.log')
@@ -42,12 +42,14 @@ $runtimeManifestPath = [System.IO.Path]::GetFullPath([string]$candidateManifest.
 $runtimeManifest = Get-Content -LiteralPath $runtimeManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
 if ([string]$r25Manifest.sourceHead -cne (& git -C $RepoRoot rev-parse HEAD).Trim() -or
     [string]$r25Manifest.branch -cne 'v1.1_DOTNET_SUPPORT' -or
+    [string]$runtimeManifest.identity -cne 'guidexos-nativeaot-runtime-pack-amd64-c188r30-thread-attachment-trace-v1' -or
     [string]$runtimeManifest.runtimeIdentity.sourceCommit -cne '9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3' -or
     [string]$runtimeManifest.runtimeIdentity.gc -cne 'Workstation' -or
     [bool]$runtimeManifest.imageBackedArenaPresent -or
-    -not [bool]$runtimeManifest.c188r12r4r5r4ThreadStoreReadiness -or
-    [string]$runtimeManifest.c188r12r4r5r4ThreadStoreReadinessSourceCommit -cne '9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3' -or
-    -not [bool]$runtimeManifest.c188r12r4r5r2r3InitializeModulesAttribution -or
+    -not [bool]$runtimeManifest.c188r30ThreadAttachmentTrace -or
+    [string]$runtimeManifest.c188r30ThreadAttachmentTraceMarker -cne 'GUIDEXOS_NATIVEAOT_C188R30_THREAD_ATTACHMENT_TRACE' -or
+    [bool]$runtimeManifest.c188r12r4r5r4ThreadStoreReadiness -or
+    [bool]$runtimeManifest.c188r12r4r5r2r3InitializeModulesAttribution -or
     -not [bool]$runtimeManifest.c188r25FailFastOriginCapture -or
     -not [bool]$runtimeManifest.c188r28GcStateGuardDiscriminator -or
     -not [bool]$runtimeManifest.c188r29PreallocationGcStateGuard -or
@@ -104,6 +106,8 @@ $sourcePaths = @(
     'tools/dotnet/runtime-pack/runtime-pack.lock.json',
     'tools/dotnet/runtime-pack/build-runtime-pack.ps1',
     'tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_platform.cpp',
+    'tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_pal_minwin_replacement.cpp',
+    'tools/dotnet/runtime-pack/src/probes/guidexos_nativeaot_c188r12r4r5_gc_startup_adapter.cpp',
     'tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_threadstore_readiness.h')
 $sourceInputs = @($sourcePaths | ForEach-Object {
     $path = Join-Path $RepoRoot $_
@@ -143,7 +147,8 @@ $manifest = [ordered]@{
     imageBackedArenaPresent=[bool]$runtimeManifest.imageBackedArenaPresent
     selector5SettingsFactory=[string]$candidateManifest.actualManagedSettingsFactory
     acceptedR20UnwindSourceSha256=[string]$candidateManifest.unwindPrimitive.sourceSha256
-    threadStoreReadinessProfile=[bool]$runtimeManifest.c188r12r4r5r4ThreadStoreReadiness
+    threadAttachmentTraceProfile=[bool]$runtimeManifest.c188r30ThreadAttachmentTrace
+    r12ThreadStoreReadinessProfile=[bool]$runtimeManifest.c188r12r4r5r4ThreadStoreReadiness
     r29PreallocationGuard=[ordered]@{schema=3;bytes=192;enabled=[bool]$runtimeManifest.c188r29PreallocationGcStateGuard}
     sourceInputs=$sourceInputs
     preservedModifiedObjects=$integrity.preservedModifiedObjects

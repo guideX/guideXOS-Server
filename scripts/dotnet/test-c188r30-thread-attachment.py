@@ -163,12 +163,30 @@ class ReverseEntrySourceTests(unittest.TestCase):
 
     def test_real_gc_reverse_entry_delegates_to_runtime_attachment(self) -> None:
         branch = self.entry.index("#elif defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)")
-        branch_end = self.entry.index("#endif", branch)
+        branch_end = self.entry.index(
+            "#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)", branch
+        )
         real_gc_branch = self.entry[branch:branch_end]
         self.assertIn("guideXosStockRhpReversePInvoke(frame);", real_gc_branch)
         self.assertNotIn("transitionFrame[0]", real_gc_branch)
         self.assertNotIn("transitionFrame[1]", real_gc_branch)
         self.assertIn("Generated UnmanagedCallersOnly entry points", real_gc_branch)
+        self.assertIn("GUIDEXOS_NATIVEAOT_C188R30_THREAD_ATTACHMENT_TRACE", real_gc_branch)
+        self.assertIn("Thread::TSF_Attached", real_gc_branch)
+        self.assertIn("GX_THREADSTORE_EVENT_TRANSITION_ATTACH_FLS", real_gc_branch)
+        self.assertNotIn("LockThreadStore", real_gc_branch)
+
+    def test_r30_trace_profile_preserves_production_lifecycle_guard(self) -> None:
+        runtime_pack = (ROOT / "tools/dotnet/runtime-pack/build-runtime-pack.ps1").read_text(
+            encoding="utf-8"
+        )
+        start = runtime_pack.index("if ($C188R30ThreadAttachmentTrace -and")
+        end = runtime_pack.index("$RuntimePackRoot =", start)
+        guard = runtime_pack[start:end]
+        self.assertIn("$PersistentCompositeLifecycle", guard)
+        self.assertIn("$C188R12R4R5R4ThreadStoreReadiness -or", guard)
+        self.assertIn("$C188R12R4R5R2R3InitializeModulesAttribution", guard)
+        self.assertIn("C188R30_THREAD_ATTACHMENT_TRACE", runtime_pack)
 
     def test_readiness_profile_verifies_stock_attachment_and_publication(self) -> None:
         readiness = self.entry.index(
@@ -237,13 +255,16 @@ class ReverseEntrySourceTests(unittest.TestCase):
         stock_enter = body.index("GX_THREADSTORE_EVENT_RHP_ARRAY_STOCK_ENTER")
         stock_call = body.index("guideXosStockRhpNewArray(eeType, length)")
         stock_return = body.index("GX_THREADSTORE_EVENT_RHP_ARRAY_STOCK_RETURN")
+        wrapper_return = body.index("GX_THREADSTORE_EVENT_RHP_ARRAY_RETURN")
         self.assertLess(valid, stock_enter)
         self.assertLess(stock_enter, stock_call)
         self.assertLess(stock_call, stock_return)
+        self.assertLess(stock_return, wrapper_return)
         for event in (
             "GX_THREADSTORE_EVENT_RHP_ARRAY_GC_STATE_VALID = 48u",
             "GX_THREADSTORE_EVENT_RHP_ARRAY_STOCK_ENTER = 49u",
             "GX_THREADSTORE_EVENT_RHP_ARRAY_STOCK_RETURN = 50u",
+            "GX_THREADSTORE_EVENT_RHP_ARRAY_RETURN = 51u",
         ):
             self.assertIn(event, READINESS_HEADER.read_text(encoding="utf-8"))
 
@@ -258,13 +279,14 @@ class ReverseEntrySourceTests(unittest.TestCase):
         self.assertIn("rhp_array_gc_state_valid", runner)
         self.assertIn("rhp_array_stock_enter", runner)
         self.assertIn("rhp_array_stock_return", runner)
+        self.assertIn("rhp_array_return", runner)
         self.assertIn("THREAD_ATTACHMENT_GUEST_DEFERRED", runner)
 
     def test_candidate_build_selects_the_proven_stock_attachment_profile(self) -> None:
         builder = R30_BUILDER.read_text(encoding="utf-8")
-        self.assertIn("-C188R12R4R5R4ThreadStoreReadiness", builder)
-        self.assertIn("c188r12r4r5r4ThreadStoreReadiness", builder)
-        self.assertIn("c188r12r4r5r2r3InitializeModulesAttribution", builder)
+        self.assertIn("-C188R30ThreadAttachmentTrace", builder)
+        self.assertIn("c188r30ThreadAttachmentTrace", builder)
+        self.assertIn("c188r12r4r5r4ThreadStoreReadiness -or", builder)
         self.assertIn("sourceInputs=$sourceInputs", builder)
 
 
@@ -278,11 +300,9 @@ class LinkedCandidateTests(unittest.TestCase):
                 encoding="utf-8-sig"
             )
         )
-        self.assertTrue(manifest["c188r12r4r5r4ThreadStoreReadiness"])
-        self.assertTrue(manifest["c188r12r4r5r2r3InitializeModulesAttribution"])
-        self.assertEqual(
-            manifest["c188r12r4r5r4ThreadStoreReadinessSourceCommit"], PINNED_RUNTIME
-        )
+        self.assertTrue(manifest["c188r30ThreadAttachmentTrace"])
+        self.assertFalse(manifest["c188r12r4r5r4ThreadStoreReadiness"])
+        self.assertFalse(manifest["c188r12r4r5r2r3InitializeModulesAttribution"])
         verify_linked_candidate(LINKED_CANDIDATE)
 
     def test_negative_case_rejects_a_tls_only_candidate(self) -> None:

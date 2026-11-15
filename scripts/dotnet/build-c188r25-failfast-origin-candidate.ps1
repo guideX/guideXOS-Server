@@ -3,6 +3,7 @@ param(
     [string]$ArtifactRoot = 'E:\CodexArtifacts\guideXOSServerV1.1_DOTNET_SUPPORT',
     [string]$CandidateRoot = '',
     [switch]$C188R12R4R5R4ThreadStoreReadiness,
+    [switch]$C188R30ThreadAttachmentTrace,
     [switch]$C188R28GcStateGuardDiscriminator,
     [switch]$C188R29PreallocationGcStateGuard
 )
@@ -29,6 +30,7 @@ $r24Builder = Join-Path $RepoRoot 'scripts\dotnet\build-c188r24-initializemodule
 $builderOutput = & $pwsh -NoProfile -File $r24Builder -RepoRoot $RepoRoot `
     -ArtifactRoot $ArtifactRoot -CandidateRoot $candidate -C188R25FailFastOriginCapture `
     -C188R12R4R5R4ThreadStoreReadiness:$C188R12R4R5R4ThreadStoreReadiness `
+    -C188R30ThreadAttachmentTrace:$C188R30ThreadAttachmentTrace `
     -C188R28GcStateGuardDiscriminator:$C188R28GcStateGuardDiscriminator `
     -C188R29PreallocationGcStateGuard:$C188R29PreallocationGcStateGuard 2>&1 | Out-String
 $builderExit = $LASTEXITCODE
