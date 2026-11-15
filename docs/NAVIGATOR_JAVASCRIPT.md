@@ -14277,3 +14277,32 @@ The shared object-store backing is 585,728 B, plus 16,384 B of hosted iterator
 sidecars. The detailed architecture, capacity accounting, stack measurements,
 and follow-up boundaries are in the
 [JS121 shared object model report](NAVIGATOR_JAVASCRIPT_JS121_SHARED_OBJECT_MODEL.md).
+
+### JS122 shared portable JSON parser — partial
+
+JS122 moves strict `JSON.parse` grammar, Unicode decoding, bounded scratch, and
+object/Array construction into one header-included implementation shared by
+hosted Navigator and the freestanding runtime. Parsed values use
+`RuntimeStringStore` and the unified `PortableObjectStore`; parse failures roll
+both stores back to their entry marks. The hosted adapter supplies the existing
+binary64 converter. The freestanding component has no number converter yet and
+reports `NumericConversionUnavailable` for numeric tokens, so complete portable
+`JSON.parse` is not claimed. `JSON.stringify`, `toJSON`, and reviver traversal
+remain hosted evaluator operations.
+
+The focused JS122 suite passes **67/67** checks and the AMD64 freestanding
+parser component compiles, relocatable-links, and audits with zero undefined
+symbols. The full JavaScript matrix passes **114/114 lanes** and reports
+**17,797/17,797 assertions** across 72 reporting lanes. The strict C++17
+production build and JS109/JS110 hosted page checks pass. The saved candidate
+is 9,285,755 B (SHA-256
+`CD6D985522E52E7C86DF0BE7F8C5B85377C24D5689C5D1E488366260A76F634B`). The
+hosted aggregate is **767/774**, with only the established seven CSS failures
+in phases 3C, 3G, 6A, three checks in 6B, and 6C. The protected executable and
+all 42 generated fixtures were restored and verified, and `.phase` remains
+absent. No QEMU, QAC, guest execution, or kernel-format integration was run.
+
+JS122 is **Outcome B — `JS122_PORTABLE_JSON_PARTIAL`**. See the [JS122 shared
+portable JSON report](NAVIGATOR_JAVASCRIPT_JS122_PORTABLE_JSON.md) for the J0–J7
+gate table, storage and stack bounds, freestanding command profile, semantic
+coverage, and recommended JS123 work.
