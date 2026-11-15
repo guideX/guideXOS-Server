@@ -1478,6 +1478,37 @@ static bool name_matches(const char* a, const char* b)
     return *a == *b;  // Both must be at end
 }
 
+static uint32_t str_len(const char* s);
+
+static bool is_short_name_char(char c)
+{
+    const char upper = to_upper(c);
+    if ((upper >= 'A' && upper <= 'Z') || (upper >= '0' && upper <= '9')) return true;
+    const char* const allowed = "$%'-_@~`!(){}^#&";
+    for (uint32_t i = 0; allowed[i]; ++i) {
+        if (upper == allowed[i]) return true;
+    }
+    return false;
+}
+
+static bool is_valid_lfn_name(const char* name, uint32_t* outLength)
+{
+    if (!name) return false;
+    const uint32_t len = str_len(name);
+    if (len == 0 || len > 127 || (len == 1 && name[0] == '.') ||
+        (len == 2 && name[0] == '.' && name[1] == '.') ||
+        name[len - 1] == '.' || name[len - 1] == ' ') return false;
+    for (uint32_t i = 0; i < len; ++i) {
+        const uint8_t c = static_cast<uint8_t>(name[i]);
+        if (c < 0x20 || c >= 0x80 || c == '"' || c == '*' || c == '/' ||
+            c == ':' || c == '<' || c == '>' || c == '?' || c == '\\' || c == '|') {
+            return false;
+        }
+    }
+    if (outLength) *outLength = len;
+    return true;
+}
+
 static bool find_in_directory_at(uint8_t volumeIndex, uint32_t dirCluster, const char* name,
                                  DirEntry* out, uint32_t* outSector, uint32_t* outOffset);
 
@@ -1522,13 +1553,13 @@ static bool make_short_name(const char* name, char out[11])
 
     for (uint32_t i = 0; i < baseLen; ++i) {
         char c = to_upper(name[i]);
-        if (c == ' ' || c == '/' || c == '\\') return false;
+        if (!is_short_name_char(c)) return false;
         out[i] = c;
     }
 
     for (uint32_t i = 0; extStart + i < len; ++i) {
         char c = to_upper(name[extStart + i]);
-        if (c == ' ' || c == '.' || c == '/' || c == '\\') return false;
+        if (!is_short_name_char(c)) return false;
         out[8 + i] = c;
     }
 
@@ -1816,6 +1847,230 @@ static bool find_in_directory_at(uint8_t volumeIndex, uint32_t dirCluster, const
     return false;
 }
 
+struct DirectorySlot {
+    uint32_t sector;
+    uint32_t offset;
+};
+
+static bool find_lfn_entry_slots(uint8_t volumeIndex, uint32_t dirCluster,
+                                 uint32_t neededEntries, DirectorySlot* slots,
+                                 uint32_t slotCapacity)
+{
+    if (volumeIndex >= MAX_FAT_VOLUMES || !slots || neededEntries == 0 ||
+        neededEntries + 1 > slotCapacity || !s_volumes[volumeIndex].mounted) return false;
+
+    FATVolume& vol = s_volumes[volumeIndex];
+    const uint32_t entriesPerSector = vol.bytesPerSector / 32;
+    if (entriesPerSector == 0) return false;
+    const uint32_t requiredSlots = neededEntries + 1; // preserve an end marker
+    uint32_t endSlots = 0;
+
+    const auto consume_sector = [&](uint32_t sector) -> bool {
+        if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) return false;
+        for (uint32_t entryIndex = 0; entryIndex < entriesPerSector; ++entryIndex) {
+            const uint32_t offset = entryIndex * 32;
+            const FAT32_DirEntry* entry = reinterpret_cast<const FAT32_DirEntry*>(&s_secBuf[offset]);
+            if (endSlots == 0 && entry->name[0] != 0x00) continue;
+            if (endSlots < requiredSlots) {
+                slots[endSlots].sector = sector;
+                slots[endSlots].offset = offset;
+            }
+            ++endSlots;
+            if (endSlots >= requiredSlots) return true;
+        }
+        return false;
+    };
+
+    if (is_fat16_root_dir(vol, dirCluster)) {
+        for (uint32_t sectorIndex = 0; sectorIndex < vol.rootDirSectors; ++sectorIndex) {
+            if (consume_sector(vol.rootDirFirstSector + sectorIndex)) return true;
+            if (s_lastIoStatus != block::BLOCK_OK) return false;
+        }
+        return false;
+    }
+
+    uint32_t cluster = dirCluster;
+    uint32_t clusterSteps = 0;
+    while (!is_end_of_chain(vol, cluster) && is_valid_data_cluster(vol, cluster) &&
+           clusterSteps < directory_chain_step_limit(vol)) {
+        ++clusterSteps;
+        for (uint32_t sectorInCluster = 0; sectorInCluster < vol.sectorsPerCluster;
+             ++sectorInCluster) {
+            if (consume_sector(cluster_to_sector(vol, cluster) + sectorInCluster)) return true;
+            if (s_lastIoStatus != block::BLOCK_OK) return false;
+        }
+        cluster = next_cluster(vol, cluster);
+        if (s_lastIoStatus != block::BLOCK_OK) return false;
+    }
+    return false;
+}
+
+static bool short_name_exists_in_directory(uint8_t volumeIndex, uint32_t dirCluster,
+                                           const char shortName[11])
+{
+    if (volumeIndex >= MAX_FAT_VOLUMES || !shortName || !s_volumes[volumeIndex].mounted)
+        return false;
+    FATVolume& vol = s_volumes[volumeIndex];
+    const uint32_t entriesPerSector = vol.bytesPerSector / 32;
+    const auto scan_sector = [&](uint32_t sector) -> bool {
+        if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) return false;
+        for (uint32_t entryIndex = 0; entryIndex < entriesPerSector; ++entryIndex) {
+            const FAT32_DirEntry* entry = reinterpret_cast<const FAT32_DirEntry*>(
+                &s_secBuf[entryIndex * 32]);
+            if (entry->name[0] == 0x00) return false;
+            if (static_cast<uint8_t>(entry->name[0]) == 0xE5 || entry->attr == ATTR_LFN ||
+                (entry->attr & ATTR_VOLUME_ID)) continue;
+            bool matches = true;
+            for (uint32_t i = 0; i < 11; ++i) {
+                if (entry->name[i] != shortName[i]) {
+                    matches = false;
+                    break;
+                }
+            }
+            if (matches) return true;
+        }
+        return false;
+    };
+
+    if (is_fat16_root_dir(vol, dirCluster)) {
+        for (uint32_t sectorIndex = 0; sectorIndex < vol.rootDirSectors; ++sectorIndex) {
+            if (scan_sector(vol.rootDirFirstSector + sectorIndex)) return true;
+            if (s_lastIoStatus != block::BLOCK_OK) return true;
+        }
+        return false;
+    }
+
+    uint32_t cluster = dirCluster;
+    uint32_t clusterSteps = 0;
+    while (!is_end_of_chain(vol, cluster) && is_valid_data_cluster(vol, cluster) &&
+           clusterSteps < directory_chain_step_limit(vol)) {
+        ++clusterSteps;
+        for (uint32_t sectorInCluster = 0; sectorInCluster < vol.sectorsPerCluster;
+             ++sectorInCluster) {
+            if (scan_sector(cluster_to_sector(vol, cluster) + sectorInCluster)) return true;
+            if (s_lastIoStatus != block::BLOCK_OK) return true;
+        }
+        cluster = next_cluster(vol, cluster);
+        if (s_lastIoStatus != block::BLOCK_OK) return true;
+    }
+    return false;
+}
+
+static bool make_unique_long_short_name(uint8_t volumeIndex, uint32_t dirCluster,
+                                        const char* name, uint32_t nameLength,
+                                        char out[11])
+{
+    char base[128];
+    uint32_t baseLength = 0;
+    char extension[3] = { ' ', ' ', ' ' };
+    uint32_t extensionLength = 0;
+    uint32_t lastDot = 0xFFFFFFFFu;
+    for (uint32_t i = 0; i < nameLength; ++i) {
+        if (name[i] == '.') lastDot = i;
+    }
+    const uint32_t baseEnd = lastDot == 0xFFFFFFFFu ? nameLength : lastDot;
+    for (uint32_t i = 0; i < baseEnd; ++i) {
+        if (is_short_name_char(name[i]) && baseLength < sizeof(base))
+            base[baseLength++] = to_upper(name[i]);
+    }
+    if (baseLength == 0) {
+        base[0] = 'F'; base[1] = 'I'; base[2] = 'L'; base[3] = 'E';
+        baseLength = 4;
+    }
+    if (lastDot != 0xFFFFFFFFu) {
+        for (uint32_t i = lastDot + 1; i < nameLength && extensionLength < 3; ++i) {
+            if (is_short_name_char(name[i])) extension[extensionLength++] = to_upper(name[i]);
+        }
+    }
+
+    s_lastIoStatus = block::BLOCK_OK;
+    for (uint32_t suffix = 1; suffix <= 999999u; ++suffix) {
+        uint32_t value = suffix;
+        char digits[6];
+        uint32_t digitCount = 0;
+        do {
+            digits[digitCount++] = static_cast<char>('0' + (value % 10));
+            value /= 10;
+        } while (value != 0 && digitCount < sizeof(digits));
+
+        memfill(out, ' ', 11);
+        uint32_t prefixLength = 7u - digitCount;
+        if (prefixLength > baseLength) prefixLength = baseLength;
+        for (uint32_t i = 0; i < prefixLength; ++i) out[i] = base[i];
+        out[prefixLength] = '~';
+        for (uint32_t i = 0; i < digitCount; ++i)
+            out[prefixLength + 1 + i] = digits[digitCount - i - 1];
+        for (uint32_t i = 0; i < extensionLength; ++i) out[8 + i] = extension[i];
+
+        if (!short_name_exists_in_directory(volumeIndex, dirCluster, out)) {
+            return s_lastIoStatus == block::BLOCK_OK;
+        }
+        if (s_lastIoStatus != block::BLOCK_OK) return false;
+    }
+    return false;
+}
+
+static uint8_t short_name_checksum(const char shortName[11])
+{
+    uint8_t sum = 0;
+    for (uint32_t i = 0; i < 11; ++i) {
+        sum = static_cast<uint8_t>(((sum & 1u) ? 0x80u : 0u) + (sum >> 1) +
+                                  static_cast<uint8_t>(shortName[i]));
+    }
+    return sum;
+}
+
+static bool write_directory_slot(const FATVolume& vol, const DirectorySlot& slot,
+                                 const void* entryBytes)
+{
+    if (read_volume_sector(vol, slot.sector, s_secBuf) != block::BLOCK_OK) return false;
+    memcopy(&s_secBuf[slot.offset], entryBytes, 32);
+    return write_volume_sector(vol, slot.sector, s_secBuf) == block::BLOCK_OK;
+}
+
+static bool publish_long_name_entries(FATVolume& vol, const DirectorySlot* slots,
+                                      uint32_t lfnCount, uint32_t nameLength,
+                                      const char* name, const char shortName[11],
+                                      uint32_t firstCluster, uint32_t fileSize)
+{
+    if (!slots || !name || lfnCount == 0 || lfnCount > 10) return false;
+    FAT32_DirEntry emptyMarker{};
+    if (!write_directory_slot(vol, slots[lfnCount + 1], &emptyMarker)) return false;
+
+    const uint8_t checksum = short_name_checksum(shortName);
+    for (uint32_t index = 0; index < lfnCount; ++index) {
+        const uint32_t ordinal = lfnCount - index;
+        const uint32_t base = (ordinal - 1) * 13;
+        FAT32_LFNEntry lfn{};
+        memfill(lfn.name1, 0xFF, sizeof(lfn.name1));
+        memfill(lfn.name2, 0xFF, sizeof(lfn.name2));
+        memfill(lfn.name3, 0xFF, sizeof(lfn.name3));
+        lfn.order = static_cast<uint8_t>(ordinal | (index == 0 ? 0x40u : 0u));
+        lfn.attr = ATTR_LFN;
+        lfn.type = 0;
+        lfn.checksum = checksum;
+        lfn.firstClusterLo = 0;
+        for (uint32_t charIndex = 0; charIndex < 13; ++charIndex) {
+            const uint32_t sourceIndex = base + charIndex;
+            uint16_t value = 0xFFFFu;
+            if (sourceIndex < nameLength) value = static_cast<uint8_t>(name[sourceIndex]);
+            else if (sourceIndex == nameLength) value = 0;
+            if (charIndex < 5) lfn.name1[charIndex] = value;
+            else if (charIndex < 11) lfn.name2[charIndex - 5] = value;
+            else lfn.name3[charIndex - 11] = value;
+        }
+        if (!write_directory_slot(vol, slots[index], &lfn)) return false;
+    }
+
+    FAT32_DirEntry shortEntry{};
+    memcopy(shortEntry.name, shortName, 11);
+    shortEntry.attr = ATTR_ARCHIVE;
+    shortEntry.firstClusterHi = static_cast<uint16_t>((firstCluster >> 16) & 0xFFFFu);
+    shortEntry.firstClusterLo = static_cast<uint16_t>(firstCluster & 0xFFFFu);
+    shortEntry.fileSize = fileSize;
+    return write_directory_slot(vol, slots[lfnCount], &shortEntry);
+}
+
 static bool find_path_entry_at(uint8_t volumeIndex, const char* path,
                                DirEntry* out, uint32_t* outSector, uint32_t* outOffset)
 {
@@ -2049,6 +2304,9 @@ FileWriteStatus create_file_path_status(uint8_t volumeIndex, const char* path,
     }
 
     char shortName[11];
+    uint32_t fileNameLength = 0;
+    bool hasLongName = false;
+    DirectorySlot longNameSlots[12]{};
     serial::puts("FAT_FILE_DIR_ENTRY_BEGIN path=");
     serial::puts(path);
     serial::puts(" parentCluster=0x");
@@ -2057,8 +2315,24 @@ FileWriteStatus create_file_path_status(uint8_t volumeIndex, const char* path,
     serial::puts(fileName);
     serial::puts("\n");
     if (!make_short_name(fileName, shortName)) {
-        serial::puts("FAT_FILE_DIR_ENTRY_RESULT=FAT_FILE_WRITE_INVALID_NAME\n");
-        return FILE_WRITE_INVALID_NAME;
+        if (!is_valid_lfn_name(fileName, &fileNameLength)) {
+            serial::puts("FAT_FILE_DIR_ENTRY_RESULT=FAT_FILE_WRITE_INVALID_NAME\n");
+            return FILE_WRITE_INVALID_NAME;
+        }
+        hasLongName = true;
+        const uint32_t lfnCount = (fileNameLength + 12) / 13;
+        if (!make_unique_long_short_name(volumeIndex, parentCluster, fileName,
+                                         fileNameLength, shortName)) {
+            if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+            return s_lastIoStatus == block::BLOCK_OK
+                ? FILE_WRITE_NO_FREE_ENTRY : FILE_WRITE_IO_ERROR;
+        }
+        if (!find_lfn_entry_slots(volumeIndex, parentCluster, lfnCount + 1,
+                                  longNameSlots, 12)) {
+            if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+            return s_lastIoStatus == block::BLOCK_OK
+                ? FILE_WRITE_NO_FREE_ENTRY : FILE_WRITE_IO_ERROR;
+        }
     }
 
     serial::puts("FPASTE_FAT_ALLOCATE_BEGIN bytes=0x");
@@ -2106,7 +2380,11 @@ FileWriteStatus create_file_path_status(uint8_t volumeIndex, const char* path,
     uint32_t sector = 0;
     uint32_t offset = 0;
     serial::puts("FPASTE_DIRECTORY_METADATA_BEGIN\n");
-    if (!find_free_dir_entry(volumeIndex, parentCluster, &sector, &offset)) {
+    if (hasLongName) {
+        const uint32_t lfnCount = (fileNameLength + 12) / 13;
+        sector = longNameSlots[lfnCount].sector;
+        offset = longNameSlots[lfnCount].offset;
+    } else if (!find_free_dir_entry(volumeIndex, parentCluster, &sector, &offset)) {
         const block::Status failedStatus = s_lastIoStatus;
         release_cluster_chain(vol, firstCluster);
         s_lastIoStatus = failedStatus;
@@ -2119,23 +2397,25 @@ FileWriteStatus create_file_path_status(uint8_t volumeIndex, const char* path,
     serial::put_hex32(offset);
     serial::puts("\n");
 
-    if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
-        const block::Status failedStatus = s_lastIoStatus;
-        release_cluster_chain(vol, firstCluster);
-        s_lastIoStatus = failedStatus;
-        if (outBlockStatus) *outBlockStatus = failedStatus;
-        return FILE_WRITE_IO_ERROR;
+    bool directoryWritten = false;
+    if (hasLongName) {
+        const uint32_t lfnCount = (fileNameLength + 12) / 13;
+        directoryWritten = publish_long_name_entries(vol, longNameSlots, lfnCount,
+            fileNameLength, fileName, shortName, firstCluster, len);
+    } else {
+        if (read_volume_sector(vol, sector, s_secBuf) == block::BLOCK_OK) {
+            FAT32_DirEntry* de = reinterpret_cast<FAT32_DirEntry*>(&s_secBuf[offset]);
+            memzero(de, sizeof(FAT32_DirEntry));
+            memcopy(de->name, shortName, 11);
+            de->attr = ATTR_ARCHIVE;
+            de->firstClusterHi = static_cast<uint16_t>((firstCluster >> 16) & 0xFFFF);
+            de->firstClusterLo = static_cast<uint16_t>(firstCluster & 0xFFFF);
+            de->fileSize = len;
+            directoryWritten = write_volume_sector(vol, sector, s_secBuf) == block::BLOCK_OK;
+        }
     }
 
-    FAT32_DirEntry* de = reinterpret_cast<FAT32_DirEntry*>(&s_secBuf[offset]);
-    memzero(de, sizeof(FAT32_DirEntry));
-    memcopy(de->name, shortName, 11);
-    de->attr = ATTR_ARCHIVE;
-    de->firstClusterHi = static_cast<uint16_t>((firstCluster >> 16) & 0xFFFF);
-    de->firstClusterLo = static_cast<uint16_t>(firstCluster & 0xFFFF);
-    de->fileSize = len;
-
-    if (write_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
+    if (!directoryWritten) {
         const block::Status failedStatus = s_lastIoStatus;
         release_cluster_chain(vol, firstCluster);
         s_lastIoStatus = failedStatus;

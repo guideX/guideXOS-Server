@@ -42,6 +42,12 @@ void runSecurity2AuthenticationGuestSmoke();
 }
 #endif
 
+#if defined(GXOS_SECURITY3A_QUALIFICATION)
+namespace kernel {
+void runSecurity3aCredentialQualification();
+}
+#endif
+
 // Storage subsystem
 #include "include/kernel/block_device.h"
 #include "include/kernel/ata.h"
@@ -1021,6 +1027,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::putc('\n');
 #if defined(GXOS_SECURITY2_AUTH_SMOKE_TEST)
         kernel::runSecurity2AuthenticationGuestSmoke();
+#endif
+#if defined(GXOS_SECURITY3A_QUALIFICATION)
+        kernel::runSecurity3aCredentialQualification();
 #endif
         kernel::native_elf::log_apps_lifecycle_checkpoint(
             kernel::native_elf::APPS_CHECKPOINT_INITIAL_MOUNT);

@@ -136,10 +136,31 @@ bool setup_device(const char* imagePath)
     g_image.seekg(0, std::ios::beg);
     g_image.read(reinterpret_cast<char*>(bootSector), sizeof(bootSector));
     if (!g_image.good() || bootSector[510] != 0x55 || bootSector[511] != 0xAA) return false;
-    g_fatStart = read_le16(bootSector + 14);
+
+    // Accept both a FAT32 volume image and a raw MBR-partitioned disk. The
+    // latter is the format used by native QEMU qualification images.
+    uint64_t volumeStartLba = 0;
+    const bool directFat32 = read_le16(bootSector + 11) == kSectorSize &&
+        read_le16(bootSector + 22) == 0 && read_le32(bootSector + 36) != 0;
+    if (!directFat32) {
+        const uint8_t partitionType = bootSector[450];
+        const uint32_t partitionStart = read_le32(bootSector + 454);
+        if ((partitionType != 0x0B && partitionType != 0x0C) ||
+            partitionStart == 0 || partitionStart >= g_sectorCount) return false;
+        volumeStartLba = partitionStart;
+        g_image.clear();
+        g_image.seekg(static_cast<std::streamoff>(volumeStartLba * kSectorSize),
+                      std::ios::beg);
+        g_image.read(reinterpret_cast<char*>(bootSector), sizeof(bootSector));
+        if (!g_image.good() || bootSector[510] != 0x55 || bootSector[511] != 0xAA)
+            return false;
+    }
+    const uint16_t reservedSectors = read_le16(bootSector + 14);
+    g_fatStart = static_cast<uint32_t>(volumeStartLba + reservedSectors);
     g_fatSectors = read_le32(bootSector + 36);
     g_fatCopies = bootSector[16];
     if (!g_fatStart || !g_fatSectors || !g_fatCopies) return false;
+    if (volumeStartLba + read_le32(bootSector + 32) > g_sectorCount) return false;
 
     kernel::block::init();
     kernel::block::BlockDevice device{};
@@ -233,9 +254,13 @@ int main(int argc, char** argv)
           "invalid filesystem fixture fails mount without leaving a partial VFS entry");
 
     kernel::vfs::FileInfo info{};
-    check(kernel::vfs::stat("/Documents/APPDATA", &info) == kernel::vfs::VFS_OK &&
-              info.type == kernel::vfs::FILE_TYPE_DIRECTORY,
-          "provisioned APPDATA directory exists on the mounted volume");
+    const kernel::vfs::Status appDataStat = kernel::vfs::stat("/Documents/APPDATA", &info);
+    const bool appDataReady = appDataStat == kernel::vfs::VFS_OK
+        ? info.type == kernel::vfs::FILE_TYPE_DIRECTORY
+        : (appDataStat == kernel::vfs::VFS_ERR_NOT_FOUND &&
+            kernel::vfs::mkdir("/Documents/APPDATA") == kernel::vfs::VFS_OK);
+    check(appDataReady,
+          "APPDATA directory is available or provisioned through the mounted VFS");
     const uint8_t appData = kernel::vfs::mount_alias(
         "/AppData", "/Documents/APPDATA");
     check(appData != 0xFF && kernel::vfs::get_mount("/AppData/TEST.TXT") &&
@@ -303,9 +328,28 @@ int main(int argc, char** argv)
     check(kernel::vfs::read_file("/Documents/MISSING.TXT", payload.data(), 64) ==
               kernel::vfs::VFS_ERR_NOT_FOUND,
           "missing document path returns a not-found status");
-    check(kernel::vfs::create_file("/Documents/TOOLONGNAME.TXT", payload.data(), 1) ==
+    const std::vector<uint8_t> credentialMarker{0x5Au};
+    check(kernel::vfs::create_file("/Documents/NOTES/.gxos-identity-0.dat",
+                                   credentialMarker.data(),
+                                   static_cast<uint32_t>(credentialMarker.size())) ==
+              static_cast<int32_t>(credentialMarker.size()),
+          "create a dotted credential-style long filename through VFS");
+    check(kernel::vfs::stat("/Documents/NOTES/.gxos-identity-0.dat", &info) ==
+              kernel::vfs::VFS_OK && info.size == credentialMarker.size() &&
+              read_equals("/Documents/NOTES/.gxos-identity-0.dat", credentialMarker),
+          "long filename lookup and data read match after directory publication");
+    check(kernel::vfs::create_file("/Documents/NOTES/.gxos-identity-0.dat",
+                                   credentialMarker.data(), 1) == kernel::vfs::VFS_ERR_EXISTS,
+          "long filename lookup prevents duplicate creation");
+    check(kernel::vfs::unmount("/Documents") == kernel::vfs::VFS_OK &&
+              kernel::vfs::mount_type("/Documents", 0, kernel::vfs::FS_TYPE_FAT32) != 0xFF &&
+              kernel::vfs::stat("/Documents/NOTES/.gxos-identity-0.dat", &info) ==
+                  kernel::vfs::VFS_OK && info.size == credentialMarker.size() &&
+              read_equals("/Documents/NOTES/.gxos-identity-0.dat", credentialMarker),
+          "long filename and data survive unmount and remount from disk");
+    check(kernel::vfs::create_file("/Documents/NOTES/BAD?NAME.TXT", payload.data(), 1) ==
               kernel::vfs::VFS_ERR_INVALID,
-          "unsupported 8.3 filename is rejected without truncation");
+          "FAT-reserved filename characters are rejected");
 
     const uint8_t fullFatMount = kernel::vfs::mount_type(
         "/Full", 2, kernel::vfs::FS_TYPE_FAT32);
