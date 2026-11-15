@@ -1,5 +1,32 @@
 # Stellar Navigator SN10 — Native Application Bring-up
 
+### SN10R22 interactive native guest acceptance (2026-11-14)
+
+**Outcome C — `SN10_NATIVE_GUEST_BLOCKED` for this run.** The R20 candidate and GTK-capable runner passed offline qualification, but the fresh QAC census found another project's active acceptance reservation, so no guest was launched. The cumulative SN10 guest state remains **partial**: SN10R21's native launch, DE440s authentication/evaluation, and visible window are preserved, while input responsiveness, normal close, reopen, and post-close stability remain unverified. Starting branch/HEAD/phase were `STELLAR_NAVIGATOR`, `fc3653ced57a938a373d32803dd78678f9ad7680`, and `SN10`; the starting worktree was clean. No production input code, runner code, or `.phase` was changed.
+
+#### Candidate and hosted preparation
+
+The immutable SN10R20 candidate at `E:\bkup\artifacts\SN10R20_20261024\candidate-final` was reused without rebuilding. The current candidate-only verification passed at `E:\bkup\artifacts\SN10R22_20261114\preflight\qemu\20261114T161057543\candidate-verification.json`. Candidate manifest SHA-256 is `e4512d173d9fa2b394b295c75b7861bba1cbb44b63faa8bed327276f851eb92a`; disk SHA-256 is `cddb923081cf43341d1bc4c140d56b972c9cf3a616729ffd59b6c6ba7285eff5`; kernel SHA-256 is `bf8a241f374f63636fe732582956116c0a80615492e43f967221f06595f2bc69`; native ELF SHA-256 is `dad4c22ac323f82865c3fb205dd2c9a78899c106ee2096d71ac7c850cc43ea63`; and DE440s SHA-256 remains `d52b91573c29e6a4e5b6dc19c4af4d9747f6da2122f5b3aff4503684a96d2c0a`.
+
+The Windows PowerShell 5.1 acceptance-runner self-test passed with `-DisplayBackend gtk`, `qemuLaunched=false`, and `qacReservationRequested=false` at `E:\bkup\artifacts\SN10R22_20261114\runner-selftest-gtk\qemu\20261114T161057186\runner-selftest.json`. The hosted Release suite passed **323/323**, with 0 failures and 0 skips. It emitted the xUnit2002 analyzer warning at `StellarNavigator.Tests\EphemerisTests.cs:51` for `Assert.NotNull` on a value tuple; this did not affect the test result.
+
+#### QAC admission and input-delivery diagnosis
+
+The fresh run at `E:\bkup\artifacts\SN10R22_20261114\qac-run\qemu\20261114T161307468\` recorded a complete QAC census: coordinator online, one QEMU process, one managed session, one reservation, and zero queued reservations. Reservation `2ce27cb50c5d4078a8c1ae2b9f463778` belonged to project `guideXOSUEFI-FONTS8R2`, mode `acceptance`, with QEMU child PID `30884`. The runner classified `QAC_OCCUPIED`, requested no reservation, and left that session untouched. No QEMU invocation, guest serial log, or new guest screenshot was produced. The structured result is `acceptance-result.json`; the exact status/list/queue snapshots are retained beside it.
+
+The SN10R21 guest log shows the kernel initialized its PS/2 keyboard and mouse paths, selected PS/2 as the active input source, and reported keyboard/mouse capability. The native ELF host polls the PS/2 key-transition queue and logs `[NATIVE-ELF] input event key=...` when a key reaches the app. SN10R21's headless QEMU invocation used `-machine pc,usb=off`, `-vga std`, `-display none`, and an HMP TCP monitor (`-monitor tcp:...`); it did not configure QMP. HMP `sendkey esc` and pointer movement were accepted by the monitor, but produced no guest input marker or normal-close marker. This localizes the observed failure to the headless QEMU input-delivery path or its device routing; it does not establish a PS/2, desktop-focus, or Stellar Navigator defect. QAC itself only owns/adopts the direct QEMU process and passes its arguments through. The runner's GTK option selects a visible frontend, but its scripted actions still use HMP `sendkey`; no GTK frontend input was observed in SN10R22 because QAC admission failed.
+
+#### Interactive acceptance status
+
+| Gate | SN10R22 result | Evidence |
+| --- | --- | --- |
+| A — input responsiveness | Open; not run because QAC was occupied. SN10R21's headless injections yielded no guest input event. | QAC preflight result and preserved SN10R21 monitor/serial logs |
+| B — normal close | Open; not run. | No SN10R22 guest launch |
+| C — reopen | Open; not run. | No SN10R22 guest launch |
+| D — post-close stability | Open; not run. | No SN10R22 guest launch |
+
+The actual SN10R21 app-window framebuffer capture remains at `E:\bkup\artifacts\SN10R21_20261114\qac-run-fixed\qemu\20261114T154638431\stellar-navigator-open.png`; its serial and HMP transcripts remain in the same directory. That screenshot shows the `Stellar Navigator SN10` window, Earth coordinates, and authenticated DE440s status. The R21 launch and ephemeris evidence is preserved; it is not claimed as evidence for A–D. No production correction was justified or implemented. `.phase` remains `SN10`; a later interactive pass needs an empty QAC lane and actual GTK-window keyboard or mouse input before those gates can close.
+
 ### SN10R21 native guest launch and acceptance (2026-11-14)
 
 **Outcome B — `SN10_NATIVE_GUEST_PARTIAL`.** The immutable R20 candidate booted under QAC, discovered and loaded the Stellar Navigator native ELF, authenticated and evaluated its DE440s resource, and rendered the expected application window. Interactive input, normal close/reopen, and post-close desktop stability remain open because QEMU's headless monitor key injection did not reach the guest. `.phase` remains `SN10`. Work was performed on `STELLAR_NAVIGATOR` at HEAD `d95acf950f9389615ce8f0cbe621d774df95457c`, whose parent is the last-confirmed R20 commit `a90053c49e10674d8ff27126db2c36120047b670`. The starting worktree was clean; this closeout changes only this report and the acceptance runner. No production kernel or application source defect was demonstrated, and no phase advance or push was made.
