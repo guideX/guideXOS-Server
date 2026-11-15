@@ -263,6 +263,7 @@ class WindowsAmd64ClassifierTests(unittest.TestCase):
             cpp.write_text(r'''#include <cstdio>
 #include <cstddef>
 #include "guidexos_nativeaot_r29_preallocation_guard.h"
+#include "guidexos_nativeaot_gc_state_guard.h"
 static_assert(sizeof(void*) == 8, "Windows AMD64 ABI required");
 static_assert(sizeof(GuideXosR25FailFastOriginRecord) == 192, "R29 record size");
 static_assert(offsetof(GuideXosR25FailFastOriginRecord, r29GuardLocation) == 136, "R29 fields follow R28");
@@ -310,6 +311,9 @@ int main() {
     auto nullHeapOutput = guideXosR29ClassifyPreallocationGcState(0, read, 0x101, 0);
     if (nullHeapOutput.firstFailedSubcondition != kGuideXosR29GuardGcHeapOutputNull) return 18;
     ++checks;
+    auto postallocation = guideXosR28ClassifyGcStateGuard(0, 0x101, 0x101, 0x303, 0x303);
+    if (postallocation.firstFailedSubcondition != kGuideXosR28GuardSubconditionNone) return 19;
+    ++checks;
     std::printf("R29_CPP_CLASSIFIER_ASSERTIONS=%u RESULT=PASS\n", checks);
     return 0;
 }
@@ -317,13 +321,13 @@ int main() {
             batch.write_text("\r\n".join([
                 "@echo off", f'call "{vcvars}" >nul',
                 "if errorlevel 1 exit /b %errorlevel%",
-                f'cl.exe /nologo /W4 /std:c++17 /EHsc /DGUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD /DGUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR /I"{HEADER.parent}" /Fo:"{temp_path / "r29_guard_test.obj"}" /Fe:"{exe}" "{cpp}"',
+                f'cl.exe /nologo /W4 /std:c++14 /EHsc /DGUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD /DGUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR /I"{HEADER.parent}" /Fo:"{temp_path / "r29_guard_test.obj"}" /Fe:"{exe}" "{cpp}"',
                 "if errorlevel 1 exit /b %errorlevel%", f'"{exe}"', "exit /b %errorlevel%", "",
             ]), encoding="utf-8")
             result = subprocess.run(["cmd.exe", "/d", "/c", str(batch)],
                                     capture_output=True, text=True, timeout=120)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertIn("R29_CPP_CLASSIFIER_ASSERTIONS=8 RESULT=PASS", result.stdout)
+            self.assertIn("R29_CPP_CLASSIFIER_ASSERTIONS=9 RESULT=PASS", result.stdout)
 
 
 if __name__ == "__main__":

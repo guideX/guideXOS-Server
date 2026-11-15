@@ -34,6 +34,27 @@ static constexpr uint64_t kGuideXosR29SafeReadNotEvaluated = 0u;
 static constexpr uint64_t kGuideXosR29SafeReadCompleted = 1u;
 static constexpr uint64_t kGuideXosR29SafeReadFailed = 2u;
 
+// R29 extends the R28 capture layout, so the post-allocation R28
+// discriminator remains available in the same build profile.
+static constexpr uint64_t kGuideXosR28GuardSubconditionNone = 0u;
+static constexpr uint64_t kGuideXosR28GuardGcStateReadFailed = 1u;
+static constexpr uint64_t kGuideXosR28GuardThreadIdentityMismatch = 2u;
+static constexpr uint64_t kGuideXosR28GuardHeapIdentityMismatch = 3u;
+static constexpr uint64_t kGuideXosR28PredicateNotEvaluated = 0u;
+static constexpr uint64_t kGuideXosR28PredicateMatched = 1u;
+static constexpr uint64_t kGuideXosR28PredicateMismatched = 2u;
+
+struct GuideXosR28GcStateGuardEvidence {
+    uint64_t firstFailedSubcondition;
+    uint64_t gcStateReadStatus;
+    uint64_t threadIdentityResult;
+    uint64_t heapIdentityResult;
+    uint64_t expectedCurrentThread;
+    uint64_t observedCurrentThread;
+    uint64_t expectedGcHeap;
+    uint64_t observedGcHeap;
+};
+
 #elif defined(GUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR)
 static constexpr uint64_t kGuideXosR25FailFastOriginSchema = 2u;
 static constexpr uint64_t kGuideXosR25FailFastOriginRecordBytes = 144u;
