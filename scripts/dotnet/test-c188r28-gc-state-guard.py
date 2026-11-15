@@ -83,6 +83,16 @@ class R28RecordTests(unittest.TestCase):
         self.assertEqual(ANALYZER.validate_words(words),
                          (True, "guard_evidence_not_applicable"))
 
+    def test_reason_eight_with_empty_discriminator_is_not_promoted_to_a_pass(self) -> None:
+        words = r28_words(0, 0, 0, 0, 0, 0, 0, 0)
+        valid, classification = ANALYZER.validate_words(words)
+        self.assertTrue(valid)  # The published record is structurally intact.
+        self.assertEqual(classification, "GC_STATE_FAILURE_NOT_DISCRIMINATED")
+        _valid, _classification, evidence = ANALYZER.validate_r28_guard_words(words)
+        self.assertEqual(evidence["firstFailedSubcondition"], "UNRECORDED")
+        self.assertEqual(evidence["discriminatorStatus"],
+                         "reason_8_failure_without_guard_details")
+
     def test_truncated_and_unpublished_r28_records_are_rejected(self) -> None:
         words = r28_words(1, -1, 0, 0, 0x101, 0, 0x303, 0)
         self.assertEqual(ANALYZER.validate_words(words[:-1])[1],

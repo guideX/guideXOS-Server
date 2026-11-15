@@ -31,9 +31,13 @@ def signed64(value: int) -> int:
     return value - (1 << 64) if value & (1 << 63) else value
 
 
-def validate_r28_guard_words(words: list[int]) -> tuple[bool, str, dict[str, object]]:
+def validate_r28_guard_words(
+    words: list[int], original_reason: int | None = None
+) -> tuple[bool, str, dict[str, object]]:
     if len(words) != R28_RECORD_BYTES // 8:
         return False, "record_word_count_invalid", {}
+    if original_reason is None:
+        original_reason = words[3]
     subcondition = words[9]
     read_status = signed64(words[10])
     thread_result, heap_result = words[11], words[12]
@@ -56,6 +60,11 @@ def validate_r28_guard_words(words: list[int]) -> tuple[bool, str, dict[str, obj
     if (subcondition == 0 and read_status == 0 and thread_result == 0 and
         heap_result == 0 and expected_thread == 0 and observed_thread == 0 and
         expected_heap == 0 and observed_heap == 0):
+        if original_reason == 8:
+            evidence["firstFailedSubcondition"] = "UNRECORDED"
+            evidence["discriminatorStatus"] = "reason_8_failure_without_guard_details"
+            return True, "GC_STATE_FAILURE_NOT_DISCRIMINATED", evidence
+        evidence["discriminatorStatus"] = "not_applicable_to_original_reason"
         return True, "guard_evidence_not_applicable", evidence
     if read_status != 0:
         valid = (subcondition == 1 and thread_result == 0 and heap_result == 0
@@ -103,7 +112,7 @@ def validate_words(words: list[int]) -> tuple[bool, str]:
             return False, "record_flags_invalid"
         if words[17] != PUBLISHED:
             return False, "record_not_published"
-        valid, classification, _evidence = validate_r28_guard_words(words)
+        valid, classification, _evidence = validate_r28_guard_words(words, words[3])
         return valid, classification
     if len(words) != RECORD_BYTES // 8:
         return False, "record_word_count_invalid"
@@ -358,7 +367,7 @@ def main() -> int:
             result["fastFailCode"] = words[4]
             result["fastFailCodeName"] = "FAST_FAIL_FATAL_APP_EXIT" if words[4] == FAST_FAIL_FATAL_APP_EXIT else "unknown"
         if len(words) == R28_RECORD_BYTES // 8 and words[1] == R28_SCHEMA:
-            _valid, _classification, guard_evidence = validate_r28_guard_words(words)
+            _valid, _classification, guard_evidence = validate_r28_guard_words(words, words[3])
             result["gcStateGuard"] = guard_evidence
         if args.candidate_root and result["recordValid"]:
             result["caller"] = resolve_caller(args.candidate_root.resolve(), words[5])
