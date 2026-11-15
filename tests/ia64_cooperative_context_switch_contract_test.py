@@ -260,6 +260,17 @@ class CooperativeContextSwitchCallerTests(unittest.TestCase):
                 self.assertEqual(call_args.findall(body), expected)
 
 
+class CooperativeContextRseModeTests(unittest.TestCase):
+    def test_context_b_uses_mode_independent_bsp_for_rbs_bounds(self) -> None:
+        source = (ROOT / "tests" / "ia64_cooperative_context_switch" /
+                  "probe_sequence.s").read_text(encoding="utf-8")
+        body = source.split(".global ia64_coop_b_test", 1)[1].split(
+            ".endp ia64_coop_b_test", 1)[0]
+        self.assertIn("Context B's RSC.mode=3", body)
+        self.assertIn("mov r14 = ar.bsp ;;", body)
+        self.assertNotRegex(body, r"\bar\.bspstore\b")
+
+
 class CooperativeSetupReturnLinkTests(unittest.TestCase):
     def setUp(self) -> None:
         self.source = (ROOT / "tests" / "ia64_cooperative_context_switch" /

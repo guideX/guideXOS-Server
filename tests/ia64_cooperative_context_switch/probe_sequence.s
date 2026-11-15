@@ -690,7 +690,8 @@ ia64_coop_b_test:
     movl r15 = ia64_coop_stack_b_top ;;
     cmp.leu p6, p7 = r14, r15 ;;
 (p7) br.cond.sptk ia64_coop_test_fail ;;
-    mov r14 = ar.bspstore ;;
+    /* BSPSTORE is mode-restricted; BSP is readable with Context B's RSC.mode=3. */
+    mov r14 = ar.bsp ;;
     movl r15 = ia64_coop_rbs_b_base ;;
     cmp.geu p6, p7 = r14, r15 ;;
 (p7) br.cond.sptk ia64_coop_test_fail ;;
