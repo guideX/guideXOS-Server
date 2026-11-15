@@ -181,6 +181,10 @@ namespace gxos { namespace gui {
         static bool isStartMenuAllProgramsView();
         static bool removeRecentProgramFromStartMenu(const std::string& act);
         static std::vector<TaskbarApplicationEntry> taskbarApplications();
+        static bool setTaskbarActivity(const std::string& appId, uint64_t windowId,
+                                       TaskbarProgressState progress, uint8_t percent, bool attention);
+        static bool clearTaskbarActivity(const std::string& appId, uint64_t windowId);
+        static void acknowledgeTaskbarActivity(const std::string& appId, uint64_t windowId);
         static bool isTaskbarAppPinned(const std::string& canonicalAppId);
         static bool pinTaskbarApp(const std::string& canonicalAppId);
         static bool unpinTaskbarApp(const std::string& canonicalAppId);
@@ -207,6 +211,8 @@ namespace gxos { namespace gui {
         static int hostedDisplayViewportIndex();
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         static HWND g_hwnd; // expose for helper drawing
+        static bool taskbarPreviewPixels(uint64_t windowId, const uint32_t*& pixels, int& width, int& height);
+        static bool taskbarWindowPreviewState(uint64_t windowId, bool& minimized, bool& focused, HBITMAP& icon);
         static constexpr UINT kHostedTitleInputDiagnosticMessage = WM_APP + 0x5A1;
 #endif
         static std::vector<DesktopItem> g_items; // expose for icon renderer

@@ -13,6 +13,7 @@
 
 #include "kernel/types.h"
 #include "kernel/kernel_app.h"
+#include "../../../../taskbar_application_model_core.h"
 
 namespace kernel {
 namespace compositor {
@@ -231,11 +232,13 @@ struct TaskbarButton {
     bool minimized;
     bool active;
     bool hover;
+    bool overflowEntry;
+    gxos::gui::TaskbarActivity activity;
     int x, y, w, h;
     
     TaskbarButton() : windowId(0), iconColor(0xFF4690C8), windowCount(0),
                       pinned(false), relaunchable(false), missingApplication(false),
-                      running(false), minimized(false), active(false), hover(false),
+                      running(false), minimized(false), active(false), hover(false), overflowEntry(false),
                       x(0), y(0), w(0), h(0) {
         appId[0] = '\0';
         title[0] = '\0';
@@ -265,6 +268,10 @@ public:
     static bool handleKeyDown(uint32_t keyCode);
     static bool handleMenuHover(int32_t mx, int32_t my);
     static bool handleWheel(int32_t mx, int32_t my, int8_t wheelDelta);
+    static bool setActivity(const char* appId, uint32_t windowId,
+                            gxos::gui::TaskbarProgressState progress, uint8_t percent, bool attention);
+    static bool clearActivity(const char* appId, uint32_t windowId);
+    static void acknowledgeActivity(const char* appId, uint32_t windowId);
     static bool menuVisible();
     static bool menuContainsPoint(int32_t mx, int32_t my);
     static bool isTaskbarButtonAt(int32_t mx, int32_t my);
@@ -273,8 +280,9 @@ public:
 private:
     static const int MAX_TASKBAR_PINS = 8;
     static const int MAX_TASKBAR_BUTTONS = MAX_WINDOWS + MAX_TASKBAR_PINS;
+    static const int MAX_TASKBAR_DISPLAY_BUTTONS = MAX_TASKBAR_BUTTONS + 1;
     static const int MAX_TASKBAR_MENU_ITEMS = MAX_WINDOWS + 8;
-    static TaskbarButton s_buttons[MAX_TASKBAR_BUTTONS];
+    static TaskbarButton s_buttons[MAX_TASKBAR_DISPLAY_BUTTONS];
     static int s_buttonCount;
     static uint32_t s_screenW;
     static uint32_t s_screenH;
@@ -291,6 +299,14 @@ private:
     static int s_pinCount;
     static TaskbarPinPersistenceState s_pinPersistence;
     static bool s_pinStoreCorrupt;
+    static gxos::gui::TaskbarActivityStore s_activityStore;
+    static int s_visibleButtonCount;
+    static int s_overflowFirstIndex;
+    static int s_previewButtonIndex;
+    static uint32_t s_previewWindowIds[4];
+    static int s_previewWindowCount;
+    static int s_previewX, s_previewY, s_previewW, s_previewH;
+    static int s_previewCardX[4], s_previewCardY[4], s_previewCardW[4], s_previewCardH[4];
 
     enum class MenuCommand : uint8_t {
         None,
@@ -301,12 +317,14 @@ private:
         CloseAllWindows,
         PinApp,
         UnpinApp,
-        LaunchApp
+        LaunchApp,
+        SelectOverflowEntry
     };
 
     struct MenuItem {
         char label[64];
         uint32_t windowId;
+        char appId[app::MAX_APP_ID];
         MenuCommand command;
         bool enabled;
     };
@@ -327,6 +345,11 @@ private:
     static bool pinApplication(const char* appId);
     static bool unpinApplication(const char* appId);
     static void openMenuForButton(int buttonIndex, int32_t mx, int32_t my);
+    static void openOverflowMenu(int32_t mx, int32_t my);
+    static void updatePreviewLayout();
+    static bool previewContainsPoint(int32_t mx, int32_t my);
+    static int previewCardAt(int32_t mx, int32_t my);
+    static void closePreview();
     static void appendMenuItem(const char* label, MenuCommand command, uint32_t windowId = 0, bool enabled = true);
     static void layoutMenu(int32_t anchorX, int32_t anchorY);
     static int menuVisibleRowCount();

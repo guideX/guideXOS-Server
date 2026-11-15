@@ -1,5 +1,7 @@
 #pragma once
 
+#include "taskbar_activity_core.h"
+
 // Small policy helpers shared by the hosted taskbar model and the freestanding
 // native taskbar. Keep this header free of the standard library so the kernel
 // can use the same identity and activation rules without pulling in containers.

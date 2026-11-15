@@ -29,6 +29,7 @@ struct TaskbarApplicationEntry {
     bool pinned{false};
     bool relaunchable{false};
     bool missingApplication{false};
+    TaskbarActivity activity{};
     std::vector<TaskbarWindowSnapshot> windows;
 
     bool running() const { return !windows.empty(); }
@@ -52,6 +53,8 @@ struct TaskbarButtonRect {
         return x >= left && x < right && y >= top && y < bottom;
     }
 };
+
+static const size_t kTaskbarOverflowEntry = static_cast<size_t>(-2);
 
 // Build stable pins first, then running unpinned apps in their supplied Z-order.
 // Windows without a canonical App Model identity always keep individual entries.
@@ -138,6 +141,29 @@ inline uint64_t TaskbarEntryWindowForClick(const TaskbarApplicationEntry& entry)
     return entry.windows.back().id;
 }
 
+inline void ApplyTaskbarActivity(
+    std::vector<TaskbarApplicationEntry>& entries,
+    const TaskbarActivityStore& activityStore) {
+    for (TaskbarApplicationEntry& entry : entries) {
+        std::vector<uint64_t> ids;
+        ids.reserve(entry.windows.size());
+        for (const TaskbarWindowSnapshot& window : entry.windows) {
+            if (!window.tombstoned && window.id != 0) ids.push_back(window.id);
+        }
+        entry.activity = activityStore.resolve(entry.appId.c_str(), ids.data(), ids.size());
+    }
+}
+
+inline std::vector<TaskbarWindowSnapshot> BuildTaskbarPreviewWindows(
+    const TaskbarApplicationEntry& entry) {
+    std::vector<TaskbarWindowSnapshot> windows;
+    windows.reserve(entry.windows.size());
+    for (const TaskbarWindowSnapshot& window : entry.windows) {
+        if (window.id != 0) windows.push_back(window);
+    }
+    return windows;
+}
+
 // Layout is shared by draw and hit testing. The caller supplies the text-driven
 // preferred widths; all resulting rectangles stay within the supplied taskbar.
 inline std::vector<TaskbarButtonRect> LayoutTaskbarButtons(
@@ -154,26 +180,66 @@ inline std::vector<TaskbarButtonRect> LayoutTaskbarButtons(
     const int available = vertical
         ? std::max(0, bottom - startY - 4)
         : std::max(0, right - reservedRight - startX);
-    const int gaps = static_cast<int>(preferredWidths.size() > 1 ? preferredWidths.size() - 1 : 0) * gap;
-    const int perEntry = vertical
-        ? preferredHeight
-        : std::max(0, (available - gaps) / static_cast<int>(preferredWidths.size()));
+    const int minWidth = vertical ? std::max(0, right - left - 8) : std::min(56, available);
+    const int overflowWidth = vertical ? minWidth : std::min(42, available);
+    size_t visibleCount = preferredWidths.size();
+    const int totalPreferred = [&]() {
+        int sum = 0;
+        for (int width : preferredWidths) sum += std::max(minWidth, width);
+        return sum + static_cast<int>(preferredWidths.size() > 1 ? preferredWidths.size() - 1 : 0) * gap;
+    }();
+    if (!vertical && totalPreferred > available) {
+        const int roomWithOverflow = std::max(0, available - overflowWidth - gap);
+        visibleCount = 0;
+        int used = 0;
+        while (visibleCount < preferredWidths.size()) {
+            const int need = std::max(minWidth, preferredWidths[visibleCount]) + (visibleCount == 0 ? 0 : gap);
+            if (used + need > roomWithOverflow) break;
+            used += need;
+            ++visibleCount;
+        }
+        // On very compact displays, keep a single application reachable in
+        // the remaining sliver instead of replacing it with an overflow-only
+        // control. The shared clock/tray reservation is still respected.
+        if (visibleCount == 0 && preferredWidths.size() == 1 && available > 0) visibleCount = 1;
+    }
     const int verticalCapacity = vertical
         ? std::max(0, (available + gap) / std::max(1, preferredHeight + gap))
-        : static_cast<int>(preferredWidths.size());
+        : static_cast<int>(visibleCount);
+    if (vertical && preferredWidths.size() > static_cast<size_t>(verticalCapacity) && verticalCapacity > 0) {
+        visibleCount = static_cast<size_t>(verticalCapacity - 1);
+    }
+    const bool showOverflow = visibleCount < preferredWidths.size();
+    const int entryGaps = static_cast<int>(visibleCount > 1 ? visibleCount - 1 : 0) * gap;
+    const int perEntry = vertical || visibleCount == 0 ? 0 : std::max(0,
+        (available - (showOverflow ? overflowWidth + gap : 0) - entryGaps) /
+        static_cast<int>(visibleCount));
 
     int x = startX;
     int y = startY;
-    for (size_t i = 0; i < preferredWidths.size(); ++i) {
+    for (size_t i = 0; i < visibleCount; ++i) {
         if (vertical && static_cast<int>(i) >= verticalCapacity) break;
         const int width = vertical
             ? std::max(0, right - left - 8)
-            : std::min(std::max(0, preferredWidths[i]), perEntry);
+            : std::min(std::max(minWidth, preferredWidths[i]), perEntry);
         const int height = vertical ? std::min(preferredHeight, bottom - y) : std::max(0, bottom - top - 12);
         if (width <= 0 || height <= 0) break;
         result.push_back(TaskbarButtonRect{x, y, x + width, y + height, i});
         if (vertical) y += height + gap;
         else x += width + gap;
+    }
+    if (showOverflow) {
+        if (vertical) {
+            if (verticalCapacity > 0) {
+                const int height = std::min(preferredHeight, bottom - y);
+                if (height > 0) result.push_back(TaskbarButtonRect{left + 4, y, right - 4, y + height, kTaskbarOverflowEntry});
+            }
+        } else {
+            const int xOverflow = x;
+            const int width = std::min(overflowWidth, std::max(0, right - reservedRight - xOverflow));
+            const int height = std::max(0, bottom - top - 12);
+            if (width > 0 && height > 0) result.push_back(TaskbarButtonRect{xOverflow, startY, xOverflow + width, startY + height, kTaskbarOverflowEntry});
+        }
     }
     return result;
 }

@@ -192,6 +192,140 @@ int main() {
           compactLeft.front().bottom <= 240,
         "compact vertical taskbar layout stays inside a small display");
 
+    TaskbarApplicationEntry previewEntry;
+    previewEntry.appId = "app.preview";
+    previewEntry.label = "Preview app";
+    previewEntry.windows = {window(71, "One", "app.preview"), window(72, "Two", "app.preview", true)};
+    const auto groupPreviews = BuildTaskbarPreviewWindows(previewEntry);
+    check(groupPreviews.size() == 2 && groupPreviews[0].id == 71 && groupPreviews[1].id == 72,
+        "grouped preview model includes each live window with stable activation IDs");
+    previewEntry.windows.erase(previewEntry.windows.begin() + 1);
+    const auto refreshedPreviews = BuildTaskbarPreviewWindows(previewEntry);
+    check(refreshedPreviews.size() == 1 && refreshedPreviews.front().id == 71,
+        "preview model drops a closed or tombstoned window on the next snapshot");
+    previewEntry.windows = {window(73, "Single", "app.preview")};
+    check(BuildTaskbarPreviewWindows(previewEntry).size() == 1,
+        "single-window preview model produces one selectable card");
+
+    TaskbarPreviewHoverState hoverState;
+    hoverState = DecideTaskbarPreviewHoverTransition(hoverState, 1, 3, true, false, false);
+    check(hoverState.visible() && hoverState.entryIndex == 1,
+        "hovering a running taskbar entry opens its preview");
+    hoverState = DecideTaskbarPreviewHoverTransition(
+        hoverState, kTaskbarNoPreviewEntry, 3, false, true, false);
+    check(hoverState.visible() && hoverState.entryIndex == 1,
+        "moving the pointer into the preview keeps it open");
+    hoverState = DecideTaskbarPreviewHoverTransition(hoverState, 2, 3, true, false, false);
+    check(hoverState.visible() && hoverState.entryIndex == 2,
+        "moving to an adjacent running entry switches previews");
+    hoverState = DecideTaskbarPreviewHoverTransition(
+        hoverState, kTaskbarNoPreviewEntry, 3, false, false, false);
+    check(!hoverState.visible(), "leaving the taskbar and preview dismisses the popup");
+    TaskbarPreviewHoverState suppressedState;
+    suppressedState.entryIndex = 1;
+    hoverState = DecideTaskbarPreviewHoverTransition(
+        suppressedState, 1, 3, true, false, true);
+    check(!hoverState.visible(), "start-menu or context-popup suppression dismisses previews");
+
+    TaskbarActivityStore activityStore;
+    check(activityStore.set("app.preview", 0, TaskbarProgressState::Determinate, 42, true),
+        "taskbar activity contract accepts bounded determinate progress and attention");
+    std::vector<TaskbarApplicationEntry> activityEntries{previewEntry};
+    ApplyTaskbarActivity(activityEntries, activityStore);
+    check(activityEntries.front().activity.attention &&
+          activityEntries.front().activity.progress == TaskbarProgressState::Determinate &&
+          activityEntries.front().activity.percent == 42,
+        "application-scoped activity resolves onto the matching taskbar entry");
+    activityStore.acknowledgeWindow("app.preview", 73);
+    activityEntries = {previewEntry};
+    ApplyTaskbarActivity(activityEntries, activityStore);
+    check(!activityEntries.front().activity.attention &&
+          activityEntries.front().activity.progress == TaskbarProgressState::Determinate,
+        "acknowledging an application clears attention and preserves its live operation progress");
+    check(!activityStore.set("app.preview", 0, TaskbarProgressState::Determinate, 101, false),
+        "taskbar progress rejects values above one hundred percent");
+    check(!activityStore.set("app.preview", 73, TaskbarProgressState::Determinate, 40, false),
+        "taskbar activity rejects ambiguous app and window ownership tokens");
+    check(!activityStore.set(nullptr, 0, TaskbarProgressState::Indeterminate, 0, false),
+        "taskbar activity rejects records without an application or window owner");
+    check(activityStore.set(nullptr, 73, TaskbarProgressState::Indeterminate, 0, false),
+        "taskbar activity contract accepts a window-token operation");
+    const uint64_t previewWindowIds[]{73};
+    TaskbarActivity resolvedActivity = activityStore.resolve("app.preview", previewWindowIds, 1);
+    check(resolvedActivity.progress == TaskbarProgressState::Indeterminate,
+        "window-token activity resolves to the owning taskbar group");
+    check(activityStore.set(nullptr, 73, TaskbarProgressState::Completed, 100, false),
+        "taskbar activity contract accepts completed state at one hundred percent");
+    resolvedActivity = activityStore.resolve("app.preview", previewWindowIds, 1);
+    check(resolvedActivity.progress == TaskbarProgressState::Completed && resolvedActivity.percent == 100,
+        "completed operation status replaces indeterminate activity");
+    check(activityStore.set(nullptr, 73, TaskbarProgressState::Failed, 100, false),
+        "taskbar activity contract accepts failed operations");
+    resolvedActivity = activityStore.resolve("app.preview", previewWindowIds, 1);
+    check(resolvedActivity.progress == TaskbarProgressState::Failed && !resolvedActivity.attention,
+        "failed progress resolves as an error indicator without false attention state");
+    activityStore.removeWindow(73);
+    resolvedActivity = activityStore.resolve("app.preview", previewWindowIds, 1);
+    check(resolvedActivity.progress == TaskbarProgressState::Determinate,
+        "closing a window token removes its status without dropping application-scoped progress");
+    check(activityStore.clear("app.preview", 0), "taskbar activity can be explicitly cleared by app identity");
+    activityEntries = {previewEntry};
+    ApplyTaskbarActivity(activityEntries, activityStore);
+    check(!activityEntries.front().activity.attention && activityEntries.front().activity.progress == TaskbarProgressState::None,
+        "cleared operation and attention states disappear from the next taskbar snapshot");
+    check(activityStore.set("app.attention", 0, TaskbarProgressState::None, 0, true),
+        "attention-only requests do not need a fabricated progress value");
+    activityStore.acknowledgeWindow("app.attention", 900);
+    check(activityStore.resolve("app.attention", static_cast<const uint64_t*>(nullptr), 0).progress == TaskbarProgressState::None &&
+          !activityStore.resolve("app.attention", static_cast<const uint64_t*>(nullptr), 0).attention,
+        "acknowledging the owning application clears an attention-only record");
+    TaskbarActivityStore boundedActivityStore;
+    bool capacityAccepted = true;
+    for (int i = 0; i < static_cast<int>(TaskbarActivityStore::Capacity); ++i) {
+        const std::string appId = "app.capacity." + std::to_string(i);
+        capacityAccepted = capacityAccepted && boundedActivityStore.set(
+            appId.c_str(), 0, TaskbarProgressState::Indeterminate, 0, false);
+    }
+    check(capacityAccepted && !boundedActivityStore.set("app.capacity.overflow", 0,
+        TaskbarProgressState::Indeterminate, 0, false),
+        "taskbar activity storage stays within its fixed record capacity");
+
+    int thumbnailW = 0;
+    int thumbnailH = 0;
+    check(ComputeTaskbarThumbnailSize(1920, 1080, 180, 96, thumbnailW, thumbnailH) &&
+          thumbnailW == 170 && thumbnailH == 96,
+        "thumbnail sizing preserves source aspect ratio inside bounded dimensions");
+    check(!ComputeTaskbarThumbnailSize(0, 1080, 180, 96, thumbnailW, thumbnailH),
+        "thumbnail sizing rejects unavailable source surfaces");
+    const TaskbarRect popup = PositionTaskbarPopup({300, 700, 360, 728}, {0, 0, 800, 768},
+        240, 180, TaskbarDockEdge::Bottom);
+    check(popup.left >= 0 && popup.top >= 0 && popup.right <= 800 && popup.bottom <= 768 && popup.bottom < 700,
+        "preview popup positions above a bottom dock and clips to the display bounds");
+    const TaskbarRect verticalPopup = PositionTaskbarPopup({-1920, 220, -1880, 260}, {-1920, 0, 0, 900},
+        220, 160, TaskbarDockEdge::Left);
+    check(verticalPopup.left >= -1880 && verticalPopup.top >= 0 && verticalPopup.bottom <= 900,
+        "preview popup positions beside a left dock on non-origin monitor coordinates");
+    const TaskbarRect topPopup = PositionTaskbarPopup({500, 0, 560, 36}, {0, 0, 1280, 720},
+        260, 184, TaskbarDockEdge::Top, 0);
+    const TaskbarRect rightPopup = PositionTaskbarPopup({1240, 240, 1280, 280}, {0, 0, 1280, 720},
+        220, 160, TaskbarDockEdge::Right, 0);
+    check(topPopup.top == 36 && topPopup.bottom <= 720 &&
+          rightPopup.right == 1240 && rightPopup.left >= 0 && rightPopup.bottom <= 720,
+        "preview popups respect top and right taskbar dock positions");
+
+    const auto overflowBottom = LayoutTaskbarButtons({100, 100, 100, 100, 100}, 0, 700, 480, 740,
+        false, 100, 706, 6, 100, 28);
+    check(overflowBottom.size() == 3 && overflowBottom.back().entryIndex == kTaskbarOverflowEntry &&
+          overflowBottom.back().right <= 380,
+        "horizontal overflow reserves the right-side system controls and exposes an overflow button");
+    check(HitTestTaskbarButton(overflowBottom, overflowBottom.back().left, overflowBottom.back().top) == kTaskbarOverflowEntry,
+        "overflow control hit testing uses its visible rectangle");
+    const auto overflowLeft = LayoutTaskbarButtons({120, 120, 120, 120, 120, 120}, 0, 0, 32, 240,
+        true, 4, 60, 4, 0, 28);
+    check(overflowLeft.size() == 5 && overflowLeft.back().entryIndex == kTaskbarOverflowEntry &&
+          overflowLeft.back().bottom <= 240,
+        "vertical overflow stays bounded and leaves remaining applications reachable");
+
     const std::filesystem::path configPath = "tmp/taskbar-application-model-test/desktop.json";
     std::filesystem::create_directories(configPath.parent_path());
     DesktopConfigData config;

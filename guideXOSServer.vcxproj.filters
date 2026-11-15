@@ -192,6 +192,12 @@
     <ClInclude Include="right_click_menu.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="taskbar_activity_core.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="taskbar_application_model_core.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="taskbar_application_model.h">
       <Filter>Header Files</Filter>
     </ClInclude>
