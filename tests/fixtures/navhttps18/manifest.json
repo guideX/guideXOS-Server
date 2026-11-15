@@ -1,0 +1,51 @@
+{
+  "schema_version": "guidexos.navigator.navhttps18-public-chain-fixture.v1",
+  "purpose": "offline verifier compatibility only; not pilot evidence or a release trust decision",
+  "source_record": {
+    "description": "Archived Let's Encrypt ACME certificate response transcript",
+    "url": "https://gist.github.com/dextercd/8263747801f74ae065684ac11ae4ef86",
+    "revision": "f79ee0716f2b2d7b7a1e0c106dda6e5999f97c7e",
+    "record_sha256": "eec1e665b56d34b05b7fb047751cd55be232d611073329ba79ea2b321786325f",
+    "acme_certificate_id": "061764283611e8cfc510fdd340300a517f03",
+    "issued_at_utc": "2026-05-29T17:31:34Z"
+  },
+  "chain_file": "letsencrypt-2026-05-29-chain.pem",
+  "chain_sha256": "1011ab03b96fdba27f4d3aa145b9d31af7273903c4ee2416226cab259272cf7c",
+  "chain_certificates": [
+    {
+      "role": "leaf",
+      "subject": "CN=test.dextercd.com",
+      "issuer": "CN=YR2,O=Let's Encrypt,C=US",
+      "valid_from_utc": "2026-05-29T17:31:34Z",
+      "valid_until_utc": "2026-08-27T17:31:33Z",
+      "der_sha256": "9340fa3116891a566f78f7aea95e8bbfe3f7f6ac8b74825489e54ab97ce9f29a"
+    },
+    {
+      "role": "intermediate",
+      "subject": "CN=YR2,O=Let's Encrypt,C=US",
+      "issuer": "CN=Root YR,O=ISRG,C=US",
+      "valid_from_utc": "2025-09-03T00:00:00Z",
+      "valid_until_utc": "2028-09-02T23:59:59Z",
+      "der_sha256": "238b85a0099c65b970477d5724f1a1d475ce5058cffe4efa8733899bdb863c47"
+    },
+    {
+      "role": "cross-signed intermediate",
+      "subject": "CN=Root YR,O=ISRG,C=US",
+      "issuer": "CN=ISRG Root X1,O=Internet Security Research Group,C=US",
+      "valid_from_utc": "2026-05-13T00:00:00Z",
+      "valid_until_utc": "2032-09-02T23:59:59Z",
+      "der_sha256": "072639d0b140d5bffae16ad9c3f6cc6086040621f51ee61a6d46a8915c07cf76"
+    }
+  ],
+  "trust_anchor_file": "isrg-root-x1.pem",
+  "trust_anchor_pem_sha256": "22b557a27055b33606b6559f37703928d3e4ad79f110b407d04986e1843543d1",
+  "trust_anchor_der_sha256": "96bcec06264976f37460779acf28c5a7cfe8a3c0aae11a8ffcee05c0bddf08c6",
+  "trust_anchor_source_file": "assets/certs/candidates/mozilla-cacert-2026-11-05.pem",
+  "trust_anchor_source_bundle_sha256": "427c064216761a1e72a8b30f0d954d08cb6e4435a82091fb865afd20c8497285",
+  "fixture_clock_utc": "2026-06-15T00:00:00Z",
+  "limitations": [
+    "The ACME transcript is an archived third-party Gist capture, not a live origin request or an official Let's Encrypt fixture release.",
+    "The offline test proves this pinned chain can be validated with the named ISRG Root X1 bytes by the pinned Mbed TLS implementation.",
+    "The trust anchor is test input only. It is not part of an approved or restricted pilot candidate."
+  ]
+}
