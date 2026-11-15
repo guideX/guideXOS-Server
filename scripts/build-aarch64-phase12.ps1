@@ -350,7 +350,7 @@ $candidateManifest = [ordered]@{
         el0NegativeQualificationDefine = [bool]$El0NegativeQualification
         el0ScheduledQualificationDefine = [bool]$El0ScheduledQualification
         runsafe4BQualificationDefine = [bool]$Runsafe4BQualification
-        studioPayloadExecution = if ($Runsafe4BQualification) { 'one controlled return-42 Build artifact is run through the kernel-internal EL0 lifecycle; arbitrary Studio Run remains disabled' } elseif ($El0Qualification) { 'not-launched; internal EL0 diagnostic path is selected' } else { 'Phase 12 profile runtime' }
+        studioPayloadExecution = if ($Runsafe4BQualification) { 'two distinct resident-compiler Build artifacts returning 42 and 43 are run through the kernel-internal EL0 lifecycle; arbitrary Studio Run remains disabled' } elseif ($El0Qualification) { 'not-launched; internal EL0 diagnostic path is selected' } else { 'Phase 12 profile runtime' }
         studioRunRemainsDisabled = $true
     }
     guest = [ordered]@{
@@ -392,6 +392,14 @@ $candidateManifest = [ordered]@{
                 sourceSha256 = (Get-Sha256Hex (Join-Path $runsafe4BWorkspace 'src\main.c'))
                 expectedReturn = 42
                 source = 'resident Build service compiles the staged source at guest runtime; Build-owned bytes feed the isolated loader'
+                return43 = [ordered]@{
+                    source = 'int gx_main(void* ctx) { return 43; }'
+                    sourceSha256 = Get-ByteArraySha256Hex ([Text.Encoding]::UTF8.GetBytes('int gx_main(void* ctx) { return 43; }'))
+                    expectedReturn = 43
+                    historicalCompilerElfSha256 = 'e636e87fca022d1e2d4b4068067e2a7d19f59a626d24c28872c4fe23ebecc8d6'
+                    provenance = 'diagnostic writes this distinct C source into guest VFS, then the resident Build service compiles it into a new immutable generation'
+                }
+                historicalCompilerElfSha256 = '76c5a81849c6f9372432a5e164563d10226a5c8ae211f4a16a8e70b5f09e48b2'
                 unsupportedChild = 'non-cooperative C loop is outside the resident compiler grammar'
             }
         } else { $null }

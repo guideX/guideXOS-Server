@@ -164,6 +164,15 @@ struct gxos_aarch64_el0_task_result {
     uint64_t kernel_root_restored;
     uint64_t cancel_requested;
     uint64_t resources_cleaned;
+    // Internal qualification observations. These are kernel-internal fields,
+    // not part of the public Studio adapter ABI.
+    uint64_t compiled_entry_point;
+    uint64_t el0_initial_pc;
+    uint64_t image_entry_descriptor;
+    uint64_t trampoline_descriptor;
+    uint64_t user_stack_descriptor;
+    uint64_t lower_stack_guard_descriptor;
+    uint64_t upper_stack_guard_descriptor;
 };
 
 // Exact identity returned by the resident Build service. The owner token is

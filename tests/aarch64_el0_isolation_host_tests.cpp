@@ -452,6 +452,36 @@ static void test_compiler_elf_task_preparation(kernel::scheduler::Task* owner)
     expect(phase2_el0_task_create_studio_build(
                &identity42, owner->id, 10000, &execution42),
            "exact immutable Build identity creates the scheduled ELF child");
+    gxos_aarch64_el0_task_result mapping42{};
+    const uint64_t descUserAp = UINT64_C(3) << 6;
+    const uint64_t descPxn = UINT64_C(1) << 53;
+    const uint64_t descUxn = UINT64_C(1) << 54;
+    expect(phase2_el0_task_query(execution42, owner->id, &mapping42) &&
+           mapping42.state == kernel::scheduler::EXECUTION_CREATED &&
+           mapping42.compiled_entry_point == UINT64_C(0x51001000) &&
+           mapping42.el0_initial_pc == GXOS_AARCH64_STUDIO_ELF_TRAMPOLINE_VA,
+           "created Build child reports the compiled entry and EL0 trampoline");
+    expect((mapping42.image_entry_descriptor & 3) == 3 &&
+           (mapping42.image_entry_descriptor & descUserAp) == descUserAp &&
+           (mapping42.image_entry_descriptor & descPxn) != 0 &&
+           (mapping42.image_entry_descriptor & descUxn) == 0 &&
+           (mapping42.trampoline_descriptor & descUserAp) == descUserAp &&
+           (mapping42.trampoline_descriptor & descPxn) != 0 &&
+           (mapping42.trampoline_descriptor & descUxn) == 0,
+           "created Build child maps the ELF entry and trampoline RX for EL0");
+    const bool stackPolicyValid = (mapping42.user_stack_descriptor & 3) == 3 &&
+           (mapping42.user_stack_descriptor & (UINT64_C(1) << 6)) == (UINT64_C(1) << 6) &&
+           (mapping42.user_stack_descriptor & (descPxn | descUxn)) == (descPxn | descUxn) &&
+           mapping42.lower_stack_guard_descriptor == 0 &&
+           mapping42.upper_stack_guard_descriptor == 0;
+    if (!stackPolicyValid) {
+        std::printf("EL0 mapping diagnostic: stack=%016llx lower_guard=%016llx upper_guard=%016llx\n",
+            static_cast<unsigned long long>(mapping42.user_stack_descriptor),
+            static_cast<unsigned long long>(mapping42.lower_stack_guard_descriptor),
+            static_cast<unsigned long long>(mapping42.upper_stack_guard_descriptor));
+    }
+    expect(stackPolicyValid,
+           "created Build child maps an RW-NX stack with unmapped guards");
     gxos_aarch64_studio_build_identity staleIdentity = identity42;
     staleIdentity.build_generation++;
     uint64_t staleExecution = UINT64_MAX;

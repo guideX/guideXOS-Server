@@ -32,6 +32,7 @@ struct RuntimeRecord {
     uint64_t parent_owner_id;
     uint64_t user_page_count;
     uint64_t user_table_page_count;
+    uint64_t image_entry_point;
     uint64_t final_state;
     uint64_t final_result_kind;
     uint64_t final_result;
@@ -489,6 +490,7 @@ extern "C" uint8_t phase2_el0_task_create_studio_elf(
 
     record->execution_id = g_next_execution_id++;
     record->parent_owner_id = owner_id;
+    record->image_entry_point = image.entry_point;
     const uint64_t child_owner = record->execution_id;
     if (!phase2_el0_address_space_create(&record->space, child_owner)) {
         zero_bytes(record, sizeof(*record));
@@ -611,6 +613,28 @@ extern "C" uint8_t phase2_el0_task_query(
     if (!record) return 0;
     result->execution_id = record->execution_id;
     result->owner_id = record->parent_owner_id;
+    result->compiled_entry_point = record->image_entry_point;
+    result->el0_initial_pc = record->context.entry_pc;
+    result->image_entry_descriptor = 0;
+    result->trampoline_descriptor = 0;
+    result->user_stack_descriptor = 0;
+    result->lower_stack_guard_descriptor = 0;
+    result->upper_stack_guard_descriptor = 0;
+    if (record->space.root != 0) {
+        const uint64_t stack_end = GXOS_AARCH64_EL0_USER_LIMIT - GXOS_AARCH64_EL0_PAGE_SIZE;
+        const uint64_t stack_base = stack_end - GXOS_AARCH64_STUDIO_ELF_STACK_BYTES;
+        (void)phase2_el0_query_descriptor(&record->space, record->image_entry_point,
+                                          &result->image_entry_descriptor);
+        (void)phase2_el0_query_descriptor(&record->space,
+            GXOS_AARCH64_STUDIO_ELF_TRAMPOLINE_VA, &result->trampoline_descriptor);
+        (void)phase2_el0_query_descriptor(&record->space, stack_base,
+                                          &result->user_stack_descriptor);
+        (void)phase2_el0_query_descriptor(&record->space,
+            stack_base - GXOS_AARCH64_EL0_PAGE_SIZE,
+            &result->lower_stack_guard_descriptor);
+        (void)phase2_el0_query_descriptor(&record->space, stack_end,
+                                          &result->upper_stack_guard_descriptor);
+    }
     if (record->task) {
         result->state = record->task->execution_state;
         result->result_kind = record->task->execution_result_kind;

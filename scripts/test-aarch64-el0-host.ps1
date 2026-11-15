@@ -118,7 +118,9 @@ foreach ($required in @('EXECUTION_TIMED_OUT', 'execution_consumed',
 }
 foreach ($required in @('scheduled_counter_ticks', 'fault_esr', 'fault_far',
         'kernel_root_restored', 'user_page_count', 'page_table_page_count',
-        'address_space_owner_id')) {
+        'address_space_owner_id', 'compiled_entry_point', 'el0_initial_pc',
+        'image_entry_descriptor', 'trampoline_descriptor', 'user_stack_descriptor',
+        'lower_stack_guard_descriptor', 'upper_stack_guard_descriptor')) {
     if (!$el0RuntimeText.Contains($required)) { throw "EL0 guest evidence field is missing: $required" }
 }
 if ($el0RuntimeText.Contains('kernel::scheduler::task_count() != 0')) {

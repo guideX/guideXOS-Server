@@ -30,6 +30,7 @@ $project = if ($Runsafe4BQualification) { 'guideXOSServer-AARCH64-RUNSAFE4B-Comp
 $sessionPrefix = if ($Runsafe4BQualification) { 'runsafe4b-' } elseif ($ScheduledEl0Qualification) { 'runsafe3b-' } else { 'el0-negative-' }
 $sessionId = $sessionPrefix + (Get-Date -Format 'yyyyMMdd-HHmmss-fff')
 $script:scheduledSourceRevision = ''
+$script:runsafe4bManifest = $null
 $sessionDirectory = Join-Path $ArtifactRoot $sessionId
 $null = New-Item -ItemType Directory -Path $sessionDirectory -Force
 $manifestPath = Join-Path $CandidateDirectory 'candidate-manifest.json'
@@ -788,41 +789,130 @@ function Assert-ScheduledEl0GuestEvidence([string]$Text) {
     $compiledElfEvidence = $null
     if ($Runsafe4BQualification) {
         $invalidElfLines = @($lines | Where-Object { $_ -match '^\[RUNSAFE4B\] INVALID ELF REJECT PASS ' })
-        $compiledElfLines = @($lines | Where-Object { $_ -match '^\[RUNSAFE4B\] COMPILED ELF PASS ' })
+        $artifactLines = @($lines | Where-Object { $_ -match '^\[RUNSAFE4B\] ARTIFACT PASS ' })
+        $loadLines = @($lines | Where-Object { $_ -match '^\[RUNSAFE4B\] LOAD PASS ' })
+        $exec42Lines = @($lines | Where-Object { $_ -match '^\[RUNSAFE4B\] EXEC42 PASS ' })
+        $exec43Lines = @($lines | Where-Object { $_ -match '^\[RUNSAFE4B\] EXEC43 PASS ' })
+        $identityLines = @($lines | Where-Object { $_ -match '^\[RUNSAFE4B\] IDENTITY REJECT PASS ' })
+        $elfRejectLines = @($lines | Where-Object { $_ -match '^\[RUNSAFE4B\] ELF REJECT PASS ' })
+        $immutableLines = @($lines | Where-Object { $_ -match '^\[RUNSAFE4B\] IMMUTABLE PASS ' })
+        $kernelLines = @($lines | Where-Object { $_ -match '^\[RUNSAFE4B\] KERNEL PASS ' })
         $noncooperativeLines = @($lines | Where-Object { $_ -match '^\[RUNSAFE4B\] NONCOOPERATIVE UNSUPPORTED ' })
         $runsafe4bMarkers = @($lines | Where-Object { $_ -match '^AARCH64_RUNSAFE4B_PASS ' })
-        if ($invalidElfLines.Count -ne 1 -or $compiledElfLines.Count -ne 1 -or
+        if ($invalidElfLines.Count -ne 1 -or $artifactLines.Count -ne 2 -or
+            $loadLines.Count -ne 2 -or $exec42Lines.Count -ne 1 -or $exec43Lines.Count -ne 1 -or
+            $identityLines.Count -ne 8 -or $elfRejectLines.Count -ne 7 -or
+            $immutableLines.Count -ne 1 -or $kernelLines.Count -ne 1 -or
             $noncooperativeLines.Count -ne 1 -or $runsafe4bMarkers.Count -ne 1) {
-            throw 'Guest did not report each RUNSAFE4-B compiled-ELF, invalid-image, and unsupported-loop outcome exactly once.'
+            throw 'Guest did not report both compiled executions and every RUNSAFE4-B identity, loader, immutability, and lifecycle control exactly once.'
         }
-        $compiledElfLine = [string]$compiledElfLines[0]
         $runsafe4bMarker = [string]$runsafe4bMarkers[0]
-        $generation = Get-RunSafe3BField $compiledElfLine 'generation'
+        $artifact42 = [string]($artifactLines | Where-Object { (Get-RunSafe3BField ([string]$_) 'return') -eq 42 } | Select-Object -First 1)
+        $artifact43 = [string]($artifactLines | Where-Object { (Get-RunSafe3BField ([string]$_) 'return') -eq 43 } | Select-Object -First 1)
+        $exec42 = [string]$exec42Lines[0]
+        $exec43 = [string]$exec43Lines[0]
+        if (!$artifact42 -or !$artifact43) { throw 'Guest artifact provenance records do not separate return 42 and return 43.' }
+        $generation42 = Get-RunSafe3BField $artifact42 'generation'
+        $generation43 = Get-RunSafe3BField $artifact43 'generation'
+        $digest42 = Get-RecordField $artifact42 'digest'
+        $digest43 = Get-RecordField $artifact43 'digest'
+        $source42 = Get-RecordField $artifact42 'source'
+        $source43 = Get-RecordField $artifact43 'source'
+        $execChecks = @(
+            @{ Line = $exec42; Return = 42; Generation = $generation42 },
+            @{ Line = $exec43; Return = 43; Generation = $generation43 })
+        $executionResultsValid = $true
+        foreach ($execution in $execChecks) {
+            $line = [string]$execution.Line
+            $svcEsr = Convert-RunSafe3BHex (Get-RecordField $line 'svc_esr')
+            $svcElr = Convert-RunSafe3BHex (Get-RecordField $line 'svc_elr')
+            if ((Get-RunSafe3BField $line 'generation') -ne $execution.Generation -or
+                (Get-RunSafe3BField $line 'entry_observed') -eq 0 -or
+                (Convert-RunSafe3BHex (Get-RecordField $line 'compiled_entry')) -ne 0x51001000 -or
+                (Get-RunSafe3BField $line 'c_return') -ne $execution.Return -or
+                (Get-RunSafe3BField $line 'svc_exit') -ne $execution.Return -or
+                (Get-RecordField $line 'state') -ne 'completed' -or
+                (Get-RecordField $line 'async') -ne '1' -or
+                (Get-RecordField $line 'cleanup') -ne '1' -or
+                (Get-RecordField $line 'reap') -ne '1' -or
+                (Get-RecordField $line 'root_restored') -ne '1' -or
+                (Get-RecordField $line 'kernel_continues') -ne '1' -or
+                $svcElr -ne 0x511ff014 -or (($svcEsr -shr 26) -band 0x3f) -ne 0x15 -or
+                ($svcEsr -band 0xffff) -ne 1) { $executionResultsValid = $false }
+        }
+        $identityControls = @('missing-successful-build','stale-generation','build-owner-mismatch',
+            'project-mismatch','package-abi-mismatch','modified-artifact-identity',
+            'invalid-scheduler-owner','invalidated-generation')
+        $identityControlsObserved = @($identityLines | ForEach-Object { Get-RecordField ([string]$_) 'control' })
+        $identityControlsValid = (($identityControlsObserved | Sort-Object) -join ',') -eq (($identityControls | Sort-Object) -join ',')
+        $elfControls = @('wrong-machine','truncated','invalid-entry','unsupported-layout',
+            'overlapping-load-segments','writable-executable','out-of-range-memory')
+        $elfControlsObserved = @($elfRejectLines | ForEach-Object { Get-RecordField ([string]$_) 'control' })
+        $elfControlsValid = ((($elfControlsObserved | Sort-Object) -join ',') -eq (($elfControls | Sort-Object) -join ',')) -and
+            @($elfRejectLines | Where-Object { (Get-RecordField ([string]$_) 'start_not_called') -ne '1' }).Count -eq 0
+        $loadMappingsValid = $true
+        foreach ($loadLine in $loadLines) {
+            foreach ($field in @('image_rx','trampoline_rx','stack_rw','stack_nx','guards','el0')) {
+                if ((Get-RecordField ([string]$loadLine) $field) -ne '1') { $loadMappingsValid = $false }
+            }
+            if ((Get-RecordField ([string]$loadLine) 'wx') -ne '0' -or
+                (Convert-RunSafe3BHex (Get-RecordField ([string]$loadLine) 'image_entry')) -ne 0x51001000) {
+                $loadMappingsValid = $false
+            }
+        }
+        $expected42 = $script:runsafe4bManifest.historicalCompilerElfSha256
+        $expected43 = $script:runsafe4bManifest.return43.historicalCompilerElfSha256
+        $expectedSource42 = $script:runsafe4bManifest.sourceSha256
+        $expectedSource43 = $script:runsafe4bManifest.return43.sourceSha256
+        $immutable = [string]$immutableLines[0]
+        $kernel = [string]$kernelLines[0]
         $identityChecks = [ordered]@{
-            result = (Get-RunSafe3BField $compiledElfLine 'result') -eq 42
-            user_pages = (Get-RunSafe3BField $compiledElfLine 'user_pages') -eq 7
-            page_tables = (Get-RunSafe3BField $compiledElfLine 'page_table_pages') -ne 0
-            cleanup = (Get-RecordField $compiledElfLine 'cleanup') -eq '1'
-            reap = (Get-RecordField $compiledElfLine 'reap') -eq '1'
-            root_restored = (Get-RecordField $compiledElfLine 'root_restored') -eq '1'
-            studio_run_disabled = (Get-RecordField $compiledElfLine 'arbitrary_studio_run') -eq 'disabled'
+            fresh_resident_builds = (Get-RecordField $artifact42 'provenance') -eq 'resident-compiler-fresh-build' -and
+                (Get-RecordField $artifact43 'provenance') -eq 'resident-compiler-fresh-build'
+            historical_42_identity = $source42 -eq $expectedSource42 -and $digest42 -eq $expected42
+            historical_43_identity = $source43 -eq $expectedSource43 -and $digest43 -eq $expected43
+            distinct_generations = $generation42 -ne 0 -and $generation43 -ne 0 -and $generation42 -ne $generation43
+            distinct_artifacts = $digest42 -ne $digest43 -and $source42 -ne $source43
+            real_exec_42_and_43 = $executionResultsValid
+            isolated_page_permissions = $loadMappingsValid
+            identity_rejections = $identityControlsValid
+            malformed_elf_rejections = $elfControlsValid
+            immutable_bytes = (Get-RecordField $immutable 'path_replaced') -eq '1' -and
+                (Get-RecordField $immutable 'validated_snapshot_unchanged') -eq '1' -and
+                (Get-RecordField $immutable 'stale_generation_rejected') -eq '1'
             invalid_machine_rejected = (Get-RecordField ([string]$invalidElfLines[0]) 'control') -eq 'wrong-machine'
             unsupported_profile = (Get-RecordField ([string]$noncooperativeLines[0]) 'reason') -eq 'resident-compiler-profile'
-            generation = $generation -ne 0
             source_revision = (Get-RecordField $runsafe4bMarker 'source') -eq $script:scheduledSourceRevision
-            final_generation = (Get-RunSafe3BField $runsafe4bMarker 'build_generation') -eq $generation
-            expected_return = (Get-RunSafe3BField $runsafe4bMarker 'expected_return') -eq 42
-            final_invalid_rejected = (Get-RecordField $runsafe4bMarker 'invalid_elf_rejected') -eq '1'
-            final_cleanup = (Get-RecordField $runsafe4bMarker 'cleanup') -eq '1'
+            final_generations = (Get-RunSafe3BField $runsafe4bMarker 'build42_generation') -eq $generation42 -and
+                (Get-RunSafe3BField $runsafe4bMarker 'build43_generation') -eq $generation43
+            final_returns = (Get-RecordField $runsafe4bMarker 'return42') -eq '1' -and
+                (Get-RecordField $runsafe4bMarker 'return43') -eq '1'
+            final_binding_and_cleanup = (Get-RecordField $runsafe4bMarker 'compiled_el0') -eq '1' -and
+                (Get-RecordField $runsafe4bMarker 'immutable') -eq '1' -and
+                (Get-RecordField $runsafe4bMarker 'invalid_elf_rejected') -eq '1' -and
+                (Get-RecordField $runsafe4bMarker 'cleanup') -eq '1'
+            kernel_continues = (Get-RecordField $kernel 'scheduler_continues') -eq '1' -and
+                (Get-RecordField $kernel 'unexpected_irq') -eq '0' -and
+                (Get-RecordField $kernel 'fatal_exception') -eq '0' -and
+                (Get-RecordField $runsafe4bMarker 'kernel_continues') -eq '1'
+            studio_run_disabled = (Get-RecordField $runsafe4bMarker 'studio_run') -eq 'disabled'
         }
         if (@($identityChecks.Values | Where-Object { !$_ }).Count -ne 0) {
-            throw "Compiled Studio ELF result does not match the immutable Build generation and cleanup evidence: checks=$($identityChecks | ConvertTo-Json -Compress) compiled=$compiledElfLine final=$runsafe4bMarker"
+            throw "Compiled ELF evidence does not match both immutable Build generations and native lifecycle results: checks=$($identityChecks | ConvertTo-Json -Compress) return42=$exec42 return43=$exec43 final=$runsafe4bMarker"
         }
         $compiledElfEvidence = [pscustomobject]@{
-            BuildGeneration = $generation
-            CompiledElf = $compiledElfLine.Trim()
+            Build42Generation = $generation42
+            Build43Generation = $generation43
+            Artifact42 = $artifact42.Trim()
+            Artifact43 = $artifact43.Trim()
+            Exec42 = $exec42.Trim()
+            Exec43 = $exec43.Trim()
+            IdentityRejections = @($identityLines | ForEach-Object { $_.Trim() })
+            ElfRejections = @($elfRejectLines | ForEach-Object { $_.Trim() })
+            Immutable = $immutable.Trim()
             InvalidElf = ([string]$invalidElfLines[0]).Trim()
             Noncooperative = ([string]$noncooperativeLines[0]).Trim()
+            Kernel = $kernel.Trim()
             FinalMarker = $runsafe4bMarker.Trim()
         }
     }
@@ -999,6 +1089,8 @@ $record = [ordered]@{
     candidate_kernel_sha256 = ''
     candidate_efi_sha256 = ''
     candidate_ramdisk_sha256 = ''
+    candidate_studio_elf_sha256 = ''
+    candidate_studio_package_manifest_sha256 = ''
     qemu_sha256 = ''
     firmware_code_sha256 = ''
     firmware_vars_template_sha256 = ''
@@ -1044,14 +1136,21 @@ try {
         }
         if ($Runsafe4BQualification) {
             $compiledElf = $manifest.artifacts.compiledStudioElfQualification
+            $return43 = if ($compiledElf) { $compiledElf.return43 } else { $null }
             if (!$manifest.overlay.runsafe4BQualificationDefine -or !$compiledElf -or
                 $compiledElf.guestProject -ne '/Runsafe4BProject' -or
                 $compiledElf.projectId -ne 'com.guidexos.runsafe4b' -or
                 $compiledElf.expectedReturn -ne 42 -or
                 [string]$compiledElf.sourceSha256 -notmatch '^[0-9a-f]{64}$' -or
-                $compiledElf.source -notmatch 'resident Build service compiles') {
+                [string]$compiledElf.historicalCompilerElfSha256 -notmatch '^[0-9a-f]{64}$' -or
+                $compiledElf.source -notmatch 'resident Build service compiles' -or
+                !$return43 -or $return43.expectedReturn -ne 43 -or
+                [string]$return43.sourceSha256 -notmatch '^[0-9a-f]{64}$' -or
+                [string]$return43.historicalCompilerElfSha256 -notmatch '^[0-9a-f]{64}$' -or
+                $return43.source -ne 'int gx_main(void* ctx) { return 43; }') {
                 throw 'Candidate manifest does not identify the source-matched RUNSAFE4-B Build artifact fixture.'
             }
+            $script:runsafe4bManifest = $compiledElf
         }
         if ([string]$manifest.server.head -notmatch '^[0-9a-f]{40}$') {
             throw 'Candidate manifest has no committed source revision identity.'
@@ -1068,6 +1167,16 @@ try {
         @{ Path = (Join-Path $CandidateDirectory 'BOOTAA64.EFI'); Hash = $manifest.artifacts.bootEfiSha256 },
         @{ Path = (Join-Path $CandidateDirectory 'esp\ramdisk.img'); Hash = $manifest.artifacts.ramdiskSha256 })) {
         if ((Get-Sha256Hex $artifact.Path) -ne $artifact.Hash) { throw "Candidate artifact hash mismatch: $($artifact.Path)" }
+    }
+    if ($Runsafe4BQualification) {
+        $studioElfPath = Join-Path $CandidateDirectory 'ramdisk-root\Apps\DeveloperStudio\bin\arm64\developerstudio.elf'
+        $studioManifestPath = Join-Path $CandidateDirectory 'ramdisk-root\Apps\DeveloperStudio\app.json'
+        if (!(Test-Path -LiteralPath $studioElfPath -PathType Leaf) -or
+            !(Test-Path -LiteralPath $studioManifestPath -PathType Leaf) -or
+            (Get-Sha256Hex $studioElfPath) -ne $manifest.artifacts.studioElf.sha256 -or
+            (Get-Sha256Hex $studioManifestPath) -ne $manifest.artifacts.packageManifestSha256) {
+            throw 'Candidate Studio ELF or package manifest hash differs from its recorded identity.'
+        }
     }
     $currentHead = (& git -C $repoRoot rev-parse HEAD).Trim()
     $currentBranch = (& git -C $repoRoot branch --show-current).Trim()
@@ -1089,6 +1198,10 @@ try {
     $record.candidate_kernel_sha256 = Get-Sha256Hex (Join-Path $CandidateDirectory 'kernel.elf')
     $record.candidate_efi_sha256 = Get-Sha256Hex (Join-Path $CandidateDirectory 'BOOTAA64.EFI')
     $record.candidate_ramdisk_sha256 = Get-Sha256Hex (Join-Path $CandidateDirectory 'esp\ramdisk.img')
+    if ($Runsafe4BQualification) {
+        $record.candidate_studio_elf_sha256 = Get-Sha256Hex (Join-Path $CandidateDirectory 'ramdisk-root\Apps\DeveloperStudio\bin\arm64\developerstudio.elf')
+        $record.candidate_studio_package_manifest_sha256 = Get-Sha256Hex (Join-Path $CandidateDirectory 'ramdisk-root\Apps\DeveloperStudio\app.json')
+    }
     $record.qemu_sha256 = Get-Sha256Hex $QemuPath
     $record.firmware_code_sha256 = Get-Sha256Hex $FirmwareCode
     $record.firmware_vars_template_sha256 = Get-Sha256Hex $FirmwareVarsTemplate

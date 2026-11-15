@@ -40,6 +40,7 @@ using Aarch64Handoff = gxos_aarch64_phase4_handoff;
 #include "phase4_boot_info.h"
 #include "phase3_timer.h"
 #if defined(GXOS_AARCH64_RUNSAFE4B_QUALIFICATION)
+#include "studio_elf_image.h"
 #include "../../../sdk/include/guidexos/build.h"
 #include "../../../kernel/core/compiler/compiler_build_service.h"
 #endif
@@ -1005,15 +1006,50 @@ static bool runsafe3b_run_scheduled_fixtures()
 }
 
 #if defined(GXOS_AARCH64_RUNSAFE4B_QUALIFICATION)
-static bool runsafe4b_run_compiled_elf()
-{
-    static const uint64_t kBuildOwnerIdentity = UINT64_C(0x52554e5341464534);
-    static uint8_t invalidElf[GXOS_AARCH64_STUDIO_ELF_MAX_FILE_BYTES] = {};
-    kernel::scheduler::Task* ownerTask = kernel::scheduler::current_task();
-    if (!ownerTask || ownerTask->execution_kind != kernel::scheduler::EXECUTION_KERNEL ||
-        ownerTask->id == 0) return false;
-    const uint64_t ownerId = ownerTask->id;
+static const uint64_t kRunsafe4bBuildOwnerIdentity = UINT64_C(0x52554e5341464534);
+static uint8_t g_runsafe4bInvalidElf[GXOS_AARCH64_STUDIO_ELF_MAX_FILE_BYTES] = {};
+static uint8_t g_runsafe4bArtifactSnapshot[GXOS_AARCH64_STUDIO_ELF_MAX_FILE_BYTES] = {};
+static uint8_t g_runsafe4bVfsReadback[GXOS_AARCH64_STUDIO_ELF_MAX_FILE_BYTES] = {};
 
+static bool runsafe4b_text_equal(const char* left, const char* right)
+{
+    if (!left || !right) return left == right;
+    while (*left && *right) if (*left++ != *right++) return false;
+    return *left == *right;
+}
+
+static void runsafe4b_copy_bytes(uint8_t* destination, const uint8_t* source,
+                                 uint64_t count)
+{
+    for (uint64_t i = 0; i < count; ++i) destination[i] = source[i];
+}
+
+static bool runsafe4b_bytes_equal(const uint8_t* left, const uint8_t* right,
+                                  uint64_t count)
+{
+    if (!left || !right) return false;
+    for (uint64_t i = 0; i < count; ++i) if (left[i] != right[i]) return false;
+    return true;
+}
+
+static void runsafe4b_set_u16(uint8_t* bytes, uint64_t offset, uint16_t value)
+{
+    bytes[offset] = static_cast<uint8_t>(value);
+    bytes[offset + 1] = static_cast<uint8_t>(value >> 8);
+}
+
+static void runsafe4b_set_u32(uint8_t* bytes, uint64_t offset, uint32_t value)
+{
+    for (uint32_t i = 0; i < 4; ++i) bytes[offset + i] = static_cast<uint8_t>(value >> (i * 8));
+}
+
+static void runsafe4b_set_u64(uint8_t* bytes, uint64_t offset, uint64_t value)
+{
+    for (uint32_t i = 0; i < 8; ++i) bytes[offset + i] = static_cast<uint8_t>(value >> (i * 8));
+}
+
+static gx_build_request runsafe4b_build_request()
+{
     gx_build_request request{};
     request.size = sizeof(request);
     request.version = GX_BUILD_API_VERSION;
@@ -1025,138 +1061,401 @@ static bool runsafe4b_run_compiled_elf()
     request.buildScript = "build.ps1";
     request.expectedArtifact = "build/bin/arm64/runsafe4b.elf";
     request.configuration = "Debug";
-    gx_build_handle buildHandle = 0;
+    return request;
+}
+
+static void runsafe4b_make_identity(
+    const kernel::compiler::BareMetalBuildService::OwnedArtifactView& artifact,
+    gxos_aarch64_studio_build_identity* identity)
+{
+    identity->owner_identity = artifact.ownerIdentity;
+    identity->build_generation = artifact.buildGeneration;
+    identity->artifact_size = artifact.artifactSize;
+    identity->project_id = artifact.projectId;
+    identity->artifact_path = artifact.artifactPath;
+    identity->package_path = artifact.packagePath;
+    identity->package_generation = artifact.packageGeneration;
+    identity->architecture = artifact.architecture;
+    identity->abi = artifact.abi;
+    identity->source_sha256 = artifact.sourceSha256;
+    identity->artifact_sha256 = artifact.artifactSha256;
+}
+
+static bool runsafe4b_build_capture(
+    const gx_build_request& request, const char* source, uint32_t expected_return,
+    const char* expected_source_sha256, const char* expected_artifact_sha256,
+    gx_build_snapshot* build,
+    kernel::compiler::BareMetalBuildService::OwnedArtifactView* artifact,
+    gxos_aarch64_studio_build_identity* identity)
+{
+    if (!build || !artifact || !identity) return false;
+    if (source) {
+        const uint64_t source_bytes = static_cast<uint64_t>(__builtin_strlen(source));
+        if (kernel::vfs::write_file("/Runsafe4BProject/src/main.c", source,
+                static_cast<uint32_t>(source_bytes)) != static_cast<int32_t>(source_bytes))
+            return false;
+    }
+    gx_build_handle handle = 0;
     if (kernel::compiler::BareMetalBuildService::start_for_owner(
-            &request, &buildHandle, kBuildOwnerIdentity) != GX_OK || buildHandle == 0)
+            &request, &handle, kRunsafe4bBuildOwnerIdentity) != GX_OK || handle == 0)
         return false;
-
-    gx_build_snapshot build{};
-    build.size = sizeof(build);
-    build.version = GX_BUILD_API_VERSION;
-    const bool polled = kernel::compiler::BareMetalBuildService::poll(buildHandle, &build) == GX_OK;
-    const bool released = kernel::compiler::BareMetalBuildService::release(buildHandle) == GX_OK;
-    if (!polled || !released || build.state != GX_BUILD_SUCCEEDED || !build.artifactValid ||
-        build.artifactSize != 4108 || build.artifactEntryPoint == 0 ||
-        build.artifactPath[0] == '\0' || build.artifactArchitecture[0] == '\0') return false;
-
-    kernel::compiler::BareMetalBuildService::OwnedArtifactView artifact{};
+    build->size = sizeof(*build);
+    build->version = GX_BUILD_API_VERSION;
+    const bool polled = kernel::compiler::BareMetalBuildService::poll(handle, build) == GX_OK;
+    const bool released = kernel::compiler::BareMetalBuildService::release(handle) == GX_OK;
+    if (!polled || !released || build->handle != handle ||
+        build->state != GX_BUILD_SUCCEEDED || !build->artifactValid ||
+        build->artifactSize != 4108 || build->artifactEntryPoint != UINT64_C(0x51001000) ||
+        build->artifactPath[0] == '\0' || build->artifactArchitecture[0] == '\0') return false;
     if (!kernel::compiler::BareMetalBuildService::current_artifact(
-            kBuildOwnerIdentity, build.handle, request.projectId, build.artifactPath,
-            build.artifactSize, "arm64", "guidexos-c-abi-v1",
-            build.packagePath, build.packageGeneration, build.artifactSha256,
-            &artifact) || !artifact.el0IntegerProfileValid ||
-        !artifact.bytes || artifact.buildGeneration != build.handle ||
-        artifact.ownerIdentity != kBuildOwnerIdentity) return false;
+            kRunsafe4bBuildOwnerIdentity, build->handle, request.projectId,
+            build->artifactPath, build->artifactSize, "arm64", "guidexos-c-abi-v1",
+            build->packagePath, build->packageGeneration, build->artifactSha256,
+            artifact) || !artifact->el0IntegerProfileValid || !artifact->bytes ||
+        artifact->buildGeneration != handle || artifact->ownerIdentity != kRunsafe4bBuildOwnerIdentity ||
+        !runsafe4b_text_equal(artifact->sourceSha256, expected_source_sha256) ||
+        !runsafe4b_text_equal(artifact->artifactSha256, expected_artifact_sha256)) return false;
+    gxos_aarch64_studio_elf_image image{};
+    if (!gxos_aarch64_studio_elf_validate(
+            artifact->bytes, artifact->artifactSize, &image) ||
+        image.entry_point != UINT64_C(0x51001000) || image.return_bits != expected_return)
+        return false;
+    runsafe4b_make_identity(*artifact, identity);
+    return true;
+}
 
-    gxos_aarch64_studio_build_identity identity{};
-    identity.owner_identity = kBuildOwnerIdentity;
-    identity.build_generation = artifact.buildGeneration;
-    identity.artifact_size = artifact.artifactSize;
-    identity.project_id = artifact.projectId;
-    identity.artifact_path = artifact.artifactPath;
-    identity.package_path = artifact.packagePath;
-    identity.package_generation = artifact.packageGeneration;
-    identity.architecture = artifact.architecture;
-    identity.abi = artifact.abi;
-    identity.source_sha256 = artifact.sourceSha256;
-    identity.artifact_sha256 = artifact.artifactSha256;
+static bool runsafe4b_reject_build_identity(
+    const gxos_aarch64_studio_build_identity* identity, uint64_t owner_id,
+    const char* control)
+{
+    uint64_t execution_id = UINT64_MAX;
+    if (phase2_el0_task_create_studio_build(
+            identity, owner_id, UINT64_C(5000000), &execution_id) || execution_id != 0)
+        return false;
+    print("[RUNSAFE4B] IDENTITY REJECT PASS control="); print(control); print("\n");
+    return true;
+}
 
-    for (uint64_t i = 0; i < artifact.artifactSize; ++i) invalidElf[i] = artifact.bytes[i];
-    invalidElf[18] = 62;
-    invalidElf[19] = 0;
-    uint64_t rejectedExecution = UINT64_MAX;
+static bool runsafe4b_reject_elf(
+    const uint8_t* bytes, uint64_t byte_count, uint64_t owner_id, const char* control)
+{
+    uint64_t execution_id = UINT64_MAX;
     if (phase2_el0_task_create_studio_elf(
-            invalidElf, artifact.artifactSize, ownerId, UINT64_C(5000000),
-            &rejectedExecution) || rejectedExecution != 0) return false;
-    print("[RUNSAFE4B] INVALID ELF REJECT PASS control=wrong-machine\n");
+            bytes, byte_count, owner_id, UINT64_C(5000000), &execution_id) ||
+        execution_id != 0) return false;
+    print("[RUNSAFE4B] ELF REJECT PASS control="); print(control);
+    print(" start_not_called=1\n");
+    return true;
+}
 
-    uint64_t executionId = 0;
+static bool runsafe4b_reject_malformed_elves(
+    const kernel::compiler::BareMetalBuildService::OwnedArtifactView& artifact,
+    uint64_t owner_id)
+{
+    runsafe4b_copy_bytes(g_runsafe4bInvalidElf, artifact.bytes, artifact.artifactSize);
+    g_runsafe4bInvalidElf[18] = 62; g_runsafe4bInvalidElf[19] = 0;
+    if (!runsafe4b_reject_elf(g_runsafe4bInvalidElf, artifact.artifactSize,
+                              owner_id, "wrong-machine")) return false;
+    if (!runsafe4b_reject_elf(artifact.bytes, artifact.artifactSize - 1,
+                              owner_id, "truncated")) return false;
+
+    runsafe4b_copy_bytes(g_runsafe4bInvalidElf, artifact.bytes, artifact.artifactSize);
+    g_runsafe4bInvalidElf[24] ^= 1;
+    if (!runsafe4b_reject_elf(g_runsafe4bInvalidElf, artifact.artifactSize,
+                              owner_id, "invalid-entry")) return false;
+    runsafe4b_copy_bytes(g_runsafe4bInvalidElf, artifact.bytes, artifact.artifactSize);
+    g_runsafe4bInvalidElf[40] = 1;
+    if (!runsafe4b_reject_elf(g_runsafe4bInvalidElf, artifact.artifactSize,
+                              owner_id, "unsupported-layout")) return false;
+    runsafe4b_copy_bytes(g_runsafe4bInvalidElf, artifact.bytes, artifact.artifactSize);
+    runsafe4b_set_u16(g_runsafe4bInvalidElf, 56, 2);
+    runsafe4b_set_u32(g_runsafe4bInvalidElf, 120, 1);
+    runsafe4b_set_u32(g_runsafe4bInvalidElf, 124, 5);
+    runsafe4b_set_u64(g_runsafe4bInvalidElf, 128, 0);
+    runsafe4b_set_u64(g_runsafe4bInvalidElf, 136, UINT64_C(0x51000000));
+    runsafe4b_set_u64(g_runsafe4bInvalidElf, 144, UINT64_C(0x51000000));
+    runsafe4b_set_u64(g_runsafe4bInvalidElf, 152, artifact.artifactSize);
+    runsafe4b_set_u64(g_runsafe4bInvalidElf, 160, UINT64_C(0x100c));
+    runsafe4b_set_u64(g_runsafe4bInvalidElf, 168, UINT64_C(0x1000));
+    if (!runsafe4b_reject_elf(g_runsafe4bInvalidElf, artifact.artifactSize,
+                              owner_id, "overlapping-load-segments")) return false;
+    runsafe4b_copy_bytes(g_runsafe4bInvalidElf, artifact.bytes, artifact.artifactSize);
+    runsafe4b_set_u32(g_runsafe4bInvalidElf, 68, 7);
+    if (!runsafe4b_reject_elf(g_runsafe4bInvalidElf, artifact.artifactSize,
+                              owner_id, "writable-executable")) return false;
+    runsafe4b_copy_bytes(g_runsafe4bInvalidElf, artifact.bytes, artifact.artifactSize);
+    runsafe4b_set_u64(g_runsafe4bInvalidElf, 104, UINT64_C(0x10000));
+    if (!runsafe4b_reject_elf(g_runsafe4bInvalidElf, artifact.artifactSize,
+                              owner_id, "out-of-range-memory")) return false;
+    print("[RUNSAFE4B] INVALID ELF REJECT PASS control=wrong-machine truncated=1 invalid-entry=1 unsupported-layout=1 overlapping-load-segments=1 writable-executable=1 out-of-range-memory=1\n");
+    return true;
+}
+
+static bool runsafe4b_confirm_kernel_continuation()
+{
+    kernel::scheduler::Stats before{};
+    kernel::scheduler::Stats after{};
+    kernel::scheduler::get_stats(&before);
+    const uint64_t work_before = runsafe3b_work_total();
+    const uint64_t counter_before = phase3_timer_counter();
+    const uint64_t timeout = runsafe3b_timeout_ticks(UINT64_C(2000000));
+    do {
+        kernel::scheduler::get_stats(&after);
+        if (after.timer_ticks > before.timer_ticks &&
+            after.context_switches > before.context_switches &&
+            runsafe3b_work_total() > work_before) break;
+        kernel::scheduler::note_execution();
+    } while (timeout != 0 && phase3_timer_counter() - counter_before < timeout);
+    return after.timer_ticks > before.timer_ticks &&
+           after.context_switches > before.context_switches &&
+           runsafe3b_work_total() > work_before && after.unexpected_irqs == 0 &&
+           !kernel::scheduler::failed() && phase3_exception_count() == 0;
+}
+
+static bool runsafe4b_execute(
+    const gxos_aarch64_studio_build_identity& identity, uint64_t owner_id,
+    uint32_t expected_return, const char* label,
+    gxos_aarch64_el0_task_result* final_result)
+{
+    if (!final_result) return false;
+    uint64_t execution_id = 0;
     if (!phase2_el0_task_create_studio_build(
-            &identity, ownerId, UINT64_C(5000000), &executionId) || executionId == 0)
+            &identity, owner_id, UINT64_C(5000000), &execution_id) || execution_id == 0)
         return false;
     gxos_aarch64_el0_task_result created{};
-    if (!phase2_el0_task_query(executionId, ownerId, &created) ||
+    if (!phase2_el0_task_query(execution_id, owner_id, &created) ||
         created.state != kernel::scheduler::EXECUTION_CREATED ||
-        !phase2_el0_task_start(executionId, ownerId)) {
-        (void)phase2_el0_task_cancel(executionId, ownerId);
-        (void)runsafe3b_reap(executionId, ownerId);
-        return false;
-    }
+        created.owner_id != owner_id || created.address_space_id == 0 ||
+        created.address_space_owner_id != execution_id || created.user_page_count != 7 ||
+        created.page_table_page_count == 0 ||
+        created.compiled_entry_point != UINT64_C(0x51001000) ||
+        created.el0_initial_pc != GXOS_AARCH64_STUDIO_ELF_TRAMPOLINE_VA ||
+        (created.user_stack_pointer & UINT64_C(0xf)) != 0) return false;
+
+    const uint64_t user_ap = UINT64_C(3) << 6;
+    const uint64_t user_rw_ap = UINT64_C(1) << 6;
+    const uint64_t pxn = UINT64_C(1) << 53;
+    const uint64_t uxn = UINT64_C(1) << 54;
+    const bool image_rx = (created.image_entry_descriptor & 3) == 3 &&
+        (created.image_entry_descriptor & user_ap) == user_ap &&
+        (created.image_entry_descriptor & pxn) != 0 &&
+        (created.image_entry_descriptor & uxn) == 0;
+    const bool trampoline_rx = (created.trampoline_descriptor & 3) == 3 &&
+        (created.trampoline_descriptor & user_ap) == user_ap &&
+        (created.trampoline_descriptor & pxn) != 0 &&
+        (created.trampoline_descriptor & uxn) == 0;
+    const bool stack_rw_nx = (created.user_stack_descriptor & 3) == 3 &&
+        (created.user_stack_descriptor & user_rw_ap) == user_rw_ap &&
+        (created.user_stack_descriptor & (pxn | uxn)) == (pxn | uxn);
+    if (!image_rx || !trampoline_rx || !stack_rw_nx ||
+        created.lower_stack_guard_descriptor != 0 ||
+        created.upper_stack_guard_descriptor != 0) return false;
+
+    print("[RUNSAFE4B] LOAD PASS machine=aarch64 image_entry=");
+    phase3_serial_hex(created.compiled_entry_point);
+    print(" trampoline="); phase3_serial_hex(created.el0_initial_pc);
+    print(" image_rx=1 trampoline_rx=1 stack_rw=1 stack_nx=1 guards=1 wx=0 el0=1\n");
+
+    gxos_aarch64_el0_task_result denied{};
+    if (phase2_el0_task_query(execution_id, owner_id + 1, &denied) ||
+        phase2_el0_task_start(execution_id, owner_id + 1) ||
+        !phase2_el0_task_start(execution_id, owner_id) ||
+        phase2_el0_task_start(execution_id, owner_id)) return false;
+    gxos_aarch64_el0_task_result started{};
+    if (!phase2_el0_task_query(execution_id, owner_id, &started) ||
+        started.state < kernel::scheduler::EXECUTION_READY) return false;
 
     gxos_aarch64_el0_task_result completed{};
     bool terminal = runsafe3b_wait_terminal(
-        executionId, ownerId, kernel::scheduler::EXECUTION_COMPLETED, &completed);
+        execution_id, owner_id, kernel::scheduler::EXECUTION_COMPLETED, &completed);
     if (!terminal) {
-        // A guest diagnostic timeout must not strand the scheduled child. Ask
-        // the existing lifecycle to cancel, then observe its terminal cleanup
-        // before attempting to reap it.
-        (void)phase2_el0_task_cancel(executionId, ownerId);
+        (void)phase2_el0_task_cancel(execution_id, owner_id);
         gxos_aarch64_el0_task_result cancelled{};
         terminal = runsafe3b_wait_terminal(
-            executionId, ownerId, kernel::scheduler::EXECUTION_CANCELLED, &cancelled);
+            execution_id, owner_id, kernel::scheduler::EXECUTION_CANCELLED, &cancelled);
         if (cancelled.execution_id != 0) completed = cancelled;
     }
-    const bool passed = terminal && completed.result_kind ==
-        kernel::scheduler::EXECUTION_RESULT_EXIT && completed.result_value == 42 &&
+    const uint64_t expected_svc_elr = GXOS_AARCH64_STUDIO_ELF_TRAMPOLINE_VA + 20;
+    const bool passed = terminal && completed.state == kernel::scheduler::EXECUTION_COMPLETED &&
+        completed.result_kind == kernel::scheduler::EXECUTION_RESULT_EXIT &&
+        completed.result_value == expected_return && completed.saved_x0 == expected_return &&
+        completed.el0_entry_count != 0 && completed.fault_elr == expected_svc_elr &&
+        ((completed.fault_esr >> 26) & UINT64_C(0x3f)) == UINT64_C(0x15) &&
+        (completed.fault_esr & UINT64_C(0xffff)) == 1 &&
+        (completed.fault_spsr & UINT64_C(0xf)) == 0 &&
         completed.user_page_count == 7 && completed.page_table_page_count != 0 &&
-        completed.resources_cleaned && completed.kernel_root_restored;
-    const bool reaped = runsafe3b_reap(executionId, ownerId);
-    if (!passed || !reaped) {
-        print("[RUNSAFE4B] COMPILED ELF FAIL child="); phase3_serial_dec(executionId);
+        completed.resources_cleaned && completed.kernel_root_restored &&
+        !phase2_el0_task_start(execution_id, owner_id);
+    const bool reaped = runsafe3b_reap(execution_id, owner_id);
+    const bool kernel_continues = reaped && runsafe4b_confirm_kernel_continuation();
+    if (!passed || !reaped || !kernel_continues) {
+        print("[RUNSAFE4B] EXEC FAIL label="); print(label);
+        print(" child="); phase3_serial_dec(execution_id);
         print(" state="); phase3_serial_dec(completed.state);
         print(" result_kind="); phase3_serial_dec(completed.result_kind);
         print(" result="); phase3_serial_dec(completed.result_value);
+        print(" saved_x0="); phase3_serial_dec(completed.saved_x0);
+        print(" entries="); phase3_serial_dec(completed.el0_entry_count);
+        print(" svc_elr="); phase3_serial_hex(completed.fault_elr);
         print(" cleanup="); phase3_serial_dec(completed.resources_cleaned);
         print(" root_restored="); phase3_serial_dec(completed.kernel_root_restored);
+        print(" reap="); phase3_serial_dec(reaped);
+        print(" kernel_continues="); phase3_serial_dec(kernel_continues);
         print("\n");
         return false;
     }
+    *final_result = completed;
+    print("[RUNSAFE4B] EXEC"); print(label); print(" PASS child=");
+    phase3_serial_dec(completed.execution_id);
+    print(" generation="); phase3_serial_dec(identity.build_generation);
+    print(" entry_observed="); phase3_serial_dec(completed.el0_entry_count);
+    print(" compiled_entry="); phase3_serial_hex(created.compiled_entry_point);
+    print(" c_return="); phase3_serial_dec(completed.saved_x0);
+    print(" svc_exit="); phase3_serial_dec(completed.result_value);
+    print(" svc_elr="); phase3_serial_hex(completed.fault_elr);
+    print(" svc_esr="); phase3_serial_hex(completed.fault_esr);
+    print(" state=completed async=1 cleanup=1 reap=1 root_restored=1 kernel_continues=1\n");
+    return true;
+}
 
-    // The resident compiler currently supports a single integer return. A
-    // non-cooperative loop must fail during Build and invalidate the previous
-    // runnable identity; no arbitrary machine code is forced into EL0.
-    static const char noncooperativeSource[] =
-        "int gx_main(void* ctx) { for (;;) {} }";
-    if (kernel::vfs::write_file("/Runsafe4BProject/src/main.c",
-            noncooperativeSource, sizeof(noncooperativeSource) - 1) !=
-        static_cast<int32_t>(sizeof(noncooperativeSource) - 1)) return false;
-    gx_build_handle unsupportedBuildHandle = 0;
-    if (kernel::compiler::BareMetalBuildService::start_for_owner(
-            &request, &unsupportedBuildHandle, kBuildOwnerIdentity) != GX_OK ||
-        unsupportedBuildHandle == 0 || unsupportedBuildHandle == build.handle)
+static bool runsafe4b_run_compiled_elf()
+{
+    static const char kReturn42SourceSha[] =
+        "79ed63fbc4052d8b92cc7ef065ecaf599e4c8409bd3e0dd31be877286acf3c97";
+    static const char kReturn43Source[] = "int gx_main(void* ctx) { return 43; }";
+    static const char kReturn43SourceSha[] =
+        "b402cc0125e3dc51fcfaf7d902c5556d346bcd91159e3cdd77af877d04f8b933";
+    static const char kReturn42ElfSha[] =
+        "76c5a81849c6f9372432a5e164563d10226a5c8ae211f4a16a8e70b5f09e48b2";
+    static const char kReturn43ElfSha[] =
+        "e636e87fca022d1e2d4b4068067e2a7d19f59a626d24c28872c4fe23ebecc8d6";
+    kernel::scheduler::Task* ownerTask = kernel::scheduler::current_task();
+    if (!ownerTask || ownerTask->execution_kind != kernel::scheduler::EXECUTION_KERNEL ||
+        ownerTask->id == 0) return false;
+    const uint64_t ownerId = ownerTask->id;
+    const gx_build_request request = runsafe4b_build_request();
+
+    gxos_aarch64_studio_build_identity missing{};
+    missing.source_sha256 = "";
+    if (!runsafe4b_reject_build_identity(&missing, ownerId, "missing-successful-build"))
         return false;
-    gx_build_snapshot unsupportedBuild{};
-    unsupportedBuild.size = sizeof(unsupportedBuild);
-    unsupportedBuild.version = GX_BUILD_API_VERSION;
+
+    gx_build_snapshot build42{};
+    kernel::compiler::BareMetalBuildService::OwnedArtifactView artifact42{};
+    gxos_aarch64_studio_build_identity identity42{};
+    if (!runsafe4b_build_capture(request, nullptr, 42, kReturn42SourceSha,
+            kReturn42ElfSha, &build42, &artifact42, &identity42)) return false;
+    print("[RUNSAFE4B] ARTIFACT PASS generation="); phase3_serial_dec(artifact42.buildGeneration);
+    print(" bytes="); phase3_serial_dec(artifact42.artifactSize);
+    print(" digest="); print(artifact42.artifactSha256);
+    print(" source="); print(artifact42.sourceSha256);
+    print(" owner="); phase3_serial_dec(artifact42.ownerIdentity);
+    print(" return=42 provenance=resident-compiler-fresh-build immutable=1\n");
+
+    gxos_aarch64_studio_build_identity bad = identity42;
+    ++bad.build_generation;
+    if (!runsafe4b_reject_build_identity(&bad, ownerId, "stale-generation")) return false;
+    bad = identity42; ++bad.owner_identity;
+    if (!runsafe4b_reject_build_identity(&bad, ownerId, "build-owner-mismatch")) return false;
+    bad = identity42; bad.project_id = "com.guidexos.other";
+    if (!runsafe4b_reject_build_identity(&bad, ownerId, "project-mismatch")) return false;
+    bad = identity42; bad.abi = "wrong-package-abi";
+    if (!runsafe4b_reject_build_identity(&bad, ownerId, "package-abi-mismatch")) return false;
+    bad = identity42; bad.artifact_sha256 = "0000000000000000000000000000000000000000000000000000000000000000";
+    if (!runsafe4b_reject_build_identity(&bad, ownerId, "modified-artifact-identity")) return false;
+    bad = identity42;
+    if (!runsafe4b_reject_build_identity(&bad, ownerId + 1, "invalid-scheduler-owner"))
+        return false;
+
+    if (!runsafe4b_reject_malformed_elves(artifact42, ownerId)) return false;
+
+    runsafe4b_copy_bytes(g_runsafe4bArtifactSnapshot, artifact42.bytes,
+                         artifact42.artifactSize);
+    runsafe4b_copy_bytes(g_runsafe4bInvalidElf, artifact42.bytes,
+                         artifact42.artifactSize);
+    g_runsafe4bInvalidElf[18] = 62; g_runsafe4bInvalidElf[19] = 0;
+    const int32_t replaced = kernel::vfs::write_file(
+        artifact42.artifactPath, g_runsafe4bInvalidElf,
+        static_cast<uint32_t>(artifact42.artifactSize));
+    const int32_t readback = replaced == static_cast<int32_t>(artifact42.artifactSize)
+        ? kernel::vfs::read_file(artifact42.artifactPath, g_runsafe4bVfsReadback,
+                                 static_cast<uint32_t>(artifact42.artifactSize)) : -1;
+    kernel::compiler::BareMetalBuildService::OwnedArtifactView snapshotCheck{};
+    const bool snapshotStillOwned = kernel::compiler::BareMetalBuildService::current_artifact(
+        kRunsafe4bBuildOwnerIdentity, artifact42.buildGeneration, artifact42.projectId,
+        artifact42.artifactPath, artifact42.artifactSize, artifact42.architecture,
+        artifact42.abi, artifact42.packagePath, artifact42.packageGeneration,
+        artifact42.artifactSha256, &snapshotCheck) &&
+        runsafe4b_text_equal(snapshotCheck.artifactSha256, kReturn42ElfSha) &&
+        runsafe4b_bytes_equal(snapshotCheck.bytes, g_runsafe4bArtifactSnapshot,
+                              artifact42.artifactSize);
+    const bool pathWasReplaced = readback == static_cast<int32_t>(artifact42.artifactSize) &&
+        runsafe4b_bytes_equal(g_runsafe4bVfsReadback, g_runsafe4bInvalidElf,
+                              artifact42.artifactSize) &&
+        !runsafe4b_bytes_equal(g_runsafe4bVfsReadback, g_runsafe4bArtifactSnapshot,
+                               artifact42.artifactSize);
+    if (!snapshotStillOwned || !pathWasReplaced) return false;
+    print("[RUNSAFE4B] IMMUTABLE PASS path_replaced=1 validated_snapshot_unchanged=1 stale_generation_rejected=1\n");
+
+    gxos_aarch64_el0_task_result result42{};
+    if (!runsafe4b_execute(identity42, ownerId, 42, "42", &result42)) return false;
+
+    gx_build_snapshot build43{};
+    kernel::compiler::BareMetalBuildService::OwnedArtifactView artifact43{};
+    gxos_aarch64_studio_build_identity identity43{};
+    if (!runsafe4b_build_capture(request, kReturn43Source, 43, kReturn43SourceSha,
+            kReturn43ElfSha, &build43, &artifact43, &identity43) ||
+        artifact43.buildGeneration == artifact42.buildGeneration ||
+        runsafe4b_text_equal(artifact43.sourceSha256, artifact42.sourceSha256) ||
+        runsafe4b_text_equal(artifact43.artifactSha256, artifact42.artifactSha256)) return false;
+    print("[RUNSAFE4B] ARTIFACT PASS generation="); phase3_serial_dec(artifact43.buildGeneration);
+    print(" bytes="); phase3_serial_dec(artifact43.artifactSize);
+    print(" digest="); print(artifact43.artifactSha256);
+    print(" source="); print(artifact43.sourceSha256);
+    print(" owner="); phase3_serial_dec(artifact43.ownerIdentity);
+    print(" return=43 provenance=resident-compiler-fresh-build immutable=1\n");
+    gxos_aarch64_el0_task_result result43{};
+    if (!runsafe4b_execute(identity43, ownerId, 43, "43", &result43)) return false;
+
+    static const char noncooperativeSource[] = "int gx_main(void* ctx) { for (;;) {} }";
+    if (kernel::vfs::write_file("/Runsafe4BProject/src/main.c", noncooperativeSource,
+            static_cast<uint32_t>(sizeof(noncooperativeSource) - 1)) !=
+        static_cast<int32_t>(sizeof(noncooperativeSource) - 1)) return false;
+    gx_build_handle unsupportedHandle = 0;
+    if (kernel::compiler::BareMetalBuildService::start_for_owner(
+            &request, &unsupportedHandle, kRunsafe4bBuildOwnerIdentity) != GX_OK ||
+        unsupportedHandle == 0 || unsupportedHandle == build43.handle) return false;
+    gx_build_snapshot unsupported{};
+    unsupported.size = sizeof(unsupported);
+    unsupported.version = GX_BUILD_API_VERSION;
     const bool unsupportedPolled =
-        kernel::compiler::BareMetalBuildService::poll(
-            unsupportedBuildHandle, &unsupportedBuild) == GX_OK;
+        kernel::compiler::BareMetalBuildService::poll(unsupportedHandle, &unsupported) == GX_OK;
     const bool unsupportedReleased =
-        kernel::compiler::BareMetalBuildService::release(
-            unsupportedBuildHandle) == GX_OK;
-    kernel::compiler::BareMetalBuildService::OwnedArtifactView staleArtifact{};
-    const bool staleRejected =
-        !kernel::compiler::BareMetalBuildService::current_artifact(
-            kBuildOwnerIdentity, artifact.buildGeneration, artifact.projectId,
-            artifact.artifactPath, artifact.artifactSize, artifact.architecture,
-            artifact.abi, artifact.packagePath, artifact.packageGeneration,
-            artifact.artifactSha256, &staleArtifact);
+        kernel::compiler::BareMetalBuildService::release(unsupportedHandle) == GX_OK;
+    kernel::compiler::BareMetalBuildService::OwnedArtifactView stale{};
+    const bool staleRejected = !kernel::compiler::BareMetalBuildService::current_artifact(
+        kRunsafe4bBuildOwnerIdentity, artifact43.buildGeneration, artifact43.projectId,
+        artifact43.artifactPath, artifact43.artifactSize, artifact43.architecture,
+        artifact43.abi, artifact43.packagePath, artifact43.packageGeneration,
+        artifact43.artifactSha256, &stale);
+    const bool invalidatedTaskRejected = runsafe4b_reject_build_identity(
+        &identity43, ownerId, "invalidated-generation");
     if (!unsupportedPolled || !unsupportedReleased ||
-        unsupportedBuild.state != GX_BUILD_FAILED ||
-        unsupportedBuild.errorCode != GX_BUILD_ERROR_COMPILER_FAILED ||
-        !staleRejected) return false;
+        unsupported.state != GX_BUILD_FAILED ||
+        unsupported.errorCode != GX_BUILD_ERROR_COMPILER_FAILED ||
+        !staleRejected || !invalidatedTaskRejected) return false;
     print("[RUNSAFE4B] NONCOOPERATIVE UNSUPPORTED reason=resident-compiler-profile build_failed=1 prior_generation_invalidated=1\n");
 
-    print("[RUNSAFE4B] COMPILED ELF PASS child="); phase3_serial_dec(completed.execution_id);
-    print(" generation="); phase3_serial_dec(artifact.buildGeneration);
-    print(" result="); phase3_serial_dec(completed.result_value);
-    print(" user_pages="); phase3_serial_dec(completed.user_page_count);
-    print(" page_table_pages="); phase3_serial_dec(completed.page_table_page_count);
-    print(" cleanup=1 reap=1 root_restored=1 arbitrary_studio_run=disabled\n");
+    kernel::scheduler::Stats finalStats{};
+    kernel::scheduler::get_stats(&finalStats);
+    if (finalStats.unexpected_irqs != 0 || kernel::scheduler::failed() ||
+        phase3_exception_count() != 0) return false;
+    print("[RUNSAFE4B] KERNEL PASS scheduler_continues=1 unexpected_irq=0 fatal_exception=0\n");
     print("AARCH64_RUNSAFE4B_PASS source=");
     print(GXOS_AARCH64_RUNSAFE3B_SOURCE_REVISION);
-    print(" build_generation="); phase3_serial_dec(artifact.buildGeneration);
-    print(" expected_return=42 invalid_elf_rejected=1 cleanup=1\n");
+    print(" build42_generation="); phase3_serial_dec(artifact42.buildGeneration);
+    print(" build43_generation="); phase3_serial_dec(artifact43.buildGeneration);
+    print(" return42=1 return43=1 compiled_el0=1 immutable=1 invalid_elf_rejected=1 cleanup=1 kernel_continues=1 studio_run=disabled\n");
     return true;
 }
 #endif

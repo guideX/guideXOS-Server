@@ -30,6 +30,7 @@ if ($LASTEXITCODE -ne 0) { throw 'RUNSAFE4-A EL0 loader host controls failed.' }
 $buildService = [IO.File]::ReadAllText((Join-Path $repoRoot 'kernel/core/compiler/compiler_build_service.cpp'))
 $driver = [IO.File]::ReadAllText((Join-Path $repoRoot 'kernel/core/compiler/compiler_driver.cpp'))
 $elfTests = [IO.File]::ReadAllText((Join-Path $repoRoot 'tests/aarch64_el0_isolation_host_tests.cpp'))
+$nativeQualification = [IO.File]::ReadAllText((Join-Path $repoRoot 'kernel/arch/arm64/phase4_main.cpp'))
 foreach ($required in @('start_for_owner', 'current_artifact', 'sourceSha256', 'artifactSha256',
         's_ownedArtifact.bytes', 'el0IntegerProfileValid')) {
     if (!$buildService.Contains($required)) { throw "RUNSAFE4-A identity source contract is missing: $required" }
@@ -38,6 +39,14 @@ if (!$driver.Contains('compile_for_target_from_bytes') -or
     !$elfTests.Contains('test_studio_elf_validation_negatives') -or
     !$elfTests.Contains('test_compiler_elf_task_preparation')) {
     throw 'RUNSAFE4-A captured-source, ELF-negative, or lifecycle host controls are missing.'
+}
+foreach ($required in @('int gx_main(void* ctx) { return 43; }',
+        'runsafe4b_build_capture', 'runsafe4b_reject_malformed_elves',
+        'runsafe4b_execute(identity42', 'runsafe4b_execute(identity43',
+        'AARCH64_RUNSAFE4B_PASS', 'validated_snapshot_unchanged')) {
+    if (!$nativeQualification.Contains($required)) {
+        throw "RUNSAFE4-B native compiled-execution contract is missing: $required"
+    }
 }
 
 Write-Host 'RUNSAFE4A_HOST_PASS (Build identity + ELF loader; execution remains a hosted simulation)' -ForegroundColor Green

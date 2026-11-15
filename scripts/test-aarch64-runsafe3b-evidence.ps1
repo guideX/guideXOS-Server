@@ -27,6 +27,14 @@ $script:scheduledSourceRevision = '0123456789abcdef0123456789abcdef01234567'
 # Exercise the extension used by the RUNSAFE4-B diagnostic candidate even
 # when this parser fixture is invoked from a parent script without the switch.
 $Runsafe4BQualification = $true
+$script:runsafe4bManifest = [pscustomobject]@{
+    sourceSha256 = '79ed63fbc4052d8b92cc7ef065ecaf599e4c8409bd3e0dd31be877286acf3c97'
+    historicalCompilerElfSha256 = '76c5a81849c6f9372432a5e164563d10226a5c8ae211f4a16a8e70b5f09e48b2'
+    return43 = [pscustomobject]@{
+        sourceSha256 = 'b402cc0125e3dc51fcfaf7d902c5556d346bcd91159e3cdd77af877d04f8b933'
+        historicalCompilerElfSha256 = 'e636e87fca022d1e2d4b4068067e2a7d19f59a626d24c28872c4fe23ebecc8d6'
+    }
+}
 $kernelDescriptor = '0x0060000000000487'
 $deviceDescriptor = '0x0060000000000403'
 $kernelProbe = '[guideXOS] AARCH64_EL0_PROBE_RECORD probe=kernel-data target=0x0000000040000000 descriptor=' +
@@ -55,10 +63,32 @@ $continuation = '[RUNSAFE3B] CONTINUATION PASS timer_delta=20 context_switch_del
 $final = 'AARCH64_RUNSAFE3B_PASS source=' + $script:scheduledSourceRevision +
     ' finite_preempts=2 timeout_enforced=1 cancellation_forced=1 fault_isolated=1 cleanup=1'
 $runsafe4b = @(
-    '[RUNSAFE4B] INVALID ELF REJECT PASS control=wrong-machine',
-    '[RUNSAFE4B] COMPILED ELF PASS child=51 generation=77 result=42 user_pages=7 page_table_pages=4 cleanup=1 reap=1 root_restored=1 arbitrary_studio_run=disabled',
+    '[RUNSAFE4B] IDENTITY REJECT PASS control=missing-successful-build',
+    '[RUNSAFE4B] ARTIFACT PASS generation=77 bytes=4108 digest=76c5a81849c6f9372432a5e164563d10226a5c8ae211f4a16a8e70b5f09e48b2 source=79ed63fbc4052d8b92cc7ef065ecaf599e4c8409bd3e0dd31be877286acf3c97 owner=5929914840653041204 return=42 provenance=resident-compiler-fresh-build immutable=1',
+    '[RUNSAFE4B] IDENTITY REJECT PASS control=stale-generation',
+    '[RUNSAFE4B] IDENTITY REJECT PASS control=build-owner-mismatch',
+    '[RUNSAFE4B] IDENTITY REJECT PASS control=project-mismatch',
+    '[RUNSAFE4B] IDENTITY REJECT PASS control=package-abi-mismatch',
+    '[RUNSAFE4B] IDENTITY REJECT PASS control=modified-artifact-identity',
+    '[RUNSAFE4B] IDENTITY REJECT PASS control=invalid-scheduler-owner',
+    '[RUNSAFE4B] ELF REJECT PASS control=wrong-machine start_not_called=1',
+    '[RUNSAFE4B] ELF REJECT PASS control=truncated start_not_called=1',
+    '[RUNSAFE4B] ELF REJECT PASS control=invalid-entry start_not_called=1',
+    '[RUNSAFE4B] ELF REJECT PASS control=unsupported-layout start_not_called=1',
+    '[RUNSAFE4B] ELF REJECT PASS control=overlapping-load-segments start_not_called=1',
+    '[RUNSAFE4B] ELF REJECT PASS control=writable-executable start_not_called=1',
+    '[RUNSAFE4B] ELF REJECT PASS control=out-of-range-memory start_not_called=1',
+    '[RUNSAFE4B] INVALID ELF REJECT PASS control=wrong-machine truncated=1 invalid-entry=1 unsupported-layout=1 overlapping-load-segments=1 writable-executable=1 out-of-range-memory=1',
+    '[RUNSAFE4B] IMMUTABLE PASS path_replaced=1 validated_snapshot_unchanged=1 stale_generation_rejected=1',
+    '[RUNSAFE4B] LOAD PASS machine=aarch64 image_entry=0x51001000 trampoline=0x511ff000 image_rx=1 trampoline_rx=1 stack_rw=1 stack_nx=1 guards=1 wx=0 el0=1',
+    '[RUNSAFE4B] EXEC42 PASS child=51 generation=77 entry_observed=1 compiled_entry=0x51001000 c_return=42 svc_exit=42 svc_elr=0x511ff014 svc_esr=0x54000001 state=completed async=1 cleanup=1 reap=1 root_restored=1 kernel_continues=1',
+    '[RUNSAFE4B] ARTIFACT PASS generation=78 bytes=4108 digest=e636e87fca022d1e2d4b4068067e2a7d19f59a626d24c28872c4fe23ebecc8d6 source=b402cc0125e3dc51fcfaf7d902c5556d346bcd91159e3cdd77af877d04f8b933 owner=5929914840653041204 return=43 provenance=resident-compiler-fresh-build immutable=1',
+    '[RUNSAFE4B] LOAD PASS machine=aarch64 image_entry=0x51001000 trampoline=0x511ff000 image_rx=1 trampoline_rx=1 stack_rw=1 stack_nx=1 guards=1 wx=0 el0=1',
+    '[RUNSAFE4B] EXEC43 PASS child=52 generation=78 entry_observed=1 compiled_entry=0x51001000 c_return=43 svc_exit=43 svc_elr=0x511ff014 svc_esr=0x54000001 state=completed async=1 cleanup=1 reap=1 root_restored=1 kernel_continues=1',
+    '[RUNSAFE4B] IDENTITY REJECT PASS control=invalidated-generation',
+    '[RUNSAFE4B] KERNEL PASS scheduler_continues=1 unexpected_irq=0 fatal_exception=0',
     '[RUNSAFE4B] NONCOOPERATIVE UNSUPPORTED reason=resident-compiler-profile build_failed=1 prior_generation_invalidated=1',
-    ('AARCH64_RUNSAFE4B_PASS source=' + $script:scheduledSourceRevision + ' build_generation=77 expected_return=42 invalid_elf_rejected=1 cleanup=1')
+    ('AARCH64_RUNSAFE4B_PASS source=' + $script:scheduledSourceRevision + ' build42_generation=77 build43_generation=78 return42=1 return43=1 compiled_el0=1 immutable=1 invalid_elf_rejected=1 cleanup=1 kernel_continues=1 studio_run=disabled')
 )
 $log = @(
     'AARCH64_EL0_QUALIFICATION_PASS observed-exit=2a cleanup=PASS',
