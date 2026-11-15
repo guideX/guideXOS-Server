@@ -74,7 +74,8 @@
 #endif
 
 #if defined(GXOS_NAVHTTPS15_GUEST_QUALIFICATION_ACTIVE) || \
-    defined(GXOS_NAVHTTPS16_GUEST_QUALIFICATION_ACTIVE)
+    defined(GXOS_NAVHTTPS16_GUEST_QUALIFICATION_ACTIVE) || \
+    defined(GXOS_NAVHTTPS17_GUEST_QUALIFICATION_ACTIVE)
 #include "include/gxos_roughtime_round.h"
 #include "include/gxos_time_estimate.h"
 #include "roughtime_multisource_guest_fixture_keys.h"
@@ -1151,7 +1152,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::desktop::draw_cursor(kernel::input::mouse_x(),
                                      kernel::input::mouse_y());
         kernel::desktop_capabilities::log_current(true, true);
+#if !defined(GXOS_NAVHTTPS17_GUEST_QUALIFICATION_ACTIVE)
         kernel::apps::printNavigatorRuntimeSmokeReport();
+#endif
 #ifdef GXOS_DESKTOP_CLEANUP_RUNTIME_PASS
         kernel::serial::puts("[KERNEL] desktopCleanupRuntimePass=2 launch-smoke begin\n");
         const bool cleanupDisplayOptionsLaunched = kernel::desktop::launch_app("DisplayOptions");
@@ -1265,6 +1268,21 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 #if defined(GXOS_NAVHTTPS16_GUEST_QUALIFICATION_ACTIVE)
         gxos::clockassurance::TimeEstimateStore& timeEstimateStore =
             gxos::clockassurance::time_estimate_store();
+        gxos::clockassurance::TlsTimeEstimateLease missingTimeLease = {};
+        const gxos::clockassurance::TlsTimeEstimateResult missingTimeStatus =
+            timeEstimateStore.request_tls_lease(
+                guestRoundResult.agreement.evaluated_monotonic_ns, &missingTimeLease);
+#if defined(GXOS_NAVHTTPS17_GUEST_QUALIFICATION_ACTIVE)
+        const bool missingTimeRejected = missingTimeStatus ==
+            gxos::clockassurance::TlsTimeEstimateResult::NoEvidence &&
+            missingTimeLease.available == 0;
+        kernel::serial::puts("[NAVHTTPS17-GUEST] missing_evidence=");
+        kernel::serial::puts(missingTimeRejected ? "PASS" : "FAIL");
+        kernel::serial::puts(" decision=");
+        kernel::serial::puts(gxos::clockassurance::tls_time_estimate_result_name(
+            missingTimeStatus));
+        kernel::serial::puts(" no_clock_change=yes public_https=disabled\n");
+#endif
         const gxos::clockassurance::TimeEstimateAcceptResult timeAcceptResult =
             timeEstimateStore.accept_fixture_round(
                 guestRoundConfiguration, guestRoundResult,
@@ -1338,12 +1356,41 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::put_hex64(timeEstimateInfo.remainingFreshnessSeconds);
         kernel::serial::puts(" system_clock_changed=0 public_https=0\n");
 
+        bool timeInvalidated = false;
+#if defined(GXOS_NAVHTTPS17_GUEST_QUALIFICATION_ACTIVE)
+        gxos::clockassurance::TlsTimeEstimateLease tlsLease = {};
+        const gxos::clockassurance::TlsTimeEstimateResult tlsLeaseResult = monotonicSafe
+            ? timeEstimateStore.request_tls_lease(advancedNowNs, &tlsLease)
+            : gxos::clockassurance::TlsTimeEstimateResult::ContinuityFailure;
+        const bool tlsLeaseAccepted = tlsLeaseResult ==
+            gxos::clockassurance::TlsTimeEstimateResult::Ready && tlsLease.available &&
+            tlsLease.scope == gxos::clockassurance::TimeEstimateScope::FixtureOnly &&
+            tlsLease.trustScopeIdentity ==
+                gxos::clockassurance::kControlledFixtureTlsTrustScopeIdentity;
+        kernel::serial::puts("[NAVHTTPS17-GUEST] tls_time_lease=");
+        kernel::serial::puts(tlsLeaseAccepted ? "PASS" : "FAIL");
+        kernel::serial::puts(" interval=");
+        kernel::serial::put_hex64(tlsLease.earliestUnixSeconds);
+        kernel::serial::putc('-');
+        kernel::serial::put_hex64(tlsLease.latestUnixSeconds);
+        kernel::serial::puts(" trust_scope=");
+        kernel::serial::put_hex32(tlsLease.trustScopeIdentity);
+        kernel::serial::puts(" remaining_seconds=");
+        kernel::serial::put_hex64(tlsLease.remainingFreshnessSeconds);
+        kernel::serial::puts(" no_clock_change=yes public_https=disabled\n");
+
+        const bool timeEstimatePassed = timeAccepted && timeAdvanced &&
+            missingTimeRejected && tlsLeaseAccepted;
+        kernel::serial::puts("[NAVHTTPS17-GUEST] result=");
+        kernel::serial::puts(timeEstimatePassed ? "PASS" : "FAIL");
+        kernel::serial::puts(" tls_ready_for_controlled_smoke=yes system_clock_changed=0 public_https=0\n");
+#else
         if (monotonicSafe) {
             timeEstimateStore.invalidate(
                 gxos::clockassurance::TimeEstimateReason::ExplicitInvalidation);
             timeEstimateStore.query(advancedNowNs, &timeEstimateInfo);
         }
-        const bool timeInvalidated = !timeEstimateInfo.available &&
+        timeInvalidated = !timeEstimateInfo.available &&
             timeEstimateInfo.state == gxos::clockassurance::TimeEstimateState::Invalidated;
         kernel::serial::puts("[NAVHTTPS16-GUEST] invalidation=");
         kernel::serial::puts(timeInvalidated ? "PASS" : "FAIL");
@@ -1357,6 +1404,24 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts(timeEstimatePassed ? "PASS" : "FAIL");
         kernel::serial::puts(" production_clock_assurance=unchanged production_policy_accepted=0 trusted_time=not-accepted system_clock_changed=0 public_https=0 simulated_independence=yes\n");
 #endif
+#endif
+#endif
+#if defined(GXOS_NAVHTTPS17_GUEST_QUALIFICATION_ACTIVE)
+        kernel::apps::printNavigatorRuntimeSmokeReport();
+        gxos::clockassurance::TimeEstimateStore& timeEstimateStoreAfterTls =
+            gxos::clockassurance::time_estimate_store();
+        timeEstimateStoreAfterTls.invalidate(
+            gxos::clockassurance::TimeEstimateReason::ExplicitInvalidation);
+        gxos::clockassurance::TimeEstimateInfo invalidatedTlsTime = {};
+        timeEstimateStoreAfterTls.query(
+            kernel::pit::ticks() * gxos::clockassurance::kTimeEstimatePitTickNanoseconds,
+            &invalidatedTlsTime);
+        const bool tlsEvidenceReleased = !invalidatedTlsTime.available &&
+            invalidatedTlsTime.state ==
+                gxos::clockassurance::TimeEstimateState::Invalidated;
+        kernel::serial::puts("[NAVHTTPS17-GUEST] post_tls_invalidation=");
+        kernel::serial::puts(tlsEvidenceReleased ? "PASS" : "FAIL");
+        kernel::serial::puts(" system_clock_changed=0 public_https=0\n");
 #endif
         // I219 Stage 8 is the only diagnostic configuration that enables the
         // NIC hardware interrupt mask, and only after the input/main-loop

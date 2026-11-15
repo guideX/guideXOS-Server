@@ -211,6 +211,25 @@ class TimeEstimateInfo(ctypes.Structure):
     ]
 
 
+class TlsTimeEstimateLease(ctypes.Structure):
+    _fields_ = [
+        ("result", ctypes.c_uint8),
+        ("state", ctypes.c_uint8),
+        ("scope", ctypes.c_uint8),
+        ("rejection_reason", ctypes.c_uint8),
+        ("available", ctypes.c_uint8),
+        ("source_policy_identity", ctypes.c_uint32),
+        ("trust_scope_identity", ctypes.c_uint32),
+        ("earliest_unix_seconds", ctypes.c_uint64),
+        ("latest_unix_seconds", ctypes.c_uint64),
+        ("measurement_anchor_monotonic_ns", ctypes.c_uint64),
+        ("observed_monotonic_ns", ctypes.c_uint64),
+        ("remaining_freshness_seconds", ctypes.c_uint64),
+        ("uncertainty_seconds", ctypes.c_uint64),
+        ("generation", ctypes.c_uint64),
+    ]
+
+
 class AcquisitionResult(ctypes.Structure):
     _fields_ = [
         ("status", ctypes.c_int),
@@ -440,8 +459,19 @@ class PortableRoughtimeTests(unittest.TestCase):
         subprocess.run(
             [gxx, "-std=c++14", "-Wall", "-Wextra", "-Werror", "-fno-exceptions",
              "-fno-rtti", "-fno-builtin", "-ffreestanding", "-O2", "-DGXOS_BARE_METAL",
+             "-DGXOS_TIME_ESTIMATE_TESTING",
              *common_includes, "-c", str(ROOT / "kernel/core/gxos_time_estimate.cpp"),
              "-o", str(time_estimate_obj)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        tls_time_policy_obj = build / "gxos_tls_time_policy.o"
+        subprocess.run(
+            [gxx, "-std=c++14", "-Wall", "-Wextra", "-Werror", "-fno-exceptions",
+             "-fno-rtti", "-fno-builtin", "-ffreestanding", "-O2", "-DGXOS_BARE_METAL",
+             *common_includes, "-c", str(ROOT / "kernel/core/gxos_tls_time_policy.cpp"),
+             "-o", str(tls_time_policy_obj)],
             check=True,
             capture_output=True,
             text=True,
@@ -449,7 +479,8 @@ class PortableRoughtimeTests(unittest.TestCase):
         time_estimate_bridge_obj = build / "roughtime_time_estimate_test_bridge.o"
         subprocess.run(
             [gxx, "-std=c++14", "-Wall", "-Wextra", "-Werror", "-fno-exceptions",
-             "-fno-rtti", "-fno-builtin", "-O2", *common_includes,
+             "-fno-rtti", "-fno-builtin", "-O2", "-DGXOS_TIME_ESTIMATE_TESTING",
+             *common_includes,
              "-c", str(ROOT / "tests/roughtime_time_estimate_test_bridge.cpp"),
              "-o", str(time_estimate_bridge_obj)],
             check=True,
@@ -460,7 +491,8 @@ class PortableRoughtimeTests(unittest.TestCase):
         # code used by the freestanding kernel.
         link_args = [gxx, "-shared", "-o", str(library_path), str(component_obj),
                      str(acquisition_obj), str(agreement_obj), str(round_obj),
-                     str(time_estimate_obj), str(time_estimate_bridge_obj),
+                     str(time_estimate_obj), str(tls_time_policy_obj),
+                     str(time_estimate_bridge_obj),
                      *(str(obj) for obj in objects)]
         if is_windows:
             link_args.append("-Wl,--export-all-symbols")
@@ -553,6 +585,28 @@ class PortableRoughtimeTests(unittest.TestCase):
             ctypes.c_uint32, ctypes.c_uint64, ctypes.POINTER(TimeEstimateInfo),
         ]
         cls.time_estimate_query_function.restype = ctypes.c_int
+        cls.time_estimate_tls_request_function = cls.library.gxos_time_estimate_test_tls_request
+        cls.time_estimate_tls_request_function.argtypes = [
+            ctypes.c_uint32, ctypes.c_uint64, ctypes.POINTER(TlsTimeEstimateLease),
+        ]
+        cls.time_estimate_tls_request_function.restype = ctypes.c_int
+        cls.time_estimate_tls_refresh_function = cls.library.gxos_time_estimate_test_tls_refresh
+        cls.time_estimate_tls_refresh_function.argtypes = [
+            ctypes.c_uint32, ctypes.POINTER(TlsTimeEstimateLease), ctypes.c_uint64,
+            ctypes.POINTER(TlsTimeEstimateLease),
+        ]
+        cls.time_estimate_tls_refresh_function.restype = ctypes.c_int
+        cls.tls_time_policy_check_function = cls.library.gxos_tls_time_policy_check_interval
+        cls.tls_time_policy_check_function.argtypes = [
+            ctypes.c_uint64, ctypes.c_uint64, ctypes.c_int64, ctypes.c_int64,
+        ]
+        cls.tls_time_policy_check_function.restype = ctypes.c_int
+        cls.tls_time_policy_utc_function = cls.library.gxos_tls_time_policy_utc_to_unix
+        cls.tls_time_policy_utc_function.argtypes = [
+            ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+            ctypes.c_int, ctypes.POINTER(ctypes.c_int64),
+        ]
+        cls.tls_time_policy_utc_function.restype = ctypes.c_int
         cls.time_estimate_invalidate_function = cls.library.gxos_time_estimate_test_invalidate
         cls.time_estimate_invalidate_function.argtypes = [ctypes.c_uint32, ctypes.c_uint8]
         cls.time_estimate_discontinuity_function = cls.library.gxos_time_estimate_test_discontinuity
@@ -1814,6 +1868,20 @@ void raw_values_must_not_mint_or_evaluate(
         self.time_estimate_query_function(slot, now_ns, ctypes.byref(info))
         return info
 
+    def request_tls_time_lease(self, slot, now_ns):
+        lease = TlsTimeEstimateLease()
+        status = self.time_estimate_tls_request_function(
+            slot, now_ns, ctypes.byref(lease),
+        )
+        return status, lease
+
+    def refresh_tls_time_lease(self, slot, lease, now_ns):
+        refreshed = TlsTimeEstimateLease()
+        status = self.time_estimate_tls_refresh_function(
+            slot, ctypes.byref(lease), now_ns, ctypes.byref(refreshed),
+        )
+        return status, refreshed
+
     def valid_navhttps15_fixture_round(self, **kwargs):
         kwargs.setdefault("operators", [401, 402, 403])
         return self.run_udp_acquisition_round(**kwargs)
@@ -2019,6 +2087,145 @@ void raw_values_must_not_mint_or_evaluate(
         self.assertEqual(after_reboot.production_policy_accepted, 0)
         self.assertEqual(after_reboot.system_clock_changed, 0)
         self.assertEqual(after_reboot.public_https_enabled, 0)
+
+    def test_tls_certificate_interval_requires_full_inclusive_containment(self):
+        check = self.tls_time_policy_check_function
+        self.assertEqual(check(100, 200, 100, 200), 0)  # Exact boundaries.
+        self.assertEqual(check(101, 199, 100, 200), 0)
+        self.assertEqual(check(99, 101, 100, 200), 3)  # Crosses notBefore.
+        self.assertEqual(check(90, 99, 100, 200), 3)  # Entirely before.
+        self.assertEqual(check(199, 201, 100, 200), 4)  # Crosses notAfter.
+        self.assertEqual(check(201, 210, 100, 200), 4)  # Entirely after.
+        self.assertEqual(check(201, 200, 100, 200), 1)  # Inverted estimate.
+        self.assertEqual(check(100, 200, 201, 200), 2)  # Inverted certificate.
+        self.assertEqual(check(0x7FFFFFFFFFFFFFFF, 0x8000000000000000,
+                               0, 0x7FFFFFFFFFFFFFFF), 1)
+
+    def test_tls_certificate_utc_conversion_validates_calendar_and_overflow(self):
+        convert = self.tls_time_policy_utc_function
+        unix_seconds = ctypes.c_int64(-1)
+        self.assertEqual(convert(1970, 1, 1, 0, 0, 0, ctypes.byref(unix_seconds)), 1)
+        self.assertEqual(unix_seconds.value, 0)
+        self.assertEqual(convert(2000, 2, 29, 0, 0, 0, ctypes.byref(unix_seconds)), 1)
+        self.assertEqual(unix_seconds.value, 951782400)
+        self.assertEqual(convert(1900, 2, 29, 0, 0, 0, ctypes.byref(unix_seconds)), 0)
+        self.assertEqual(convert(2000, 2, 30, 0, 0, 0, ctypes.byref(unix_seconds)), 0)
+        self.assertEqual(convert(2000, 12, 31, 23, 59, 60, ctypes.byref(unix_seconds)), 0)
+        self.assertEqual(convert(10000, 1, 1, 0, 0, 0, ctypes.byref(unix_seconds)), 0)
+
+    def test_tls_time_consumer_requires_stored_quorum_evidence_and_scopes_lease(self):
+        status, absent = self.request_tls_time_lease(0, 0)
+        self.assertEqual(status, 1)  # NoEvidence, regardless of plausible RTC state.
+        self.assertEqual(absent.available, 0)
+        self.assertEqual(absent.trust_scope_identity, 0)
+
+        configuration, one_source = self.valid_navhttps15_fixture_round(
+            modes=["normal", "timeout", "network_failure"],
+        )
+        self.assertNotEqual(one_source.agreement.status, 0)
+        self.assertNotEqual(self.accept_fixture_round(0, configuration, one_source), 0)
+        status, rejected = self.request_tls_time_lease(
+            0, one_source.agreement.evaluated_monotonic_ns,
+        )
+        self.assertEqual(status, 1)
+        self.assertEqual(rejected.available, 0)
+
+        configuration, result = self.valid_navhttps15_fixture_round(
+            modes=["normal", "normal", "timeout"],
+        )
+        self.assertEqual(result.agreement.status, 0)
+        self.assertEqual(result.agreement.independent_source_count, 2)
+        self.assertEqual(self.accept_fixture_round(0, configuration, result), 0)
+        anchor = result.agreement.evaluated_monotonic_ns
+        status, lease = self.request_tls_time_lease(0, anchor)
+        self.assertEqual(status, 0)
+        self.assertEqual(lease.available, 1)
+        self.assertEqual(lease.scope, 1)  # FixtureOnly.
+        self.assertEqual(lease.source_policy_identity, 0x1501)
+        self.assertEqual(lease.trust_scope_identity, 0x1701)
+        self.assertEqual(lease.earliest_unix_seconds,
+                         result.agreement.earliest_unix_seconds)
+        self.assertEqual(lease.latest_unix_seconds,
+                         result.agreement.latest_unix_seconds)
+        self.assertEqual(lease.uncertainty_seconds,
+                         result.agreement.maximum_uncertainty_seconds)
+
+        forged = TlsTimeEstimateLease.from_buffer_copy(lease)
+        forged.earliest_unix_seconds = 1
+        forged.latest_unix_seconds = 2
+        status, refreshed = self.refresh_tls_time_lease(0, forged, anchor)
+        self.assertEqual(status, 0)
+        self.assertEqual(refreshed.earliest_unix_seconds,
+                         result.agreement.earliest_unix_seconds)
+        self.assertEqual(refreshed.latest_unix_seconds,
+                         result.agreement.latest_unix_seconds)
+
+        wrong_scope = TlsTimeEstimateLease.from_buffer_copy(lease)
+        wrong_scope.trust_scope_identity ^= 1
+        self.assertEqual(self.refresh_tls_time_lease(0, wrong_scope, anchor)[0], 9)
+
+    def test_tls_time_consumer_rejects_duplicate_operators_stale_time_and_rollback(self):
+        configuration, duplicate = self.valid_navhttps15_fixture_round(
+            operators=[401, 401, 403],
+        )
+        self.assertEqual(self.accept_fixture_round(0, configuration, duplicate), 2)
+        status, lease = self.request_tls_time_lease(
+            0, duplicate.agreement.evaluated_monotonic_ns,
+        )
+        self.assertEqual(status, 1)
+        self.assertEqual(lease.available, 0)
+
+        configuration, result = self.valid_navhttps15_fixture_round()
+        anchor = result.agreement.evaluated_monotonic_ns
+        self.assertEqual(self.accept_fixture_round(1, configuration, result), 0)
+        status, lease = self.request_tls_time_lease(1, anchor)
+        self.assertEqual(status, 0)
+        self.assertEqual(self.request_tls_time_lease(1, anchor + 300_000_000_000)[0], 6)
+
+        self.assertEqual(self.accept_fixture_round(2, configuration, result), 0)
+        status, lease = self.request_tls_time_lease(2, anchor)
+        self.assertEqual(status, 0)
+        self.assertEqual(self.request_tls_time_lease(2, anchor - 1)[0], 7)
+        self.assertEqual(self.refresh_tls_time_lease(2, lease, anchor)[0], 9)
+
+    def test_tls_time_lease_invalidation_and_replacement_are_connection_scoped(self):
+        configuration, result = self.valid_navhttps15_fixture_round()
+        anchor = result.agreement.evaluated_monotonic_ns
+        self.assertEqual(self.accept_fixture_round(3, configuration, result), 0)
+        status, prior_connection = self.request_tls_time_lease(3, anchor)
+        self.assertEqual(status, 0)
+
+        # Reaccepting creates a new provenance generation. An in-flight
+        # connection cannot reuse its old lease after evidence replacement.
+        self.assertEqual(self.time_estimate_accept_function(
+            3, ctypes.byref(configuration), ctypes.byref(result), anchor,
+        ), 0)
+        status, next_connection = self.request_tls_time_lease(3, anchor)
+        self.assertEqual(status, 0)
+        self.assertNotEqual(prior_connection.generation, next_connection.generation)
+        self.assertEqual(self.refresh_tls_time_lease(3, prior_connection, anchor)[0], 9)
+        self.assertEqual(self.refresh_tls_time_lease(3, next_connection, anchor)[0], 0)
+
+        self.time_estimate_invalidate_function(3, 17)
+        self.assertEqual(self.refresh_tls_time_lease(3, next_connection, anchor)[0], 9)
+
+    def test_concurrent_tls_contexts_keep_distinct_fixture_intervals(self):
+        config_a, result_a = self.valid_navhttps15_fixture_round()
+        config_b, result_b = self.valid_navhttps15_fixture_round(
+            midpoints=[FIXTURE_TIME + 60] * 3,
+        )
+        anchor_a = result_a.agreement.evaluated_monotonic_ns
+        anchor_b = result_b.agreement.evaluated_monotonic_ns
+        self.assertEqual(self.accept_fixture_round(4, config_a, result_a), 0)
+        self.assertEqual(self.accept_fixture_round(5, config_b, result_b), 0)
+        status_a, lease_a = self.request_tls_time_lease(4, anchor_a)
+        status_b, lease_b = self.request_tls_time_lease(5, anchor_b)
+        self.assertEqual(status_a, 0)
+        self.assertEqual(status_b, 0)
+        self.assertNotEqual(lease_a.earliest_unix_seconds,
+                            lease_b.earliest_unix_seconds)
+        self.assertEqual(self.refresh_tls_time_lease(4, lease_a, anchor_a)[0], 0)
+        self.assertEqual(self.refresh_tls_time_lease(5, lease_b, anchor_b)[0], 0)
 
 
 if __name__ == "__main__":

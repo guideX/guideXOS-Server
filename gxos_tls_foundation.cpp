@@ -1,6 +1,8 @@
 #include "gxos_tls_foundation.h"
 #include "tests/phase8j_ecdsa_vectors.h"
 #include "gxos_tls_prerequisites.h"
+#include "kernel/core/include/gxos_time_estimate.h"
+#include "kernel/core/include/gxos_tls_time_policy.h"
 
 #if defined(GXOS_BARE_METAL)
 #include "kernel/core/include/kernel/pit.h"
@@ -3051,8 +3053,251 @@ struct GxosTlsHttpByteStreamSession {
     GxosTlsSmokeIoContext io{};
     mbedtls_ssl_context ssl;
     mbedtls_ssl_config conf;
+    gxos::clockassurance::TlsTimeEstimateLease timeLease{};
+    int64_t tightestNotBeforeUnixSeconds = 0;
+    int64_t tightestNotAfterUnixSeconds = 0;
+    bool controlledTimeRequired = false;
+    bool controlledTimeScopeReady = false;
+    bool certificateTimeBoundsSeen = false;
+    bool timeAssuranceRejected = false;
     bool closed = false;
 };
+
+bool tls_monotonic_now_ns(uint64_t* output)
+{
+    if (!output) return false;
+    const uint64_t ticks = kernel::pit::ticks();
+    const uint64_t tickNs = gxos::clockassurance::kTimeEstimatePitTickNanoseconds;
+    if (ticks > UINT64_MAX / tickNs) return false;
+    *output = ticks * tickNs;
+    return true;
+}
+
+bool tls_controlled_fixture_host(const char* hostname)
+{
+    if (!hostname) return false;
+    if (text_equals(hostname, "guidexos.test")) return true;
+    size_t length = 0;
+    while (hostname[length] != '\0' && length < 254u) ++length;
+    if (length == 0 || length >= 254u) return false;
+    static const char suffix[] = ".guidexos.test";
+    const size_t suffixLength = sizeof(suffix) - 1u;
+    if (length <= suffixLength) return false;
+    const size_t prefixLength = length - suffixLength;
+    if (prefixLength == 0 || hostname[prefixLength] != '.') return false;
+    for (size_t i = 0; i < suffixLength; ++i) {
+        if (web::httpSharedLower(hostname[prefixLength + i]) != suffix[i]) return false;
+    }
+    return true;
+}
+
+bool tls_controlled_fixture_scope_ready(const char* hostname)
+{
+    const GxosValidatedHttpsPolicyInfo policy = gxos_validated_https_policy_info();
+    if (policy.selectedState != GxosValidatedHttpsPolicyState::ControlledQualification ||
+        policy.state != GxosValidatedHttpsPolicyState::ControlledQualification ||
+        policy.broadPublicHttpsEnabled || !tls_controlled_fixture_host(hostname)) {
+        return false;
+    }
+    const BareMetalCaStoreState& profile = ca_store_state();
+    const GxosTrustStorePolicyInfo trust = gxos_tls_trust_store_policy_info();
+    return trust.state == GxosTrustStorePolicyState::TrustStoreParsed &&
+        trust.source != GxosTrustStoreSource::SmokeFixtureTrust &&
+        profile.trustProfilePresent && profile.trustProfileValid &&
+        profile.trustProfileBundleHashMatch &&
+        text_equals(profile.trustProfileClass, "fixture-only") &&
+        text_equals(profile.trustProfileClockAssurance,
+                    "plausible-allowed-controlled-fixtures-only");
+}
+
+void tls_publish_time_lease(const gxos::clockassurance::TlsTimeEstimateLease& lease,
+                            GxosTlsLocalHandshakeResult* result)
+{
+    if (!result) return;
+    result->timeSourcePolicyIdentity = lease.sourcePolicyIdentity;
+    result->timeTrustScopeIdentity = lease.trustScopeIdentity;
+    result->timeIntervalStartUnixSeconds = lease.earliestUnixSeconds;
+    result->timeIntervalEndUnixSeconds = lease.latestUnixSeconds;
+    result->timeEvidenceRemainingSeconds = lease.remainingFreshnessSeconds;
+    result->timeAssuranceAccepted = lease.result ==
+        gxos::clockassurance::TlsTimeEstimateResult::Ready && lease.available != 0;
+    result->timeAssuranceFailed = !result->timeAssuranceAccepted;
+    copy_text(result->timeAssuranceReason, sizeof(result->timeAssuranceReason),
+        gxos::clockassurance::tls_time_estimate_result_name(lease.result));
+}
+
+void tls_add_time_failure_flag(GxosTlsHttpByteStreamSession* session,
+                               gxos::tls_time::CertificateIntervalResult result,
+                               uint32_t* flags)
+{
+    if (!session || !flags) return;
+    session->timeAssuranceRejected = true;
+    if (session->result) session->result->timeAssuranceFailed = true;
+    switch (result) {
+    case gxos::tls_time::CertificateIntervalResult::BeforeNotBefore:
+        *flags |= MBEDTLS_X509_BADCERT_FUTURE;
+        break;
+    case gxos::tls_time::CertificateIntervalResult::AfterNotAfter:
+        *flags |= MBEDTLS_X509_BADCERT_EXPIRED;
+        break;
+    default:
+        *flags |= MBEDTLS_X509_BADCERT_OTHER;
+        break;
+    }
+    if (session->result) {
+        copy_text(session->result->timeAssuranceReason,
+            sizeof(session->result->timeAssuranceReason),
+            gxos::tls_time::certificate_interval_result_name(result));
+    }
+}
+
+bool tls_certificate_dates_to_unix(const mbedtls_x509_crt* certificate,
+                                   int64_t* notBefore, int64_t* notAfter)
+{
+    if (!certificate || !notBefore || !notAfter) return false;
+    const gxos::tls_time::UtcCalendarTime before = {
+        certificate->valid_from.year, certificate->valid_from.mon,
+        certificate->valid_from.day, certificate->valid_from.hour,
+        certificate->valid_from.min, certificate->valid_from.sec
+    };
+    const gxos::tls_time::UtcCalendarTime after = {
+        certificate->valid_to.year, certificate->valid_to.mon,
+        certificate->valid_to.day, certificate->valid_to.hour,
+        certificate->valid_to.min, certificate->valid_to.sec
+    };
+    return gxos::tls_time::certificate_utc_to_unix_seconds(before, notBefore) &&
+        gxos::tls_time::certificate_utc_to_unix_seconds(after, notAfter) &&
+        *notBefore <= *notAfter;
+}
+
+int gxos_tls_controlled_time_verify_callback(void* context,
+                                              mbedtls_x509_crt* certificate,
+                                              int depth, uint32_t* flags)
+{
+    (void)depth;
+    GxosTlsHttpByteStreamSession* session =
+        static_cast<GxosTlsHttpByteStreamSession*>(context);
+    if (!session || !flags || !session->controlledTimeRequired) {
+        if (flags) *flags |= MBEDTLS_X509_BADCERT_OTHER;
+        return 0;
+    }
+    if (!session->controlledTimeScopeReady ||
+        !tls_controlled_fixture_scope_ready(session->result
+            ? session->result->sniHost : nullptr)) {
+        session->timeAssuranceRejected = true;
+        *flags |= MBEDTLS_X509_BADCERT_OTHER;
+        if (session->result) {
+            session->result->timeAssuranceFailed = true;
+            copy_text(session->result->timeAssuranceReason,
+                sizeof(session->result->timeAssuranceReason), "controlled-trust-scope-rejected");
+        }
+        return 0;
+    }
+
+    uint64_t nowMonotonicNs = 0;
+    if (!tls_monotonic_now_ns(&nowMonotonicNs)) {
+        session->timeAssuranceRejected = true;
+        *flags |= MBEDTLS_X509_BADCERT_OTHER;
+        if (session->result) {
+            session->result->timeAssuranceFailed = true;
+            copy_text(session->result->timeAssuranceReason,
+                sizeof(session->result->timeAssuranceReason), "monotonic-counter-overflow");
+        }
+        return 0;
+    }
+
+    gxos::clockassurance::TlsTimeEstimateLease refreshed = {};
+    const gxos::clockassurance::TlsTimeEstimateResult leaseResult =
+        gxos::clockassurance::refresh_controlled_fixture_tls_time(
+            session->timeLease, nowMonotonicNs, &refreshed);
+    if (leaseResult != gxos::clockassurance::TlsTimeEstimateResult::Ready) {
+        session->timeAssuranceRejected = true;
+        session->timeLease = refreshed;
+        tls_publish_time_lease(refreshed, session->result);
+        *flags |= MBEDTLS_X509_BADCERT_OTHER;
+        return 0;
+    }
+    session->timeLease = refreshed;
+    tls_publish_time_lease(refreshed, session->result);
+
+    int64_t notBefore = 0;
+    int64_t notAfter = 0;
+    if (!tls_certificate_dates_to_unix(certificate, &notBefore, &notAfter)) {
+        tls_add_time_failure_flag(session,
+            gxos::tls_time::CertificateIntervalResult::InvalidCertificateDate, flags);
+        return 0;
+    }
+    if (!session->certificateTimeBoundsSeen ||
+        notBefore > session->tightestNotBeforeUnixSeconds) {
+        session->tightestNotBeforeUnixSeconds = notBefore;
+    }
+    if (!session->certificateTimeBoundsSeen ||
+        notAfter < session->tightestNotAfterUnixSeconds) {
+        session->tightestNotAfterUnixSeconds = notAfter;
+    }
+    session->certificateTimeBoundsSeen = true;
+
+    const gxos::tls_time::CertificateIntervalResult intervalResult =
+        gxos::tls_time::check_certificate_interval(
+            refreshed.earliestUnixSeconds, refreshed.latestUnixSeconds,
+            notBefore, notAfter);
+    if (intervalResult != gxos::tls_time::CertificateIntervalResult::Valid) {
+        tls_add_time_failure_flag(session, intervalResult, flags);
+    }
+    return 0;
+}
+
+bool tls_controlled_time_final_check(GxosTlsHttpByteStreamSession* session,
+                                     uint32_t* failureFlags)
+{
+    if (!session || !session->controlledTimeRequired) return true;
+    if (failureFlags) *failureFlags = 0;
+    if (!session->certificateTimeBoundsSeen || session->timeAssuranceRejected) {
+        if (failureFlags) *failureFlags |= MBEDTLS_X509_BADCERT_OTHER;
+        return false;
+    }
+    uint64_t nowMonotonicNs = 0;
+    if (!tls_monotonic_now_ns(&nowMonotonicNs)) {
+        if (failureFlags) *failureFlags |= MBEDTLS_X509_BADCERT_OTHER;
+        return false;
+    }
+    gxos::clockassurance::TlsTimeEstimateLease refreshed = {};
+    const gxos::clockassurance::TlsTimeEstimateResult leaseResult =
+        gxos::clockassurance::refresh_controlled_fixture_tls_time(
+            session->timeLease, nowMonotonicNs, &refreshed);
+    session->timeLease = refreshed;
+    tls_publish_time_lease(refreshed, session->result);
+    if (leaseResult != gxos::clockassurance::TlsTimeEstimateResult::Ready) {
+        session->timeAssuranceRejected = true;
+        if (failureFlags) *failureFlags |= MBEDTLS_X509_BADCERT_OTHER;
+        return false;
+    }
+    const gxos::tls_time::CertificateIntervalResult intervalResult =
+        gxos::tls_time::check_certificate_interval(
+            refreshed.earliestUnixSeconds, refreshed.latestUnixSeconds,
+            session->tightestNotBeforeUnixSeconds,
+            session->tightestNotAfterUnixSeconds);
+    if (intervalResult != gxos::tls_time::CertificateIntervalResult::Valid) {
+        session->timeAssuranceRejected = true;
+        if (failureFlags) {
+            if (intervalResult == gxos::tls_time::CertificateIntervalResult::BeforeNotBefore) {
+                *failureFlags |= MBEDTLS_X509_BADCERT_FUTURE;
+            } else if (intervalResult == gxos::tls_time::CertificateIntervalResult::AfterNotAfter) {
+                *failureFlags |= MBEDTLS_X509_BADCERT_EXPIRED;
+            } else {
+                *failureFlags |= MBEDTLS_X509_BADCERT_OTHER;
+            }
+        }
+        if (session->result) {
+            session->result->timeAssuranceFailed = true;
+            copy_text(session->result->timeAssuranceReason,
+                sizeof(session->result->timeAssuranceReason),
+                gxos::tls_time::certificate_interval_result_name(intervalResult));
+        }
+        return false;
+    }
+    return true;
+}
 
 bool tls_http_response_wait_until_ready(GxosTlsHttpByteStreamSession* session,
                                         uint32_t transactionStartTicks,
@@ -4501,6 +4746,22 @@ bool gxos_tls_open_http_byte_stream(const char* sniHostname,
         return false;
     }
 
+    const GxosValidatedHttpsPolicyInfo selectedHttpsPolicy =
+        gxos_validated_https_policy_info();
+    const bool controlledTimeRequired = selectedHttpsPolicy.selectedState ==
+        GxosValidatedHttpsPolicyState::ControlledQualification;
+    result->timeAssuranceRequired = controlledTimeRequired;
+    if (controlledTimeRequired && !tls_controlled_fixture_scope_ready(sniHostname)) {
+        result->timeAssuranceFailed = true;
+        copy_text(result->timeAssuranceReason, sizeof(result->timeAssuranceReason),
+            "controlled-trust-scope-rejected");
+        result->verifyFlags = MBEDTLS_X509_BADCERT_OTHER;
+        tls_set_transport_status(result,
+            gxos::web::HttpByteStreamTlsStatus::CertificateVerifyFailed,
+            "Controlled TLS requires the selected fixture trust profile and a .guidexos.test host.");
+        return false;
+    }
+
     const GxosTlsRuntimeHookInfo hooks = gxos_tls_runtime_hook_info();
     result->allocatorStatus = hooks.allocatorStatus;
     result->rngCallbackStatus = hooks.rngCallbackStatus;
@@ -4540,6 +4801,9 @@ bool gxos_tls_open_http_byte_stream(const char* sniHostname,
     session->result = result;
     session->io.stream = tcpStream;
     session->io.result = result;
+    session->controlledTimeRequired = controlledTimeRequired;
+    session->controlledTimeScopeReady = !controlledTimeRequired ||
+        tls_controlled_fixture_scope_ready(sniHostname);
     mbedtls_ssl_init(&session->ssl);
     mbedtls_ssl_config_init(&session->conf);
 
@@ -4602,6 +4866,31 @@ bool gxos_tls_open_http_byte_stream(const char* sniHostname,
         }
         result->usedSniHostname = true;
 
+        if (session->controlledTimeRequired) {
+            uint64_t nowMonotonicNs = 0;
+            gxos::clockassurance::TlsTimeEstimateLease lease = {};
+            gxos::clockassurance::TlsTimeEstimateResult timeStatus =
+                gxos::clockassurance::TlsTimeEstimateResult::CounterOverflow;
+            if (tls_monotonic_now_ns(&nowMonotonicNs)) {
+                timeStatus = gxos::clockassurance::request_controlled_fixture_tls_time(
+                    nowMonotonicNs, &lease);
+            }
+            session->timeLease = lease;
+            tls_publish_time_lease(lease, result);
+            if (timeStatus != gxos::clockassurance::TlsTimeEstimateResult::Ready) {
+                result->verifyFlags |= MBEDTLS_X509_BADCERT_OTHER;
+                result->timeAssuranceFailed = true;
+                copy_text(result->timeAssuranceReason, sizeof(result->timeAssuranceReason),
+                    gxos::clockassurance::tls_time_estimate_result_name(timeStatus));
+                tls_set_transport_status(result,
+                    gxos::web::HttpByteStreamTlsStatus::CertificateVerifyFailed,
+                    "Controlled TLS has no current policy-accepted fixture time estimate.");
+                break;
+            }
+            mbedtls_ssl_set_verify(&session->ssl,
+                gxos_tls_controlled_time_verify_callback, session);
+        }
+
         mbedtls_ssl_set_bio(&session->ssl, &session->io, gxos_tls_stream_send, gxos_tls_stream_recv, nullptr);
         result->sslBioStatus = 0;
 
@@ -4661,7 +4950,6 @@ bool gxos_tls_open_http_byte_stream(const char* sniHostname,
             break;
         }
 
-        result->handshakeSuccess = true;
         result->tlsClientHelloSent = true;
         result->tlsClientHelloRealSuiteCount = result->tlsSuiteContractRealCount;
         result->tlsClientHelloScsvOnly = false;
@@ -4671,6 +4959,19 @@ bool gxos_tls_open_http_byte_stream(const char* sniHostname,
         tls_set_stage(result, "peer_validation");
         tls_trace_stage("peer_validation");
         result->verifyFlags = static_cast<uint32_t>(mbedtls_ssl_get_verify_result(&session->ssl));
+        if (session->controlledTimeRequired) {
+            uint32_t timeFailureFlags = 0;
+            if (!tls_controlled_time_final_check(session, &timeFailureFlags)) {
+                result->verifyFlags |= timeFailureFlags;
+                result->certificateValidationSuccess = false;
+                result->hostnameValidationSuccess = false;
+                result->timeAssuranceFailed = true;
+                tls_set_transport_status(result,
+                    gxos::web::HttpByteStreamTlsStatus::CertificateVerifyFailed,
+                    "Controlled TLS time evidence expired or changed during certificate validation.");
+                break;
+            }
+        }
         result->certificateValidationSuccess = result->verifyFlags == 0;
         result->hostnameValidationSuccess =
             result->certificateValidationSuccess &&
@@ -4682,6 +4983,8 @@ bool gxos_tls_open_http_byte_stream(const char* sniHostname,
                     : "TLS certificate validation failed.");
             break;
         }
+
+        result->handshakeSuccess = true;
 
         result->transportStatus = gxos::web::HttpByteStreamTlsStatus::Success;
         outStream->context = session;

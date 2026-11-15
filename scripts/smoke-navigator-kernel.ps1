@@ -11,7 +11,8 @@ param(
     [switch]$ReuseActiveBuild,
     [string]$ArtifactPath,
     [switch]$DisableSecureEntropy,
-    [switch]$GuestDnsQualification
+    [switch]$GuestDnsQualification,
+    [switch]$Navhttps17Qualification
 )
 
 $ErrorActionPreference = "Stop"
@@ -32,6 +33,15 @@ $requiredHttpsCaseNames = @(
 $httpsQualificationRequested =
     ($ScenarioFilter -contains 'production_validated') -or
     (($ScenarioFilter.Count -eq 0) -and ($ScenarioGroup -ne 'PublicPilot'))
+if ($Navhttps17Qualification) {
+    if ($ScenarioFilter -and $ScenarioFilter.Count -gt 0 -and
+        @($ScenarioFilter | Where-Object { $_ -ne 'production_validated' }).Count -gt 0) {
+        throw 'NAVHTTPS17 controlled TLS qualification supports only the production_validated fixture profile.'
+    }
+    if (-not $ScenarioFilter -or $ScenarioFilter.Count -eq 0) {
+        $ScenarioFilter = @('production_validated')
+    }
+}
 
 function Write-NavigatorHttpsQualificationBlocked {
     param([Parameter(Mandatory = $true)][string]$Reason)
@@ -119,6 +129,9 @@ function Invoke-KernelBuildForSmoke {
     $kernelBuildLog = Join-Path $artifactRoot 'kernel-build.log'
     $flags = '-DGXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE -DGXOS_NAVIGATOR_TLS_CAPABILITY_CONTRACT_NEGATIVE_TEST_ACTIVE -DGXOS_KERNEL_TEXT_WRITE_GUARD'
     if ($GuestDnsQualification) { $flags += ' -DGXOS_NAVIGATOR_GUEST_DNS_QUALIFICATION_ACTIVE' }
+    if ($Navhttps17Qualification) {
+        $flags += ' -DGXOS_NAVHTTPS13_GUEST_QUALIFICATION_ACTIVE -DGXOS_NAVHTTPS15_GUEST_QUALIFICATION_ACTIVE -DGXOS_NAVHTTPS16_GUEST_QUALIFICATION_ACTIVE -DGXOS_NAVHTTPS17_GUEST_QUALIFICATION_ACTIVE'
+    }
     $oldBuildErrorActionPreference = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
@@ -391,6 +404,7 @@ function Start-NavigatorKernelSmokeServers {
     $httpProc = $null
     $httpsProc = $null
     $dnsProc = $null
+    $roughtimeProc = $null
 
     try {
 
@@ -420,6 +434,23 @@ function Start-NavigatorKernelSmokeServers {
     )
     $dnsProc = Start-Process -FilePath $python -ArgumentList $dnsArgs -PassThru -WindowStyle Hidden -RedirectStandardOutput $dnsLog -RedirectStandardError $dnsErrLog
 
+    $roughtimeLog = Join-Path $LogDir "navhttps17-roughtime-$stamp-$ScenarioName.log"
+    $roughtimeErrLog = Join-Path $LogDir "navhttps17-roughtime-$stamp-$ScenarioName.err.log"
+    if ($Navhttps17Qualification) {
+        foreach ($fixturePort in @(5319, 5320, 5321)) {
+            $owners = @(Get-NavigatorKernelSmokeUdpPortOwners -Port $fixturePort)
+            if ($owners.Count -gt 0) {
+                $details = ($owners | ForEach-Object { "$($_.LocalAddress):$($_.LocalPort) pid=$($_.OwningProcess) ($($_.Name))" }) -join ', '
+                throw "NAVHTTPS17 Roughtime fixture UDP port $fixturePort is already owned: $details. No process was stopped."
+            }
+        }
+        $multiSourceFixture = Join-Path $Root 'tests\roughtime_v1_multisource_guest_fixture.py'
+        $roughtimeProc = Start-Process -FilePath $python `
+            -ArgumentList @('-B', "`"$multiSourceFixture`"", '--timeout', '120') `
+            -WorkingDirectory $Root -PassThru -WindowStyle Hidden `
+            -RedirectStandardOutput $roughtimeLog -RedirectStandardError $roughtimeErrLog
+    }
+
     # DHCP discovery is deliberately deferred until after input/main-loop
     # startup. Do not let the kernel reach its first TLS probe before the
     # localhost fixtures are actually listening; a fixed sleep made this
@@ -428,7 +459,8 @@ function Start-NavigatorKernelSmokeServers {
     $httpReady = $false
     $httpsReady = $false
     $dnsReady = $false
-    while ((Get-Date) -lt $serverDeadline -and (-not $httpReady -or -not $httpsReady -or -not $dnsReady)) {
+    $roughtimeReady = -not $Navhttps17Qualification
+    while ((Get-Date) -lt $serverDeadline -and (-not $httpReady -or -not $httpsReady -or -not $dnsReady -or -not $roughtimeReady)) {
         if ($httpProc.HasExited) {
             throw "local HTTP smoke server exited early; see $httpLog"
         }
@@ -437,6 +469,9 @@ function Start-NavigatorKernelSmokeServers {
         }
         if ($dnsProc.HasExited) {
             throw "controlled DNS fixture exited early; see $dnsLog and $dnsErrLog"
+        }
+        if ($roughtimeProc -and $roughtimeProc.HasExited) {
+            throw "NAVHTTPS17 Roughtime fixture exited before QEMU admission; see $roughtimeLog and $roughtimeErrLog"
         }
 
         $ownedDnsEndpoints = @(Get-NavigatorKernelSmokeUdpPortOwners -Port $dnsPort)
@@ -462,6 +497,16 @@ function Start-NavigatorKernelSmokeServers {
             }
         }
 
+        if ($roughtimeProc) {
+            $roughtimeReady = $true
+            foreach ($fixturePort in @(5319, 5320, 5321)) {
+                $fixtureEndpoint = @(Get-NavigatorKernelSmokeUdpPortOwners -Port $fixturePort | Where-Object {
+                    $_.OwningProcess -eq $roughtimeProc.Id
+                })
+                if ($fixtureEndpoint.Count -eq 0) { $roughtimeReady = $false }
+            }
+        }
+
         foreach ($probe in @(
                 [pscustomobject]@{ Port = 8080; Ready = 'Http' },
                 [pscustomobject]@{ Port = 8443; Ready = 'Https' })) {
@@ -480,7 +525,7 @@ function Start-NavigatorKernelSmokeServers {
                 $client.Close()
             }
         }
-        if (-not $httpReady -or -not $httpsReady -or -not $dnsReady) {
+        if (-not $httpReady -or -not $httpsReady -or -not $dnsReady -or -not $roughtimeReady) {
             Start-Sleep -Milliseconds 100
         }
     }
@@ -488,6 +533,7 @@ function Start-NavigatorKernelSmokeServers {
     if (-not $httpReady) { throw "local HTTP smoke server did not listen on port 8080; see $httpLog" }
     if (-not $httpsReady) { throw "local HTTPS smoke server did not listen on port 8443; see $httpsLog" }
     if (-not $dnsReady) { throw "controlled DNS fixture did not own 127.0.0.1:55353 and report ready; see $dnsLog and $dnsErrLog" }
+    if (-not $roughtimeReady) { throw "NAVHTTPS17 multi-source Roughtime fixture did not bind UDP ports 5319-5321; see $roughtimeLog and $roughtimeErrLog" }
     Write-Host '[NAVIGATOR-GUEST-DNS-CONFIG] qemu_backend=user guest=10.0.2.15 gateway=10.0.2.2 test_a_resolver=10.0.2.3:53 controlled_resolver=10.0.2.2:55353 host_fixture=127.0.0.1:55353 controlled_host=prod.guidexos.test controlled_a=10.0.2.2 static_mapping=disabled_for_controlled_host'
 
     return [pscustomobject]@{
@@ -496,6 +542,10 @@ function Start-NavigatorKernelSmokeServers {
         HttpLog = $httpLog
         HttpsLog = $httpsLog
         DnsProcess = $dnsProc
+        RoughtimeProcess = $roughtimeProc
+        RoughtimeLog = $roughtimeLog
+        RoughtimeErrorLog = $roughtimeErrLog
+        Navhttps17Qualification = $Navhttps17Qualification
         DnsLog = $dnsLog
         DnsStopFile = $dnsStopFile
         DnsPort = $dnsPort
@@ -510,6 +560,10 @@ function Start-NavigatorKernelSmokeServers {
             if ($ownedProc -and -not $ownedProc.HasExited) {
                 Stop-Process -Id $ownedProc.Id -Force -ErrorAction SilentlyContinue
             }
+        }
+        if ($roughtimeProc -and -not $roughtimeProc.HasExited) {
+            Stop-Process -Id $roughtimeProc.Id -Force -ErrorAction SilentlyContinue
+            try { $roughtimeProc.WaitForExit(2000) } catch { }
         }
         Remove-Item -LiteralPath $dnsStopFile -Force -ErrorAction SilentlyContinue
         throw
@@ -541,6 +595,10 @@ function Stop-NavigatorKernelSmokeServers {
         if ($remainingDnsOwner.Count -gt 0) {
             throw "Controlled DNS fixture process $($Servers.DnsProcess.Id) still owns UDP/$($Servers.DnsPort) after cleanup."
         }
+    }
+    if ($Servers -and $Servers.RoughtimeProcess -and -not $Servers.RoughtimeProcess.HasExited) {
+        Stop-Process -Id $Servers.RoughtimeProcess.Id -Force -ErrorAction SilentlyContinue
+        try { $Servers.RoughtimeProcess.WaitForExit(2000) } catch { }
     }
 }
 
@@ -1379,9 +1437,12 @@ $localTlsSelectedBlockedRegexChecks = @{
 # classifying the trust-policy assertions independently.
 $missingTrustProfileChecks = @($commonChecks | Where-Object {
     $_ -ne "[NAVIGATOR-SMOKE] tls_smoke.result=PASS" -and
+    $_ -ne "[NAVIGATOR-SMOKE] tls_smoke.failure.result=PASS" -and
     $_ -ne "[NAVIGATOR-SMOKE] result=PASS"
 }) + @(
     "[NAVIGATOR-SMOKE] tls_smoke.result=FAIL",
+    "[NAVIGATOR-SMOKE] tls_smoke.failure.result=FAIL",
+    "[NAVIGATOR-SMOKE] tls_smoke.failure.error=Controlled TLS requires the selected fixture trust profile and a .guidexos.test host.",
     "[NAVIGATOR-SMOKE] result=FAIL",
     "[NAVIGATOR-SMOKE] https.case.policy_validated.plain_tcp_connect_attempts=0",
     "[NAVIGATOR-SMOKE] https.case.policy_validated.tls_tcp_connect_attempts=0",
@@ -2068,7 +2129,7 @@ $scenarioDefinitions = @(
         ProductionCaSource = $criticalNameConstraintsCaFixture
         TlsCert = $defaultHttpsCert
         TlsKey = $defaultHttpsKey
-        Checks = $manifestBlockedChecks + @(
+        Checks = $commonChecks + @(
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_path=/certs/ca-bundle.pem",
             "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=ProductionRootStore",
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_status=Loaded",
@@ -2089,9 +2150,11 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_reason=CA bundle rejected because one or more certificates were unsupported or malformed; filtered trust parsing is disabled.",
             "[NAVIGATOR-SMOKE] tls_prereq.tls_backend_status=CaParseFailed",
             "[NAVIGATOR-SMOKE] tls_readiness=no",
-            "[NAVIGATOR-SMOKE] tls_smoke.result=FAIL",
+            "[NAVIGATOR-SMOKE] tls_smoke.result=PASS",
+            "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.tls_status=CaParseFailed",
             "[NAVIGATOR-SMOKE] https.case.policy_validated.enabled=no",
-            "[NAVIGATOR-SMOKE] https.case.policy_validated.result=PASS"
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.result=PASS",
+            "[NAVIGATOR-SMOKE] result=PASS"
         )
         RegexChecks = Merge-CheckMaps -Base $clockUnavailableRegexChecks -Extra @{
             '\[NAVIGATOR-SMOKE\] tls_prereq\.wall_clock_epoch=[1-9][0-9]+' = "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_epoch=<positive Unix seconds>"
@@ -2757,6 +2820,37 @@ try {
 
             Write-Host $runOutput
             $scenarioChecks = @($scenario.Checks)
+            if ($Navhttps17Qualification -and $scenario.Name -eq 'production_validated') {
+                $scenarioChecks += @(
+                    '[NAVHTTPS13-GUEST-A] hook_result=PASS',
+                    '[NAVHTTPS13-GUEST-B] result=success',
+                    '[NAVHTTPS15-GUEST] result=PASS',
+                    '[NAVHTTPS16-GUEST] acceptance=accepted-fixture-only',
+                    '[NAVHTTPS16-GUEST] advance=PASS',
+                    '[NAVHTTPS17-GUEST] missing_evidence=PASS',
+                    '[NAVHTTPS17-GUEST] tls_time_lease=PASS',
+                    '[NAVHTTPS17-GUEST] result=PASS',
+                    '[NAVHTTPS17-GUEST] post_tls_invalidation=PASS',
+                    '[NAVIGATOR-SMOKE] https.case.policy_validated.time_assurance_required=yes',
+                    '[NAVIGATOR-SMOKE] https.case.policy_validated.time_assurance_accepted=yes',
+                    '[NAVIGATOR-SMOKE] https.case.policy_validated.time_assurance_failed=no',
+                    '[NAVIGATOR-SMOKE] https.case.policy_validated.time_source_policy_identity=5377',
+                    '[NAVIGATOR-SMOKE] https.case.policy_validated.time_trust_scope_identity=5889'
+                )
+                if (-not (Test-Path -LiteralPath $activeServers.RoughtimeLog -PathType Leaf)) {
+                    throw 'NAVHTTPS17 guest evidence acquisition fixture evidence is missing.'
+                }
+                if ($activeServers.RoughtimeProcess -and -not $activeServers.RoughtimeProcess.HasExited) {
+                    [void]$activeServers.RoughtimeProcess.WaitForExit(5000)
+                }
+                $roughtimeOutput = Get-Content -LiteralPath $activeServers.RoughtimeLog -Raw
+                if (($activeServers.RoughtimeProcess -and
+                        (-not $activeServers.RoughtimeProcess.HasExited -or
+                         $activeServers.RoughtimeProcess.ExitCode -ne 0)) -or
+                    -not $roughtimeOutput.Contains('result=PASS operators=3 simulated_independence=yes')) {
+                    throw "NAVHTTPS17 multi-source fixture did not complete its signed acquisition exchanges successfully: $($activeServers.RoughtimeLog)"
+                }
+            }
             if ($GuestDnsQualification -and $scenario.Name -eq 'production_validated') {
                 $scenarioChecks = @($scenarioChecks | Where-Object {
                     $_ -ne '[NAVIGATOR-SMOKE] https.case.policy_validated.dns_resolution_source=controlled-smoke-gateway-map'

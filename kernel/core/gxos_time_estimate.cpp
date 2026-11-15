@@ -11,6 +11,7 @@ static TimeEstimateStore s_timeEstimateStore;
 static uint8_t s_timeEstimateStoreInitialized;
 
 static const uint32_t kNavhttps15FixturePolicyIdentity = 0x1501U;
+static const uint64_t kFixtureTlsPolicyGenerationInitial = 1ULL;
 static const uint32_t kFixtureOperatorIdentities[3] = { 401U, 402U, 403U };
 static const uint32_t kMaximumForwardMovementSeconds = 300U;
 static const uint32_t kPitDriftPartsPerMillion = 500U;
@@ -273,9 +274,33 @@ void TimeEstimateStore::initialize()
     clear_bytes(&m_info, sizeof(m_info));
     m_latchedFailure = 0;
     m_expiryMonotonicNs = 0;
+    m_generation = kFixtureTlsPolicyGenerationInitial;
     m_info.state = TimeEstimateState::NoEvidence;
     m_info.scope = TimeEstimateScope::None;
     m_info.reason = TimeEstimateReason::NoAuthenticatedPersistentState;
+}
+
+#if defined(GXOS_TIME_ESTIMATE_TESTING)
+void TimeEstimateStore::initialize_for_test()
+{
+    initialize();
+}
+#endif
+
+bool TimeEstimateStore::advance_generation()
+{
+    if (m_generation == UINT64_MAX) {
+        m_latchedFailure = 1;
+        m_info.available = 0;
+        m_info.state = TimeEstimateState::ContinuityFailure;
+        m_info.reason = TimeEstimateReason::CounterOverflow;
+        m_info.currentEarliestUnixSeconds = 0;
+        m_info.currentLatestUnixSeconds = 0;
+        m_info.remainingFreshnessSeconds = 0;
+        return false;
+    }
+    ++m_generation;
+    return true;
 }
 
 TimeEstimateAcceptResult TimeEstimateStore::accept_fixture_round(
@@ -355,6 +380,7 @@ TimeEstimateAcceptResult TimeEstimateStore::accept_fixture_round(
         return TimeEstimateAcceptResult::InvalidInterval;
     }
     if (nowMonotonicNs < agreement.evaluated_monotonic_ns) {
+        if (!advance_generation()) return TimeEstimateAcceptResult::CounterOverflow;
         m_info.available = 0;
         m_info.agreementSatisfied = 0;
         m_info.state = TimeEstimateState::RollbackSuspected;
@@ -385,6 +411,7 @@ TimeEstimateAcceptResult TimeEstimateStore::accept_fixture_round(
         }
         if (m_info.available) {
             if (agreement.latest_unix_seconds < m_info.currentEarliestUnixSeconds) {
+                if (!advance_generation()) return TimeEstimateAcceptResult::CounterOverflow;
                 m_info.available = 0;
                 m_info.state = TimeEstimateState::RollbackSuspected;
                 m_info.reason = TimeEstimateReason::RollbackDetected;
@@ -397,6 +424,7 @@ TimeEstimateAcceptResult TimeEstimateStore::accept_fixture_round(
             if (agreement.earliest_unix_seconds > m_info.currentLatestUnixSeconds) {
                 const uint64_t gap = agreement.earliest_unix_seconds -
                     m_info.currentLatestUnixSeconds;
+                if (!advance_generation()) return TimeEstimateAcceptResult::CounterOverflow;
                 m_info.available = 0;
                 if (gap > kMaximumForwardMovementSeconds) {
                     m_info.state = TimeEstimateState::ContinuityFailure;
@@ -439,6 +467,8 @@ TimeEstimateAcceptResult TimeEstimateStore::accept_fixture_round(
         m_info.remainingFreshnessSeconds = 0;
         return TimeEstimateAcceptResult::CounterOverflow;
     }
+
+    if (!advance_generation()) return TimeEstimateAcceptResult::CounterOverflow;
 
     clear_bytes(&m_info, sizeof(m_info));
     m_info.state = TimeEstimateState::Fresh;
@@ -491,6 +521,7 @@ TimeEstimateAcceptResult TimeEstimateStore::accept_fixture_round(
 TimeEstimateReason TimeEstimateStore::query(uint64_t nowMonotonicNs,
                                             TimeEstimateInfo* output)
 {
+    const bool wasAvailable = m_info.available != 0;
     if (m_info.available) {
         if (nowMonotonicNs < m_info.measurementAnchorMonotonicNs ||
             nowMonotonicNs < m_info.lastObservedMonotonicNs) {
@@ -571,8 +602,121 @@ TimeEstimateReason TimeEstimateStore::query(uint64_t nowMonotonicNs,
         }
     }
 
+    if (wasAvailable && !m_info.available) {
+        (void)advance_generation();
+    }
+
     if (output) *output = m_info;
     return m_info.reason;
+}
+
+namespace {
+
+static TlsTimeEstimateResult classify_tls_lease(const TimeEstimateInfo& info)
+{
+    if (!info.available || info.state == TimeEstimateState::NoEvidence ||
+        info.state == TimeEstimateState::Invalidated ||
+        info.state == TimeEstimateState::Rejected) {
+        if (info.reason == TimeEstimateReason::MonotonicWentBackwards ||
+            info.reason == TimeEstimateReason::RollbackDetected) {
+            return TlsTimeEstimateResult::MonotonicRollback;
+        }
+        if (info.reason == TimeEstimateReason::ClockDiscontinuity ||
+            info.state == TimeEstimateState::ContinuityFailure) {
+            return info.reason == TimeEstimateReason::CounterOverflow
+                ? TlsTimeEstimateResult::CounterOverflow
+                : TlsTimeEstimateResult::ContinuityFailure;
+        }
+        if (info.state == TimeEstimateState::Expired ||
+            info.reason == TimeEstimateReason::Expired ||
+            info.reason == TimeEstimateReason::UncertaintyLimitExceeded) {
+            return TlsTimeEstimateResult::Expired;
+        }
+        return TlsTimeEstimateResult::NoEvidence;
+    }
+    if (info.scope != TimeEstimateScope::FixtureOnly) {
+        return TlsTimeEstimateResult::WrongScope;
+    }
+    if (info.policyIdentity != kNavhttps15FixturePolicyIdentity) {
+        return TlsTimeEstimateResult::WrongSourcePolicy;
+    }
+    if (info.currentEarliestUnixSeconds > info.currentLatestUnixSeconds ||
+        info.currentEarliestUnixSeconds == 0 ||
+        info.currentLatestUnixSeconds >= static_cast<uint64_t>(kPlausibleMaximumUnixSeconds)) {
+        return TlsTimeEstimateResult::InvalidInterval;
+    }
+    if (info.currentUncertaintySeconds > kFixtureTimeEstimateMaximumUncertaintySeconds) {
+        return TlsTimeEstimateResult::ExcessiveUncertainty;
+    }
+    if (info.remainingFreshnessSeconds == 0) return TlsTimeEstimateResult::Expired;
+    if (info.state != TimeEstimateState::Fresh && info.state != TimeEstimateState::Advanced) {
+        return TlsTimeEstimateResult::ContinuityFailure;
+    }
+    return TlsTimeEstimateResult::Ready;
+}
+
+static void write_tls_lease(const TimeEstimateInfo& info, uint64_t generation,
+                            TlsTimeEstimateResult status, TlsTimeEstimateLease* output)
+{
+    if (!output) return;
+    clear_bytes(output, sizeof(*output));
+    output->result = status;
+    output->state = info.state;
+    output->scope = info.scope;
+    output->rejectionReason = info.reason;
+    output->available = status == TlsTimeEstimateResult::Ready ? 1U : 0U;
+    output->sourcePolicyIdentity = info.policyIdentity;
+    output->trustScopeIdentity = status == TlsTimeEstimateResult::Ready
+        ? kControlledFixtureTlsTrustScopeIdentity : 0U;
+    output->earliestUnixSeconds = info.currentEarliestUnixSeconds;
+    output->latestUnixSeconds = info.currentLatestUnixSeconds;
+    output->measurementAnchorMonotonicNs = info.measurementAnchorMonotonicNs;
+    output->observedMonotonicNs = info.lastObservedMonotonicNs;
+    output->remainingFreshnessSeconds = info.remainingFreshnessSeconds;
+    output->uncertaintySeconds = info.currentUncertaintySeconds;
+    output->generation = generation;
+}
+
+} // namespace
+
+TlsTimeEstimateResult TimeEstimateStore::request_tls_lease(
+    uint64_t nowMonotonicNs, TlsTimeEstimateLease* output)
+{
+    TimeEstimateInfo info = {};
+    query(nowMonotonicNs, &info);
+    const TlsTimeEstimateResult status = classify_tls_lease(info);
+    write_tls_lease(info, m_generation, status, output);
+    return status;
+}
+
+TlsTimeEstimateResult TimeEstimateStore::refresh_tls_lease(
+    const TlsTimeEstimateLease& lease, uint64_t nowMonotonicNs,
+    TlsTimeEstimateLease* output)
+{
+    TimeEstimateInfo info = {};
+    query(nowMonotonicNs, &info);
+    if (lease.result != TlsTimeEstimateResult::Ready ||
+        lease.available == 0 ||
+        lease.generation != m_generation ||
+        lease.sourcePolicyIdentity != kNavhttps15FixturePolicyIdentity ||
+        lease.trustScopeIdentity != kControlledFixtureTlsTrustScopeIdentity) {
+        write_tls_lease(info, m_generation, TlsTimeEstimateResult::LeaseChanged, output);
+        return TlsTimeEstimateResult::LeaseChanged;
+    }
+    const TlsTimeEstimateResult status = classify_tls_lease(info);
+    write_tls_lease(info, m_generation, status, output);
+    if (status != TlsTimeEstimateResult::Ready) return status;
+    if (lease.measurementAnchorMonotonicNs != info.measurementAnchorMonotonicNs ||
+        lease.sourcePolicyIdentity != info.policyIdentity ||
+        lease.scope != info.scope) {
+        if (output) {
+            output->available = 0;
+            output->trustScopeIdentity = 0;
+            output->result = TlsTimeEstimateResult::LeaseChanged;
+        }
+        return TlsTimeEstimateResult::LeaseChanged;
+    }
+    return status;
 }
 
 void TimeEstimateStore::invalidate(TimeEstimateReason reason)
@@ -590,6 +734,7 @@ void TimeEstimateStore::invalidate(TimeEstimateReason reason)
         m_info.reason == TimeEstimateReason::ClockDiscontinuity) {
         m_latchedFailure = 1;
     }
+    (void)advance_generation();
 }
 
 void TimeEstimateStore::report_clock_discontinuity()
@@ -602,6 +747,7 @@ void TimeEstimateStore::report_clock_discontinuity()
     m_info.currentLatestUnixSeconds = 0;
     m_info.remainingFreshnessSeconds = 0;
     m_latchedFailure = 1;
+    (void)advance_generation();
 }
 
 TimeEstimateStore& time_estimate_store()
@@ -611,6 +757,19 @@ TimeEstimateStore& time_estimate_store()
         s_timeEstimateStoreInitialized = 1;
     }
     return s_timeEstimateStore;
+}
+
+TlsTimeEstimateResult request_controlled_fixture_tls_time(
+    uint64_t nowMonotonicNs, TlsTimeEstimateLease* output)
+{
+    return time_estimate_store().request_tls_lease(nowMonotonicNs, output);
+}
+
+TlsTimeEstimateResult refresh_controlled_fixture_tls_time(
+    const TlsTimeEstimateLease& lease, uint64_t nowMonotonicNs,
+    TlsTimeEstimateLease* output)
+{
+    return time_estimate_store().refresh_tls_lease(lease, nowMonotonicNs, output);
 }
 
 const char* time_estimate_state_name(TimeEstimateState state)
@@ -680,6 +839,24 @@ const char* time_estimate_accept_result_name(TimeEstimateAcceptResult result)
     case TimeEstimateAcceptResult::RollbackDetected: return "rollback-suspected";
     case TimeEstimateAcceptResult::ExcessiveForwardMovement: return "excessive-forward-movement";
     case TimeEstimateAcceptResult::ContinuityFailure: return "monotonic-clock-discontinuity";
+    default: return "unknown";
+    }
+}
+
+const char* tls_time_estimate_result_name(TlsTimeEstimateResult result)
+{
+    switch (result) {
+    case TlsTimeEstimateResult::Ready: return "ready-fixture-only";
+    case TlsTimeEstimateResult::NoEvidence: return "no-current-fixture-time-evidence";
+    case TlsTimeEstimateResult::WrongScope: return "time-evidence-scope-mismatch";
+    case TlsTimeEstimateResult::WrongSourcePolicy: return "time-source-policy-mismatch";
+    case TlsTimeEstimateResult::InvalidInterval: return "time-interval-malformed";
+    case TlsTimeEstimateResult::ExcessiveUncertainty: return "time-uncertainty-too-large";
+    case TlsTimeEstimateResult::Expired: return "time-evidence-expired";
+    case TlsTimeEstimateResult::MonotonicRollback: return "monotonic-continuity-failed";
+    case TlsTimeEstimateResult::ContinuityFailure: return "time-evidence-continuity-failed";
+    case TlsTimeEstimateResult::LeaseChanged: return "time-evidence-invalidated-during-validation";
+    case TlsTimeEstimateResult::CounterOverflow: return "time-evidence-arithmetic-overflow";
     default: return "unknown";
     }
 }

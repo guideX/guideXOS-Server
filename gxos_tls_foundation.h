@@ -326,6 +326,15 @@ struct GxosTlsLocalHandshakeResult {
     GxosTlsHookStatus psaInitStatus;
     bool caChainReady;
     size_t caChainCertCount;
+    bool timeAssuranceRequired;
+    bool timeAssuranceAccepted;
+    bool timeAssuranceFailed;
+    uint32_t timeSourcePolicyIdentity;
+    uint32_t timeTrustScopeIdentity;
+    uint64_t timeIntervalStartUnixSeconds;
+    uint64_t timeIntervalEndUnixSeconds;
+    uint64_t timeEvidenceRemainingSeconds;
+    char timeAssuranceReason[48];
     int sslConfigDefaultsStatus;
     int sslSetupStatus;
     int sslHostnameStatus;

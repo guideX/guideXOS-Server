@@ -15653,6 +15653,12 @@ bool NavigatorApp::smokeHttpsUnsupportedDocument(const char* url, const char* ex
     const bool broadPublicBlocked =
         httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::ProductionValidated &&
         !httpsPolicy.broadPublicHttpsEnabled;
+    // In the controlled-qualification profile, public HTTPS is disabled even
+    // though the named fixture host is permitted. The numeric gateway cases
+    // below are therefore expected policy rejections, not failed smoke cases.
+    const bool controlledNumericHttpsBlocked =
+        httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::ControlledQualification &&
+        nav_starts_with(expectedFinalUrl, "https://10.0.2.2:");
     const bool selectedButBlocked =
         (httpsPolicy.selectedState == gxos::GxosValidatedHttpsPolicyState::UserTrustStoreDevMode ||
          httpsPolicy.selectedState == gxos::GxosValidatedHttpsPolicyState::ProductionValidated ||
@@ -15663,12 +15669,13 @@ bool NavigatorApp::smokeHttpsUnsupportedDocument(const char* url, const char* ex
           httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::ProductionValidated) &&
         httpsPolicy.blocker && httpsPolicy.blocker[0];
     const bool selectedOrBroadPublicBlocked = selectedButBlocked || broadPublicBlocked;
-    const bool titleOk = selectedOrBroadPublicBlocked ||
+    const bool titleOk = selectedOrBroadPublicBlocked || controlledNumericHttpsBlocked ||
         streq_local(app.m_title, direct ? "HTTPS Unsupported" : "HTTPS Redirect Unsupported");
     const bool errorOk =
         nav_starts_with(app.m_metaErrorStatus, direct ? "HTTPS/TLS unsupported" : "HTTPS/TLS unsupported redirect") ||
         (selectedButBlocked && streq_local(app.m_metaErrorStatus, httpsPolicy.blocker)) ||
-        (broadPublicBlocked && streq_local(app.m_metaErrorStatus, httpsPolicy.publicHttpsPilotReason));
+        ((broadPublicBlocked || controlledNumericHttpsBlocked) &&
+            streq_local(app.m_metaErrorStatus, httpsPolicy.publicHttpsPilotReason));
     return streq_local(app.m_metaRequestedUrl, url) &&
            streq_local(app.m_metaFinalUrl, expectedFinalUrl) &&
            errorOk &&
@@ -19002,6 +19009,24 @@ static bool printNavigatorPolicyValidatedTlsSmokeCase()
     serial::puts(transportSelection[0] ? transportSelection : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.tls_status=");
     serial::puts(tlsStatus[0] ? tlsStatus : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.time_assurance_required=");
+    serial::puts(tlsResult.timeAssuranceRequired ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.time_assurance_accepted=");
+    serial::puts(tlsResult.timeAssuranceAccepted ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.time_assurance_failed=");
+    serial::puts(tlsResult.timeAssuranceFailed ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.time_source_policy_identity=");
+    serial_put_dec(tlsResult.timeSourcePolicyIdentity);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.time_trust_scope_identity=");
+    serial_put_dec(tlsResult.timeTrustScopeIdentity);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.time_interval_start=");
+    serial_put_dec64(tlsResult.timeIntervalStartUnixSeconds);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.time_interval_end=");
+    serial_put_dec64(tlsResult.timeIntervalEndUnixSeconds);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.time_remaining_seconds=");
+    serial_put_dec64(tlsResult.timeEvidenceRemainingSeconds);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.time_assurance_reason=");
+    serial::puts(tlsResult.timeAssuranceReason[0] ? tlsResult.timeAssuranceReason : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.allowlist_mode=");
     serial::puts(tlsAllowlistLocalOnly ? "local-only controlled HTTPS" : "explicit-policy validated HTTPS");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.tls_backend=mbedtls");
