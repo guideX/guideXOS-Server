@@ -2,6 +2,7 @@ param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
     [string]$ArtifactRoot = 'E:\CodexArtifacts\guideXOSServerV1.1_DOTNET_SUPPORT',
     [string]$CandidateRoot = '',
+    [switch]$C188R12R4R5R4ThreadStoreReadiness,
     [switch]$C188R25FailFastOriginCapture,
     [switch]$C188R28GcStateGuardDiscriminator,
     [switch]$C188R29PreallocationGcStateGuard
@@ -27,6 +28,7 @@ $r23Builder = Join-Path $RepoRoot 'scripts\dotnet\build-c188r23-settings-candida
 $buildLog = Join-Path (Split-Path -Parent $candidate) ('r24-r23-build-' + [guid]::NewGuid().ToString('N') + '.log')
 $buildOutput = (& $pwsh -NoProfile -File $r23Builder -RepoRoot $RepoRoot `
     -ArtifactRoot $ArtifactRoot -CandidateRoot $candidate `
+    -C188R12R4R5R4ThreadStoreReadiness:$C188R12R4R5R4ThreadStoreReadiness `
     -C188R25FailFastOriginCapture:$C188R25FailFastOriginCapture `
     -C188R28GcStateGuardDiscriminator:$C188R28GcStateGuardDiscriminator `
     -C188R29PreallocationGcStateGuard:$C188R29PreallocationGcStateGuard 2>&1 | Out-String)

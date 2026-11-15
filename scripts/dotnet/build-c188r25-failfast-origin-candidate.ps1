@@ -2,6 +2,7 @@ param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
     [string]$ArtifactRoot = 'E:\CodexArtifacts\guideXOSServerV1.1_DOTNET_SUPPORT',
     [string]$CandidateRoot = '',
+    [switch]$C188R12R4R5R4ThreadStoreReadiness,
     [switch]$C188R28GcStateGuardDiscriminator,
     [switch]$C188R29PreallocationGcStateGuard
 )
@@ -27,6 +28,7 @@ $python = (Get-Command python.exe -ErrorAction Stop | Select-Object -First 1).So
 $r24Builder = Join-Path $RepoRoot 'scripts\dotnet\build-c188r24-initializemodules-candidate.ps1'
 $builderOutput = & $pwsh -NoProfile -File $r24Builder -RepoRoot $RepoRoot `
     -ArtifactRoot $ArtifactRoot -CandidateRoot $candidate -C188R25FailFastOriginCapture `
+    -C188R12R4R5R4ThreadStoreReadiness:$C188R12R4R5R4ThreadStoreReadiness `
     -C188R28GcStateGuardDiscriminator:$C188R28GcStateGuardDiscriminator `
     -C188R29PreallocationGcStateGuard:$C188R29PreallocationGcStateGuard 2>&1 | Out-String
 $builderExit = $LASTEXITCODE

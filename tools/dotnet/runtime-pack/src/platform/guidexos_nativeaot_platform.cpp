@@ -123,10 +123,16 @@ static_assert(offsetof(RuntimeThreadLocals, m_hPalThread) == 0x60u,
     "C188 R6 pinned PAL thread-handle offset changed");
 #endif
 
-#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS) || \
+    defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
 extern "C" void __cdecl guideXosStockRhpReversePInvoke(void* frame);
 extern "C" void __cdecl guideXosStockRhpReversePInvokeReturn(void* frame);
-#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE)
+#endif
+
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE) || \
+    defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
+extern "C" uint32_t __cdecl GuideXosNativeAotTransitionGetPalFlsIndex(void);
 extern "C" void* __cdecl GuideXosNativeAotTransitionGetPalFlsValue(void);
 #endif
 
@@ -206,6 +212,11 @@ const char* threadReadinessEventName(uint32_t event) {
     case GX_THREADSTORE_EVENT_ATTRIBUTION_PREPARE_AFTER_INIT_FRAME: return "attribution_prepare_after_init_frame";
     case GX_THREADSTORE_EVENT_ATTRIBUTION_PREPARE_BEFORE_RETURN_THREAD: return "attribution_prepare_before_return_thread";
     case GX_THREADSTORE_EVENT_ATTRIBUTION_PREPARE_BEFORE_RETURN_FRAME: return "attribution_prepare_before_return_frame";
+    case GX_THREADSTORE_EVENT_TRANSITION_ATTACH_STATE: return "transition_attach_state";
+    case GX_THREADSTORE_EVENT_TRANSITION_ATTACH_FLS: return "transition_attach_fls";
+    case GX_THREADSTORE_EVENT_RHP_ARRAY_GC_STATE_VALID: return "rhp_array_gc_state_valid";
+    case GX_THREADSTORE_EVENT_RHP_ARRAY_STOCK_ENTER: return "rhp_array_stock_enter";
+    case GX_THREADSTORE_EVENT_RHP_ARRAY_STOCK_RETURN: return "rhp_array_stock_return";
     default: return "unknown";
     }
 }
@@ -33315,8 +33326,13 @@ void initializeNativeAotModules(bool registrationOnly = false) {
 void initializeNativeAotModules() {
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_C188R25_FAILFAST_ORIGIN)
-    g_guideXosR25InitializationStage =
-        kGuideXosR25FailFastStageNativeModulePreparation;
+    // A generated UnmanagedCallersOnly entry can re-enter this helper through
+    // RhpReversePInvoke after the outer preparation call has advanced the
+    // stage. Preserve that stage on the already-initialized fast path.
+    if (!g_guideXosNativeAotModulesInitialized) {
+        g_guideXosR25InitializationStage =
+            kGuideXosR25FailFastStageNativeModulePreparation;
+    }
 #endif
     if (g_guideXosNativeAotModulesInitialized) {
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
@@ -34829,6 +34845,12 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
         guideXosFailFast(8u);
     }
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION) && \
+    defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    GuideXosNativeAotThreadReadinessMark(
+        GX_THREADSTORE_EVENT_RHP_ARRAY_GC_STATE_VALID,
+        currentThread, gcHeap);
+#endif
     recordAllocationStage(GUIDEXOS_NATIVEAOT_ALLOC_STAGE_A05_ALLOCATION_CONTEXT_LOADED,
                           eeType, length, objectSize, allocationPointerBefore,
                           allocationLimitBefore, currentThread, transitionFrame);
@@ -34925,6 +34947,12 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
                               allocationLimitBefore, currentThread);
     }
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    GuideXosNativeAotThreadReadinessMark(
+        GX_THREADSTORE_EVENT_RHP_ARRAY_STOCK_ENTER,
+        reinterpret_cast<gx_uintptr>(eeType),
+        static_cast<gx_uintptr>(length));
+#endif
     void* result = guideXosStockRhpNewArray(eeType, length);
     if (result == nullptr) {
         ++g_guideXosAllocationDiagnostics.pointerContractFailures;
@@ -34933,6 +34961,11 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
                               allocationLimitBefore, currentThread);
         guideXosFailFast(6u);
     }
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    GuideXosNativeAotThreadReadinessMark(
+        GX_THREADSTORE_EVENT_RHP_ARRAY_STOCK_RETURN,
+        reinterpret_cast<gx_uintptr>(result), currentThread);
+#endif
 
     gx_uintptr allocationPointerAfter = 0;
     gx_uintptr allocationLimitAfter = 0;
@@ -36192,6 +36225,20 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
         GX_THREADSTORE_EVENT_THREADSTORE_PUBLICATION,
         reinterpret_cast<uintptr_t>(currentAfterTransition),
         threadStorePublished ? 1u : 0u);
+    if (currentAfterTransition != nullptr) {
+        RuntimeThreadLocals* attachedLocals =
+            reinterpret_cast<RuntimeThreadLocals*>(currentAfterTransition);
+        GuideXosNativeAotThreadReadinessMark(
+            GX_THREADSTORE_EVENT_TRANSITION_ATTACH_STATE,
+            attachedLocals->m_ThreadStateFlags,
+            reinterpret_cast<uintptr_t>(attachedLocals->m_pTransitionFrame));
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
+        GuideXosNativeAotThreadReadinessMark(
+            GX_THREADSTORE_EVENT_TRANSITION_ATTACH_FLS,
+            static_cast<uintptr_t>(GuideXosNativeAotTransitionGetPalFlsIndex()),
+            reinterpret_cast<uintptr_t>(GuideXosNativeAotTransitionGetPalFlsValue()));
+#endif
+    }
     if (currentAfterTransition == nullptr || !threadStorePublished ||
         !GuideXosThreadStorePushTelemetryFrame(
             frame, g_threadReadinessTransitions,
@@ -36207,6 +36254,12 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
         GX_THREADSTORE_EVENT_TRANSITION_ATTACH_COMPLETE,
         reinterpret_cast<uintptr_t>(currentAfterTransition),
         currentAfterTransition->GetPalThreadIdForLogging());
+#elif defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
+    // Generated UnmanagedCallersOnly entry points require the NativeAOT
+    // reverse-P/Invoke transition. The TLS-cell-only bridge below preserves
+    // the legacy fixed-heap contract but does not attach a NativeAOT Thread,
+    // publish it in ThreadStore, or establish the runtime execution mode.
+    guideXosStockRhpReversePInvoke(frame);
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
     guideXosNativeAotInitTraceReturn(
@@ -36573,7 +36626,8 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
 #endif
 #endif
 #endif
-#if !defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+#if !defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS) && \
+    !defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
     unsigned char* cell = runtimeCell(block);
     void** transitionFrame = reinterpret_cast<void**>(frame);
     transitionFrame[0] = *reinterpret_cast<void**>(cell + kRuntimeCellTransitionFrameOffset);
@@ -36615,6 +36669,10 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvokeReturn(void* frame
         GX_THREADSTORE_EVENT_TRANSITION_RETURN,
         reinterpret_cast<uintptr_t>(frame),
         reinterpret_cast<uintptr_t>(restoredTelemetryFrame));
+#elif defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
+    // Pair the stock entry transition with its runtime-owned return path so
+    // Thread mode and transition-frame state are restored together.
+    guideXosStockRhpReversePInvokeReturn(frame);
 #else
     if (frame == nullptr) {
         guideXosFailFast(3u);
