@@ -334,6 +334,7 @@ struct Runtime {
     gx_result exitCode;
     bool lastFocus;
     bool focusKnown;
+    bool inputReadinessLogged;
     uint32_t readLogCount;
     uint8_t resourceReadHandle;
     uint64_t resourceReadPosition;
@@ -1238,6 +1239,12 @@ static gx_result GX_CALL host_poll_event(gx_app_context* context, gx_event* outE
         pump_desktop(runtime);
 
         const bool focused = compositor::KernelCompositor::getFocusedWindow() == runtime->owner->window();
+#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)
+        if (focused && !runtime->inputReadinessLogged) {
+            serial::puts("[SN10-GUEST-INPUT] app-event-loop-ready focus=focused\n");
+            runtime->inputReadinessLogged = true;
+        }
+#endif
         if (!runtime->focusKnown || focused != runtime->lastFocus) {
             runtime->focusKnown = true;
             runtime->lastFocus = focused;

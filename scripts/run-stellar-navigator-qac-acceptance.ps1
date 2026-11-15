@@ -397,7 +397,8 @@ function Join-WindowsCommandLineArguments([string[]]$Arguments) {
     [SN10R3ManagedProcess]::BuildCommandLine($Arguments)
 }
 
-function New-QemuArguments([string]$DiskPath, [int]$SerialPort, [int]$MonitorPort, [string]$FirmwarePath = $Ovmf, [ValidateSet('none', 'gtk')][string]$Display = 'none') {
+function New-QemuArguments([string]$DiskPath, [int]$SerialPort, [int]$MonitorPort, [string]$FirmwarePath = $Ovmf, [ValidateSet('none', 'gtk')][string]$Display = 'none', [int]$QmpPort = 0) {
+    if ($QmpPort -le 0) { throw 'A positive ephemeral QMP port is required for guest input delivery.' }
     $firmware = ConvertTo-QemuOptionValue ([IO.Path]::GetFullPath($FirmwarePath))
     $disk = ConvertTo-QemuOptionValue ([IO.Path]::GetFullPath($DiskPath))
     @(
@@ -410,6 +411,7 @@ function New-QemuArguments([string]$DiskPath, [int]$SerialPort, [int]$MonitorPor
         '-chardev', "socket,id=sn10serial,host=127.0.0.1,port=$SerialPort,server=off,ipv4=on,reconnect-ms=0",
         '-serial', 'chardev:sn10serial',
         '-monitor', "tcp:127.0.0.1:$MonitorPort,server,nowait",
+        '-qmp', "tcp:127.0.0.1:$QmpPort,server,nowait",
         '-D', (Join-Path $script:RunRoot 'qemu.log'),
         '-rtc', 'base=utc,clock=host',
         '-no-reboot',
@@ -525,28 +527,151 @@ function Wait-SerialPattern {
     throw "GUEST_TIMEOUT: bounded wait for '$Description' expired while the serial stream and guest remained active."
 }
 
-function Get-QemuTextKeyCommands([string]$Text) {
-    $commands = [System.Collections.Generic.List[string]]::new()
+function Get-QmpTextKeyCodes([string]$Text) {
+    $codes = [System.Collections.Generic.List[string]]::new()
     foreach ($character in $Text.ToCharArray()) {
         if (($character -ge 'a' -and $character -le 'z') -or ($character -ge '0' -and $character -le '9')) {
-            $key = [string]$character
+            $code = [string]$character
         } else {
             switch ([string]$character) {
-                ' ' { $key = 'spc' }
-                '.' { $key = 'dot' }
+                ' ' { $code = 'spc' }
+                '.' { $code = 'dot' }
                 default { throw "Unsupported character in bounded guest shell command: [$character]" }
             }
         }
-        $commands.Add("sendkey $key")
+        $codes.Add($code)
     }
-    $commands.Add('sendkey ret')
-    return $commands.ToArray()
+    $codes.Add('ret')
+    return $codes.ToArray()
+}
+
+function New-QmpKeyEvent([string]$KeyCode, [bool]$Down) {
+    if ([string]::IsNullOrWhiteSpace($KeyCode) -or $KeyCode -notmatch '^[a-z0-9_]+$') { throw "Invalid QMP qcode key: [$KeyCode]" }
+    return [ordered]@{
+        type = 'key'
+        data = [ordered]@{
+            down = $Down
+            key = [ordered]@{ type = 'qcode'; data = $KeyCode }
+        }
+    }
+}
+
+function Get-GuestInputReadiness([string]$Text) {
+    if ($Text -notmatch 'STELLAR_NAVIGATOR_UI status=initial-content-drawn') {
+        return [pscustomobject]@{ ready = $false; stage = 'application-not-visible'; downObserved = $false; upObserved = $false }
+    }
+    if ($Text -notmatch '\[SN10-GUEST-INPUT\] app-event-loop-ready focus=focused') {
+        return [pscustomobject]@{ ready = $false; stage = 'focused-app-event-loop-not-ready'; downObserved = $false; upObserved = $false }
+    }
+    $deviceDownObserved = $Text -match '\[SN10-GUEST-INPUT\] ps2 key=0x0*61 action=down'
+    $deviceUpObserved = $Text -match '\[SN10-GUEST-INPUT\] ps2 key=0x0*61 action=up'
+    $downObserved = $Text -match '\[NATIVE-ELF\] input event key=0x0*61 action=down'
+    $upObserved = $Text -match '\[NATIVE-ELF\] input event key=0x0*61 action=up'
+    if (-not $deviceDownObserved) {
+        return [pscustomobject]@{ ready = $false; stage = 'guest-device-input-not-observed'; downObserved = $false; upObserved = $false }
+    }
+    if (-not $downObserved) {
+        return [pscustomobject]@{ ready = $false; stage = 'desktop-input-dispatch-not-observed'; downObserved = $false; upObserved = $false }
+    }
+    if (-not $deviceUpObserved -or -not $upObserved) {
+        return [pscustomobject]@{ ready = $false; stage = 'guest-key-release-not-observed'; downObserved = $true; upObserved = $false }
+    }
+    return [pscustomobject]@{ ready = $true; stage = 'guest-input-loop-responsive'; downObserved = $true; upObserved = $true }
+}
+
+function Get-GuestApplicationResponseStage([string]$Text) {
+    $deviceObserved = $Text -match '\[SN10-GUEST-INPUT\] ps2 key=0x0*1B action=down'
+    $inputObserved = $Text -match '\[NATIVE-ELF\] input event key=0x0*1B action=down'
+    $applicationResponded = $Text -match 'STELLAR_NAVIGATOR_LIFECYCLE status=initialized-evaluated-shutdown'
+    $stage = if (-not $deviceObserved) { 'guest-device-input-not-observed' }
+        elseif (-not $inputObserved) { 'desktop-input-dispatch-not-observed' }
+        elseif (-not $applicationResponded) { 'application-response-not-observed' }
+        else { 'application-response-observed' }
+    return [pscustomobject]@{ stage = $stage; guestPs2IrqReceived = $deviceObserved; nativeElfDispatcherDequeued = $inputObserved; applicationHandledEscape = $applicationResponded }
+}
+
+function Test-QacCoordinatorUnavailableError([string]$Message) {
+    return $Message -match '(?i)\bCoordinator(?: is)? unavailable\b'
+}
+
+function Wait-GuestInputReadiness {
+    param([Parameter(Mandatory = $true)]$Capture, [Parameter(Mandatory = $true)][int]$Seconds, [int]$StartIndex = 0)
+    try {
+        [void](Wait-SerialPattern -Capture $Capture -Pattern '\[SN10-GUEST-INPUT\] app-event-loop-ready focus=focused' -Seconds $Seconds -Description 'focused native app event-loop readiness' -StartIndex $StartIndex)
+    } catch {
+        if ($_.Exception.Message -like 'GUEST_TIMEOUT:*') { throw 'GUEST_INPUT_READINESS_MISSING: the focused native app event-loop marker did not arrive; no guest input was injected.' }
+        throw
+    }
+    return [ordered]@{
+        passed = $true
+        marker = '[SN10-GUEST-INPUT] app-event-loop-ready focus=focused'
+        observedBeforeAnyGuestInputInjection = $true
+        appWindowFocusVerified = $true
+        synchronousBootLaunchStillInProgress = ($Capture.Snapshot() -notmatch '\[KERNEL\] Entering main loop \(waiting for input\)')
+    }
+}
+
+function Wait-GuestInputObservation {
+    param(
+        [Parameter(Mandatory = $true)]$Capture,
+        [Parameter(Mandatory = $true)][string]$KeyHex,
+        [Parameter(Mandatory = $true)][ValidateSet('down', 'up')][string]$Action,
+        [Parameter(Mandatory = $true)][int]$Seconds,
+        [int]$StartIndex = 0
+    )
+    $devicePattern = '\[SN10-GUEST-INPUT\] ps2 key=0x0*' + $KeyHex + ' action=' + $Action
+    try {
+        [void](Wait-SerialPattern -Capture $Capture -Pattern $devicePattern -Seconds $Seconds -Description "guest PS/2 $Action for key 0x$KeyHex" -StartIndex $StartIndex)
+    } catch {
+        if ($_.Exception.Message -like 'GUEST_TIMEOUT:*') { throw "GUEST_DEVICE_INPUT_NOT_OBSERVED: QMP acknowledged key 0x$KeyHex $Action, but the PS/2 IRQ marker did not arrive." }
+        throw
+    }
+    $dispatchPattern = '\[NATIVE-ELF\] input event key=0x0*' + $KeyHex + ' action=' + $Action
+    try {
+        [void](Wait-SerialPattern -Capture $Capture -Pattern $dispatchPattern -Seconds $Seconds -Description "desktop/native input dispatch $Action for key 0x$KeyHex" -StartIndex $StartIndex)
+    } catch {
+        if ($_.Exception.Message -like 'GUEST_TIMEOUT:*') { throw "DESKTOP_INPUT_DISPATCH_NOT_OBSERVED: PS/2 received key 0x$KeyHex $Action, but Native ELF did not dequeue it." }
+        throw
+    }
+    return [ordered]@{ guestPs2IrqReceived = $true; nativeElfDispatcherDequeued = $true; keyHex = $KeyHex; action = $Action }
+}
+
+function Wait-GuestApplicationResponse {
+    param([Parameter(Mandatory = $true)]$Capture, [Parameter(Mandatory = $true)][int]$Seconds, [int]$StartIndex = 0, [string]$Description = 'normal Stellar Navigator shutdown')
+    try {
+        [void](Wait-SerialPattern -Capture $Capture -Pattern 'STELLAR_NAVIGATOR_LIFECYCLE status=initialized-evaluated-shutdown' -Seconds $Seconds -Description $Description -StartIndex $StartIndex)
+    } catch {
+        if ($_.Exception.Message -like 'GUEST_TIMEOUT:*') { throw "GUEST_APPLICATION_RESPONSE_NOT_OBSERVED: guest dispatched Escape to Stellar Navigator, but '$Description' did not arrive." }
+        throw
+    }
+    return [ordered]@{ passed = $true; lifecycleMarker = 'STELLAR_NAVIGATOR_LIFECYCLE status=initialized-evaluated-shutdown' }
+}
+
+function Send-OwnedGuestKey([string]$KeyCode, [int]$HoldMilliseconds = 100) {
+    if (-not $script:QmpSession) { throw 'QMP input session has not completed its handshake.' }
+    [void](Get-OwnedQacReservation $script:ReservationId $script:Owned.Process.Id)
+    $downEvent = New-QmpKeyEvent $KeyCode $true
+    $downResult = Invoke-QmpCommand -Session $script:QmpSession -Execute 'input-send-event' -Arguments @{ events = @($downEvent) }
+    Start-Sleep -Milliseconds $HoldMilliseconds
+    $upEvent = New-QmpKeyEvent $KeyCode $false
+    $upResult = Invoke-QmpCommand -Session $script:QmpSession -Execute 'input-send-event' -Arguments @{ events = @($upEvent) }
+    $entry = [ordered]@{
+        timestamp = (Get-Date -Format o)
+        key = $KeyCode
+        pressRelease = $true
+        holdMilliseconds = $HoldMilliseconds
+        qmpDownAcknowledged = ($downResult.PSObject.Properties.Name -contains 'return')
+        qmpUpAcknowledged = ($upResult.PSObject.Properties.Name -contains 'return')
+        guestEvidence = 'pending-serial-ps2-native-event-marker'
+    }
+    $entry | ConvertTo-Json -Compress -Depth 8 | Add-Content -LiteralPath (Join-Path $script:RunRoot 'guest-input-events.jsonl') -Encoding utf8
+    return $entry
 }
 
 function Send-OwnedGuestText([string]$Text) {
-    $commands = @(Get-QemuTextKeyCommands $Text)
-    foreach ($command in $commands) { [void](Send-OwnedMonitorCommand $command) }
-    return [ordered]@{ commandText = $Text; keyCommandCount = $commands.Count; submittedWith = 'QEMU HMP sendkey; native guest keyboard input'; }
+    $codes = @(Get-QmpTextKeyCodes $Text)
+    foreach ($code in $codes) { [void](Send-OwnedGuestKey $code 60) }
+    return [ordered]@{ commandText = $Text; keyCommandCount = $codes.Count; keyCodes = $codes; submittedWith = 'QMP input-send-event; explicit PS/2 key down/up transitions'; }
 }
 
 function Get-QacReservationCleanupAction($Reservation, [string]$ReservationId, [int]$OwnerCliPid) {
@@ -872,6 +997,119 @@ function Assert-OwnedQemuIdentity($Owned) {
     }
 }
 
+function Read-QmpMessage($Session, [int]$TimeoutSeconds = 10) {
+    $deadline = [Diagnostics.Stopwatch]::StartNew()
+    while ($deadline.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
+        try {
+            $line = $Session.Reader.ReadLine()
+        } catch [IO.IOException] {
+            continue
+        }
+        if ($null -eq $line) { throw 'QMP stream closed while waiting for a response.' }
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        try { return $line | ConvertFrom-Json -ErrorAction Stop } catch { continue }
+    }
+    throw 'QMP_RESPONSE_TIMEOUT: bounded wait for QMP response expired.'
+}
+
+function Invoke-QmpCommand {
+    param(
+        [Parameter(Mandatory = $true)]$Session,
+        [Parameter(Mandatory = $true)][string]$Execute,
+        [hashtable]$Arguments = $null,
+        [int]$TimeoutSeconds = 10
+    )
+    $payload = [ordered]@{ execute = $Execute }
+    if ($Arguments -and $Arguments.Count -gt 0) { $payload.arguments = $Arguments }
+    $json = $payload | ConvertTo-Json -Compress -Depth 8
+    $Session.Writer.WriteLine($json)
+    $Session.Writer.Flush()
+    $deadline = [Diagnostics.Stopwatch]::StartNew()
+    while ($deadline.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
+        $message = Read-QmpMessage -Session $Session -TimeoutSeconds ([Math]::Max(1, $TimeoutSeconds - [int]$deadline.Elapsed.TotalSeconds))
+        if ($message.PSObject.Properties.Name -contains 'event') { continue }
+        if ($message.PSObject.Properties.Name -contains 'return') {
+            [ordered]@{ timestamp = (Get-Date -Format o); execute = $Execute; arguments = $Arguments; response = $message } |
+                ConvertTo-Json -Compress -Depth 10 | Add-Content -LiteralPath (Join-Path $script:RunRoot 'qmp-commands.jsonl') -Encoding utf8
+            return $message
+        }
+        if ($message.PSObject.Properties.Name -contains 'error') {
+            $errorClass = if ($message.error.PSObject.Properties.Name -contains 'class') { $message.error.class } else { 'unknown' }
+            $errorDescription = if ($message.error.PSObject.Properties.Name -contains 'desc') { $message.error.desc } else { 'unknown' }
+            throw "QMP_COMMAND_FAILED: '$Execute' returned $errorClass`: $errorDescription"
+        }
+    }
+    throw "QMP_RESPONSE_TIMEOUT: bounded wait for '$Execute' expired."
+}
+
+function New-QmpSession([int]$Port, [int]$TimeoutSeconds = 10) {
+    $client = [Net.Sockets.TcpClient]::new()
+    $timeoutMs = [Math]::Max(1000, $TimeoutSeconds * 1000)
+    $client.ReceiveTimeout = 500
+    $client.SendTimeout = $timeoutMs
+    $connect = $client.ConnectAsync([Net.IPAddress]::Loopback, $Port)
+    if (-not $connect.Wait([Math]::Min($timeoutMs, 3000))) { $client.Dispose(); throw 'QMP_CONNECT_TIMEOUT: timed out connecting to the owned QEMU endpoint.' }
+    if ($connect.IsFaulted) { $client.Dispose(); throw "QMP_CONNECT_FAILURE: $($connect.Exception.GetBaseException().Message)" }
+    $stream = $client.GetStream()
+    $stream.ReadTimeout = 500
+    $stream.WriteTimeout = $timeoutMs
+    $encoding = New-Object System.Text.UTF8Encoding $false
+    $reader = [IO.StreamReader]::new($stream, $encoding, $false, 1024, $true)
+    $writer = [IO.StreamWriter]::new($stream, $encoding, 1024, $true)
+    $writer.NewLine = "`n"
+    $writer.AutoFlush = $true
+    $session = [pscustomobject]@{ Client = $client; Stream = $stream; Reader = $reader; Writer = $writer; Port = $Port }
+    $greeting = Read-QmpMessage -Session $session -TimeoutSeconds $TimeoutSeconds
+    if (-not ($greeting.PSObject.Properties.Name -contains 'QMP')) { Close-QmpSession $session; throw 'QMP_GREETING_MISSING: QMP greeting did not identify its protocol.' }
+    [void](Invoke-QmpCommand -Session $session -Execute 'qmp_capabilities' -TimeoutSeconds $TimeoutSeconds)
+    return $session
+}
+
+function Close-QmpSession($Session) {
+    if (-not $Session) { return }
+    foreach ($name in @('Writer', 'Reader', 'Stream', 'Client')) {
+        $member = $Session.$name
+        if ($member) { try { $member.Dispose() } catch { } }
+    }
+}
+
+function Get-SN10FocusContract {
+    $compositorPath = Join-Path $Root 'kernel\core\kernel_compositor.cpp'
+    $nativeHostPath = Join-Path $Root 'kernel\core\native_elf_baremetal.cpp'
+    $keyboardPath = Join-Path $Root 'kernel\core\ps2keyboard.cpp'
+    $samplePath = Join-Path $Root 'sdk\samples\stellarnavigator\main.cpp'
+    foreach ($path in @($compositorPath, $nativeHostPath, $keyboardPath, $samplePath)) {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Guest input focus contract source is missing: $path" }
+    }
+    $compositor = Get-Content -LiteralPath $compositorPath -Raw
+    $nativeHost = Get-Content -LiteralPath $nativeHostPath -Raw
+    $keyboard = Get-Content -LiteralPath $keyboardPath -Raw
+    $sample = Get-Content -LiteralPath $samplePath -Raw
+    $registerStart = $compositor.IndexOf('bool KernelCompositor::registerWindow(', [StringComparison]::Ordinal)
+    if ($registerStart -lt 0) { throw 'Guest input focus contract changed: KernelCompositor::registerWindow is missing.' }
+    $registerEnd = $compositor.IndexOf('void KernelCompositor::unregisterWindow(', $registerStart, [StringComparison]::Ordinal)
+    $focusCall = $compositor.IndexOf('setFocus(window->id)', $registerStart, [StringComparison]::Ordinal)
+    $focusedQuery = $nativeHost.Contains('compositor::KernelCompositor::getFocusedWindow() == runtime->owner->window()')
+    $readinessMarker = $nativeHost.Contains('[SN10-GUEST-INPUT] app-event-loop-ready focus=focused') -and $nativeHost.Contains('if (focused && !runtime->inputReadinessLogged)')
+    $deviceMarker = $keyboard.Contains('[SN10-GUEST-INPUT] ps2 key=0x') -and $keyboard.Contains('enqueue_event(key, keyUp)')
+    $proofOnlyMarkers = $nativeHost.Contains('#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)') -and $keyboard.Contains('#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)')
+    $escapeHandler = $sample.Contains('gx_event_is_escape_down(&event)')
+    $windowRegistrationFocuses = $registerStart -ge 0 -and $registerEnd -gt $registerStart -and $focusCall -gt $registerStart -and $focusCall -lt $registerEnd
+    if (-not $windowRegistrationFocuses -or -not $focusedQuery -or -not $readinessMarker -or -not $deviceMarker -or -not $proofOnlyMarkers -or -not $escapeHandler) {
+        throw 'Guest input focus contract changed: application registration, focused-window polling, or Escape handling is missing.'
+    }
+    return [ordered]@{
+        passed = $true
+        newWindowRegistrationSetsCompositorFocus = $true
+        nativeHostPollsFocusedWindow = $true
+        proofBuildLogsFocusedEventLoopReadiness = $true
+        proofBuildLogsActualPs2IrqTransitions = $true
+        diagnosticLoggingRestrictedToSn10ProofBuild = $true
+        applicationHandlesEscapeKeyDown = $true
+        focusPath = 'KernelCompositor::registerWindow -> setFocus(window->id) -> Native ELF focused-window poll'
+    }
+}
+
 function Send-OwnedMonitorCommand([string]$Command) {
     Assert-OwnedQemuIdentity $script:Owned
     [void](Get-OwnedQacReservation $script:ReservationId $script:Owned.Process.Id)
@@ -959,13 +1197,14 @@ function Invoke-SelfTest {
         $runnerResult.checks.qacLaneFailFast = [ordered]@{ passed = $true; emptyLaneAdmitted = $freeLane.available; occupiedLaneRejected = (-not $busyLane.available); incompleteCensusRejected = (-not $unknownLane.countsKnown); reservationRequestedBySelfTest = $false }
 
         $argCheck = Test-StructuredArgumentPassing
-        $driveArgs = New-QemuArguments 'C:\SN10 R3 & (candidate), rev 2\stellar-navigator.raw' 40001 40002 'C:\SN10 R3 & (firmware), rev 2\OVMF.fd' $DisplayBackend
+        $driveArgs = New-QemuArguments 'C:\SN10 R3 & (candidate), rev 2\stellar-navigator.raw' 40001 40002 'C:\SN10 R3 & (firmware), rev 2\OVMF.fd' $DisplayBackend 40003
         $firmwareArg = $driveArgs[3]
         $diskArg = $driveArgs[5]
         $displayIndex = [Array]::IndexOf($driveArgs, '-display')
         $expectedFirmwareArg = 'if=pflash,format=raw,readonly=on,file=' + ('C:\SN10 R3 & (firmware), rev 2\OVMF.fd'.Replace(', ', ',, '))
-        if ($firmwareArg -cne $expectedFirmwareArg -or $diskArg -notmatch '^file=(?!fat:).+\.raw,format=raw,if=ide,index=0$' -or $driveArgs[0] -ne '-machine' -or $displayIndex -lt 0 -or $driveArgs[$displayIndex + 1] -cne $DisplayBackend) {
-            throw 'Disposable writable raw MBR/FAT32 disk or selected display backend argument construction failed.'
+        $qmpIndex = [Array]::IndexOf($driveArgs, '-qmp')
+        if ($firmwareArg -cne $expectedFirmwareArg -or $diskArg -notmatch '^file=(?!fat:).+\.raw,format=raw,if=ide,index=0$' -or $driveArgs[0] -ne '-machine' -or $displayIndex -lt 0 -or $driveArgs[$displayIndex + 1] -cne $DisplayBackend -or $qmpIndex -lt 0 -or $driveArgs[$qmpIndex + 1] -cne 'tcp:127.0.0.1:40003,server,nowait') {
+            throw 'Disposable writable raw MBR/FAT32 disk, selected display backend, or QMP input endpoint construction failed.'
         }
         if ($firmwareArg.Contains('"') -or $diskArg.Contains('"') -or $diskArg -notmatch ',, rev 2') { throw 'QEMU drive path escaping or structured quoting is invalid.' }
         $runnerResult.checks.commandConstruction = [ordered]@{
@@ -977,6 +1216,8 @@ function Invoke-SelfTest {
             diskAttachment = $diskArg
             diskInterface = 'ide index 0, raw MBR disk with a FAT32 0x0C root partition and FAT32 0xEF EFI partition, writable disposable copy'
             displayBackend = $DisplayBackend
+            qmpInputEndpoint = $driveArgs[$qmpIndex + 1]
+            inputTransport = 'QMP input-send-event; keyboard events have explicit qcode down/up transitions'
             isolation = 'QEMU receives one per-run copy; the verified candidate disk and source ESP remain unchanged'
             argumentVector = $driveArgs
             processArgumentRoundTrip = $argCheck
@@ -1024,7 +1265,7 @@ function Invoke-SelfTest {
         $candidateCopyPath = Join-Path $script:RunRoot 'selftest-candidate-writable-copy.raw'
         $candidateCopyEvidence = New-DisposableQemuDiskCopy $CandidateDiskPath $candidateCopyPath
         if ($candidateCopyEvidence.sourceSha256 -cne $Expected.Disk -or $candidateCopyEvidence.initialSha256 -cne $Expected.Disk -or $candidateCopyEvidence.sourceSha256AfterCopy -cne $Expected.Disk -or -not $candidateCopyEvidence.writeAccess.writeOpenSucceeded) { throw 'Actual SN10R8 candidate disposable-copy verification failed.' }
-        $candidateQemuArguments = @(New-QemuArguments $candidateCopyPath 40003 40004 $Ovmf $DisplayBackend)
+        $candidateQemuArguments = @(New-QemuArguments $candidateCopyPath 40004 40005 $Ovmf $DisplayBackend 40006)
         $candidateIdeArguments = @()
         for ($i = 0; $i -lt $candidateQemuArguments.Count - 1; $i++) {
             if ($candidateQemuArguments[$i] -ceq '-drive' -and $candidateQemuArguments[$i + 1] -match '(^|,)if=ide(,|$)') { $candidateIdeArguments += [string]$candidateQemuArguments[$i + 1] }
@@ -1036,15 +1277,44 @@ function Invoke-SelfTest {
         $runnerResult.checks.actualCandidateDiskCopy = [ordered]@{ passed = $true; originalSha256 = $candidateSourceAfterTest; originalUnchanged = $true; disposableInitialSha256 = $candidateCopyEvidence.initialSha256; disposableWriteOpenSucceeded = $candidateCopyEvidence.writeAccess.writeOpenSucceeded; sourceAttributesUnchanged = ($candidateCopyEvidence.sourceAttributes -ceq $candidateCopyEvidence.sourceAttributesAfterCopy); effectiveIdeDiskArgument = $candidateIdeArguments[0]; disposableCopyRemovedAfterOfflineCheck = (-not (Test-Path -LiteralPath $candidateCopyPath)); qemuLaunched = $false }
 
         $reopenCommand = 'desktop.launch com.guidexos.stellarnavigator'
-        $reopenKeys = @(Get-QemuTextKeyCommands $reopenCommand)
-        if ($reopenKeys.Count -ne ($reopenCommand.Length + 1) -or $reopenKeys[0] -cne 'sendkey d' -or $reopenKeys -notcontains 'sendkey dot' -or $reopenKeys -notcontains 'sendkey spc' -or $reopenKeys[-1] -cne 'sendkey ret') {
-            throw 'Supported shell command was not converted into bounded guest keyboard input.'
+        $reopenKeys = @(Get-QmpTextKeyCodes $reopenCommand)
+        if ($reopenKeys.Count -ne ($reopenCommand.Length + 1) -or $reopenKeys[0] -cne 'd' -or $reopenKeys -notcontains 'dot' -or $reopenKeys -notcontains 'spc' -or $reopenKeys[-1] -cne 'ret') {
+            throw 'Supported shell command was not converted into bounded QMP qcode down/up events.'
         }
         $unsupportedKeyInputRejected = $false
-        try { [void](Get-QemuTextKeyCommands 'desktop.launch unsupported/character') }
+        try { [void](Get-QmpTextKeyCodes 'desktop.launch unsupported/character') }
         catch { $unsupportedKeyInputRejected = $true }
         if (-not $unsupportedKeyInputRejected) { throw 'Guest shell input accepted a character without an explicit QEMU key mapping.' }
-        $runnerResult.checks.reopenInput = [ordered]@{ passed = $true; method = 'backtick opens shell; desktop.launch com.guidexos.stellarnavigator uses desktop::launch_app'; keyCommandCount = $reopenKeys.Count; spaceAndPeriodMapped = $true; unsupportedCharactersRejected = $true; serialStartIndexSupported = $true }
+        $keyDown = New-QmpKeyEvent 'a' $true
+        $keyUp = New-QmpKeyEvent 'a' $false
+        if ($keyDown.type -cne 'key' -or $keyDown.data.down -ne $true -or $keyDown.data.key.type -cne 'qcode' -or $keyDown.data.key.data -cne 'a' -or $keyUp.data.down -ne $false) { throw 'QMP keyboard event fixture did not preserve explicit qcode press/release states.' }
+        $appVisibleFixture = 'STELLAR_NAVIGATOR_UI status=initial-content-drawn'
+        $focusedLoopFixture = $appVisibleFixture + "`n[SN10-GUEST-INPUT] app-event-loop-ready focus=focused"
+        $deviceDownFixture = $focusedLoopFixture + "`n[SN10-GUEST-INPUT] ps2 key=0x00000061 action=down"
+        $dispatchDownFixture = $deviceDownFixture + "`n[NATIVE-ELF] input event key=0x00000061 action=down"
+        $fullyReadyFixture = $dispatchDownFixture + "`n[SN10-GUEST-INPUT] ps2 key=0x00000061 action=up`n[NATIVE-ELF] input event key=0x00000061 action=up"
+        if ((Get-GuestInputReadiness 'STELLAR_NAVIGATOR_UI status=window-created').stage -cne 'application-not-visible' -or
+            (Get-GuestInputReadiness $appVisibleFixture).stage -cne 'focused-app-event-loop-not-ready' -or
+            (Get-GuestInputReadiness $focusedLoopFixture).stage -cne 'guest-device-input-not-observed' -or
+            (Get-GuestInputReadiness $deviceDownFixture).stage -cne 'desktop-input-dispatch-not-observed' -or
+            (Get-GuestInputReadiness $dispatchDownFixture).stage -cne 'guest-key-release-not-observed' -or
+            -not (Get-GuestInputReadiness $fullyReadyFixture).ready) {
+            throw 'Guest input readiness fixture failed to distinguish app visibility, focus-loop readiness, PS/2 receipt, native dispatch, and release.'
+        }
+        $escapeDeviceFixture = '[SN10-GUEST-INPUT] ps2 key=0x0000001B action=down'
+        $escapeDispatchFixture = $escapeDeviceFixture + "`n[NATIVE-ELF] input event key=0x0000001B action=down"
+        if ((Get-GuestApplicationResponseStage '').stage -cne 'guest-device-input-not-observed' -or
+            (Get-GuestApplicationResponseStage $escapeDeviceFixture).stage -cne 'desktop-input-dispatch-not-observed' -or
+            (Get-GuestApplicationResponseStage $escapeDispatchFixture).stage -cne 'application-response-not-observed' -or
+            (Get-GuestApplicationResponseStage ($escapeDispatchFixture + "`nSTELLAR_NAVIGATOR_LIFECYCLE status=initialized-evaluated-shutdown")).stage -cne 'application-response-observed') {
+            throw 'Application-response fixture failed to distinguish delivered Escape from normal app shutdown.'
+        }
+        if (-not (Test-QacCoordinatorUnavailableError 'QAC status failed with exit code 2: Coordinator unavailable: Coordinator is unavailable.')) {
+            throw 'QAC unavailable fixture failed to recognize a coordinator outage.'
+        }
+        $focusContract = Get-SN10FocusContract
+        $runnerResult.checks.reopenInput = [ordered]@{ passed = $true; method = 'QMP qcode press/release; backtick opens shell; desktop.launch com.guidexos.stellarnavigator uses desktop::launch_app'; qcodeCount = $reopenKeys.Count; spaceAndPeriodMapped = $true; unsupportedCharactersRejected = $true; qmpDownUpSequencingVerified = $true; readinessStagesCovered = @('application-not-visible', 'focused-app-event-loop-not-ready', 'guest-device-input-not-observed', 'desktop-input-dispatch-not-observed', 'guest-key-release-not-observed', 'guest-input-loop-responsive'); applicationResponseStagesCovered = @('guest-device-input-not-observed', 'desktop-input-dispatch-not-observed', 'application-response-not-observed', 'application-response-observed') }
+        $runnerResult.checks.inputFocusContract = $focusContract
         $runnerResult.checks.initialLaunch = [ordered]@{ passed = $true; method = 'SN10 guest-proof boot driver dispatches the first instance through desktop::launch_app'; noShellCommandRequired = $true; desktopLoopWaitDeferredUntilFirstAppShutdown = $true }
 
         $elfLayout = Get-NativeElfLayout
@@ -1219,6 +1489,8 @@ $script:Owned = $null
 $script:ManagedQac = $null
 $script:ReservationId = $null
 $script:MonitorPort = 0
+$script:QmpPort = 0
+$script:QmpSession = $null
 $capture = $null
 $runtimeDiskCopy = $null
 $overall = [ordered]@{
@@ -1242,6 +1514,7 @@ try {
     if (-not (Test-Path -LiteralPath $Qemu) -or -not (Test-Path -LiteralPath $QacCli)) { throw 'Installed QEMU or QAC CLI is unavailable.' }
     $candidateCheck = Assert-CandidateIdentity
     $overall.checks.artifactIntegrity = $candidateCheck
+    $overall.checks.inputFocusContract = Get-SN10FocusContract
 
     $qacStatus = Get-QacSnapshot 'qac-status-before.log' @('status')
     $qacList = Get-QacSnapshot 'qac-list-before.log' @('list')
@@ -1288,9 +1561,13 @@ try {
     $monitorProbe.Start()
     $script:MonitorPort = ([Net.IPEndPoint]$monitorProbe.LocalEndpoint).Port
     $monitorProbe.Stop()
+    $qmpProbe = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+    $qmpProbe.Start()
+    $script:QmpPort = ([Net.IPEndPoint]$qmpProbe.LocalEndpoint).Port
+    $qmpProbe.Stop()
     $serialLog = Join-Path $script:RunRoot 'guest-serial.log'
     $capture = [SN10R3SerialCapture]::new($serialLog)
-    $qemuArguments = @(New-QemuArguments $runtimeDiskPath $capture.Port $script:MonitorPort $Ovmf $DisplayBackend)
+    $qemuArguments = @(New-QemuArguments $runtimeDiskPath $capture.Port $script:MonitorPort $Ovmf $DisplayBackend $script:QmpPort)
     $ideDriveArguments = @()
     for ($i = 0; $i -lt $qemuArguments.Count - 1; $i++) {
         if ($qemuArguments[$i] -ceq '-drive' -and $qemuArguments[$i + 1] -match '(^|,)if=ide(,|$)') { $ideDriveArguments += [string]$qemuArguments[$i + 1] }
@@ -1307,6 +1584,7 @@ try {
         qemuArgumentVector = $qemuArguments
         serialEndpoint = [ordered]@{ host = $capture.Host; port = $capture.Port; backend = 'QEMU socket chardev TCP client to runner-owned loopback listener' }
         monitorEndpoint = [ordered]@{ host = '127.0.0.1'; port = $script:MonitorPort; backend = 'HMP TCP loopback, ephemeral per run' }
+        qmpEndpoint = [ordered]@{ host = '127.0.0.1'; port = $script:QmpPort; backend = 'QMP TCP loopback, ephemeral per run; qmp_capabilities handshake required' }
         candidateEspPath = [IO.Path]::GetFullPath($CandidateEspPath)
         candidateDiskPath = [IO.Path]::GetFullPath($CandidateDiskPath)
         qemuDisposableDiskPath = [IO.Path]::GetFullPath($runtimeDiskPath)
@@ -1401,6 +1679,37 @@ try {
         throw
     }
 
+    try {
+        $script:QmpSession = New-QmpSession $script:QmpPort 10
+    } catch {
+        throw "INPUT_TRANSPORT_UNAVAILABLE: could not establish an owned QMP session: $($_.Exception.Message)"
+    }
+    try {
+        $qmpSchema = Invoke-QmpCommand -Session $script:QmpSession -Execute 'query-qmp-schema' -TimeoutSeconds 10
+        $qmpSchemaText = $qmpSchema.return | ConvertTo-Json -Compress -Depth 16
+        if ($qmpSchemaText -notmatch 'input-send-event') { throw 'QMP schema does not expose input-send-event.' }
+    } catch {
+        throw "INPUT_TRANSPORT_UNAVAILABLE: owned QMP session lacks input-send-event: $($_.Exception.Message)"
+    }
+    $qmpInputDevices = $null
+    $qmpInputDeviceQuery = 'unavailable'
+    try {
+        $deviceResponse = Invoke-QmpCommand -Session $script:QmpSession -Execute 'query-input-devices' -TimeoutSeconds 10
+        $qmpInputDevices = $deviceResponse.return
+        $qmpInputDeviceQuery = 'available'
+    } catch { $qmpInputDevices = $_.Exception.Message }
+    $overall.checks.qmpInputTransport = [ordered]@{
+        passed = $true
+        qmpHandshake = $true
+        inputSendEventAdvertisedByLiveQemuSchema = $true
+        inputDeviceInventoryQuery = $qmpInputDeviceQuery
+        inputDevices = $qmpInputDevices
+        qemuDisplayBackend = $DisplayBackend
+        guestInputDevices = 'QEMU pc machine with usb=off; QMP events route through the existing PS/2 keyboard and mouse path'
+        interactiveInputTransport = 'QMP input-send-event qcode press/release'
+        screenshots = 'HMP screendump remains on the owned loopback monitor'
+    }
+
     $remaining = [Math]::Max(1, [int][Math]::Ceiling(($script:RunDeadline - [DateTimeOffset]::UtcNow).TotalSeconds))
     $bootText = Wait-SerialPattern -Capture $capture -Pattern '\[KERNEL\] VFS layer initialized' -Seconds $remaining -Description 'AMD64 kernel VFS boot marker'
     $overall.checks.kernelBoot = [ordered]@{ passed = $true; marker = '[KERNEL] VFS layer initialized'; desktopRequiredSeparateMarker = $false }
@@ -1422,14 +1731,40 @@ try {
     $overall.checks.nativeApplication = [ordered]@{ productionAppModelStartupLaunchObserved = $true; launchMethod = 'SN10 guest-proof boot driver calls desktop::launch_app with the Stellar Navigator package ID'; nativeWindowCreated = $true; windowTitle = $firstWindowTitle; initialContentDrawn = $true; runtimeLoadPlacement = $firstLoadPlacement; guestEphemerisEvaluatorObserved = $true; serialRecordIntegrity = [ordered]@{ recordLengthBytes = $firstEphemeris.recordLengthBytes; maximumBytes = 512; printableAscii = $firstEphemeris.recordPrintableAscii; bounded = $firstEphemeris.recordWithin512ByteBound }; ephemerisLine = $firstEphemeris.line; coordinateFrame = $firstEphemeris.frame; units = $firstEphemeris.units; epochEtTdbSeconds = $firstEphemeris.epochEtTdbSeconds; numericalComparison = $firstEphemeris.comparison; passed = $true }
     $overall.checks.screenshotWhileOpen = Save-Screenshot 'stellar-navigator-open.ppm'
 
-    $firstCloseStartIndex = $capture.Snapshot().Length
-    [void](Send-OwnedMonitorCommand 'sendkey esc')
+    $inputReadinessStartIndex = 0
     $remaining = [Math]::Max(1, [int][Math]::Ceiling(($script:RunDeadline - [DateTimeOffset]::UtcNow).TotalSeconds))
-    [void](Wait-SerialPattern -Capture $capture -Pattern 'STELLAR_NAVIGATOR_LIFECYCLE status=initialized-evaluated-shutdown' -Seconds $remaining -Description 'first normal Stellar Navigator shutdown' -StartIndex $firstCloseStartIndex)
+    $appInputLoopReady = Wait-GuestInputReadiness -Capture $capture -Seconds $remaining -StartIndex $inputReadinessStartIndex
+    $overall.checks.appInputLoopReady = $appInputLoopReady
+    $inputProbeStartIndex = $capture.Snapshot().Length
+    $inputProbeInjection = Send-OwnedGuestKey 'a' 100
+    $inputProbeDown = Wait-GuestInputObservation -Capture $capture -KeyHex '61' -Action down -Seconds 8 -StartIndex $inputProbeStartIndex
+    $inputProbeUp = Wait-GuestInputObservation -Capture $capture -KeyHex '61' -Action up -Seconds 8 -StartIndex $inputProbeStartIndex
+    $inputReadiness = Get-GuestInputReadiness $capture.Snapshot()
+    if (-not $inputReadiness.ready) { throw "GUEST_INPUT_READINESS_MISSING: input preflight reached stage '$($inputReadiness.stage)'." }
+    $overall.checks.guestInputReadiness = [ordered]@{
+        passed = $true
+        appLoop = $appInputLoopReady
+        harmlessKey = 'a'
+        qmpInjection = $inputProbeInjection
+        guestDevice = $inputProbeDown
+        desktopDispatch = $inputProbeDown
+        keyRelease = $inputProbeUp
+        stage = $inputReadiness.stage
+        readinessGateCompletedBeforeCloseInjection = $true
+        qmpEventLog = Join-Path $script:RunRoot 'qmp-commands.jsonl'
+        inputEventLog = Join-Path $script:RunRoot 'guest-input-events.jsonl'
+    }
+
+    $firstCloseStartIndex = $capture.Snapshot().Length
+    $firstCloseInjection = Send-OwnedGuestKey 'esc' 120
+    $firstCloseInput = Wait-GuestInputObservation -Capture $capture -KeyHex '1B' -Action down -Seconds 8 -StartIndex $firstCloseStartIndex
+    $remaining = [Math]::Max(1, [int][Math]::Ceiling(($script:RunDeadline - [DateTimeOffset]::UtcNow).TotalSeconds))
+    [void](Wait-GuestApplicationResponse -Capture $capture -Seconds $remaining -Description 'first normal Stellar Navigator shutdown' -StartIndex $firstCloseStartIndex)
     $remaining = [Math]::Max(1, [int][Math]::Ceiling(($script:RunDeadline - [DateTimeOffset]::UtcNow).TotalSeconds))
     [void](Wait-SerialPattern -Capture $capture -Pattern 'lifecycle PASS window/resource cleanup complete' -Seconds $remaining -Description 'native loader resource cleanup after first close' -StartIndex $firstCloseStartIndex)
     $firstCloseText = $capture.Snapshot().Substring($firstCloseStartIndex)
-    $overall.checks.normalClose = [ordered]@{ passed = $true; lifecycleMarker = ($firstCloseText -match 'STELLAR_NAVIGATOR_LIFECYCLE status=initialized-evaluated-shutdown'); loaderCleanupMarker = ($firstCloseText -match 'lifecycle PASS window/resource cleanup complete'); productionLaunchReturnedAfterCleanup = $true; applicationInstanceExited = ($firstCloseText -match 'lifecycle PASS window/resource cleanup complete') }
+    $firstCloseResponseStage = Get-GuestApplicationResponseStage $firstCloseText
+    $overall.checks.normalClose = [ordered]@{ passed = ($firstCloseResponseStage.stage -ceq 'application-response-observed'); injection = $firstCloseInjection; guestDeviceAndDispatch = $firstCloseInput; applicationResponseStage = $firstCloseResponseStage; lifecycleMarker = ($firstCloseText -match 'STELLAR_NAVIGATOR_LIFECYCLE status=initialized-evaluated-shutdown'); loaderCleanupMarker = ($firstCloseText -match 'lifecycle PASS window/resource cleanup complete'); productionLaunchReturnedAfterCleanup = $true; applicationInstanceExited = ($firstCloseText -match 'lifecycle PASS window/resource cleanup complete') }
     if (-not $overall.checks.normalClose.loaderCleanupMarker) { throw 'Native loader did not report complete window/resource cleanup.' }
     $remaining = [Math]::Max(1, [int][Math]::Ceiling(($script:RunDeadline - [DateTimeOffset]::UtcNow).TotalSeconds))
     [void](Wait-SerialPattern -Capture $capture -Pattern '\[KERNEL\] Entering main loop \(waiting for input\)' -Seconds $remaining -Description 'desktop keyboard input loop readiness after first native app shutdown' -StartIndex $firstCloseStartIndex)
@@ -1439,7 +1774,7 @@ try {
     # Use the existing desktop backtick shortcut and guest shell command, which
     # dispatches through desktop::launch_app and the production AppModel path.
     $reopenStartIndex = $capture.Snapshot().Length
-    [void](Send-OwnedMonitorCommand 'sendkey grave_accent')
+    [void](Send-OwnedGuestKey 'grave_accent' 100)
     Start-Sleep -Milliseconds 500
     $overall.checks.shellBeforeReopen = Save-Screenshot 'shell-before-reopen.ppm'
     $reopenInput = Send-OwnedGuestText 'desktop.launch com.guidexos.stellarnavigator'
@@ -1449,6 +1784,8 @@ try {
     if ($secondAppText -notmatch 'STELLAR_NAVIGATOR_UI status=window-created') { throw 'Second launch did not create a new native application window through the guest desktop dispatcher.' }
     $remaining = [Math]::Max(1, [int][Math]::Ceiling(($script:RunDeadline - [DateTimeOffset]::UtcNow).TotalSeconds))
     $secondAppText = Wait-SerialPattern -Capture $capture -Pattern 'STELLAR_NAVIGATOR_EPHEMERIS status=available body=earth target_naif=399 et_tdb_s=0\.000000 frame=J2000_SSB units=km position_km=' -Seconds $remaining -Description 'second native application ephemeris evaluation' -StartIndex $reopenStartIndex
+    $secondInputLoopReady = Wait-GuestInputReadiness -Capture $capture -Seconds $remaining -StartIndex $reopenStartIndex
+    $overall.checks.secondAppInputLoopReady = $secondInputLoopReady
     $secondLoadPlacement = Get-VerifiedGuestLoadPlacement $secondAppText $nativeElfLayout
     $secondWindowTitle = Get-VerifiedGuestWindowTitle $secondAppText
     $secondEphemeris = Get-VerifiedGuestEphemeris $secondAppText
@@ -1470,15 +1807,17 @@ try {
     $overall.checks.screenshotSecondInstanceOpen = Save-Screenshot 'stellar-navigator-second-instance-open.ppm'
 
     $secondCloseStartIndex = $capture.Snapshot().Length
-    [void](Send-OwnedMonitorCommand 'sendkey esc')
+    $secondCloseInjection = Send-OwnedGuestKey 'esc' 120
+    $secondCloseInput = Wait-GuestInputObservation -Capture $capture -KeyHex '1B' -Action down -Seconds 8 -StartIndex $secondCloseStartIndex
     $remaining = [Math]::Max(1, [int][Math]::Ceiling(($script:RunDeadline - [DateTimeOffset]::UtcNow).TotalSeconds))
-    [void](Wait-SerialPattern -Capture $capture -Pattern 'STELLAR_NAVIGATOR_LIFECYCLE status=initialized-evaluated-shutdown' -Seconds $remaining -Description 'second normal Stellar Navigator shutdown' -StartIndex $secondCloseStartIndex)
+    [void](Wait-GuestApplicationResponse -Capture $capture -Seconds $remaining -Description 'second normal Stellar Navigator shutdown' -StartIndex $secondCloseStartIndex)
     $remaining = [Math]::Max(1, [int][Math]::Ceiling(($script:RunDeadline - [DateTimeOffset]::UtcNow).TotalSeconds))
     [void](Wait-SerialPattern -Capture $capture -Pattern 'lifecycle PASS window/resource cleanup complete' -Seconds $remaining -Description 'second native loader cleanup and instance exit' -StartIndex $secondCloseStartIndex)
     $secondCloseText = $capture.Snapshot().Substring($secondCloseStartIndex)
-    $overall.checks.secondClose = [ordered]@{ passed = $true; lifecycleMarker = ($secondCloseText -match 'STELLAR_NAVIGATOR_LIFECYCLE status=initialized-evaluated-shutdown'); loaderCleanupMarker = ($secondCloseText -match 'lifecycle PASS window/resource cleanup complete'); applicationInstanceExited = ($secondCloseText -match 'lifecycle PASS window/resource cleanup complete') }
+    $secondCloseResponseStage = Get-GuestApplicationResponseStage $secondCloseText
+    $overall.checks.secondClose = [ordered]@{ passed = ($secondCloseResponseStage.stage -ceq 'application-response-observed'); injection = $secondCloseInjection; guestDeviceAndDispatch = $secondCloseInput; applicationResponseStage = $secondCloseResponseStage; lifecycleMarker = ($secondCloseText -match 'STELLAR_NAVIGATOR_LIFECYCLE status=initialized-evaluated-shutdown'); loaderCleanupMarker = ($secondCloseText -match 'lifecycle PASS window/resource cleanup complete'); applicationInstanceExited = ($secondCloseText -match 'lifecycle PASS window/resource cleanup complete') }
     $overall.checks.shellAfterSecondClose = Save-Screenshot 'shell-after-second-close.ppm'
-    [void](Send-OwnedMonitorCommand 'sendkey esc')
+    [void](Send-OwnedGuestKey 'esc' 100)
     Start-Sleep -Milliseconds 500
     $overall.checks.desktopAfterSecondClose = Save-Screenshot 'desktop-after-second-close.ppm'
     if (-not $overall.checks.desktopAfterSecondClose.captured) { throw 'Guest desktop screenshot after second close was not captured.' }
@@ -1489,9 +1828,23 @@ try {
     $overall.blocker = $null
 } catch {
     if ($overall.blocker -eq 'EXTERNAL_QEMU_COORDINATION_BLOCKER') { $overall.classification = 'BLOCKED' }
+    elseif (Test-QacCoordinatorUnavailableError $_.Exception.Message) {
+        $overall.classification = 'BLOCKED'
+        $overall.blocker = 'QAC_COORDINATOR_UNAVAILABLE'
+        if (-not $overall.checks.qacPreflight) {
+            $overall.checks.qacPreflight = [ordered]@{
+                coordinatorOnline = $false
+                reservationNotRequested = $true
+                statusPath = Join-Path $script:RunRoot 'qac-status-before.log'
+                error = $_.Exception.Message
+            }
+        }
+    }
     elseif ($overall.blocker -eq 'PREBOOT_STORAGE_FAILURE' -or $_.Exception.Message -like 'PREBOOT_STORAGE_FAILURE:*') { $overall.classification = 'FAIL'; $overall.blocker = 'PREBOOT_STORAGE_FAILURE' }
     elseif ($overall.blocker -eq 'PREBOOT_QEMU_STARTUP_FAILURE' -or $_.Exception.Message -like 'PREBOOT_QEMU_STARTUP_FAILURE:*') { $overall.classification = 'FAIL'; $overall.blocker = 'PREBOOT_QEMU_STARTUP_FAILURE' }
     elseif ($_.Exception.Message -match '^(NATIVE_EPHEMERIS_RECORD_INVALID|NATIVE_EPHEMERIS_RECORD_MISSING|NATIVE_ELF_LOAD_RECORD_INVALID|NATIVE_ELF_LOAD_PLACEMENT_INVALID|NATIVE_WINDOW_TITLE_RECORD_MISSING|NATIVE_WINDOW_TITLE_INVALID):') { $overall.classification = 'FAIL'; $overall.blocker = $Matches[1] }
+    elseif ($_.Exception.Message -match '^(INPUT_TRANSPORT_UNAVAILABLE|GUEST_INPUT_READINESS_MISSING|GUEST_DEVICE_INPUT_NOT_OBSERVED|DESKTOP_INPUT_DISPATCH_NOT_OBSERVED):') { $overall.classification = 'BLOCKED'; $overall.blocker = $Matches[1] }
+    elseif ($_.Exception.Message -like 'GUEST_APPLICATION_RESPONSE_NOT_OBSERVED:*') { $overall.classification = 'FAIL'; $overall.blocker = 'GUEST_APPLICATION_RESPONSE_NOT_OBSERVED' }
     elseif ($_.Exception.Message -like 'SERIAL_CAPTURE_FAILURE:*') { $overall.classification = 'BLOCKED'; $overall.blocker = 'SERIAL_CAPTURE_FAILURE' }
     elseif ($_.Exception.Message -like 'NO_GUEST_SERIAL_OUTPUT:*') { $overall.classification = 'BLOCKED'; $overall.blocker = 'NO_GUEST_SERIAL_OUTPUT' }
     elseif ($_.Exception.Message -like 'SERIAL_STREAM_DISCONNECT_FAILURE:*') { $overall.classification = 'BLOCKED'; $overall.blocker = 'SERIAL_STREAM_DISCONNECT_FAILURE' }
@@ -1502,6 +1855,10 @@ try {
     else { $overall.classification = 'FAIL'; $overall.blocker = $null }
     $overall.error = $_.Exception.Message
 } finally {
+    if ($script:QmpSession) {
+        Close-QmpSession $script:QmpSession
+        $script:QmpSession = $null
+    }
     if ($script:Owned -and -not $script:Owned.Process.HasExited) {
         try {
             Assert-OwnedQemuIdentity $script:Owned

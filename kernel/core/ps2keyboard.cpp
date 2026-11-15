@@ -331,6 +331,11 @@ void irq_handler()
     }
     
     if (key != 0) {
+#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)
+        serial::puts("[SN10-GUEST-INPUT] ps2 key=0x");
+        serial::put_hex32(key);
+        serial::puts(keyUp ? " action=up\n" : " action=down\n");
+#endif
         enqueue_event(key, keyUp);
         if (keyUp) return;
         s_lastKey = key;
