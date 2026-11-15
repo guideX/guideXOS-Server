@@ -31,12 +31,14 @@ Assert-R25 ($source -match 'g_guideXosR25InitializationStage =\s*kGuideXosR25Fai
 Assert-R25 ($source -match '__fastfail\(kFastFailFatalAppExit\);\s*for \(;;\)') 'existing runtime fail-fast behavior remains intact'
 Assert-R25 ($source -notmatch 'g_guideXosR25FailFastOriginRecord[^;]*Thread\s*\*') 'record does not alias a NativeAOT Thread'
 Assert-R25 (Test-Path -LiteralPath $analyzer -PathType Leaf) 'offline analyzer is present'
+Assert-R25 ((@(Get-C188R25HmpWords '00000001001e14e0: 0x0000000000000001 0x0000000000000002')).Count -eq 2) 'QEMU HMP record lines without a 0x address prefix retain both fixed-width words'
 Assert-R25 ($source.IndexOf('#define guideXosFailFast(reason)') -ge 0 -and
     $source.IndexOf('#define guideXosFailFast(reason)') -lt $source.IndexOf('#if defined(GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION)')) 'capture wrapper covers every fail-fast caller, independent of the optional suspension profile'
 Assert-R25 ($header -match 'originalReason' -and $header -match 'callerCaptureReturnAddress' -and
     $header -match 'failFastImplementationAddress' -and $header -match 'initializationStage' -and
     $header -match 'published') 'bounded record carries reason, caller, implementation, stage, and validity fields'
 Assert-R25 ($guestRunner -match 'r25CaptureConfig\.recordBytes\s*-ne 80' -and
+    $guestRunner -match 'Get-C188R25HmpWords \$snapshot\.recordText' -and
     $guestRunner -match 'x/10gx ' -and $guestRunner -match 'x/8gx ' ) 'guest capture validates the configured record size and bounds record/stack reads'
 $pauseIndex = $guestRunner.IndexOf("Invoke-Qmp 'stop'")
 $registerIndex = $guestRunner.IndexOf("Invoke-Qmp 'human-monitor-command' ([ordered]@{'command-line'='info registers'})")

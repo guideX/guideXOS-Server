@@ -90,6 +90,10 @@ class FailFastOriginTests(unittest.TestCase):
         text = "0x0000000100100000: 0x0000000000000001 0x0000000000000002\n"
         self.assertEqual(analyzer.parse_hmp_words(text), [1, 2])
 
+    def test_hmp_parser_accepts_qemu_addresses_without_prefix(self) -> None:
+        text = "00000001001e14e0: 0x0000000000000001 0x0000000000000002\n"
+        self.assertEqual(analyzer.parse_hmp_words(text), [1, 2])
+
     def test_hmp_record_round_trips_as_ten_bounded_words(self) -> None:
         words = valid_words()
         text = "0x0000000100100000: " + " ".join(f"0x{word:016x}" for word in words) + "\n"

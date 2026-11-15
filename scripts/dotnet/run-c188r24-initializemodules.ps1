@@ -185,6 +185,7 @@ try {
     $psi.CreateNoWindow=$true;$psi.RedirectStandardOutput=$true;$psi.RedirectStandardError=$true
     foreach ($argument in @('-NoProfile','-File',$outerRunner,'-CandidateRoot',$candidate,
             '-ExpectedKernelSha256',[string]$manifest.kernelSha256,'-BootEvidencePath',$bootRoot,
+            '-BootEvidenceAuthorizationPath',$guardPath,
             '-MaxRuntimeSeconds',[string]$MaxRuntimeSeconds,'-CaptureCpuOnReadinessTimeout')) {
         [void]$psi.ArgumentList.Add([string]$argument)
     }
@@ -280,8 +281,9 @@ try {
                 $r25Analysis = $r25AnalysisText | ConvertFrom-Json -ErrorAction Stop
                 $final.r25OriginAnalysisPath=$r25AnalysisPath
                 $final.r25FirstFailureRecordValid=[bool]$r25Analysis.recordValid
-                $final.r25CallerAttribution=$r25Analysis.caller
-                if ([bool]$r25Analysis.recordValid -and [bool]$r25Analysis.caller.resolved) {
+                $callerAttribution = if ($r25Analysis.PSObject.Properties['caller']) { $r25Analysis.caller } else { $null }
+                $final.r25CallerAttribution=$callerAttribution
+                if ([bool]$r25Analysis.recordValid -and $null -ne $callerAttribution -and [bool]$callerAttribution.resolved) {
                     $final.failure='The first fatal boundary and its enclosing linked function were captured; the underlying violated contract remains unproven.'
                 } elseif ([bool]$r25Analysis.recordValid) {
                     $final.outcome='FAILFAST_EVIDENCE_BLOCKED'
@@ -331,6 +333,8 @@ try {
     } elseif ($isR25 -and [bool]$final.r25FirstFailureRecordValid -and
             $null -ne $final.r25CallerAttribution -and [bool]$final.r25CallerAttribution.resolved) {
         $final.outcome='FAILFAST_ORIGIN_ATTRIBUTED'
+    } elseif ($isR25 -and [bool]$final.r25FirstFailureRecordValid) {
+        $final.outcome='FAILFAST_ORIGIN_CALLER_UNRESOLVED'
     } elseif ($factoryVerified) {
         $final.outcome='REAL_SETTINGS_FACTORY_NATIVE_VERIFIED'
     } elseif ($m7) {

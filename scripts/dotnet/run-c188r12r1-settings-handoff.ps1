@@ -2,8 +2,10 @@ param(
     [Parameter(Mandatory=$true)][string]$CandidateRoot,
     [Parameter(Mandatory=$true)][ValidatePattern('^[A-Fa-f0-9]{64}$')][string]$ExpectedKernelSha256,
     [Parameter(Mandatory=$true)][string]$BootEvidencePath,
+    [Parameter()][string]$BootEvidenceAuthorizationPath = '',
     [Parameter()][ValidateRange(60,300)][int]$MaxRuntimeSeconds = 120,
-    [Parameter()][switch]$CaptureCpuOnReadinessTimeout
+    [Parameter()][switch]$CaptureCpuOnReadinessTimeout,
+    [Parameter()][switch]$PrelaunchRehearsal
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -37,7 +39,7 @@ if (-not (Test-Path -LiteralPath $candidate -PathType Container)) { throw "Candi
 $precreatedR25EvidenceRoot = $false
 if (Test-Path -LiteralPath $bootRoot) {
     . (Join-Path $PSScriptRoot 'c188r26-precreated-evidence-root.ps1')
-    $precreatedCheck = Test-C188R26PrecreatedR25EvidenceRoot $bootRoot $candidate
+    $precreatedCheck = Test-C188R26PrecreatedR25EvidenceRoot $bootRoot $candidate $BootEvidenceAuthorizationPath
     if (-not $precreatedCheck.accepted) {
         throw "Guest evidence root already exists and is not an authorized R25 capture root: $bootRoot ($($precreatedCheck.reason))"
     }
@@ -100,6 +102,18 @@ $runManifestPath = Join-Path $bootRoot 'r12r2r1-input-manifest.json'
     sourceMediaHashes=$sourceMediaHashes;copiedMediaHashes=$copiedMediaHashes
     originalRamdiskSha256=$stagingManifest.ramdiskSha256.ToUpperInvariant()
 } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $runManifestPath -Encoding utf8
+
+if ($PrelaunchRehearsal) {
+    [ordered]@{
+        schema='GUIDEXOS_C188R27_PRELAUNCH_REHEARSAL_V1';result='PASS'
+        candidateRoot=$candidate;bootEvidencePath=$bootRoot
+        precreatedEvidenceRoot=$precreatedR25EvidenceRoot
+        sourceMediaHashes=$sourceMediaHashes;copiedMediaHashes=$copiedMediaHashes
+        runManifestSha256=(Get-FileHash -LiteralPath $runManifestPath -Algorithm SHA256).Hash
+        qacInvoked=$false;qemuLaunched=$false;guestExecuted=$false
+    } | ConvertTo-Json -Depth 6 -Compress | Write-Output
+    return
+}
 
 $qacCli = 'D:\dev\guideXOS_QAC\src\GuideXOS.QAC.Cli\bin\Debug\net10.0-windows\GuideXOS.QAC.Cli.exe'
 $control = Join-Path $PSScriptRoot 'c188-qmp-control.py'

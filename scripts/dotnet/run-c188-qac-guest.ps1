@@ -316,12 +316,7 @@ function Save-C188R25FailFastOriginSnapshot([string]$Trigger) {
         $snapshot.registersSha256 = (Get-FileHash -LiteralPath $registerPath -Algorithm SHA256).Hash
         $snapshot.recordResponse = Invoke-Qmp 'human-monitor-command' ([ordered]@{'command-line'=('x/10gx ' + [string]$r25CaptureConfig.recordAddress)})
         $snapshot.recordText = [string]([string]$snapshot.recordResponse | ConvertFrom-Json -ErrorAction Stop).return
-        $words = [System.Collections.Generic.List[UInt64]]::new()
-        foreach ($line in [regex]::Matches($snapshot.recordText,'(?im)^\s*0x[0-9a-f]{1,16}:\s*(?<values>[^\r\n]+)')) {
-            foreach ($word in [regex]::Matches($line.Groups['values'].Value,'(?i)0x([0-9a-f]{16})')) {
-                $words.Add([Convert]::ToUInt64($word.Groups[1].Value,16))
-            }
-        }
+        $words = @(Get-C188R25HmpWords $snapshot.recordText)
         $snapshot.recordWords = @($words | ForEach-Object { '0x{0:X16}' -f $_ })
         if ($words.Count -eq 10) {
             $snapshot.recordValid = $words[0] -eq 0x4738523235464154 -and

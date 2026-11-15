@@ -21,7 +21,7 @@ EXPECTED_RECORD_FLAGS = 0x7
 def parse_hmp_words(text: str) -> list[int]:
     words: list[int] = []
     for line in text.splitlines():
-        match = re.match(r"\s*0x[0-9a-fA-F]{1,16}:\s*(.*)$", line)
+        match = re.match(r"\s*(?:0x)?[0-9a-fA-F]{1,16}:\s*(.*)$", line)
         if match:
             words.extend(int(value, 16) for value in re.findall(r"0x([0-9a-fA-F]{16})\b", match.group(1)))
     return words
