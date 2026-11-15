@@ -9,6 +9,7 @@
 #define KERNEL_NATIVE_ELF_BAREMETAL_H
 
 #include <stdint.h>
+#include "kernel/application_execution_policy.h"
 #include "kernel/native_elf_security_policy.h"
 
 namespace kernel {
@@ -39,6 +40,38 @@ struct PackageInfo {
     bool hasAudioOutput;
 };
 
+enum class LaunchOwnerKind : uint8_t {
+    TrustedKernelSystem,
+    AuthenticatedAdministrator,
+    AuthenticatedStandardUser,
+    InteractiveUnassigned,
+    InvalidOrUnavailable
+};
+
+enum class LaunchLifecycleState : uint8_t {
+    None,
+    Preparing,
+    Running,
+    Completed,
+    Failed,
+    Rejected
+};
+
+// A Native ELF launch is synchronous and has no independent scheduler PID.
+// This is historical attribution for the launch instance, not a process
+// handle or an authorization capability.
+struct LaunchAttributionV1 {
+    uint16_t version;
+    LaunchLifecycleState state;
+    LaunchOwnerKind ownerKind;
+    uint8_t hasIndependentProcessId;
+    uint64_t launchInstanceId;
+    uint64_t userId;
+    uint64_t sessionGeneration;
+    application_policy::PolicyResult policyResult;
+    char appId[application_policy::kAppIdCapacity];
+};
+
 enum AppsLifecycleCheckpoint : uint8_t {
     APPS_CHECKPOINT_INITIAL_MOUNT = 1,
     APPS_CHECKPOINT_PACMAN_REGISTERED,
@@ -59,6 +92,11 @@ void discover();
 // Launch a discovered package by display name, id, package directory, or the
 // short PacMan compatibility label.  Returns only after the app exits.
 bool launch(const char* appName);
+
+// Returns the most recent launch-instance attribution. The user and session
+// fields are captured by the authentication runtime; this query cannot set
+// ownership and the session generation is not an authorization token.
+bool queryLastLaunchAttribution(LaunchAttributionV1* output);
 
 // Whether a supported external NativeElf package was discovered.
 bool is_available(const char* appName);

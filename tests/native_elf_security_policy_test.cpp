@@ -1,4 +1,5 @@
 #include "../kernel/core/include/kernel/native_elf_security_policy.h"
+#include "../kernel/core/include/kernel/application_execution_policy.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -100,8 +101,126 @@ static bool try_native_entry(const SourceState& source, const PackageIdentity& p
     return try_native_entry_between(source, source, package);
 }
 
+static kernel::application_policy::ApplicationIdentityV1 policy_app()
+{
+    using namespace kernel::application_policy;
+    ApplicationIdentityV1 app{};
+    app.version = kApplicationIdentityVersion;
+    strcpy(app.appId, "com.example.developmentapp");
+    strcpy(app.architecture, "amd64");
+    app.publisher.version = kPublisherIdentityVersion;
+    app.publisher.signatureStatus = SignatureStatus::VerificationUnavailable;
+    app.publisher.revocationStatus = RevocationStatus::Unknown;
+    strcpy(app.publisher.displayName, "guideXOS");
+    return app;
+}
+
+static kernel::application_policy::EvaluationInputV1 policy_defaults()
+{
+    using namespace kernel::application_policy;
+    EvaluationInputV1 input{};
+    input.version = kEvaluationInputVersion;
+    input.trust = TrustClassification::UnknownOrUnverifiable;
+    input.administratorLocalRule = RuleEffect::None;
+    input.unknownApplicationRule = RuleEffect::None;
+    return input;
+}
+
 int main()
 {
+    using namespace kernel::application_policy;
+    ApplicationIdentityV1 appIdentity = policy_app();
+    EvaluationInputV1 policyInput = policy_defaults();
+    EvaluationResultV1 policyResult = evaluate(appIdentity, policyInput);
+    expect(policyResult.allowed() &&
+        policyResult.result == PolicyResult::VerificationUnavailable &&
+        !policyResult.publisherCryptographicallyVerified,
+        "development policy preserves an unverified app launch and reports unavailable verification");
+
+    appIdentity.publisher.signatureStatus = SignatureStatus::Unsigned;
+    appIdentity.hasExecutableDigest = 1u;
+    appIdentity.executableSha256[0] = 0xA5u;
+    policyResult = evaluate(appIdentity, policyInput);
+    expect(policyResult.allowed() && policyResult.result == PolicyResult::UnknownTrust &&
+        !policyResult.publisherCryptographicallyVerified,
+        "unsigned status and an arbitrary checksum do not authenticate a publisher or block development launch");
+
+    policyInput.trust = TrustClassification::TrustedApplication;
+    policyResult = evaluate(appIdentity, policyInput);
+    expect(policyResult.allowed() && policyResult.result == PolicyResult::UnknownTrust,
+        "an app trust label without a trusted-source digest match does not grant trust");
+    policyInput.trustedApplicationDigestMatch = 1u;
+    policyResult = evaluate(appIdentity, policyInput);
+    expect(policyResult.allowed() && policyResult.result == PolicyResult::Allowed &&
+        !policyResult.publisherCryptographicallyVerified,
+        "trusted application digest policy is separate from publisher authentication");
+
+    appIdentity.publisher.signatureStatus = SignatureStatus::Verified;
+    appIdentity.publisher.hasPublicKeyIdentity = 1u;
+    appIdentity.publisher.revocationStatus = RevocationStatus::NotRevoked;
+    policyInput.trust = TrustClassification::TrustedPublisher;
+    policyInput.trustedApplicationDigestMatch = 0u;
+    policyResult = evaluate(appIdentity, policyInput);
+    expect(policyResult.allowed() && policyResult.result == PolicyResult::Allowed &&
+        policyResult.publisherCryptographicallyVerified,
+        "trusted publisher classification requires a verified signature, key identity, and non-revoked status");
+
+    policyInput.mandatoryReleaseRejected = 1u;
+    policyInput.administratorLocalRule = RuleEffect::Allow;
+    policyInput.administratorAuthorized = 1u;
+    policyResult = evaluate(appIdentity, policyInput);
+    expect(!policyResult.allowed() && policyResult.result == PolicyResult::ReleaseProfileRejected,
+        "release-profile rejection takes precedence over local allow rules");
+
+    policyInput.mandatoryReleaseRejected = 0u;
+    policyInput.authoritativeBlock = 1u;
+    policyResult = evaluate(appIdentity, policyInput);
+    expect(!policyResult.allowed() && policyResult.result == PolicyResult::Blocked,
+        "trusted-authority blocks take precedence over administrator local allow rules");
+
+    policyInput.authoritativeBlock = 0u;
+    policyInput.administratorLocalRule = RuleEffect::RequireAdministrator;
+    policyInput.administratorAuthorized = 0u;
+    policyResult = evaluate(appIdentity, policyInput);
+    expect(!policyResult.allowed() && policyResult.result == PolicyResult::RequiresAdministrator,
+        "administrator-controlled restricted launch reports missing administrator authority");
+    policyInput.administratorAuthorized = 1u;
+    policyResult = evaluate(appIdentity, policyInput);
+    expect(policyResult.allowed() && policyResult.result == PolicyResult::Allowed,
+        "administrator-controlled restricted launch is permitted after authorization");
+
+    policyInput.administratorLocalRule = RuleEffect::None;
+    policyInput.trust = TrustClassification::ExplicitlyBlockedPublisher;
+    policyResult = evaluate(appIdentity, policyInput);
+    expect(!policyResult.allowed() && policyResult.result == PolicyResult::Blocked,
+        "explicit publisher block classifications are enforced when no higher local rule overrides them");
+    policyInput.administratorLocalRule = RuleEffect::Allow;
+    policyResult = evaluate(appIdentity, policyInput);
+    expect(policyResult.allowed() && policyResult.result == PolicyResult::Allowed,
+        "administrator local policy precedence is distinct from trusted-authority revocation");
+
+    policyInput.administratorLocalRule = RuleEffect::None;
+    policyInput.trust = TrustClassification::TrustedPublisher;
+    appIdentity.publisher.revocationStatus = RevocationStatus::Revoked;
+    policyResult = evaluate(appIdentity, policyInput);
+    expect(!policyResult.allowed() && policyResult.result == PolicyResult::Blocked,
+        "publisher revocation blocks even a previously trusted application");
+
+    appIdentity.publisher.revocationStatus = RevocationStatus::Unknown;
+    appIdentity.appId[0] = '\0';
+    policyResult = evaluate(appIdentity, policyInput);
+    expect(!policyResult.allowed() && policyResult.result == PolicyResult::InvalidApplicationIdentity,
+        "invalid canonical App Model identities are rejected");
+    strcpy(appIdentity.appId, "com.GuideXOS.DevelopmentApp");
+    policyResult = evaluate(appIdentity, policyInput);
+    expect(policyResult.allowed(),
+        "policy preserves the existing case-sensitive printable App Model identity contract");
+    policyInput.administratorLocalRule = static_cast<RuleEffect>(0xFFu);
+    policyResult = evaluate(appIdentity, policyInput);
+    expect(!policyResult.allowed() && policyResult.result == PolicyResult::InvalidPolicyInput,
+        "unknown policy enum values fail closed");
+    policyInput.administratorLocalRule = RuleEffect::None;
+
     SourceState source = approved_source();
     PackageIdentity package = approved_package();
     expect(native_entry_allowed(source, package), "approved PacMan on read-only release image is allowed");

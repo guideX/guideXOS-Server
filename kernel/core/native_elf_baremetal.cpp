@@ -23,6 +23,7 @@
 #include "sdk/include/guidexos/abi.h"
 #include "sdk/include/guidexos/app.h"
 #include "include/kernel/native_elf_security_policy.h"
+#include "include/kernel/authentication.h"
 #if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
 #include <psa/crypto.h>
 #endif
@@ -376,6 +377,8 @@ static char s_lifecycleManifestProbe[1024];
 static bool s_discovered = false;
 static bool s_launchInProgress = false;
 static uint64_t s_runtimeSequence = 0;
+static uint64_t s_nextLaunchInstanceId = 1u;
+static LaunchAttributionV1 s_lastLaunchAttribution{};
 static Runtime* s_activeRuntime = nullptr;
 static uint32_t s_lifecycleCheckpointCount = 0;
 static bool s_discoveryOpenFailureReported = false;
@@ -762,7 +765,118 @@ static security::PackageIdentity package_identity(const Package* package,
     identity.executableSha256 = executableDigest;
     return identity;
 }
+#endif
 
+static void copy_policy_text(char* output, uint32_t capacity, const char* input) {
+    if (!output || capacity == 0u) return;
+    uint32_t index = 0u;
+    if (input) {
+        while (index + 1u < capacity && input[index]) {
+            output[index] = input[index];
+            ++index;
+        }
+    }
+    output[index] = '\0';
+}
+
+static application_policy::ApplicationIdentityV1 policy_identity(
+    const Package* package, const uint8_t* digest, bool digestAvailable) {
+    application_policy::ApplicationIdentityV1 identity{};
+    identity.version = application_policy::kApplicationIdentityVersion;
+    identity.publisher.version = application_policy::kPublisherIdentityVersion;
+    identity.publisher.signatureStatus =
+        application_policy::SignatureStatus::VerificationUnavailable;
+    identity.publisher.revocationStatus = application_policy::RevocationStatus::Unknown;
+    if (package) {
+        copy_policy_text(identity.appId, sizeof(identity.appId), package->id);
+        copy_policy_text(identity.architecture, sizeof(identity.architecture), package->architecture);
+    }
+    // Native ELF currently has no package-version field or signature verifier.
+    identity.packageVersion[0] = '\0';
+    if (digest && digestAvailable) {
+        identity.hasExecutableDigest = 1u;
+        for (uint32_t i = 0u; i < 32u; ++i) identity.executableSha256[i] = digest[i];
+    }
+    return identity;
+}
+
+static application_policy::EvaluationResultV1 evaluate_launch_policy(
+    const Package* package, const uint8_t* digest, bool digestAvailable,
+    bool releaseProfileRejected) {
+    application_policy::EvaluationInputV1 input{};
+    input.version = application_policy::kEvaluationInputVersion;
+    input.mandatoryReleaseRejected = releaseProfileRejected ? 1u : 0u;
+    input.trust = application_policy::TrustClassification::UnknownOrUnverifiable;
+    // No local trust catalog is active in SECURITY3C. Preserve existing
+    // development behavior for unsigned and unverified Native ELF packages.
+    input.administratorLocalRule = application_policy::RuleEffect::None;
+    input.unknownApplicationRule = application_policy::RuleEffect::None;
+    if (input.administratorLocalRule == application_policy::RuleEffect::RequireAdministrator ||
+        input.unknownApplicationRule == application_policy::RuleEffect::RequireAdministrator) {
+        input.administratorAuthorized = authentication::runtime().authorizeCurrent(
+            authorization::Operation::ApplicationLaunchRestricted).allowed() ? 1u : 0u;
+    }
+
+    const application_policy::EvaluationResultV1 decision =
+        application_policy::evaluate(policy_identity(package, digest, digestAvailable), input);
+    s_lastLaunchAttribution.policyResult = decision.result;
+    if (!decision.allowed()) s_lastLaunchAttribution.state = LaunchLifecycleState::Rejected;
+    serial::puts("[APP-POLICY] appId=");
+    serial::puts(package ? package->id : "(invalid)");
+    serial::puts(" result=");
+    serial::puts(application_policy::resultName(decision.result));
+    serial::puts(" launchAllowed=");
+    serial::puts(decision.allowed() ? "yes" : "no");
+    serial::puts(" publisherVerified=");
+    serial::puts(decision.publisherCryptographicallyVerified ? "yes" : "no");
+    serial::putc('\n');
+    return decision;
+}
+
+static bool begin_launch_attribution(const Package* package) {
+    if (!package || s_nextLaunchInstanceId == 0u) return false;
+    LaunchAttributionV1 attribution{};
+    attribution.version = 1u;
+    attribution.state = LaunchLifecycleState::Preparing;
+    attribution.ownerKind = LaunchOwnerKind::InvalidOrUnavailable;
+    attribution.hasIndependentProcessId = 0u;
+    attribution.launchInstanceId = s_nextLaunchInstanceId;
+    s_nextLaunchInstanceId = s_nextLaunchInstanceId == UINT64_MAX
+        ? 0u : s_nextLaunchInstanceId + 1u;
+    attribution.userId = identity::kInvalidUserId;
+    attribution.policyResult = application_policy::PolicyResult::UnknownTrust;
+    copy_policy_text(attribution.appId, sizeof(attribution.appId), package->id);
+
+    authentication::ExecutionAuthorityV1 authority{};
+    const authentication::Result query =
+        authentication::runtime().queryExecutionAuthority(&authority);
+    if (query == authentication::Result::Ok) {
+        switch (authority.kind) {
+            case authentication::ExecutionAuthorityKind::AuthenticatedAdministrator:
+                attribution.ownerKind = LaunchOwnerKind::AuthenticatedAdministrator;
+                attribution.userId = authority.userId;
+                attribution.sessionGeneration = authority.sessionGeneration;
+                break;
+            case authentication::ExecutionAuthorityKind::AuthenticatedStandardUser:
+                attribution.ownerKind = LaunchOwnerKind::AuthenticatedStandardUser;
+                attribution.userId = authority.userId;
+                attribution.sessionGeneration = authority.sessionGeneration;
+                break;
+            case authentication::ExecutionAuthorityKind::InteractiveUnassigned:
+                attribution.ownerKind = LaunchOwnerKind::InteractiveUnassigned;
+                break;
+            case authentication::ExecutionAuthorityKind::Invalidated:
+            case authentication::ExecutionAuthorityKind::Unavailable:
+            default:
+                attribution.ownerKind = LaunchOwnerKind::InvalidOrUnavailable;
+                break;
+        }
+    }
+    s_lastLaunchAttribution = attribution;
+    return true;
+}
+
+#if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
 static bool verify_current_manifest(const Package* package) {
     if (!package || !package_source_unchanged(package)) return false;
     char manifestPath[256];
@@ -2638,6 +2752,7 @@ static bool run_package(Package* package) {
     log_breadcrumb(&runtime, "03 RUNTIME_CREATED");
 #if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
     if (!package_source_unchanged(package) || !verify_current_manifest(package)) {
+        (void)evaluate_launch_policy(package, nullptr, false, true);
         log_security_reject("package-source-or-manifest-changed-before-launch");
         return false;
     }
@@ -2665,12 +2780,18 @@ static bool run_package(Package* package) {
     serial::puts("..0x"); serial::put_hex64(reinterpret_cast<uintptr_t>(runtime.stack + kRuntimeStackBytes));
     serial::putc('\n');
 
+    uint8_t finalDigest[32]{};
+    bool finalDigestAvailable = false;
 #if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
-    uint8_t finalDigest[32];
-    if (!package_source_unchanged(package) || !verify_current_manifest(package) ||
-        !verify_pacman_resources(package) ||
-        !compute_sha256(runtime.verifiedElf, runtime.verifiedElfBytes, finalDigest) ||
-        !security::package_allowed(package_identity(package, finalDigest))) {
+    finalDigestAvailable = compute_sha256(runtime.verifiedElf,
+        runtime.verifiedElfBytes, finalDigest);
+    const bool releaseProfileAccepted = package_source_unchanged(package) &&
+        verify_current_manifest(package) && verify_pacman_resources(package) &&
+        finalDigestAvailable &&
+        security::package_allowed(package_identity(package, finalDigest));
+    if (!releaseProfileAccepted) {
+        (void)evaluate_launch_policy(package, finalDigest,
+            finalDigestAvailable, true);
         delete[] runtime.stack;
         delete[] runtime.image;
         delete[] runtime.verifiedElf;
@@ -2681,9 +2802,22 @@ static bool run_package(Package* package) {
         return false;
     }
 #endif
+    const application_policy::EvaluationResultV1 policyDecision =
+        evaluate_launch_policy(package, finalDigest, finalDigestAvailable, false);
+    if (!policyDecision.allowed()) {
+        delete[] runtime.stack;
+        delete[] runtime.image;
+        delete[] runtime.verifiedElf;
+        runtime.stack = nullptr;
+        runtime.image = nullptr;
+        runtime.verifiedElf = nullptr;
+        log_runtime(&runtime, "launch rejected by application execution policy");
+        return false;
+    }
 #if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
     serial::puts("[NATIVE-ELF-PREVIEW] decision=ALLOW package=com.guidexos.pacman entry=immediate\n");
 #endif
+    s_lastLaunchAttribution.state = LaunchLifecycleState::Running;
     s_activeRuntime = &runtime;
     log_breadcrumb(&runtime, "04 GX_MAIN_ENTER");
     gx_result result = gxos_native_call_on_stack(runtime.entry, &runtime.context,
@@ -2752,16 +2886,29 @@ bool launch(const char* appName) {
 #endif
         return false;
     }
+    if (!begin_launch_attribution(package)) return false;
 #if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
     if (!package_source_unchanged(package) || !verify_current_manifest(package)) {
+        (void)evaluate_launch_policy(package, nullptr, false, true);
         log_security_reject("package-source-or-manifest-rejected-at-launch");
+        s_lastLaunchAttribution.state = LaunchLifecycleState::Rejected;
         return false;
     }
 #endif
     s_launchInProgress = true;
     const bool result = run_package(package);
     s_launchInProgress = false;
+    if (s_lastLaunchAttribution.state != LaunchLifecycleState::Rejected) {
+        s_lastLaunchAttribution.state = result
+            ? LaunchLifecycleState::Completed : LaunchLifecycleState::Failed;
+    }
     return result;
+}
+
+bool queryLastLaunchAttribution(LaunchAttributionV1* output) {
+    if (!output || s_lastLaunchAttribution.version != 1u) return false;
+    *output = s_lastLaunchAttribution;
+    return true;
 }
 
 // Kernel slide base for audio DMA translation (see audio_virt_to_phys).
@@ -2835,6 +2982,7 @@ void app_audio_app_proof() {
 void log_apps_lifecycle_checkpoint(AppsLifecycleCheckpoint, bool, bool, uint32_t) {}
 void discover() {}
 bool launch(const char*) { return false; }
+bool queryLastLaunchAttribution(LaunchAttributionV1*) { return false; }
 bool is_available(const char*) { return false; }
 const PackageInfo* lookup_package(const char*) { return nullptr; }
 const PackageInfo* registered_package(const char*) { return nullptr; }

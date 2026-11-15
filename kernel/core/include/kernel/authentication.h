@@ -83,6 +83,24 @@ struct SessionSnapshotV1 {
     char displayName[identity::kDisplayNameCapacity];
 };
 
+// Trusted-runtime snapshot for attributing a launch to the currently
+// authenticated interactive session. The generation is diagnostic provenance,
+// not a bearer credential and is never accepted as authorization by itself.
+enum class ExecutionAuthorityKind : uint8_t {
+    AuthenticatedAdministrator,
+    AuthenticatedStandardUser,
+    InteractiveUnassigned,
+    Invalidated,
+    Unavailable
+};
+
+struct ExecutionAuthorityV1 {
+    uint16_t version;
+    ExecutionAuthorityKind kind;
+    identity::UserId userId;
+    uint64_t sessionGeneration;
+};
+
 struct RuntimeSnapshotV1 {
     uint16_t version;
     uint8_t initialized;
@@ -141,6 +159,7 @@ public:
     Result eraseAccount(identity::UserId userId);
     bool credentialEligible(identity::UserId userId) const;
     Result queryCurrentSession(SessionSnapshotV1* output);
+    Result queryExecutionAuthority(ExecutionAuthorityV1* output);
     authorization::DecisionResult authorizeCurrent(
         authorization::Operation operation,
         identity::UserId target = identity::kInvalidUserId);
@@ -157,6 +176,7 @@ private:
     struct SessionRecord {
         SessionReference reference;
         identity::UserId userId;
+        uint64_t generation;
         SessionState state;
     };
 
@@ -204,6 +224,7 @@ private:
     authorization::AuditSnapshotV1 m_authorizationAudit;
     SessionRecord m_sessions[kMaximumSessions];
     int8_t m_currentSession;
+    uint64_t m_nextSessionGeneration;
     AttemptRecord m_attempts[kMaximumAuthenticationAttempts];
     size_t m_nextAttemptSlot;
     uint8_t m_slotBytes[2][32u + identity::kMaximumUsers * 64u + 4u];

@@ -139,7 +139,8 @@ Runtime::Runtime()
       m_lastInvalidationDecision(authorization::Decision::InvalidSession),
       m_lastInvalidationReason(authorization::Reason::SessionRevoked),
       m_authorizationAudit{},
-      m_sessions{}, m_currentSession(-1), m_attempts{}, m_nextAttemptSlot(0u),
+      m_sessions{}, m_currentSession(-1), m_nextSessionGeneration(1u),
+      m_attempts{}, m_nextAttemptSlot(0u),
       m_slotBytes{}, m_writeBytes{}, m_verifyBytes{}
 {
 }
@@ -161,6 +162,7 @@ Result Runtime::initialize(identity::Runtime* identities,
     memset(m_sessions, 0, sizeof(m_sessions));
     memset(m_attempts, 0, sizeof(m_attempts));
     m_currentSession = -1;
+    m_nextSessionGeneration = 1u;
     m_hasInvalidatedCurrentSession = false;
     m_lastInvalidationDecision = authorization::Decision::InvalidSession;
     m_lastInvalidationReason = authorization::Reason::SessionRevoked;
@@ -719,6 +721,7 @@ Result Runtime::openSession(identity::UserId userId, SessionReference* outputSes
     if (!outputSession || !m_crypto.randomBytes) return Result::InvalidArgument;
     if (!m_storeReadable || !m_identityRegistryReadable) return Result::AccountUnavailable;
     if (m_currentSession >= 0) return Result::SessionUnavailable;
+    if (m_nextSessionGeneration == 0u) return Result::SessionUnavailable;
     identity::UserRecordV1 account{};
     if (!m_identities || m_identities->find(userId, &account) != identity::Result::Ok ||
         findCredential(userId, nullptr) != Result::Ok) return Result::AccountUnavailable;
@@ -752,6 +755,9 @@ Result Runtime::openSession(identity::UserId userId, SessionReference* outputSes
     }
     m_sessions[slot].reference = reference;
     m_sessions[slot].userId = userId;
+    m_sessions[slot].generation = m_nextSessionGeneration;
+    m_nextSessionGeneration = m_nextSessionGeneration == UINT64_MAX
+        ? 0u : m_nextSessionGeneration + 1u;
     m_sessions[slot].state = SessionState::Active;
     m_currentSession = static_cast<int8_t>(slot);
     m_hasInvalidatedCurrentSession = false;
@@ -1183,6 +1189,41 @@ Result Runtime::queryCurrentSession(SessionSnapshotV1* output)
         }
     }
     *output = snapshot;
+    return Result::Ok;
+}
+
+Result Runtime::queryExecutionAuthority(ExecutionAuthorityV1* output)
+{
+    if (!output) return Result::InvalidArgument;
+    ExecutionAuthorityV1 authority{};
+    authority.version = 1u;
+    authority.kind = ExecutionAuthorityKind::Unavailable;
+    authority.userId = identity::kInvalidUserId;
+
+    if (!m_initialized) {
+        *output = authority;
+        return Result::NotInitialized;
+    }
+
+    SessionSnapshotV1 session{};
+    const Result queried = queryCurrentSession(&session);
+    if (queried != Result::Ok) {
+        *output = authority;
+        return queried;
+    }
+    if (session.state == SessionState::Active && m_currentSession >= 0) {
+        const SessionRecord& current = m_sessions[static_cast<size_t>(m_currentSession)];
+        authority.kind = session.role == identity::AccountRole::Administrator
+            ? ExecutionAuthorityKind::AuthenticatedAdministrator
+            : ExecutionAuthorityKind::AuthenticatedStandardUser;
+        authority.userId = session.userId;
+        authority.sessionGeneration = current.generation;
+    } else if (m_hasInvalidatedCurrentSession) {
+        authority.kind = ExecutionAuthorityKind::Invalidated;
+    } else {
+        authority.kind = ExecutionAuthorityKind::InteractiveUnassigned;
+    }
+    *output = authority;
     return Result::Ok;
 }
 

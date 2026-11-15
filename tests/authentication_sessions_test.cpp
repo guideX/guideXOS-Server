@@ -271,6 +271,15 @@ int main()
         session.state == authentication::SessionState::Active && session.userId == admin.id &&
         session.role == identity::AccountRole::Administrator,
         "successful credential verification establishes an active administrator session");
+    authentication::ExecutionAuthorityV1 adminAuthority{};
+    check(auth.queryExecutionAuthority(&adminAuthority) == authentication::Result::Ok &&
+        adminAuthority.version == 1u &&
+        adminAuthority.kind == authentication::ExecutionAuthorityKind::AuthenticatedAdministrator &&
+        adminAuthority.userId == admin.id && adminAuthority.sessionGeneration != 0u,
+        "trusted execution-context query returns stable account identity and active session provenance");
+    const uint64_t firstAdminSessionGeneration = adminAuthority.sessionGeneration;
+    check(auth.authorizeCurrent(authorization::Operation::ApplicationLaunchRestricted).allowed(),
+        "administrator session can satisfy a restricted application launch rule");
     identity::IdentityContextV1 context{};
     check(identities.queryContext(identity::ExecutionDomain::Interactive, &context) ==
             identity::Result::Ok && context.kind == identity::IdentityKind::AuthenticatedHuman &&
@@ -321,6 +330,9 @@ int main()
             identity::Result::Unauthorized && unassignedId == identity::kInvalidUserId &&
         identities.queryContext(identity::ExecutionDomain::Interactive, &context) ==
             identity::Result::Ok && context.kind == identity::IdentityKind::InteractiveUnassigned &&
+        auth.queryExecutionAuthority(&adminAuthority) == authentication::Result::Ok &&
+        adminAuthority.kind == authentication::ExecutionAuthorityKind::InteractiveUnassigned &&
+        adminAuthority.userId == identity::kInvalidUserId && adminAuthority.sessionGeneration == 0u &&
         auth.signOutCurrent() == authentication::Result::SessionUnavailable,
         "sign-out invalidates the current session and restores explicit compatibility context");
 
@@ -354,7 +366,15 @@ int main()
         auth.queryCurrentSession(&session) == authentication::Result::Ok &&
         session.role == identity::AccountRole::StandardUser,
         "standard-user authentication opens a session without administrator designation");
+    authentication::ExecutionAuthorityV1 standardAuthority{};
+    check(auth.queryExecutionAuthority(&standardAuthority) == authentication::Result::Ok &&
+        standardAuthority.kind == authentication::ExecutionAuthorityKind::AuthenticatedStandardUser &&
+        standardAuthority.userId == standardId &&
+        standardAuthority.sessionGeneration > firstAdminSessionGeneration,
+        "new sign-ins receive distinct session generations and current account roles");
     check(auth.authorizeCurrent(authorization::Operation::AccountCreate).decision ==
+            authorization::Decision::InsufficientPrivileges &&
+        auth.authorizeCurrent(authorization::Operation::ApplicationLaunchRestricted).decision ==
             authorization::Decision::InsufficientPrivileges &&
         auth.authorizeCurrent(authorization::Operation::AccountChangeOwnCredential,
             standardId).decision == authorization::Decision::Allowed &&
@@ -411,9 +431,12 @@ int main()
     check(auth.queryCurrentSession(&session) == authentication::Result::Ok &&
         session.state == authentication::SessionState::Active &&
         session.role == identity::AccountRole::Administrator &&
+        auth.queryExecutionAuthority(&standardAuthority) == authentication::Result::Ok &&
+        standardAuthority.kind == authentication::ExecutionAuthorityKind::AuthenticatedAdministrator &&
+        standardAuthority.userId == standardId && standardAuthority.sessionGeneration != 0u &&
         auth.authorizeCurrent(authorization::Operation::AccountCreate).decision ==
             authorization::Decision::Allowed,
-        "approved role promotion changes the authenticated user's next authorization decision");
+        "approved role promotion changes the current context and next authorization decision");
     store.failNextWrite = true;
     check(auth.changeCredential(standardId, initialPassword, textLength(initialPassword),
             changedPassword, textLength(changedPassword)) == authentication::Result::IoError,
@@ -426,6 +449,10 @@ int main()
             changedPassword, textLength(changedPassword)) == authentication::Result::OkPersistent &&
         auth.queryCurrentSession(&session) == authentication::Result::Ok &&
         session.state == authentication::SessionState::None &&
+        auth.queryExecutionAuthority(&standardAuthority) == authentication::Result::Ok &&
+        standardAuthority.kind == authentication::ExecutionAuthorityKind::Invalidated &&
+        standardAuthority.userId == identity::kInvalidUserId &&
+        standardAuthority.sessionGeneration == 0u &&
         auth.authorizeCurrent(authorization::Operation::AccountCreate).decision ==
             authorization::Decision::InvalidSession,
         "successful durable password change invalidates the active session");

@@ -24,7 +24,8 @@ enum class Operation : uint16_t {
     ProcessAccessProtectedControls,
     FilesystemModifyProtectedConfiguration,
     FilesystemModifyIdentityCredentialData,
-    FilesystemAdministrativeChange
+    FilesystemAdministrativeChange,
+    ApplicationLaunchRestricted
 };
 
 enum class ContextKind : uint8_t {
@@ -102,6 +103,7 @@ inline bool validOperation(Operation operation)
         case Operation::ApplicationModifySystemSettings:
         case Operation::ApplicationChangeTrustPolicy:
         case Operation::ApplicationRegisterSystemWide:
+        case Operation::ApplicationLaunchRestricted:
         case Operation::ProcessTerminateOther:
         case Operation::ProcessPrivilegedManagement:
         case Operation::ProcessAccessProtectedControls:
