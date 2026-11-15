@@ -469,6 +469,7 @@ const char* resultName(Result result)
     case Result::StorageCorrupt: return "STORAGE_CORRUPT";
     case Result::IoError: return "IO_ERROR";
     case Result::GenerationExhausted: return "GENERATION_EXHAUSTED";
+    case Result::Unauthorized: return "UNAUTHORIZED";
     default: return "UNKNOWN";
     }
 }

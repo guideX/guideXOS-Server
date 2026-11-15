@@ -79,7 +79,10 @@ enum : uint32_t {
     kIdentityCredentialsDurable = 1u << 5,
     kIdentitySessionActive = 1u << 6,
     kIdentityCurrentRoleAvailable = 1u << 7,
-    kIdentityBootstrapRequired = 1u << 8
+    kIdentityBootstrapRequired = 1u << 8,
+    kIdentityAccountAdministrationImplemented = 1u << 9,
+    kIdentityCanAdministerAccounts = 1u << 10,
+    kIdentitySystemWideAuthorizationIncomplete = 1u << 11
 };
 
 struct IdentitySnapshotV2 {
@@ -142,6 +145,20 @@ authentication::Result bootstrapAdministratorLocal(
     const char* displayName, const char* password, size_t passwordBytes,
     authentication::SessionReference* outputSession);
 authentication::Result signOutLocal(const app::KernelApp* caller);
+authentication::Result createAccountLocal(
+    const app::KernelApp* caller, const char* accountName,
+    const char* displayName, identity::UserId* outputUserId);
+authentication::Result resetAccountCredentialLocal(
+    const app::KernelApp* caller, identity::UserId userId,
+    const char* newPassword, size_t passwordBytes);
+authentication::Result setAccountRoleLocal(
+    const app::KernelApp* caller, identity::UserId userId,
+    identity::AccountRole role);
+authentication::Result setAccountStatusLocal(
+    const app::KernelApp* caller, identity::UserId userId,
+    identity::AccountStatus status);
+authentication::Result deleteAccountLocal(
+    const app::KernelApp* caller, identity::UserId userId);
 
 struct DisplaySnapshotRequestV1 {
     uint32_t structureSize;

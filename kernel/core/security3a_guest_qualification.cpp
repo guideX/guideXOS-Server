@@ -427,13 +427,13 @@ static void runProvisioningAndReloadQualification()
         for (size_t i = 0u; i < sizeof(bootstrapSession.bytes); ++i) clearBootstrap[i] = 0u;
 
         identity::UserId standardId = identity::kInvalidUserId;
-        const identity::Result created = identity::runtime().provision(
+        const authentication::Result created = authentication::runtime().createAccount(
             SECURITY3A_STANDARD_ACCOUNT, SECURITY3A_STANDARD_DISPLAY_NAME, &standardId);
         serial::puts("[SECURITY3A] standard_account_create_result=");
-        serial::puts(identity::resultName(created));
+        serial::puts(authentication::resultName(created));
         serial::putc('\n');
         check("standard_user_identity_commits_durably",
-            created == identity::Result::OkPersistent &&
+            created == authentication::Result::OkPersistent &&
             standardId == kExpectedStandardUserId);
         const authentication::Result enrolled = authentication::runtime().enrollCredential(
             standardId, SECURITY3A_STANDARD_PASSWORD,

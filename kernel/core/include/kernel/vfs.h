@@ -117,6 +117,7 @@ enum Status : int8_t {
     VFS_ERR_CORRUPT_DIRECTORY = -21,
     VFS_ERR_INVALID_DESTINATION = -22,
     VFS_ERR_ROLLBACK_FAILED = -23,
+    VFS_ERR_UNAUTHORIZED = -24,
 };
 
 // ================================================================

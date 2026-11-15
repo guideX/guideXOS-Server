@@ -18204,7 +18204,7 @@ private:
             m_usersFieldFocus = row == 5 ? 0u : 1u;
             return true;
         }
-        if (row == 7) {
+        if (row == 8) {
             invokeUsersAction();
             return true;
         }
@@ -18872,16 +18872,17 @@ private:
     void drawIdentityInformation(uint32_t contentX, uint32_t contentW,
                                  uint32_t cardY)
     {
-        const char* labels[8] = {
+        const char* labels[9] = {
             "Identity registry", "Account records", "Current account",
             "Account role", "Authentication and session", "Account name",
-            "Password", "Action"
+            "Password", "Account administration", "Action"
         };
         char accountCount[80] = "Unavailable";
         char credentialState[100] = "Authentication unavailable";
-        const char* values[8] = {
+        char authorizationState[120] = "Unavailable; broader enforcement incomplete";
+        const char* values[9] = {
             "Unavailable", accountCount, "Unavailable", "Unavailable",
-            credentialState, m_usersAccountInput, "", ""
+            credentialState, m_usersAccountInput, "", authorizationState, ""
         };
         if (m_identitySnapshotAvailable) {
             values[0] = "Available";
@@ -18916,9 +18917,24 @@ private:
                 appendText(credentialState, sizeof(credentialState),
                     identity::persistenceStateName(static_cast<identity::PersistenceState>(
                         m_identitySnapshot.credentialPersistenceState)));
-                appendText(credentialState, sizeof(credentialState), "; roles informational only");
+                appendText(credentialState, sizeof(credentialState),
+                    "; role checked by native authorization");
             }
             values[4] = credentialState;
+            if ((m_identitySnapshot.flags &
+                    settings_native::kIdentityAccountAdministrationImplemented) != 0u) {
+                authorizationState[0] = '\0';
+                appendText(authorizationState, sizeof(authorizationState),
+                    (m_identitySnapshot.flags &
+                        settings_native::kIdentityCanAdministerAccounts) != 0u
+                        ? "Permitted; account operations implemented"
+                        : "Not permitted; account operations implemented");
+                appendText(authorizationState, sizeof(authorizationState),
+                    (m_identitySnapshot.flags &
+                        settings_native::kIdentitySystemWideAuthorizationIncomplete) != 0u
+                        ? "; broader enforcement incomplete" : "; broader enforcement available");
+            }
+            values[7] = authorizationState;
         }
 
         const uint32_t valueOffset = 176u;
@@ -18937,7 +18953,7 @@ private:
             (m_identitySnapshot.flags & settings_native::kIdentityBootstrapRequired) != 0u;
         const char* actionLabel = authenticated ? "Sign out" :
             (bootstrap ? "Set up first administrator" : "Sign in");
-        for (size_t row = 0u; row < 8u; ++row) {
+        for (size_t row = 0u; row < 9u; ++row) {
             const uint32_t rowY = cardY + 42u + static_cast<uint32_t>(row) * 32u;
             appDrawText(contentX + 16u, rowY, labels[row], rgb(150, 162, 181));
             if (row == 5u || row == 6u) {
@@ -18949,7 +18965,7 @@ private:
                 drawWrappedSettingsValue(valueX + 5u, rowY, row == 5u
                     ? m_usersAccountInput : passwordMask, valueWidth > 10u
                     ? valueWidth - 10u : 1u, rgb(243, 245, 250), false);
-            } else if (row == 7u) {
+            } else if (row == 8u) {
                 const uint32_t buttonColor = authenticated ? rgb(86, 61, 61) : rgb(52, 87, 135);
                 framebuffer::fill_rect(valueX, rowY - 3u,
                     valueWidth > 8u ? valueWidth - 8u : 1u, 20u, buttonColor);
@@ -18960,7 +18976,7 @@ private:
                 drawWrappedSettingsValue(valueX, rowY, values[row], valueWidth,
                     m_identitySnapshotAvailable ? rgb(243, 245, 250) : rgb(165, 173, 187), true);
             }
-            if (row + 1u < 8u) {
+            if (row + 1u < 9u) {
                 framebuffer::fill_rect(contentX + 16u, rowY + 24u,
                     contentW > 32u ? contentW - 32u : 1u, 1u, rgb(55, 61, 74));
             }

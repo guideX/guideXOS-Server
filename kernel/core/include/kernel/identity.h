@@ -56,7 +56,8 @@ enum class Result : uint8_t {
     StorageUnavailable,
     StorageCorrupt,
     IoError,
-    GenerationExhausted
+    GenerationExhausted,
+    Unauthorized
 };
 
 enum class IdentityKind : uint8_t {

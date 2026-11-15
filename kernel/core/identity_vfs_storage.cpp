@@ -1,5 +1,6 @@
 #include "include/kernel/identity_runtime.h"
 #include "include/kernel/vfs.h"
+#include "vfs_security_store_internal.h"
 
 namespace kernel {
 namespace identity {
@@ -40,7 +41,7 @@ StoreWriteResult writeSlot(void*, uint8_t slot, const uint8_t* bytes,
     if (!mount || mount->fsType != vfs::FS_TYPE_FAT32)
         return StoreWriteResult::Unavailable;
     if (mount->readOnly) return StoreWriteResult::ReadOnly;
-    const int32_t written = vfs::write_file(
+    const int32_t written = vfs::internal::writeSecurityStoreFile(
         path, bytes, static_cast<uint32_t>(byteCount));
     return written == static_cast<int32_t>(byteCount)
         ? StoreWriteResult::Ok : StoreWriteResult::IoError;

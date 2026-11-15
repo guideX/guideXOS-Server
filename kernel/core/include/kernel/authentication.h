@@ -2,6 +2,7 @@
 #define KERNEL_AUTHENTICATION_H
 
 #include "kernel/identity_runtime.h"
+#include "kernel/authorization.h"
 
 namespace kernel {
 namespace authentication {
@@ -110,6 +111,8 @@ public:
     };
 
     Runtime();
+    Runtime(const Runtime&) = delete;
+    Runtime& operator=(const Runtime&) = delete;
 
     Result initialize(identity::Runtime* identities,
                       const StorageAdapter* storage,
@@ -129,16 +132,26 @@ public:
                                   const char* displayName,
                                   const char* password, size_t passwordBytes,
                                   SessionReference* outputSession);
+    Result createAccount(const char* accountName, const char* displayName,
+                         identity::UserId* outputUserId);
+    Result resetCredential(identity::UserId userId,
+                           const char* newPassword, size_t newBytes);
     Result setAccountRole(identity::UserId userId, identity::AccountRole role);
     Result setAccountStatus(identity::UserId userId, identity::AccountStatus status);
     Result eraseAccount(identity::UserId userId);
     bool credentialEligible(identity::UserId userId) const;
     Result queryCurrentSession(SessionSnapshotV1* output);
+    authorization::DecisionResult authorizeCurrent(
+        authorization::Operation operation,
+        identity::UserId target = identity::kInvalidUserId);
+    Result queryAuthorizationAudit(authorization::AuditSnapshotV1* output) const;
     Result queryContext(identity::ExecutionDomain domain,
                         identity::IdentityContextV1* output);
     Result signOutCurrent();
     Result snapshot(RuntimeSnapshotV1* output) const;
-    void invalidateUser(identity::UserId userId);
+    void invalidateUser(identity::UserId userId,
+        authorization::Decision reason = authorization::Decision::InvalidSession,
+        authorization::Reason diagnostic = authorization::Reason::SessionRevoked);
 
 private:
     struct SessionRecord {
@@ -163,8 +176,8 @@ private:
                             const char* password, size_t passwordBytes) const;
     bool credentialRecordValid(const CredentialRecord& credential) const;
     void clearSession(size_t index, SessionState finalState);
-    bool currentAdministrator();
-    bool currentUserIs(identity::UserId userId);
+    void refreshBootstrapRequired();
+    void recordAuthorizationDecision(const authorization::DecisionResult& decision);
     void clearAttempt(uint64_t nameKey);
     uint64_t accountNameKey(const char* accountName) const;
     bool isThrottled(uint64_t nameKey, uint64_t now) const;
@@ -185,6 +198,10 @@ private:
     bool m_storeReadable;
     bool m_storeWritable;
     bool m_bootstrapRequired;
+    bool m_hasInvalidatedCurrentSession;
+    authorization::Decision m_lastInvalidationDecision;
+    authorization::Reason m_lastInvalidationReason;
+    authorization::AuditSnapshotV1 m_authorizationAudit;
     SessionRecord m_sessions[kMaximumSessions];
     int8_t m_currentSession;
     AttemptRecord m_attempts[kMaximumAuthenticationAttempts];

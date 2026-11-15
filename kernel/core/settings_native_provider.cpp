@@ -249,7 +249,10 @@ bool validIdentitySnapshot(const IdentitySnapshotV2& snapshot)
         kIdentityRecordsDurable | kIdentityAccountCountAvailable |
         kIdentityAuthenticationAvailable | kIdentityCredentialStoreAvailable |
         kIdentityCredentialsDurable | kIdentitySessionActive |
-        kIdentityCurrentRoleAvailable | kIdentityBootstrapRequired;
+        kIdentityCurrentRoleAvailable | kIdentityBootstrapRequired |
+        kIdentityAccountAdministrationImplemented |
+        kIdentityCanAdministerAccounts |
+        kIdentitySystemWideAuthorizationIncomplete;
     const uint32_t contextKind = snapshot.currentContextKind;
     const bool sessionActive = (snapshot.flags & kIdentitySessionActive) != 0u;
     const bool contextValid =
@@ -269,6 +272,17 @@ bool validIdentitySnapshot(const IdentitySnapshotV2& snapshot)
         snapshot.version == kIdentitySnapshotVersion && snapshot.revision != 0u &&
         (snapshot.flags & kIdentityInfrastructureAvailable) != 0u &&
         (snapshot.flags & ~knownFlags) == 0u &&
+        (((snapshot.flags & kIdentityAccountAdministrationImplemented) == 0u) ||
+         ((snapshot.flags & kIdentityAuthenticationAvailable) != 0u)) &&
+        (((snapshot.flags & kIdentityCanAdministerAccounts) == 0u) ||
+         ((snapshot.flags & (kIdentitySessionActive |
+                             kIdentityCurrentRoleAvailable |
+                             kIdentityAccountAdministrationImplemented)) ==
+          (kIdentitySessionActive | kIdentityCurrentRoleAvailable |
+           kIdentityAccountAdministrationImplemented) &&
+          snapshot.currentRole == static_cast<uint32_t>(identity::AccountRole::Administrator))) &&
+        (((snapshot.flags & kIdentitySystemWideAuthorizationIncomplete) == 0u) ||
+         ((snapshot.flags & kIdentityAuthenticationAvailable) != 0u)) &&
         snapshot.accountCount <= identity::kMaximumUsers &&
         snapshot.credentialCount <= identity::kMaximumUsers &&
         (((snapshot.flags & kIdentityAccountCountAvailable) != 0u) ||
@@ -337,6 +351,8 @@ SnapshotStatus readIdentitySnapshot(
     if (authentication::runtime().snapshot(&authRuntime) == authentication::Result::Ok &&
         authRuntime.initialized != 0u) {
         snapshot.flags |= kIdentityAuthenticationAvailable;
+        snapshot.flags |= kIdentityAccountAdministrationImplemented;
+        snapshot.flags |= kIdentitySystemWideAuthorizationIncomplete;
         if (authRuntime.credentialStoreAvailable != 0u)
             snapshot.flags |= kIdentityCredentialStoreAvailable;
         if (authRuntime.allCredentialsDurable != 0u)
@@ -358,6 +374,9 @@ SnapshotStatus readIdentitySnapshot(
                     snapshot.currentDisplayName[i] = session.displayName[i];
             }
         }
+        if (authentication::runtime().authorizeCurrent(
+                authorization::Operation::AccountCreate).allowed())
+            snapshot.flags |= kIdentityCanAdministerAccounts;
     }
     if (!validIdentitySnapshot(snapshot)) return SnapshotStatus::Unavailable;
 
@@ -397,6 +416,52 @@ authentication::Result signOutLocal(const app::KernelApp* caller)
     if (!caller || !textEquals(caller->getRuntimeAppId(), kSettingsRuntimeAppId))
         return authentication::Result::Unauthorized;
     return authentication::runtime().signOutCurrent();
+}
+
+static bool isSettingsCaller(const app::KernelApp* caller)
+{
+    return caller && textEquals(caller->getRuntimeAppId(), kSettingsRuntimeAppId);
+}
+
+authentication::Result createAccountLocal(
+    const app::KernelApp* caller, const char* accountName,
+    const char* displayName, identity::UserId* outputUserId)
+{
+    if (!isSettingsCaller(caller)) return authentication::Result::Unauthorized;
+    return authentication::runtime().createAccount(accountName, displayName,
+        outputUserId);
+}
+
+authentication::Result resetAccountCredentialLocal(
+    const app::KernelApp* caller, identity::UserId userId,
+    const char* newPassword, size_t passwordBytes)
+{
+    if (!isSettingsCaller(caller)) return authentication::Result::Unauthorized;
+    return authentication::runtime().resetCredential(userId, newPassword,
+        passwordBytes);
+}
+
+authentication::Result setAccountRoleLocal(
+    const app::KernelApp* caller, identity::UserId userId,
+    identity::AccountRole role)
+{
+    if (!isSettingsCaller(caller)) return authentication::Result::Unauthorized;
+    return authentication::runtime().setAccountRole(userId, role);
+}
+
+authentication::Result setAccountStatusLocal(
+    const app::KernelApp* caller, identity::UserId userId,
+    identity::AccountStatus status)
+{
+    if (!isSettingsCaller(caller)) return authentication::Result::Unauthorized;
+    return authentication::runtime().setAccountStatus(userId, status);
+}
+
+authentication::Result deleteAccountLocal(
+    const app::KernelApp* caller, identity::UserId userId)
+{
+    if (!isSettingsCaller(caller)) return authentication::Result::Unauthorized;
+    return authentication::runtime().eraseAccount(userId);
 }
 
 static bool validBitsPerPixel(uint32_t bitsPerPixel)

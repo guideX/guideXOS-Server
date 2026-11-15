@@ -111,6 +111,7 @@ Result mapIdentityResult(identity::Result result)
     case identity::Result::Ok: return Result::Ok;
     case identity::Result::OkPersistent: return Result::OkPersistent;
     case identity::Result::OkVolatile: return Result::OkVolatile;
+    case identity::Result::Unauthorized: return Result::Unauthorized;
     case identity::Result::InvalidArgument: return Result::InvalidArgument;
     case identity::Result::LastAdministrator: return Result::LastAdministrator;
     case identity::Result::CapacityExceeded:
@@ -134,6 +135,10 @@ Runtime::Runtime()
       m_persistence(identity::PersistenceState::Unavailable), m_initialized(false),
       m_identityRegistryReadable(false), m_identityRecordsDurable(false),
       m_storeReadable(false), m_storeWritable(false), m_bootstrapRequired(true),
+      m_hasInvalidatedCurrentSession(false),
+      m_lastInvalidationDecision(authorization::Decision::InvalidSession),
+      m_lastInvalidationReason(authorization::Reason::SessionRevoked),
+      m_authorizationAudit{},
       m_sessions{}, m_currentSession(-1), m_attempts{}, m_nextAttemptSlot(0u),
       m_slotBytes{}, m_writeBytes{}, m_verifyBytes{}
 {
@@ -144,8 +149,10 @@ Result Runtime::initialize(identity::Runtime* identities,
                             const CryptoProvider* crypto,
                             bool bindInteractiveContext)
 {
+    if (m_initialized) return Result::Unauthorized;
     if (!identities || !crypto || !crypto->randomBytes ||
         !crypto->deriveVerifier || !crypto->clockTicks) return Result::InvalidArgument;
+    if (!identities->bindAuthorizationManager(this)) return Result::Unauthorized;
     m_identities = identities;
     m_storage = storage ? *storage : StorageAdapter{};
     m_crypto = *crypto;
@@ -154,6 +161,11 @@ Result Runtime::initialize(identity::Runtime* identities,
     memset(m_sessions, 0, sizeof(m_sessions));
     memset(m_attempts, 0, sizeof(m_attempts));
     m_currentSession = -1;
+    m_hasInvalidatedCurrentSession = false;
+    m_lastInvalidationDecision = authorization::Decision::InvalidSession;
+    m_lastInvalidationReason = authorization::Reason::SessionRevoked;
+    memset(&m_authorizationAudit, 0, sizeof(m_authorizationAudit));
+    m_authorizationAudit.version = 1u;
     m_nextAttemptSlot = 0u;
     m_generation = 0u;
     m_activeSlot = -1;
@@ -170,9 +182,9 @@ Result Runtime::initialize(identity::Runtime* identities,
     if (!m_storage.available || !m_storage.readSlot) {
         m_storeWritable = false;
         m_persistence = identity::PersistenceState::Unavailable;
-        m_bootstrapRequired = true;
+        refreshBootstrapRequired();
         if (bindInteractiveContext)
-            m_identities->setInteractiveContextProvider(this,
+            m_identities->setInteractiveContextProvider(this, this,
                 [](void* context, identity::IdentityContextV1* output) -> identity::Result {
                     return static_cast<Runtime*>(context)->queryContext(
                         identity::ExecutionDomain::Interactive, output) == Result::Ok
@@ -357,23 +369,9 @@ Result Runtime::initialize(identity::Runtime* identities,
     }
     m_storeWritable = m_storeReadable && m_storage.writable && m_storage.writeSlot;
 
-    identity::UserRecordV1 accounts[identity::kMaximumUsers]{};
-    size_t accountCount = 0u;
-    bool activeAdministrator = false;
-    if (m_identities->enumerate(accounts, identity::kMaximumUsers, &accountCount) ==
-        identity::Result::Ok) {
-        for (size_t i = 0u; i < accountCount; ++i) {
-            if (m_storeReadable && accounts[i].status == identity::AccountStatus::Active &&
-                accounts[i].role == identity::AccountRole::Administrator &&
-                findCredential(accounts[i].id, nullptr) == Result::Ok) {
-                activeAdministrator = true;
-                break;
-            }
-        }
-    }
-    m_bootstrapRequired = !activeAdministrator;
+    refreshBootstrapRequired();
     if (bindInteractiveContext)
-        m_identities->setInteractiveContextProvider(this,
+        m_identities->setInteractiveContextProvider(this, this,
             [](void* context, identity::IdentityContextV1* output) -> identity::Result {
                 return static_cast<Runtime*>(context)->queryContext(
                     identity::ExecutionDomain::Interactive, output) == Result::Ok
@@ -571,7 +569,8 @@ Result Runtime::enrollCredential(identity::UserId userId,
                                 const char* password, size_t passwordBytes)
 {
     if (!m_initialized) return Result::NotInitialized;
-    if (!currentAdministrator() && !currentUserIs(userId)) return Result::Unauthorized;
+    if (!authorizeCurrent(authorization::Operation::AccountEnrollCredential,
+            userId).allowed()) return Result::Unauthorized;
     identity::UserRecordV1 account{};
     if (!m_identityRegistryReadable || !m_identities ||
         m_identities->find(userId, &account) != identity::Result::Ok)
@@ -593,15 +592,7 @@ Result Runtime::enrollCredential(identity::UserId userId,
     secureZero(candidate, sizeof(candidate));
     if (committed == Result::Ok || committed == Result::OkPersistent ||
         committed == Result::OkVolatile) {
-        m_bootstrapRequired = true;
-        identity::UserRecordV1 accounts[identity::kMaximumUsers]{};
-        size_t count = 0u;
-        if (m_identities->enumerate(accounts, identity::kMaximumUsers, &count) == identity::Result::Ok)
-            for (size_t i = 0u; i < count; ++i)
-                if (accounts[i].status == identity::AccountStatus::Active &&
-                    accounts[i].role == identity::AccountRole::Administrator &&
-                    findCredential(accounts[i].id, nullptr) == Result::Ok)
-                    m_bootstrapRequired = false;
+        refreshBootstrapRequired();
     }
     return committed;
 }
@@ -763,6 +754,9 @@ Result Runtime::openSession(identity::UserId userId, SessionReference* outputSes
     m_sessions[slot].userId = userId;
     m_sessions[slot].state = SessionState::Active;
     m_currentSession = static_cast<int8_t>(slot);
+    m_hasInvalidatedCurrentSession = false;
+    m_lastInvalidationDecision = authorization::Decision::InvalidSession;
+    m_lastInvalidationReason = authorization::Reason::SessionRevoked;
     *outputSession = reference;
     secureZero(&reference, sizeof(reference));
     return Result::Ok;
@@ -774,7 +768,8 @@ Result Runtime::changeCredential(identity::UserId userId,
 {
     if (!m_initialized) return Result::NotInitialized;
     if (!m_identityRegistryReadable) return Result::AccountUnavailable;
-    if (!currentAdministrator() && !currentUserIs(userId)) return Result::Unauthorized;
+    if (!authorizeCurrent(authorization::Operation::AccountChangeOwnCredential,
+            userId).allowed()) return Result::Unauthorized;
     identity::UserRecordV1 account{};
     if (!m_identities || m_identities->find(userId, &account) != identity::Result::Ok)
         return Result::AccountUnavailable;
@@ -801,7 +796,8 @@ Result Runtime::changeCredential(identity::UserId userId,
 Result Runtime::revokeCredential(identity::UserId userId)
 {
     if (!m_initialized) return Result::NotInitialized;
-    if (!currentAdministrator() && !currentUserIs(userId)) return Result::Unauthorized;
+    if (!authorizeCurrent(authorization::Operation::AccountChangeOwnCredential,
+            userId).allowed()) return Result::Unauthorized;
     size_t index = 0u;
     if (findCredential(userId, &index) != Result::Ok) return Result::CredentialMissing;
     identity::UserRecordV1 account{};
@@ -830,6 +826,7 @@ Result Runtime::revokeCredential(identity::UserId userId)
     secureZero(candidate, sizeof(candidate));
     if (committed == Result::Ok || committed == Result::OkPersistent ||
         committed == Result::OkVolatile) invalidateUser(userId);
+    refreshBootstrapRequired();
     return committed;
 }
 
@@ -851,13 +848,15 @@ Result Runtime::bootstrapAdministrator(const char* accountName,
     size_t accountCount = 0u;
     if (!m_identities || m_identities->enumerate(accounts, identity::kMaximumUsers,
             &accountCount) != identity::Result::Ok) return Result::AccountUnavailable;
-    size_t usableAdministrators = 0u;
+    if (!m_bootstrapRequired) return Result::Unauthorized;
+    bool hasAdministratorRecord = false;
     for (size_t i = 0u; i < accountCount; ++i)
-        if (accounts[i].status == identity::AccountStatus::Active &&
-            accounts[i].role == identity::AccountRole::Administrator &&
-            findCredential(accounts[i].id, nullptr) == Result::Ok)
-            ++usableAdministrators;
-    if (usableAdministrators != 0u) return Result::Unauthorized;
+        if (accounts[i].role == identity::AccountRole::Administrator)
+            hasAdministratorRecord = true;
+    // Recovery is available only when no Administrator account record exists.
+    // A disabled, credential-less, or otherwise inaccessible Administrator
+    // must not reopen anonymous bootstrap.
+    if (hasAdministratorRecord) return Result::Unauthorized;
 
     identity::UserRecordV1 account{};
     const identity::Result lookup = m_identities->findByAccountName(accountName, &account);
@@ -875,7 +874,7 @@ Result Runtime::bootstrapAdministrator(const char* accountName,
             passwordBytes, &authenticated);
         secureZero(&authenticated, sizeof(authenticated));
         if (authentication != Result::Ok) return authentication;
-        const identity::Result promoted = m_identities->setRole(account.id,
+        const identity::Result promoted = m_identities->setRoleForAuthentication(this, account.id,
             identity::AccountRole::Administrator);
         if (promoted != identity::Result::Ok &&
             promoted != identity::Result::OkPersistent &&
@@ -884,7 +883,7 @@ Result Runtime::bootstrapAdministrator(const char* accountName,
         identity::AccountRole role{};
         if (m_identities->getRole(account.id, &role) != identity::Result::Ok ||
             role != identity::AccountRole::Administrator) return Result::IoError;
-        m_bootstrapRequired = false;
+        refreshBootstrapRequired();
         SessionReference current{};
         if (m_currentSession >= 0) current = m_sessions[m_currentSession].reference;
         *outputSession = current;
@@ -898,7 +897,7 @@ Result Runtime::bootstrapAdministrator(const char* accountName,
     if (preparedResult != Result::Ok) return preparedResult;
     if (lookup == identity::Result::NotFound) {
         identity::UserId userId = identity::kInvalidUserId;
-        const identity::Result created = m_identities->provision(accountName,
+        const identity::Result created = m_identities->provisionForAuthentication(this, accountName,
             displayName, &userId);
         if (created != identity::Result::Ok && created != identity::Result::OkPersistent &&
             created != identity::Result::OkVolatile) {
@@ -923,11 +922,11 @@ Result Runtime::bootstrapAdministrator(const char* accountName,
     secureZero(candidate, sizeof(candidate));
     if (enrolled != Result::Ok && enrolled != Result::OkPersistent &&
         enrolled != Result::OkVolatile) return enrolled;
-    const identity::Result roleSet = m_identities->setRole(account.id,
+    const identity::Result roleSet = m_identities->setRoleForAuthentication(this, account.id,
         identity::AccountRole::Administrator);
     if (roleSet != identity::Result::Ok && roleSet != identity::Result::OkPersistent &&
         roleSet != identity::Result::OkVolatile) return mapIdentityResult(roleSet);
-    m_bootstrapRequired = false;
+    refreshBootstrapRequired();
     const Result authenticated = authenticate(accountName, password, passwordBytes,
         outputSession);
     if (authenticated != Result::Ok) return authenticated;
@@ -938,10 +937,82 @@ Result Runtime::bootstrapAdministrator(const char* accountName,
     return Result::Ok;
 }
 
+Result Runtime::createAccount(const char* accountName, const char* displayName,
+                              identity::UserId* outputUserId)
+{
+    if (outputUserId) *outputUserId = identity::kInvalidUserId;
+    if (!m_initialized) return Result::NotInitialized;
+    if (!outputUserId || !identity::validAccountName(accountName) ||
+        !identity::validDisplayName(displayName)) return Result::InvalidArgument;
+    if (!authorizeCurrent(authorization::Operation::AccountCreate).allowed())
+        return Result::Unauthorized;
+    const identity::Result created = m_identities
+        ? m_identities->provisionForAuthentication(this, accountName, displayName, outputUserId)
+        : identity::Result::NotInitialized;
+    const Result mapped = mapIdentityResult(created);
+    if (mapped != Result::Ok && mapped != Result::OkPersistent &&
+        mapped != Result::OkVolatile) *outputUserId = identity::kInvalidUserId;
+    refreshBootstrapRequired();
+    return mapped;
+}
+
+Result Runtime::resetCredential(identity::UserId userId,
+                                const char* newPassword, size_t newBytes)
+{
+    if (!m_initialized) return Result::NotInitialized;
+    if (!authorizeCurrent(authorization::Operation::AccountResetCredential,
+            userId).allowed()) return Result::Unauthorized;
+    identity::UserRecordV1 target{};
+    const identity::Result targetResult = m_identities
+        ? m_identities->findRecord(userId, &target) : identity::Result::NotInitialized;
+    if (!m_identityRegistryReadable ||
+        (targetResult != identity::Result::Ok && targetResult != identity::Result::Inactive))
+        return Result::AccountUnavailable;
+    if (!m_storeReadable) return m_persistence == identity::PersistenceState::Unsupported
+        ? Result::UnsupportedCredentialFormat : Result::StorageUnavailable;
+
+    CredentialRecord replacement{};
+    const Result prepared = prepareCredential(newPassword, newBytes, &replacement);
+    if (prepared != Result::Ok) return prepared;
+    replacement.userId = userId;
+    size_t existingIndex = 0u;
+    const Result existing = findCredential(userId, &existingIndex);
+    if (existing != Result::Ok && m_credentialCount >= identity::kMaximumUsers) {
+        secureZero(&replacement, sizeof(replacement));
+        return Result::CapacityExceeded;
+    }
+
+    CredentialRecord candidate[identity::kMaximumUsers]{};
+    size_t outputCount = m_credentialCount;
+    if (existing == Result::Ok) {
+        memcpy(candidate, m_credentials, m_credentialCount * sizeof(CredentialRecord));
+        candidate[existingIndex] = replacement;
+    } else {
+        size_t insert = 0u;
+        while (insert < m_credentialCount && m_credentials[insert].userId < userId)
+            ++insert;
+        for (size_t i = 0u; i < insert; ++i) candidate[i] = m_credentials[i];
+        candidate[insert] = replacement;
+        for (size_t i = insert; i < m_credentialCount; ++i)
+            candidate[i + 1u] = m_credentials[i];
+        ++outputCount;
+    }
+    const Result committed = commitCredentials(candidate, outputCount);
+    secureZero(&replacement, sizeof(replacement));
+    secureZero(candidate, sizeof(candidate));
+    if (committed == Result::Ok || committed == Result::OkPersistent ||
+        committed == Result::OkVolatile) {
+        invalidateUser(userId);
+        refreshBootstrapRequired();
+    }
+    return committed;
+}
+
 Result Runtime::setAccountRole(identity::UserId userId, identity::AccountRole role)
 {
     if (!m_initialized) return Result::NotInitialized;
-    if (!currentAdministrator()) return Result::Unauthorized;
+    if (!authorizeCurrent(authorization::Operation::AccountChangeRole,
+            userId).allowed()) return Result::Unauthorized;
     if (!identity::validAccountRole(role)) return Result::InvalidArgument;
     identity::UserRecordV1 target{};
     if (!m_identities || m_identities->findRecord(userId, &target) == identity::Result::NotFound)
@@ -961,16 +1032,16 @@ Result Runtime::setAccountRole(identity::UserId userId, identity::AccountRole ro
                     findCredential(accounts[i].id, nullptr) == Result::Ok) ++others;
         if (others == 0u) return Result::LastAdministrator;
     }
-    const identity::Result changed = m_identities->setRole(userId, role);
-    m_bootstrapRequired = changed != identity::Result::Ok &&
-        changed != identity::Result::OkPersistent && changed != identity::Result::OkVolatile;
+    const identity::Result changed = m_identities->setRoleForAuthentication(this, userId, role);
+    refreshBootstrapRequired();
     return mapIdentityResult(changed);
 }
 
 Result Runtime::setAccountStatus(identity::UserId userId, identity::AccountStatus status)
 {
     if (!m_initialized) return Result::NotInitialized;
-    if (!currentAdministrator()) return Result::Unauthorized;
+    if (!authorizeCurrent(authorization::Operation::AccountSetEnabled,
+            userId).allowed()) return Result::Unauthorized;
     identity::UserRecordV1 target{};
     if (!m_identities || m_identities->findRecord(userId, &target) == identity::Result::NotFound)
         return Result::AccountUnavailable;
@@ -989,17 +1060,21 @@ Result Runtime::setAccountStatus(identity::UserId userId, identity::AccountStatu
                     findCredential(accounts[i].id, nullptr) == Result::Ok) ++others;
         if (others == 0u) return Result::LastAdministrator;
     }
-    const identity::Result changed = m_identities->setStatus(userId, status);
+    const identity::Result changed = m_identities->setStatusForAuthentication(this, userId, status);
     if (changed != identity::Result::Ok && changed != identity::Result::OkPersistent &&
         changed != identity::Result::OkVolatile) return mapIdentityResult(changed);
-    if (status == identity::AccountStatus::Disabled) invalidateUser(userId);
+    if (status == identity::AccountStatus::Disabled)
+        invalidateUser(userId, authorization::Decision::AccountDisabledOrDeleted,
+            authorization::Reason::AccountDisabled);
+    refreshBootstrapRequired();
     return mapIdentityResult(changed);
 }
 
 Result Runtime::eraseAccount(identity::UserId userId)
 {
     if (!m_initialized) return Result::NotInitialized;
-    if (!currentAdministrator()) return Result::Unauthorized;
+    if (!authorizeCurrent(authorization::Operation::AccountDelete,
+            userId).allowed()) return Result::Unauthorized;
     identity::UserRecordV1 target{};
     if (!m_identities || m_identities->findRecord(userId, &target) == identity::Result::NotFound)
         return Result::AccountUnavailable;
@@ -1017,10 +1092,11 @@ Result Runtime::eraseAccount(identity::UserId userId)
                     findCredential(accounts[i].id, nullptr) == Result::Ok) ++others;
         if (others == 0u) return Result::LastAdministrator;
     }
-    const identity::Result erased = m_identities->erase(userId);
+    const identity::Result erased = m_identities->eraseForAuthentication(this, userId);
     if (erased != identity::Result::Ok && erased != identity::Result::OkPersistent &&
         erased != identity::Result::OkVolatile) return mapIdentityResult(erased);
-    invalidateUser(userId);
+    invalidateUser(userId, authorization::Decision::AccountDisabledOrDeleted,
+        authorization::Reason::AccountDeleted);
     size_t index = 0u;
     if (findCredential(userId, &index) == Result::Ok) {
         CredentialRecord candidate[identity::kMaximumUsers]{};
@@ -1032,7 +1108,7 @@ Result Runtime::eraseAccount(identity::UserId userId)
         if (removed != Result::Ok && removed != Result::OkPersistent &&
             removed != Result::OkVolatile) return removed;
     }
-    m_bootstrapRequired = true;
+    refreshBootstrapRequired();
     return erased == identity::Result::OkPersistent ? Result::OkPersistent :
         (erased == identity::Result::OkVolatile ? Result::OkVolatile : Result::Ok);
 }
@@ -1045,21 +1121,6 @@ bool Runtime::credentialEligible(identity::UserId userId) const
         findCredential(userId, nullptr) == Result::Ok;
 }
 
-bool Runtime::currentAdministrator()
-{
-    SessionSnapshotV1 current{};
-    return queryCurrentSession(&current) == Result::Ok &&
-        current.state == SessionState::Active &&
-        current.role == identity::AccountRole::Administrator;
-}
-
-bool Runtime::currentUserIs(identity::UserId userId)
-{
-    SessionSnapshotV1 current{};
-    return queryCurrentSession(&current) == Result::Ok &&
-        current.state == SessionState::Active && current.userId == userId;
-}
-
 void Runtime::clearSession(size_t index, SessionState finalState)
 {
     if (index >= kMaximumSessions) return;
@@ -1069,11 +1130,19 @@ void Runtime::clearSession(size_t index, SessionState finalState)
     if (m_currentSession == static_cast<int8_t>(index)) m_currentSession = -1;
 }
 
-void Runtime::invalidateUser(identity::UserId userId)
+void Runtime::invalidateUser(identity::UserId userId, authorization::Decision reason,
+                             authorization::Reason diagnostic)
 {
-    for (size_t i = 0u; i < kMaximumSessions; ++i)
-        if (m_sessions[i].state == SessionState::Active && m_sessions[i].userId == userId)
+    for (size_t i = 0u; i < kMaximumSessions; ++i) {
+        if (m_sessions[i].state == SessionState::Active && m_sessions[i].userId == userId) {
+            if (m_currentSession == static_cast<int8_t>(i)) {
+                m_hasInvalidatedCurrentSession = true;
+                m_lastInvalidationDecision = reason;
+                m_lastInvalidationReason = diagnostic;
+            }
             clearSession(i, SessionState::Invalidated);
+        }
+    }
 }
 
 Result Runtime::queryCurrentSession(SessionSnapshotV1* output)
@@ -1087,10 +1156,24 @@ Result Runtime::queryCurrentSession(SessionSnapshotV1* output)
     if (m_currentSession >= 0) {
         const size_t index = static_cast<size_t>(m_currentSession);
         identity::UserRecordV1 account{};
+        const identity::Result accountState = m_identities
+            ? m_identities->findRecord(m_sessions[index].userId, &account)
+            : identity::Result::NotInitialized;
         if (m_sessions[index].state != SessionState::Active || !m_storeReadable ||
             !m_identityRegistryReadable || !m_identities ||
-            m_identities->find(m_sessions[index].userId, &account) != identity::Result::Ok ||
+            accountState != identity::Result::Ok ||
             findCredential(m_sessions[index].userId, nullptr) != Result::Ok) {
+            m_hasInvalidatedCurrentSession = true;
+            m_lastInvalidationDecision = accountState == identity::Result::NotFound
+                ? authorization::Decision::AccountDisabledOrDeleted
+                : (accountState == identity::Result::Inactive
+                    ? authorization::Decision::AccountDisabledOrDeleted
+                    : authorization::Decision::InvalidSession);
+            m_lastInvalidationReason = accountState == identity::Result::NotFound
+                ? authorization::Reason::AccountDeleted
+                : (accountState == identity::Result::Inactive
+                    ? authorization::Reason::AccountDisabled
+                    : authorization::Reason::SessionRevoked);
             clearSession(index, SessionState::Invalidated);
         } else {
             snapshot.state = SessionState::Active;
@@ -1101,6 +1184,90 @@ Result Runtime::queryCurrentSession(SessionSnapshotV1* output)
     }
     *output = snapshot;
     return Result::Ok;
+}
+
+authorization::DecisionResult Runtime::authorizeCurrent(
+    authorization::Operation operation, identity::UserId target)
+{
+    authorization::SecurityContext context{};
+    context.kind = authorization::ContextKind::Unsupported;
+    context.subject = identity::kInvalidUserId;
+    if (!m_initialized) {
+        authorization::DecisionResult unavailable{
+            authorization::Decision::UnsupportedContext,
+            authorization::Reason::ContextUnavailable,
+            operation,
+            identity::kInvalidUserId
+        };
+        recordAuthorizationDecision(unavailable);
+        return unavailable;
+    }
+
+    SessionSnapshotV1 current{};
+    const Result sessionResult = queryCurrentSession(&current);
+    if (sessionResult == Result::Ok && current.state == SessionState::Active) {
+        context.subject = current.userId;
+        context.kind = current.role == identity::AccountRole::Administrator
+            ? authorization::ContextKind::AuthenticatedAdministrator
+            : authorization::ContextKind::AuthenticatedStandardUser;
+    } else if (sessionResult != Result::Ok) {
+        context.kind = authorization::ContextKind::Unsupported;
+    } else if (m_hasInvalidatedCurrentSession) {
+        context.kind = m_lastInvalidationDecision ==
+                authorization::Decision::AccountDisabledOrDeleted
+            ? authorization::ContextKind::AccountDisabled
+            : authorization::ContextKind::InvalidOrRevokedSession;
+    } else {
+        context.kind = authorization::ContextKind::InteractiveUnassigned;
+    }
+    authorization::DecisionResult decision = authorization::evaluate(
+        context, operation, target);
+    if (m_hasInvalidatedCurrentSession &&
+        m_lastInvalidationDecision == authorization::Decision::AccountDisabledOrDeleted) {
+        decision.decision = authorization::Decision::AccountDisabledOrDeleted;
+        decision.reason = m_lastInvalidationReason;
+    }
+    recordAuthorizationDecision(decision);
+    return decision;
+}
+
+void Runtime::recordAuthorizationDecision(
+    const authorization::DecisionResult& decision)
+{
+    if (m_authorizationAudit.decisions != UINT64_MAX)
+        ++m_authorizationAudit.decisions;
+    if (!decision.allowed() && m_authorizationAudit.denials != UINT64_MAX)
+        ++m_authorizationAudit.denials;
+    m_authorizationAudit.lastOperation = decision.operation;
+    m_authorizationAudit.lastDecision = decision.decision;
+    m_authorizationAudit.lastReason = decision.reason;
+}
+
+Result Runtime::queryAuthorizationAudit(authorization::AuditSnapshotV1* output) const
+{
+    if (!output) return Result::InvalidArgument;
+    if (!m_initialized) return Result::NotInitialized;
+    *output = m_authorizationAudit;
+    return Result::Ok;
+}
+
+void Runtime::refreshBootstrapRequired()
+{
+    m_bootstrapRequired = false;
+    if (!m_initialized || !m_identityRegistryReadable || !m_storeReadable || !m_identities)
+        return;
+    identity::UserRecordV1 accounts[identity::kMaximumUsers]{};
+    size_t count = 0u;
+    if (m_identities->enumerate(accounts, identity::kMaximumUsers, &count) !=
+        identity::Result::Ok) return;
+    bool hasAdministratorRecord = false;
+    for (size_t i = 0u; i < count; ++i) {
+        if (accounts[i].role == identity::AccountRole::Administrator) {
+            hasAdministratorRecord = true;
+            break;
+        }
+    }
+    m_bootstrapRequired = !hasAdministratorRecord;
 }
 
 Result Runtime::queryContext(identity::ExecutionDomain domain,
@@ -1134,6 +1301,7 @@ Result Runtime::signOutCurrent()
     if (!m_initialized) return Result::NotInitialized;
     if (m_currentSession < 0) return Result::SessionUnavailable;
     clearSession(static_cast<size_t>(m_currentSession), SessionState::Invalidated);
+    m_hasInvalidatedCurrentSession = false;
     return Result::Ok;
 }
 

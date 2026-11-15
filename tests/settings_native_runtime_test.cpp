@@ -1414,8 +1414,14 @@ int main()
                 kernel::identity::PersistenceState::Unavailable) &&
             (identitySnapshot.flags & kIdentityAuthenticationAvailable) != 0u &&
             (identitySnapshot.flags & kIdentityBootstrapRequired) != 0u &&
+            (identitySnapshot.flags & kIdentityAccountAdministrationImplemented) != 0u &&
+            (identitySnapshot.flags & kIdentitySystemWideAuthorizationIncomplete) != 0u &&
+            (identitySnapshot.flags & kIdentityCanAdministerAccounts) == 0u &&
             identitySnapshot.credentialCount == 0u,
-        "native Users status distinguishes empty registry, supported authentication, required bootstrap, no login, and unavailable persistence");
+        "native Users status reports implemented account authorization, incomplete system coverage, required bootstrap, no login, and unavailable persistence");
+    expect(createAccountLocal(nullptr, "unauthorized", "Unauthorized", nullptr) ==
+            authentication::Result::Unauthorized,
+        "non-Settings caller cannot invoke native account administration");
 
     const char testPassword[] = "Security2Test!Pass";
     authentication::SessionReference testSession{};
@@ -1432,16 +1438,18 @@ int main()
             identitySnapshot.sessionState == static_cast<uint32_t>(authentication::SessionState::Active) &&
             identitySnapshot.currentRole == static_cast<uint32_t>(identity::AccountRole::Administrator) &&
             std::string(identitySnapshot.currentDisplayName) == "Security Administrator" &&
+            (identitySnapshot.flags & kIdentityCanAdministerAccounts) != 0u &&
             identitySnapshot.credentialCount == 1u &&
             identitySnapshot.credentialPersistenceState == static_cast<uint32_t>(
                 identity::PersistenceState::Volatile),
-        "native Settings snapshot reports the authenticated administrator session and display name");
+        "native Settings snapshot reports the authenticated administrator, role, and account-operation permission");
     expect(signOutLocal(settingsApp) == authentication::Result::Ok,
         "native Settings sign-out invalidates the active session");
     expect(readIdentitySnapshot(settingsApp, &identityRequest, &identitySnapshot,
                 sizeof(identitySnapshot), &identitySnapshotSize, &identitySnapshotRevision) == SnapshotStatus::Ok &&
             validIdentitySnapshot(identitySnapshot) &&
             (identitySnapshot.flags & kIdentitySessionActive) == 0u &&
+            (identitySnapshot.flags & kIdentityCanAdministerAccounts) == 0u &&
             identitySnapshot.currentContextKind == static_cast<uint32_t>(
                 identity::IdentityKind::InteractiveUnassigned),
         "native Settings reports the explicit unassigned compatibility context after sign-out");
@@ -1454,6 +1462,49 @@ int main()
                 sizeof(identitySnapshot), &identitySnapshotSize, &identitySnapshotRevision) == SnapshotStatus::Ok &&
             (identitySnapshot.flags & kIdentitySessionActive) != 0u,
         "native Settings authenticates the enrolled account and publishes the active session");
+
+    identity::UserRecordV1 adminRecord{};
+    expect(identity::runtime().findByAccountName("security-admin", &adminRecord) ==
+            identity::Result::Ok,
+        "authoritative account lookup resolves the active Settings administrator");
+    identity::UserId nativeManagedId = identity::kInvalidUserId;
+    expect(createAccountLocal(settingsApp, "settings-user", "Settings User",
+                &nativeManagedId) == authentication::Result::OkVolatile &&
+            nativeManagedId != identity::kInvalidUserId &&
+            resetAccountCredentialLocal(settingsApp, nativeManagedId, testPassword,
+                sizeof(testPassword) - 1u) == authentication::Result::OkVolatile,
+        "native Settings routes account creation and credential setup through authorized operations");
+    expect(signOutLocal(settingsApp) == authentication::Result::Ok &&
+            authenticateLocal(settingsApp, "settings-user", testPassword,
+                sizeof(testPassword) - 1u, &testSession) == authentication::Result::Ok &&
+            readIdentitySnapshot(settingsApp, &identityRequest, &identitySnapshot,
+                sizeof(identitySnapshot), &identitySnapshotSize,
+                &identitySnapshotRevision) == SnapshotStatus::Ok &&
+            (identitySnapshot.flags & kIdentityCanAdministerAccounts) == 0u,
+        "Standard User session is visible and has no account-administration permission");
+    identity::UserId rejectedAccountId = identity::kInvalidUserId;
+    expect(createAccountLocal(settingsApp, "rejected-user", "Rejected User",
+                &rejectedAccountId) == authentication::Result::Unauthorized &&
+            rejectedAccountId == identity::kInvalidUserId &&
+            setAccountRoleLocal(settingsApp, nativeManagedId,
+                identity::AccountRole::Administrator) == authentication::Result::Unauthorized &&
+            setAccountStatusLocal(settingsApp, nativeManagedId,
+                identity::AccountStatus::Disabled) == authentication::Result::Unauthorized &&
+            deleteAccountLocal(settingsApp, nativeManagedId) ==
+                authentication::Result::Unauthorized &&
+            resetAccountCredentialLocal(settingsApp, adminRecord.id, "replacement-password-123",
+                sizeof("replacement-password-123") - 1u) == authentication::Result::Unauthorized,
+        "Settings account requests cannot let a Standard User create, promote, or reset accounts");
+    identity::UserRecordV1 nativeManagedRecord{};
+    expect(identity::runtime().findRecord(nativeManagedId, &nativeManagedRecord) ==
+            identity::Result::Ok &&
+            nativeManagedRecord.role == identity::AccountRole::StandardUser &&
+            nativeManagedRecord.status == identity::AccountStatus::Active &&
+            authentication::runtime().credentialEligible(nativeManagedId) &&
+            signOutLocal(settingsApp) == authentication::Result::Ok &&
+            authenticateLocal(settingsApp, "security-admin", testPassword,
+                sizeof(testPassword) - 1u, &testSession) == authentication::Result::Ok,
+        "denied Settings mutations leave the account unchanged and administrator can sign back in");
     expect(signOutLocal(settingsApp) == authentication::Result::Ok,
         "native Settings can end the session created by its local sign-in action");
     identityRequest.version = kIdentitySnapshotVersion + 1u;

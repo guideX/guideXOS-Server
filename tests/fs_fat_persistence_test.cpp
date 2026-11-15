@@ -2,6 +2,7 @@
 #include "kernel/fs_ext4.h"
 #include "kernel/fs_fat.h"
 #include "kernel/vfs.h"
+#include "../kernel/core/vfs_security_store_internal.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -254,6 +255,55 @@ int main(int argc, char** argv)
           "invalid filesystem fixture fails mount without leaving a partial VFS entry");
 
     kernel::vfs::FileInfo info{};
+    const uint8_t rootAlias = kernel::vfs::mount_alias("/", "/Documents");
+    check(rootAlias != 0xFF && kernel::vfs::get_mount("/.gxos-identity-0.dat") &&
+              kernel::vfs::get_mount("/.gxos-identity-0.dat")->alias,
+          "root alias exposes the backing volume for reserved security-store checks");
+    const char securityStorePayload[] = "SECURITY3B-store-data";
+    const uint8_t rejectedStoreHandle = kernel::vfs::open(
+        "/.gxos-credentials-0.dat", kernel::vfs::OPEN_WRITE |
+            kernel::vfs::OPEN_CREATE | kernel::vfs::OPEN_TRUNCATE);
+    check(rejectedStoreHandle == 0xFF && kernel::vfs::last_open_status() ==
+              kernel::vfs::VFS_ERR_UNAUTHORIZED &&
+              kernel::vfs::create_file("/.gxos-credentials-0.dat", "x", 1u) ==
+                  kernel::vfs::VFS_ERR_UNAUTHORIZED,
+          "write handles and create operations cannot mutate protected credential snapshots");
+    check(kernel::vfs::mkdir("/.gxos-identity-1.dat") ==
+              kernel::vfs::VFS_ERR_UNAUTHORIZED &&
+              kernel::vfs::unlink("/.gxos-identity-1.dat") ==
+                  kernel::vfs::VFS_ERR_UNAUTHORIZED &&
+              kernel::vfs::rename("/.gxos-identity-0.dat", "/ordinary.dat") ==
+                  kernel::vfs::VFS_ERR_UNAUTHORIZED,
+          "directory creation, deletion, and rename APIs reject reserved security paths");
+    const bool internalStoreWrite = kernel::vfs::internal::writeSecurityStoreFile(
+              "/.gxos-identity-0.dat", securityStorePayload,
+              static_cast<uint32_t>(sizeof(securityStorePayload) - 1u)) ==
+                  static_cast<int32_t>(sizeof(securityStorePayload) - 1u);
+    check(internalStoreWrite && read_equals("/.gxos-identity-0.dat",
+              std::vector<uint8_t>(securityStorePayload,
+                  securityStorePayload + sizeof(securityStorePayload) - 1u)),
+          "native security-store adapter can commit and read back its reserved snapshot");
+    const int32_t genericStoreWrite = kernel::vfs::write_file(
+        "/.gxos-identity-0.dat", "forged-store-data", 17u);
+    check(genericStoreWrite == kernel::vfs::VFS_ERR_UNAUTHORIZED &&
+              read_equals("/.gxos-identity-0.dat",
+                  std::vector<uint8_t>(securityStorePayload,
+                      securityStorePayload + sizeof(securityStorePayload) - 1u)),
+          "ordinary VFS writes cannot create or replace protected identity snapshots");
+    const uint8_t securityAlias = kernel::vfs::mount_alias(
+        "/SecurityAlias", "/Documents");
+    check(securityAlias != 0xFF && kernel::vfs::write_file(
+              "/SecurityAlias/.gxos-identity-0.dat", "alias-forgery", 13u) ==
+                  kernel::vfs::VFS_ERR_UNAUTHORIZED &&
+              read_equals("/.gxos-identity-0.dat",
+                  std::vector<uint8_t>(securityStorePayload,
+                      securityStorePayload + sizeof(securityStorePayload) - 1u)),
+          "VFS aliases cannot bypass protected security-store path checks");
+    check(kernel::vfs::unmount("/SecurityAlias") == kernel::vfs::VFS_OK,
+          "security path test alias can be removed cleanly");
+    check(kernel::vfs::unmount("/") == kernel::vfs::VFS_OK,
+          "temporary root alias is removed before the remaining filesystem tests");
+
     const kernel::vfs::Status appDataStat = kernel::vfs::stat("/Documents/APPDATA", &info);
     const bool appDataReady = appDataStat == kernel::vfs::VFS_OK
         ? info.type == kernel::vfs::FILE_TYPE_DIRECTORY

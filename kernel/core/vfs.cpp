@@ -7,6 +7,7 @@
 //
 
 #include "include/kernel/vfs.h"
+#include "vfs_security_store_internal.h"
 #include "include/kernel/block_device.h"
 #include "include/kernel/fs_fat.h"
 #include "include/kernel/fs_ext4.h"
@@ -213,6 +214,50 @@ static const char* resolve_relative_path(const char* fullPath,
 
     join_path(mount->sourcePrefix, relative, resolvedPath, resolvedPathSize);
     return resolvedPath;
+}
+
+static bool pathEqualsIgnoreCase(const char* left, const char* right)
+{
+    if (!left || !right) return false;
+    while (*left && *right) {
+        char a = *left++;
+        char b = *right++;
+        if (a >= 'A' && a <= 'Z') a = static_cast<char>(a + ('a' - 'A'));
+        if (b >= 'A' && b <= 'Z') b = static_cast<char>(b + ('a' - 'A'));
+        if (a != b) return false;
+    }
+    return *left == '\0' && *right == '\0';
+}
+
+static bool isSecurityStoreCanonicalPath(const char* path)
+{
+    char normalized[VFS_MAX_PATH]{};
+    if (!path || strlen(path) >= sizeof(normalized)) return false;
+    normalize_path(path, normalized, sizeof(normalized));
+    size_t length = strlen(normalized);
+    while (length > 1u && normalized[length - 1u] == '/') normalized[--length] = '\0';
+    return pathEqualsIgnoreCase(normalized, "/.gxos-identity-0.dat") ||
+        pathEqualsIgnoreCase(normalized, "/.gxos-identity-1.dat") ||
+        pathEqualsIgnoreCase(normalized, "/.gxos-credentials-0.dat") ||
+        pathEqualsIgnoreCase(normalized, "/.gxos-credentials-1.dat");
+}
+
+static bool isProtectedSecurityStorePath(const char* path, const MountPoint* mount)
+{
+    if (!path || !mount) return false;
+    char normalized[VFS_MAX_PATH]{};
+    if (strlen(path) >= sizeof(normalized)) return true;
+    normalize_path(path, normalized, sizeof(normalized));
+    char resolved[VFS_MAX_PATH]{};
+    const char* actualPath = resolve_relative_path(normalized, mount,
+        resolved, sizeof(resolved));
+    if (!actualPath) return false;
+    char canonical[VFS_MAX_PATH]{};
+    if (strlen(actualPath) >= sizeof(canonical)) return true;
+    normalize_path(actualPath, canonical, sizeof(canonical));
+    size_t length = strlen(canonical);
+    while (length > 1u && canonical[length - 1u] == '/') canonical[--length] = '\0';
+    return isSecurityStoreCanonicalPath(canonical);
 }
 
 // Detect filesystem type from block device
@@ -851,7 +896,8 @@ void join_path(const char* base, const char* name, char* output, size_t outputSi
 // Public API — File Operations
 // ================================================================
 
-uint8_t open(const char* path, uint16_t flags)
+static uint8_t openInternal(const char* path, uint16_t flags,
+                            bool allowSecurityStoreWrite)
 {
     s_lastOpenStatus = VFS_ERR_INVALID;
     if (!path || ((flags & OPEN_TRUNCATE) && !(flags & OPEN_WRITE))) return 0xFF;
@@ -864,6 +910,13 @@ uint8_t open(const char* path, uint16_t flags)
         serial::puts(path);
         serial::puts("\n");
 #endif
+        return 0xFF;
+    }
+
+    const uint16_t mutationFlags = OPEN_WRITE | OPEN_APPEND | OPEN_CREATE | OPEN_TRUNCATE;
+    if ((flags & mutationFlags) != 0u && !allowSecurityStoreWrite &&
+        isProtectedSecurityStorePath(path, mount)) {
+        s_lastOpenStatus = VFS_ERR_UNAUTHORIZED;
         return 0xFF;
     }
 
@@ -1033,6 +1086,11 @@ uint8_t open(const char* path, uint16_t flags)
     s_lastOpenStatus = VFS_OK;
     
     return handle;
+}
+
+uint8_t open(const char* path, uint16_t flags)
+{
+    return openInternal(path, flags, false);
 }
 
 Status last_open_status()
@@ -1456,6 +1514,9 @@ void closedir(uint8_t iterator)
 Status mkdir(const char* path)
 {
     if (!path) return VFS_ERR_INVALID;
+    MountPoint* protectedMount = find_mount_for_path(path);
+    if (protectedMount && isProtectedSecurityStorePath(path, protectedMount))
+        return VFS_ERR_UNAUTHORIZED;
 
     FileInfo existing{};
     if (stat(path, &existing) == VFS_OK) return VFS_ERR_EXISTS;
@@ -1540,6 +1601,7 @@ Status rmdir(const char* path)
 
     MountPoint* mount = find_mount_for_path(path);
     if (!mount) return VFS_ERR_NOT_MOUNT;
+    if (isProtectedSecurityStorePath(path, mount)) return VFS_ERR_UNAUTHORIZED;
     if (mount->readOnly) return VFS_ERR_READ_ONLY;
 
     char resolvedPath[VFS_MAX_PATH];
@@ -1621,6 +1683,7 @@ Status unlink(const char* path)
 
     MountPoint* mount = find_mount_for_path(path);
     if (!mount) return VFS_ERR_NOT_MOUNT;
+    if (isProtectedSecurityStorePath(path, mount)) return VFS_ERR_UNAUTHORIZED;
     if (mount->readOnly) return VFS_ERR_READ_ONLY;
 
     char resolvedPath[VFS_MAX_PATH];
@@ -1645,6 +1708,8 @@ Status rename(const char* oldPath, const char* newPath)
     MountPoint* newMount = find_mount_for_path(newPath);
     if (!oldMount || !newMount) return VFS_ERR_NOT_MOUNT;
     if (oldMount != newMount) return VFS_ERR_INVALID;
+    if (isProtectedSecurityStorePath(oldPath, oldMount) ||
+        isProtectedSecurityStorePath(newPath, newMount)) return VFS_ERR_UNAUTHORIZED;
     if (oldMount->readOnly) return VFS_ERR_READ_ONLY;
 
     char resolvedOldPath[VFS_MAX_PATH];
@@ -1679,13 +1744,14 @@ int32_t read_file(const char* path, void* buffer, uint32_t maxSize)
 }
 
 static int32_t write_file_stream(const char* path, const void* buffer,
-                                 uint32_t size, uint16_t openFlags)
+                                 uint32_t size, uint16_t openFlags,
+                                 bool allowSecurityStoreWrite = false)
 {
     if (!path || (!buffer && size != 0) || size > 0x7FFFFFFFu) {
         return VFS_ERR_INVALID;
     }
 
-    const uint8_t handle = open(path, openFlags);
+    const uint8_t handle = openInternal(path, openFlags, allowSecurityStoreWrite);
     if (handle == 0xFFu) return last_open_status();
 
     const uint8_t* bytes = static_cast<const uint8_t*>(buffer);
@@ -1728,6 +1794,15 @@ int32_t append_file(const char* path, const void* buffer, uint32_t size)
 {
     return write_file_stream(path, buffer, size,
                              OPEN_WRITE | OPEN_APPEND | OPEN_CREATE);
+}
+
+int32_t internal::writeSecurityStoreFile(const char* path, const void* buffer,
+                                        uint32_t size)
+{
+    if (!isSecurityStoreCanonicalPath(path) || !buffer || size == 0u)
+        return VFS_ERR_UNAUTHORIZED;
+    return write_file_stream(path, buffer, size,
+        OPEN_WRITE | OPEN_CREATE | OPEN_TRUNCATE, true);
 }
 
 // ================================================================
@@ -1835,6 +1910,7 @@ const char* status_name(Status status)
         case VFS_ERR_CORRUPT_DIRECTORY: return "VFS_ERR_CORRUPT_DIRECTORY";
         case VFS_ERR_INVALID_DESTINATION: return "VFS_ERR_INVALID_DESTINATION";
         case VFS_ERR_ROLLBACK_FAILED: return "VFS_ERR_ROLLBACK_FAILED";
+        case VFS_ERR_UNAUTHORIZED: return "VFS_ERR_UNAUTHORIZED";
         default: return "VFS_STATUS_UNKNOWN";
     }
 }

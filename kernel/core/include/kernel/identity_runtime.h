@@ -4,6 +4,7 @@
 #include "kernel/identity.h"
 
 namespace kernel {
+namespace authentication { class Runtime; }
 namespace identity {
 
 enum class StoreReadResult : uint8_t {
@@ -42,6 +43,8 @@ struct StorageAdapter {
 class Runtime {
 public:
     Runtime();
+    Runtime(const Runtime&) = delete;
+    Runtime& operator=(const Runtime&) = delete;
 
     Result initialize(const StorageAdapter* storage);
     bool initialized() const;
@@ -55,13 +58,25 @@ public:
     Result getRole(UserId id, AccountRole* output) const;
     bool isAdministrator(UserId id) const;
     Result erase(UserId id);
-    void setInteractiveContextProvider(void* context,
-                                       InteractiveContextProviderFn provider);
     Result queryContext(ExecutionDomain domain, IdentityContextV1* output) const;
     Result snapshot(RuntimeSnapshotV1* output) const;
 
 private:
     Result commit(const Registry& candidate);
+    Result provisionForAuthentication(const authentication::Runtime* owner,
+                                      const char* accountName,
+                                      const char* displayName, UserId* outId);
+    Result setStatusForAuthentication(const authentication::Runtime* owner,
+                                      UserId id, AccountStatus status);
+    Result setRoleForAuthentication(const authentication::Runtime* owner,
+                                    UserId id, AccountRole role);
+    Result eraseForAuthentication(const authentication::Runtime* owner, UserId id);
+    bool bindAuthorizationManager(const authentication::Runtime* owner);
+    void setInteractiveContextProvider(const authentication::Runtime* owner,
+                                       void* context,
+                                       InteractiveContextProviderFn provider);
+
+    friend class ::kernel::authentication::Runtime;
 
     Registry m_registry;
     StorageAdapter m_storage;
@@ -71,6 +86,7 @@ private:
     bool m_initialized;
     bool m_accountCountAvailable;
     bool m_allRecordsDurable;
+    const authentication::Runtime* m_authorizationManagerOwner;
     void* m_contextProviderContext;
     InteractiveContextProviderFn m_contextProvider;
 };

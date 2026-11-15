@@ -29,13 +29,15 @@ Runtime::Runtime()
     : m_registry(), m_storage{}, m_persistence(PersistenceState::Unavailable),
       m_generation(0u), m_activeSlot(-1), m_initialized(false),
       m_accountCountAvailable(false),
-      m_allRecordsDurable(false), m_contextProviderContext(nullptr),
+      m_allRecordsDurable(false), m_authorizationManagerOwner(nullptr),
+      m_contextProviderContext(nullptr),
       m_contextProvider(nullptr)
 {
 }
 
 Result Runtime::initialize(const StorageAdapter* storage)
 {
+    if (m_authorizationManagerOwner) return Result::Unauthorized;
     m_registry.initializeEmpty();
     m_storage = storage ? *storage : StorageAdapter{};
     m_persistence = PersistenceState::Unavailable;
@@ -207,7 +209,19 @@ Result Runtime::commit(const Registry& candidate)
 
 Result Runtime::provision(const char* accountName, const char* displayName, UserId* outId)
 {
+    if (m_authorizationManagerOwner) {
+        if (outId) *outId = kInvalidUserId;
+        return Result::Unauthorized;
+    }
+    return provisionForAuthentication(nullptr, accountName, displayName, outId);
+}
+
+Result Runtime::provisionForAuthentication(const authentication::Runtime* owner,
+                                           const char* accountName,
+                                           const char* displayName, UserId* outId)
+{
     if (outId) *outId = kInvalidUserId;
+    if (owner != m_authorizationManagerOwner) return Result::Unauthorized;
     if (!m_initialized) return Result::NotInitialized;
     Registry candidate = m_registry;
     const Result created = candidate.provision(accountName, displayName, outId);
@@ -250,6 +264,14 @@ Result Runtime::enumerate(UserRecordV1* output, size_t capacity, size_t* outCoun
 
 Result Runtime::setStatus(UserId id, AccountStatus status)
 {
+    if (m_authorizationManagerOwner) return Result::Unauthorized;
+    return setStatusForAuthentication(nullptr, id, status);
+}
+
+Result Runtime::setStatusForAuthentication(const authentication::Runtime* owner,
+                                           UserId id, AccountStatus status)
+{
+    if (owner != m_authorizationManagerOwner) return Result::Unauthorized;
     if (!m_initialized) return Result::NotInitialized;
     Registry candidate = m_registry;
     const Result changed = candidate.setStatus(id, status);
@@ -265,6 +287,14 @@ Result Runtime::setStatus(UserId id, AccountStatus status)
 
 Result Runtime::setRole(UserId id, AccountRole role)
 {
+    if (m_authorizationManagerOwner) return Result::Unauthorized;
+    return setRoleForAuthentication(nullptr, id, role);
+}
+
+Result Runtime::setRoleForAuthentication(const authentication::Runtime* owner,
+                                         UserId id, AccountRole role)
+{
+    if (owner != m_authorizationManagerOwner) return Result::Unauthorized;
     if (!m_initialized) return Result::NotInitialized;
     Registry candidate = m_registry;
     const Result changed = candidate.setRole(id, role);
@@ -291,6 +321,13 @@ bool Runtime::isAdministrator(UserId id) const
 
 Result Runtime::erase(UserId id)
 {
+    if (m_authorizationManagerOwner) return Result::Unauthorized;
+    return eraseForAuthentication(nullptr, id);
+}
+
+Result Runtime::eraseForAuthentication(const authentication::Runtime* owner, UserId id)
+{
+    if (owner != m_authorizationManagerOwner) return Result::Unauthorized;
     if (!m_initialized) return Result::NotInitialized;
     Registry candidate = m_registry;
     const Result removed = candidate.erase(id);
@@ -302,6 +339,14 @@ Result Runtime::erase(UserId id)
         return Result::OkVolatile;
     }
     return commit(candidate);
+}
+
+bool Runtime::bindAuthorizationManager(const authentication::Runtime* owner)
+{
+    if (!owner) return false;
+    if (m_authorizationManagerOwner && m_authorizationManagerOwner != owner) return false;
+    m_authorizationManagerOwner = owner;
+    return true;
 }
 
 Result Runtime::queryContext(ExecutionDomain domain, IdentityContextV1* output) const
@@ -334,8 +379,10 @@ Result Runtime::queryContext(ExecutionDomain domain, IdentityContextV1* output) 
 }
 
 void Runtime::setInteractiveContextProvider(
-    void* context, InteractiveContextProviderFn provider)
+    const authentication::Runtime* owner, void* context,
+    InteractiveContextProviderFn provider)
 {
+    if (!owner || owner != m_authorizationManagerOwner) return;
     m_contextProviderContext = provider ? context : nullptr;
     m_contextProvider = provider;
 }
