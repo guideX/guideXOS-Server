@@ -23,6 +23,7 @@ struct Handle {
 std::map<std::string, Node> files;
 Handle handles[32] = {};
 std::string failWritePath;
+static const uint64_t kBuildOwnerIdentity = UINT64_C(0x52554e5341464534);
 
 std::string parent(const std::string& path)
 {
@@ -73,7 +74,8 @@ gx_build_request request(const char* expected = "build/bin/arm64/app.elf")
 bool run(const gx_build_request& req, gx_build_snapshot* snapshot)
 {
     gx_build_handle handle = 0;
-    if (kernel::compiler::BareMetalBuildService::start(&req, &handle) != GX_OK || handle == 0) return false;
+    if (kernel::compiler::BareMetalBuildService::start_for_owner(
+            &req, &handle, kBuildOwnerIdentity) != GX_OK || handle == 0) return false;
     gx_build_snapshot concurrent = {};
     gx_build_handle rejectedHandle = UINT64_MAX;
     const gx_build_request busyRequest = request();
@@ -299,6 +301,74 @@ int main()
     if (!check(text("/Apps/TestPkg/app.json") == manifest && exists("/Apps/TestPkg/bin/arm64/app.elf") &&
                exists("/Apps/TestPkg/bin/amd64/app.elf"), "validated package VFS publication")) return 7;
 
+    using kernel::compiler::BareMetalBuildService::OwnedArtifactView;
+    OwnedArtifactView owned = {};
+    const bool ownedIdentity = kernel::compiler::BareMetalBuildService::current_artifact(
+        kBuildOwnerIdentity, result.handle, "com.example.buildservice",
+        result.artifactPath, result.artifactSize, "arm64", "guidexos-c-abi-v1",
+        result.packagePath, result.packageGeneration, result.artifactSha256, &owned);
+    if (!check(ownedIdentity && owned.bytes && owned.buildGeneration == result.handle &&
+               owned.ownerIdentity == kBuildOwnerIdentity && owned.el0IntegerProfileValid &&
+               owned.artifactSize == 4108 && std::strlen(owned.sourceSha256) == 64,
+               "successful Build binds the exact owned ARM64 artifact and source revision")) return 29;
+    OwnedArtifactView mismatch = {};
+    if (!check(!kernel::compiler::BareMetalBuildService::current_artifact(
+                   kBuildOwnerIdentity, result.handle + 1, "com.example.buildservice",
+                   result.artifactPath, result.artifactSize, "arm64", "guidexos-c-abi-v1",
+                   result.packagePath, result.packageGeneration, result.artifactSha256, &mismatch) &&
+               !kernel::compiler::BareMetalBuildService::current_artifact(
+                   kBuildOwnerIdentity + 1, result.handle, "com.example.buildservice",
+                   result.artifactPath, result.artifactSize, "arm64", "guidexos-c-abi-v1",
+                   result.packagePath, result.packageGeneration, result.artifactSha256, &mismatch),
+               "stale Build generations and cross-owner artifact reuse are rejected")) return 30;
+    if (!check(!kernel::compiler::BareMetalBuildService::current_artifact(
+                   kBuildOwnerIdentity, result.handle, "com.other.project",
+                   result.artifactPath, result.artifactSize, "arm64", "guidexos-c-abi-v1",
+                   result.packagePath, result.packageGeneration, result.artifactSha256, &mismatch) &&
+               !kernel::compiler::BareMetalBuildService::current_artifact(
+                   kBuildOwnerIdentity, result.handle, "com.example.buildservice",
+                   "build/bin/arm64/substituted.elf", result.artifactSize, "arm64",
+                   "guidexos-c-abi-v1", result.packagePath, result.packageGeneration,
+                   result.artifactSha256, &mismatch) &&
+               !kernel::compiler::BareMetalBuildService::current_artifact(
+                   kBuildOwnerIdentity, result.handle, "com.example.buildservice",
+                   result.artifactPath, result.artifactSize + 1, "arm64",
+                   "guidexos-c-abi-v1", result.packagePath, result.packageGeneration,
+                   result.artifactSha256, &mismatch),
+               "project, VFS path, and size substitutions are rejected")) return 31;
+    if (!check(!kernel::compiler::BareMetalBuildService::current_artifact(
+                   kBuildOwnerIdentity, result.handle, "com.example.buildservice",
+                   result.artifactPath, result.artifactSize, "amd64", "guidexos-c-abi-v1",
+                   result.packagePath, result.packageGeneration, result.artifactSha256, &mismatch) &&
+               !kernel::compiler::BareMetalBuildService::current_artifact(
+                   kBuildOwnerIdentity, result.handle, "com.example.buildservice",
+                   result.artifactPath, result.artifactSize, "arm64", "unsupported-abi",
+                   result.packagePath, result.packageGeneration, result.artifactSha256, &mismatch) &&
+               !kernel::compiler::BareMetalBuildService::current_artifact(
+                   kBuildOwnerIdentity, result.handle, "com.example.buildservice",
+                   result.artifactPath, result.artifactSize, "arm64", "guidexos-c-abi-v1",
+                   result.packagePath, result.packageGeneration,
+                   "0000000000000000000000000000000000000000000000000000000000000000", &mismatch),
+               "architecture, ABI, and digest substitutions are rejected")) return 32;
+    if (!check(!kernel::compiler::BareMetalBuildService::current_artifact(
+                   kBuildOwnerIdentity, result.handle, "com.example.buildservice",
+                   result.artifactPath, result.artifactSize, "arm64", "guidexos-c-abi-v1",
+                   "/Apps/Substituted", result.packageGeneration, result.artifactSha256, &mismatch) &&
+               !kernel::compiler::BareMetalBuildService::current_artifact(
+                   kBuildOwnerIdentity, result.handle, "com.example.buildservice",
+                   result.artifactPath, result.artifactSize, "arm64", "guidexos-c-abi-v1",
+                   result.packagePath, result.packageGeneration + 1, result.artifactSha256, &mismatch),
+               "package path and generation substitutions are rejected")) return 36;
+    const std::vector<uint8_t> immutableBytes = owned.bytes && owned.artifactSize
+        ? std::vector<uint8_t>(owned.bytes, owned.bytes + owned.artifactSize)
+        : std::vector<uint8_t>();
+    arm->second.bytes[0] ^= 0xff;
+    const bool vfsSubstitutionIsolated = owned.bytes && !immutableBytes.empty() &&
+        owned.bytes[0] == immutableBytes[0] && owned.bytes[0] == 0x7f;
+    arm->second.bytes = immutableBytes;
+    if (!check(vfsSubstitutionIsolated,
+               "post-validation VFS replacement cannot change kernel-owned execution bytes")) return 33;
+
     // Canonical logical files remain readable when present without aliases.
     const std::string projectBytes = text("/Workspace/GUIDEXOS.PJT");
     const std::string manifestBytes = text("/Workspace/app/APP.JSN");
@@ -309,6 +379,14 @@ int main()
     gx_build_snapshot canonical = {};
     if (!check(run(request(), &canonical) && canonical.state == GX_BUILD_SUCCEEDED,
                "canonical logical metadata works without FAT aliases")) return 23;
+    OwnedArtifactView canonicalOwned = {};
+    if (!check(canonical.handle != result.handle &&
+               kernel::compiler::BareMetalBuildService::current_artifact(
+                   kBuildOwnerIdentity, canonical.handle, "com.example.buildservice",
+                   canonical.artifactPath, canonical.artifactSize, "arm64",
+                   "guidexos-c-abi-v1", canonical.packagePath, canonical.packageGeneration,
+                   canonical.artifactSha256, &canonicalOwned),
+               "a subsequent Build receives a distinct immutable generation")) return 34;
 
     // Presenting both forms is ambiguous and must fail closed.
     put("/Workspace/GUIDEXOS.PJT", projectBytes.c_str());
@@ -370,13 +448,19 @@ int main()
                has_output(syntax, "error: line") && !exists("/Workspace/build/bin/arm64/app.elf") &&
                !exists("/Workspace/build/bin/amd64/app.elf"),
                "syntax error propagates diagnostics and removes stale build outputs")) return 9;
+    if (!check(!kernel::compiler::BareMetalBuildService::current_artifact(
+                   kBuildOwnerIdentity, replaced.handle, "com.example.buildservice",
+                   replaced.artifactPath, replaced.artifactSize, "arm64",
+                   "guidexos-c-abi-v1", replaced.packagePath, replaced.packageGeneration,
+                   replaced.artifactSha256, &mismatch),
+               "failed Build invalidates the previously runnable generation")) return 35;
     if (!check(exists("/Apps/TestPkg/bin/arm64/app.elf"), "failed rebuild preserves previous published package")) return 10;
 
     const char* projectMissingSource = "{\"projectId\":\"com.example.buildservice\",\"projectKind\":\"native-gui-application\",\"abi\":\"guidexos-c-abi-v1\",\"sourceRoot\":\"src\",\"sourceEntry\":\"missing.c\",\"outputName\":\"app\",\"packageRoot\":\"/Apps/TestPkg\"}";
     put("/Workspace/GUIDEXOS.PJT", projectMissingSource);
     gx_build_snapshot missing = {};
     if (!check(run(request(), &missing) && missing.state == GX_BUILD_FAILED &&
-               missing.errorCode == GX_BUILD_ERROR_COMPILER_FAILED && !exists("/Workspace/build/bin/arm64/app.elf"),
+               missing.errorCode == GX_BUILD_ERROR_SOURCE_SELECTION && !exists("/Workspace/build/bin/arm64/app.elf"),
                "missing source is a failed build with no stale output")) return 11;
 
     put("/Workspace/GUIDEXOS.PJT", project);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include "studio_elf_image.h"
 
 #define GXOS_AARCH64_EL0_PAGE_SIZE UINT64_C(4096)
 #define GXOS_AARCH64_EL0_USER_BASE UINT64_C(0x0000400000000000)
@@ -165,6 +166,23 @@ struct gxos_aarch64_el0_task_result {
     uint64_t resources_cleaned;
 };
 
+// Exact identity returned by the resident Build service. The owner token is
+// the Phase 9 application runtime identity; owner_id below remains the
+// current scheduler kernel task that owns the asynchronous child lifecycle.
+struct gxos_aarch64_studio_build_identity {
+    uint64_t owner_identity;
+    uint64_t build_generation;
+    uint64_t artifact_size;
+    const char* project_id;
+    const char* artifact_path;
+    const char* package_path;
+    uint64_t package_generation;
+    const char* architecture;
+    const char* abi;
+    const char* source_sha256;
+    const char* artifact_sha256;
+};
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -180,6 +198,9 @@ uint8_t phase2_el0_map_owned_page(gxos_aarch64_el0_address_space* space,
 uint8_t phase2_el0_copy_code(gxos_aarch64_el0_address_space* space,
                              uint64_t owner_id, uint64_t virtual_address,
                              const uint8_t* image, uint64_t image_size);
+uint8_t phase2_el0_copy_owned_memory(gxos_aarch64_el0_address_space* space,
+                                     uint64_t owner_id, uint64_t virtual_address,
+                                     const uint8_t* bytes, uint64_t byte_count);
 uint8_t phase2_el0_query_descriptor(const gxos_aarch64_el0_address_space* space,
                                     uint64_t virtual_address,
                                     uint64_t* descriptor);
@@ -220,6 +241,12 @@ uint8_t phase2_el0_task_create(const uint8_t* trusted_image,
                                uint64_t image_size, uint64_t owner_id,
                                uint64_t budget_microseconds,
                                uint64_t* execution_id);
+uint8_t phase2_el0_task_create_studio_elf(
+    const uint8_t* validated_elf, uint64_t elf_size, uint64_t owner_id,
+    uint64_t budget_microseconds, uint64_t* execution_id);
+uint8_t phase2_el0_task_create_studio_build(
+    const gxos_aarch64_studio_build_identity* identity, uint64_t owner_id,
+    uint64_t budget_microseconds, uint64_t* execution_id);
 uint8_t phase2_el0_task_start(uint64_t execution_id, uint64_t owner_id);
 uint8_t phase2_el0_task_query(uint64_t execution_id, uint64_t owner_id,
                               gxos_aarch64_el0_task_result* result);

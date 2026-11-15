@@ -24,6 +24,9 @@ foreach ($functionName in @(
 }
 
 $script:scheduledSourceRevision = '0123456789abcdef0123456789abcdef01234567'
+# Exercise the extension used by the RUNSAFE4-B diagnostic candidate even
+# when this parser fixture is invoked from a parent script without the switch.
+$Runsafe4BQualification = $true
 $kernelDescriptor = '0x0060000000000487'
 $deviceDescriptor = '0x0060000000000403'
 $kernelProbe = '[guideXOS] AARCH64_EL0_PROBE_RECORD probe=kernel-data target=0x0000000040000000 descriptor=' +
@@ -51,11 +54,17 @@ $terminal = @(
 $continuation = '[RUNSAFE3B] CONTINUATION PASS timer_delta=20 context_switch_delta=40 kernel_work_delta=60 unexpected_irqs=0 exceptions=0'
 $final = 'AARCH64_RUNSAFE3B_PASS source=' + $script:scheduledSourceRevision +
     ' finite_preempts=2 timeout_enforced=1 cancellation_forced=1 fault_isolated=1 cleanup=1'
+$runsafe4b = @(
+    '[RUNSAFE4B] INVALID ELF REJECT PASS control=wrong-machine',
+    '[RUNSAFE4B] COMPILED ELF PASS child=51 generation=77 result=42 user_pages=7 page_table_pages=4 cleanup=1 reap=1 root_restored=1 arbitrary_studio_run=disabled',
+    '[RUNSAFE4B] NONCOOPERATIVE UNSUPPORTED reason=resident-compiler-profile build_failed=1 prior_generation_invalidated=1',
+    ('AARCH64_RUNSAFE4B_PASS source=' + $script:scheduledSourceRevision + ' build_generation=77 expected_return=42 invalid_elf_rejected=1 cleanup=1')
+)
 $log = @(
     'AARCH64_EL0_QUALIFICATION_PASS observed-exit=2a cleanup=PASS',
     'AARCH64_EL0_NEGATIVE_KERNEL_DATA_PASS', 'AARCH64_EL0_NEGATIVE_GICD_PASS',
     'AARCH64_EL0_NEGATIVE_CONTROLS_PASS', $kernelProbe, $deviceProbe
-) + $ready + $terminal + @($continuation, $final)
+) + $ready + $terminal + @($continuation, $final) + $runsafe4b
 $evidence = Assert-ScheduledEl0GuestEvidence ($log -join "`n")
 if ($evidence.SourceRevision -ne $script:scheduledSourceRevision -or
     $evidence.FinitePreemptions -ne 2 -or $evidence.TimerDelta -ne 20 -or

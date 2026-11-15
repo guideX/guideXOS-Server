@@ -2175,9 +2175,11 @@ static gx_result GX_CALL phase11_file_remove(gx_app_context* context, const char
 
 static gx_result GX_CALL phase11_build_start(gx_app_context* context, const gx_build_request* request, gx_build_handle* output)
 {
-    if (!phase9_runtime(context)) return GX_ERROR_INVALID_ARGUMENT;
+    Phase9Runtime* owner = phase9_runtime(context);
+    if (!owner) return GX_ERROR_INVALID_ARGUMENT;
     phase9_vfs_enter();
-    const gx_result result = kernel::compiler::BareMetalBuildService::start(request, output);
+    const gx_result result = kernel::compiler::BareMetalBuildService::start_for_owner(
+        request, output, reinterpret_cast<uintptr_t>(owner));
     phase9_vfs_exit();
     return result;
 }

@@ -28,10 +28,12 @@ $sources = @(
     (Join-Path $repoRoot 'kernel/core/native_architecture.cpp'),
     (Join-Path $repoRoot 'kernel/core/compiler/elf_writer.cpp'),
     (Join-Path $repoRoot 'kernel/arch/arm64/compiler_backend.cpp'),
+    (Join-Path $repoRoot 'kernel/arch/arm64/studio_elf_image.cpp'),
     (Join-Path $repoRoot 'kernel/arch/amd64/compiler_backend.cpp')
 )
 & $gxx -std=c++14 -Wall -Wextra -O2 -DGXOS_BARE_METAL `
     "-I$(Join-Path $repoRoot 'kernel')" `
+    "-iquote$(Join-Path $repoRoot '.')" `
     "-iquote$(Join-Path $repoRoot 'kernel/core/include')" `
     "-I$(Join-Path $repoRoot 'sdk/include')" `
     "-I$(Join-Path $repoRoot 'kernel/arch/amd64/include')" `

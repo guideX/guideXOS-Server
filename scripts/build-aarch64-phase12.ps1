@@ -8,7 +8,8 @@ param(
     [switch]$R2B1Workspaces,
     [switch]$El0Qualification,
     [switch]$El0NegativeQualification,
-    [switch]$El0ScheduledQualification
+    [switch]$El0ScheduledQualification,
+    [switch]$Runsafe4BQualification
 )
 
 $ErrorActionPreference = 'Stop'
@@ -125,6 +126,12 @@ if ($El0ScheduledQualification) {
     }
     $kernelBuildParameters.El0ScheduledQualification = $true
 }
+if ($Runsafe4BQualification) {
+    if (!$El0ScheduledQualification) {
+        throw 'Runsafe4BQualification requires El0ScheduledQualification and its RUNSAFE2/RUNSAFE3 controls.'
+    }
+    $kernelBuildParameters.Runsafe4BQualification = $true
+}
 & (Join-Path $PSScriptRoot 'build-aarch64-phase10.ps1') @kernelBuildParameters
 
 $clang = Join-Path $LlvmRoot 'clang++.exe'
@@ -240,6 +247,21 @@ New-Item -ItemType Directory -Path $packageSkeletonStage -Force | Out-Null
 # both freshly built target ELFs; no target ELF is present before the guest build.
 Copy-Item -LiteralPath (Join-Path $proofSource 'app\app.json') -Destination (Join-Path $packageSkeletonStage 'app.json') -Force
 
+$runsafe4BWorkspace = $null
+if ($Runsafe4BQualification) {
+    $runsafe4BWorkspace = Join-Path $stageRoot 'Runsafe4BProject'
+    New-Item -ItemType Directory -Path (Join-Path $runsafe4BWorkspace 'app') -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $runsafe4BWorkspace 'src') -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $runsafe4BWorkspace 'guidexos.project'),
+        '{"projectId":"com.guidexos.runsafe4b","projectKind":"native-gui-application","abi":"guidexos-c-abi-v1","sourceRoot":"src","sourceEntry":"main.c","outputName":"runsafe4b"}',
+        [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText((Join-Path $runsafe4BWorkspace 'app\app.json'),
+        '{"id":"com.guidexos.runsafe4b","kind":"NativeElf","entries":[{"path":"bin/arm64/runsafe4b.elf"}]}',
+        [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText((Join-Path $runsafe4BWorkspace 'src\main.c'),
+        'int gx_main(void* ctx) { return 42; }', [Text.UTF8Encoding]::new($false))
+}
+
 $r2b1Workspace = $null
 if ($R2B1Workspaces) {
     $vfsFailureSource = Join-Path $repoRoot 'sdk\samples\r2b1_vfs_failure'
@@ -298,13 +320,13 @@ $serverHead = (& git -C $repoRoot rev-parse HEAD 2>&1 | Out-String).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Unable to record the source repository revision.' }
 $serverBranch = (& git -C $repoRoot branch --show-current 2>&1 | Out-String).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Unable to record the source repository branch.' }
-$candidateProfile = if ($El0ScheduledQualification) { 'runsafe3b-scheduled-el0' } elseif ($El0NegativeQualification) { 'runsafe2-el0-negative-controls' } elseif ($El0Qualification) { 'runsafe2-el0-qualification' } elseif ($ProductionStudio -and $R2B1Workspaces) { 'r2b1-native-build-ui' } elseif ($ProductionStudio) { 'production-ui' } else { 'phase12-smoke' }
+$candidateProfile = if ($Runsafe4BQualification) { 'runsafe4b-compiled-el0' } elseif ($El0ScheduledQualification) { 'runsafe3b-scheduled-el0' } elseif ($El0NegativeQualification) { 'runsafe2-el0-negative-controls' } elseif ($El0Qualification) { 'runsafe2-el0-qualification' } elseif ($ProductionStudio -and $R2B1Workspaces) { 'r2b1-native-build-ui' } elseif ($ProductionStudio) { 'production-ui' } else { 'phase12-smoke' }
 $studioSmokeEnabled = !$ProductionStudio
 $studioDriverOverlay = Join-Path $studioSourceCopy 'build.ps1'
 $studioCompatOverlay = Join-Path $studioSourceCopy 'src\studio_v05_compile_compat.h'
 $candidateManifest = [ordered]@{
     schemaVersion = 1
-    candidate = if ($El0ScheduledQualification) { 'guideXOS Server ARM64 RUNSAFE3-B Scheduled EL0 Diagnostic' } elseif ($El0NegativeQualification) { 'guideXOS Server ARM64 RUNSAFE2 EL0 Negative Controls' } elseif ($El0Qualification) { 'guideXOS Server ARM64 RUNSAFE2 EL0 Qualification Diagnostic' } else { 'guideXOS Server ARM64 NativeElf Developer Studio' }
+    candidate = if ($Runsafe4BQualification) { 'guideXOS Server ARM64 RUNSAFE4-B Compiled ELF EL0 Diagnostic' } elseif ($El0ScheduledQualification) { 'guideXOS Server ARM64 RUNSAFE3-B Scheduled EL0 Diagnostic' } elseif ($El0NegativeQualification) { 'guideXOS Server ARM64 RUNSAFE2 EL0 Negative Controls' } elseif ($El0Qualification) { 'guideXOS Server ARM64 RUNSAFE2 EL0 Qualification Diagnostic' } else { 'guideXOS Server ARM64 NativeElf Developer Studio' }
     profile = $candidateProfile
     server = [ordered]@{
         branch = $serverBranch
@@ -327,7 +349,8 @@ $candidateManifest = [ordered]@{
         el0QualificationDefine = [bool]$El0Qualification
         el0NegativeQualificationDefine = [bool]$El0NegativeQualification
         el0ScheduledQualificationDefine = [bool]$El0ScheduledQualification
-        studioPayloadExecution = if ($El0Qualification) { 'not-launched; internal EL0 diagnostic path is selected' } else { 'Phase 12 profile runtime' }
+        runsafe4BQualificationDefine = [bool]$Runsafe4BQualification
+        studioPayloadExecution = if ($Runsafe4BQualification) { 'one controlled return-42 Build artifact is run through the kernel-internal EL0 lifecycle; arbitrary Studio Run remains disabled' } elseif ($El0Qualification) { 'not-launched; internal EL0 diagnostic path is selected' } else { 'Phase 12 profile runtime' }
         studioRunRemainsDisabled = $true
     }
     guest = [ordered]@{
@@ -355,7 +378,21 @@ $candidateManifest = [ordered]@{
                 timeout = Get-ByteArraySha256Hex ([byte[]]@(0xe9,0xff,0x9f,0xd2,0x29,0x09,0x00,0xf1,0xe1,0xff,0xff,0x54))
                 cancellation = Get-ByteArraySha256Hex ([byte[]]@(0x60,0x08,0x80,0xd2,0xff,0xff,0xff,0x17))
                 fault = Get-ByteArraySha256Hex ([byte[]]@(0x09,0x00,0xa8,0xd2,0x20,0x01,0x40,0xf9))
-                source = 'internal phase2_el0_runtime.cpp qualification fixtures; no Studio ELF is executed'
+            source = if ($Runsafe4BQualification) {
+                'internal phase2_el0_runtime.cpp qualification fixtures remain separate; the controlled compiled Studio ELF has its own diagnostic path'
+            } else {
+                'internal phase2_el0_runtime.cpp qualification fixtures; no Studio ELF is executed'
+            }
+            }
+        } else { $null }
+        compiledStudioElfQualification = if ($Runsafe4BQualification) {
+            [ordered]@{
+                guestProject = '/Runsafe4BProject'
+                projectId = 'com.guidexos.runsafe4b'
+                sourceSha256 = (Get-Sha256Hex (Join-Path $runsafe4BWorkspace 'src\main.c'))
+                expectedReturn = 42
+                source = 'resident Build service compiles the staged source at guest runtime; Build-owned bytes feed the isolated loader'
+                unsupportedChild = 'non-cooperative C loop is outside the resident compiler grammar'
             }
         } else { $null }
     }

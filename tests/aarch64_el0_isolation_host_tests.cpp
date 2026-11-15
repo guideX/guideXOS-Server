@@ -1,11 +1,16 @@
 #include <stdint.h>
-#include <stdio.h>
+#include <cstdio>
+#include <cstring>
 
 #include "kernel/arch/arm64/phase2_el0.h"
 #include "kernel/arch/arm64/phase2_mmu.h"
 #include "kernel/arch/arm64/phase3_timer.h"
 #include "kernel/core/include/kernel/common_physical_allocator.h"
 #include "kernel/core/include/kernel/common_scheduler.h"
+#include "kernel/arch/arm64/studio_elf_image.h"
+#include "kernel/core/compiler/elf_writer.h"
+#include "kernel/core/compiler/compiler_build_service.h"
+#include "kernel/arch/arm64/compiler_backend.h"
 
 extern "C" void* phase2_el0_host_physical_pointer(uint64_t physical_address);
 
@@ -26,6 +31,36 @@ static bool g_scheduler_stack_used[16];
 static uint32_t g_scheduler_context_count = 0;
 static uint64_t g_scheduler_switch_count = 0;
 static uint64_t g_interrupt_frame[40];
+static kernel::compiler::BareMetalBuildService::OwnedArtifactView g_testOwnedArtifact{};
+
+static void expect(bool condition, const char* label);
+static void allocate_scheduler_pages(uint64_t pages, uint64_t* base);
+static bool release_scheduler_pages(uint64_t base, uint64_t pages);
+static void* find_execution_task(uint64_t execution_id);
+
+static uint32_t read_le32(const uint8_t* bytes, uint32_t offset)
+{
+    return static_cast<uint32_t>(bytes[offset]) |
+        (static_cast<uint32_t>(bytes[offset + 1]) << 8) |
+        (static_cast<uint32_t>(bytes[offset + 2]) << 16) |
+        (static_cast<uint32_t>(bytes[offset + 3]) << 24);
+}
+
+static void write_le16(uint8_t* bytes, uint32_t offset, uint16_t value)
+{
+    bytes[offset] = static_cast<uint8_t>(value);
+    bytes[offset + 1] = static_cast<uint8_t>(value >> 8);
+}
+
+static void write_le32(uint8_t* bytes, uint32_t offset, uint32_t value)
+{
+    for (uint32_t i = 0; i < 4; ++i) bytes[offset + i] = static_cast<uint8_t>(value >> (i * 8));
+}
+
+static void write_le64(uint8_t* bytes, uint32_t offset, uint64_t value)
+{
+    for (uint32_t i = 0; i < 8; ++i) bytes[offset + i] = static_cast<uint8_t>(value >> (i * 8));
+}
 
 struct SchedulerMockContext {
     uint64_t stack_base;
@@ -36,6 +71,110 @@ struct SchedulerMockContext {
 static SchedulerMockContext g_scheduler_contexts[32];
 static uint64_t g_context_switch_marker = 0;
 
+static bool make_compiler_elf(int32_t return_value, uint8_t* elf,
+                              uint32_t capacity, uint32_t* elf_bytes)
+{
+    if (!elf || !elf_bytes) return false;
+    kernel::compiler::FunctionIR function{};
+    const char name[] = "gx_main";
+    for (uint32_t i = 0; i < sizeof(name); ++i) function.name[i] = name[i];
+    function.returnConstant = return_value;
+    uint8_t code[512]{};
+    uint32_t code_bytes = 0;
+    if (!kernel::compiler::arm64::emit_function(
+            function, code, sizeof(code), &code_bytes)) return false;
+    kernel::compiler::ElfLayout layout{};
+    if (!kernel::compiler::write_bootstrap_elf_for_target_at_base(
+            code, code_bytes, kernel::compiler::CompilerTarget::Arm64,
+            GXOS_AARCH64_STUDIO_ELF_BASE, elf, capacity, &layout)) return false;
+    *elf_bytes = layout.outputBytes;
+    return true;
+}
+
+static void test_studio_elf_validation_negatives()
+{
+    uint8_t original[16384]{};
+    uint32_t size = 0;
+    expect(make_compiler_elf(42, original, sizeof(original), &size) && size == 4108,
+           "ELF negative controls start from authentic resident-compiler output");
+    gxos_aarch64_studio_elf_image image{};
+    expect(!gxos_aarch64_studio_elf_validate(original, 100, &image),
+           "truncated ELF headers are rejected before field reads");
+    expect(!gxos_aarch64_studio_elf_validate(original, size - 1, &image),
+           "truncated load segment is rejected");
+
+    uint8_t bad[16384]{};
+    for (uint32_t i = 0; i < size; ++i) bad[i] = original[i];
+    bad[18] = 62; bad[19] = 0;
+    expect(!gxos_aarch64_studio_elf_validate(bad, size, &image),
+           "wrong ELF machine architecture is rejected");
+    for (uint32_t i = 0; i < size; ++i) bad[i] = original[i];
+    write_le64(bad, 24, GXOS_AARCH64_STUDIO_ELF_BASE + 0x2000);
+    expect(!gxos_aarch64_studio_elf_validate(bad, size, &image),
+           "entry outside the supported compiler function is rejected");
+    for (uint32_t i = 0; i < size; ++i) bad[i] = original[i];
+    write_le64(bad, 80, GXOS_AARCH64_STUDIO_ELF_BASE + 0x1000);
+    expect(!gxos_aarch64_studio_elf_validate(bad, size, &image),
+           "incorrect fixed load base is rejected");
+    for (uint32_t i = 0; i < size; ++i) bad[i] = original[i];
+    write_le32(bad, 68, 7);
+    expect(!gxos_aarch64_studio_elf_validate(bad, size, &image),
+           "writable executable segment is rejected by W^X policy");
+    for (uint32_t i = 0; i < size; ++i) bad[i] = original[i];
+    write_le64(bad, 104, UINT64_C(0x100000));
+    expect(!gxos_aarch64_studio_elf_validate(bad, size, &image),
+           "excessive segment memory requirements are rejected");
+    for (uint32_t i = 0; i < size; ++i) bad[i] = original[i];
+    write_le32(bad, 64, 2);
+    expect(!gxos_aarch64_studio_elf_validate(bad, size, &image),
+           "dynamic and relocation-bearing load layouts are rejected");
+    for (uint32_t i = 0; i < size; ++i) bad[i] = original[i];
+    write_le16(bad, 56, 2);
+    expect(!gxos_aarch64_studio_elf_validate(bad, size, &image),
+           "overlapping or additional program segments are rejected");
+    for (uint32_t i = 0; i < size; ++i) bad[i] = original[i];
+    write_le64(bad, 40, 120);
+    write_le16(bad, 60, 1);
+    expect(!gxos_aarch64_studio_elf_validate(bad, size, &image),
+           "section tables and relocation sections are unsupported");
+    for (uint32_t i = 0; i < size; ++i) bad[i] = original[i];
+    write_le64(bad, 112, 3);
+    expect(!gxos_aarch64_studio_elf_validate(bad, size, &image),
+           "invalid segment alignment is rejected");
+    for (uint32_t i = 0; i < size; ++i) bad[i] = original[i];
+    write_le32(bad, 0x1000, UINT32_C(0x1e202800));
+    expect(!gxos_aarch64_studio_elf_validate(bad, size, &image),
+           "SIMD and unsupported instruction profiles are rejected");
+    for (uint32_t i = 0; i < size; ++i) bad[i] = original[i];
+    bad[0x1000] = static_cast<uint8_t>(bad[0x1000] | 1);
+    expect(!gxos_aarch64_studio_elf_validate(bad, size, &image),
+           "integer return instructions must write the C return register w0");
+}
+
+static void set_test_owned_artifact(const uint8_t* bytes, uint64_t size,
+                                    uint64_t owner_identity, uint64_t generation,
+                                    uint8_t profile_valid)
+{
+    g_testOwnedArtifact = {};
+    g_testOwnedArtifact.bytes = bytes;
+    g_testOwnedArtifact.artifactSize = size;
+    g_testOwnedArtifact.ownerIdentity = owner_identity;
+    g_testOwnedArtifact.buildGeneration = generation;
+    g_testOwnedArtifact.el0IntegerProfileValid = profile_valid;
+    std::snprintf(g_testOwnedArtifact.projectId, sizeof(g_testOwnedArtifact.projectId),
+                  "%s", "com.example.runsafe4a");
+    std::snprintf(g_testOwnedArtifact.artifactPath, sizeof(g_testOwnedArtifact.artifactPath),
+                  "%s", "build/bin/arm64/app.elf");
+    std::snprintf(g_testOwnedArtifact.architecture, sizeof(g_testOwnedArtifact.architecture),
+                  "%s", "arm64");
+    std::snprintf(g_testOwnedArtifact.abi, sizeof(g_testOwnedArtifact.abi),
+                  "%s", "guidexos-c-abi-v1");
+    std::snprintf(g_testOwnedArtifact.sourceSha256, sizeof(g_testOwnedArtifact.sourceSha256),
+                  "%s", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    std::snprintf(g_testOwnedArtifact.artifactSha256, sizeof(g_testOwnedArtifact.artifactSha256),
+                  "%s", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+}
+
 static void kernel_owner_entry(void*) {}
 
 static void expect(bool condition, const char* label)
@@ -43,7 +182,7 @@ static void expect(bool condition, const char* label)
     ++g_assertions;
     if (!condition) {
         ++g_failures;
-        printf("FAIL: %s\n", label);
+        std::printf("FAIL: %s\n", label);
     }
 }
 
@@ -55,9 +194,26 @@ static void reset_fake_memory()
     }
     g_page_allocated[0] = true; // Kernel root owned by the test fixture.
     g_page_allocated[1] = true; // Shared kernel L1 table.
+    g_page_allocated[2] = true; // Shared kernel L2 table.
+    g_page_allocated[3] = true; // Shared kernel L3 table.
     g_current_root = kPhysicalBase;
     uint64_t* root = reinterpret_cast<uint64_t*>(g_physical_pages[0]);
     root[0] = (kPhysicalBase + 4096) | 3;
+    uint64_t* l1 = reinterpret_cast<uint64_t*>(g_physical_pages[1]);
+    uint64_t* l2 = reinterpret_cast<uint64_t*>(g_physical_pages[2]);
+    uint64_t* l3 = reinterpret_cast<uint64_t*>(g_physical_pages[3]);
+    const uint64_t image_va = GXOS_AARCH64_STUDIO_ELF_BASE;
+    const uint32_t l1_index = static_cast<uint32_t>((image_va >> 30) & 0x1ff);
+    const uint32_t l2_index = static_cast<uint32_t>((image_va >> 21) & 0x1ff);
+    l1[l1_index] = (kPhysicalBase + 2 * 4096) | 3;
+    l2[l2_index] = (kPhysicalBase + 3 * 4096) | 3;
+    const uint64_t image_window_start = image_va & ~UINT64_C(0x1fffff);
+    const uint32_t first_leaf = static_cast<uint32_t>((image_window_start >> 12) & 0x1ff);
+    for (uint32_t page = 0; page < 512; ++page) {
+        const uint64_t va = image_window_start + static_cast<uint64_t>(page) * 4096;
+        l3[(first_leaf + page) & 0x1ff] = va | 3 | (UINT64_C(1) << 2) |
+            (UINT64_C(3) << 8) | (UINT64_C(1) << 10) | (UINT64_C(1) << 54);
+    }
 }
 
 static uint64_t* table_at(uint64_t physical)
@@ -199,6 +355,211 @@ static void test_permissions_and_ownership()
     expect(a.space.state == GXOS_AARCH64_EL0_SPACE_CLEANED &&
            b.space.state == GXOS_AARCH64_EL0_SPACE_CLEANED,
            "both child address spaces release their private resources");
+}
+
+static void test_studio_fixed_address_is_private()
+{
+    reset_fake_memory();
+    gxos_aarch64_el0_address_space space{};
+    const uint64_t owner = 19;
+    expect(phase2_el0_address_space_create(&space, owner),
+           "create a private child root for the compiler fixed-address image");
+    const uint64_t rx = GXOS_AARCH64_EL0_PAGE_READ | GXOS_AARCH64_EL0_PAGE_EXECUTE;
+    const uint64_t rw_stack = GXOS_AARCH64_EL0_PAGE_READ |
+        GXOS_AARCH64_EL0_PAGE_WRITE | GXOS_AARCH64_EL0_PAGE_STACK;
+    uint64_t physical = 0;
+    expect(phase2_el0_allocate_page(&space, owner, GXOS_AARCH64_STUDIO_ELF_BASE,
+               rx, &physical) && physical != GXOS_AARCH64_STUDIO_ELF_BASE,
+           "fixed compiler image VA maps a distinct child-owned physical page");
+    const uint64_t stack_end = GXOS_AARCH64_EL0_USER_LIMIT - GXOS_AARCH64_EL0_PAGE_SIZE;
+    const uint64_t stack_base = stack_end - GXOS_AARCH64_STUDIO_ELF_STACK_BYTES;
+    bool stack_ok = true;
+    for (uint64_t offset = 0; offset < GXOS_AARCH64_STUDIO_ELF_STACK_BYTES; offset += 4096) {
+        uint64_t stack_physical = 0;
+        stack_ok = stack_ok && phase2_el0_allocate_page(
+            &space, owner, stack_base + offset, rw_stack, &stack_physical);
+    }
+    expect(stack_ok && phase2_el0_validate_stack(&space, stack_end),
+           "EL0 stack is separately owned with an aligned stack top");
+    expect(!phase2_el0_query_descriptor(&space, GXOS_AARCH64_STUDIO_ELF_BASE - 4096,
+               &physical) &&
+           !phase2_el0_query_descriptor(&space, stack_base - 4096, &physical) &&
+           !phase2_el0_query_descriptor(&space, stack_end, &physical),
+           "image and stack retain unmapped guard pages");
+
+    uint64_t user_descriptor = 0;
+    expect(phase2_el0_query_descriptor(&space, GXOS_AARCH64_STUDIO_ELF_BASE,
+               &user_descriptor) && ((user_descriptor >> 6) & 3) == 3 &&
+           (user_descriptor & (UINT64_C(1) << 54)) == 0 &&
+           (user_descriptor & (UINT64_C(1) << 53)) != 0,
+           "EL0 text is user-readable and executable while EL1 execute stays disabled");
+    uint64_t* child_root = table_at(space.root);
+    uint64_t* kernel_root = table_at(space.kernel_root);
+    expect(child_root[0] != kernel_root[0] &&
+           ((kernel_root[0] & UINT64_C(0x000000fffffff000)) == kPhysicalBase + 4096),
+           "low identity mapping tables are copy-on-write in the child root");
+    uint64_t kernel_descriptor = 0;
+    const uint64_t* kernel_l1 = table_at(kernel_root[0] & UINT64_C(0x000000fffffff000));
+    const uint64_t* kernel_l2 = table_at(kernel_l1[(GXOS_AARCH64_STUDIO_ELF_BASE >> 30) & 0x1ff] & UINT64_C(0x000000fffffff000));
+    const uint64_t* kernel_l3 = table_at(kernel_l2[(GXOS_AARCH64_STUDIO_ELF_BASE >> 21) & 0x1ff] & UINT64_C(0x000000fffffff000));
+    kernel_descriptor = kernel_l3[(GXOS_AARCH64_STUDIO_ELF_BASE >> 12) & 0x1ff];
+    expect(((kernel_descriptor >> 6) & 3) == 0 &&
+           (kernel_descriptor & UINT64_C(0x000000fffffff000)) == GXOS_AARCH64_STUDIO_ELF_BASE,
+           "kernel root retains its original privileged identity mapping");
+    expect(phase2_el0_cleanup(&space),
+           "ELF mapping cleanup releases the copied page tables and user pages");
+}
+
+static void test_compiler_elf_task_preparation(kernel::scheduler::Task* owner)
+{
+    expect(owner && kernel::scheduler::current_task() == owner,
+           "Studio ELF creator is owned by the current kernel task");
+
+    uint8_t elf42[16384]{};
+    uint8_t elf43[16384]{};
+    uint32_t size42 = 0;
+    uint32_t size43 = 0;
+    expect(make_compiler_elf(42, elf42, sizeof(elf42), &size42) &&
+           make_compiler_elf(43, elf43, sizeof(elf43), &size43) &&
+           size42 == 4108 && size43 == 4108,
+           "production ARM64 compiler backend and ELF writer emit 42 and 43 artifacts");
+
+    gxos_aarch64_studio_elf_image plan42{};
+    gxos_aarch64_studio_elf_image plan43{};
+    expect(gxos_aarch64_studio_elf_validate(elf42, size42, &plan42) &&
+           gxos_aarch64_studio_elf_validate(elf43, size43, &plan43) &&
+           plan42.entry_point == UINT64_C(0x51001000) &&
+           plan42.return_bits == 42 && plan43.return_bits == 43,
+           "ELF validator binds the fixed entry and the actual compiler return instructions");
+
+    const char sourceSha[] = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const char artifactSha[] = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    gxos_aarch64_studio_build_identity identity42{};
+    identity42.owner_identity = UINT64_C(0x52554e5341464534);
+    identity42.build_generation = 100;
+    identity42.artifact_size = size42;
+    identity42.project_id = "com.example.runsafe4a";
+    identity42.artifact_path = "build/bin/arm64/app.elf";
+    identity42.package_path = "";
+    identity42.package_generation = 0;
+    identity42.architecture = "arm64";
+    identity42.abi = "guidexos-c-abi-v1";
+    identity42.source_sha256 = sourceSha;
+    identity42.artifact_sha256 = artifactSha;
+    set_test_owned_artifact(elf42, size42, identity42.owner_identity,
+                            identity42.build_generation, 1);
+    uint64_t execution42 = 0;
+    expect(phase2_el0_task_create_studio_build(
+               &identity42, owner->id, 10000, &execution42),
+           "exact immutable Build identity creates the scheduled ELF child");
+    gxos_aarch64_studio_build_identity staleIdentity = identity42;
+    staleIdentity.build_generation++;
+    uint64_t staleExecution = UINT64_MAX;
+    expect(!phase2_el0_task_create_studio_build(
+               &staleIdentity, owner->id, 10000, &staleExecution) && staleExecution == 0,
+           "stale Build generation cannot create a child");
+    staleIdentity = identity42;
+    staleIdentity.source_sha256 = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+    staleExecution = UINT64_MAX;
+    expect(!phase2_el0_task_create_studio_build(
+               &staleIdentity, owner->id, 10000, &staleExecution) && staleExecution == 0,
+           "source revision mismatch cannot create a child");
+    set_test_owned_artifact(elf42, size42, identity42.owner_identity,
+                            identity42.build_generation, 0);
+    staleExecution = UINT64_MAX;
+    expect(!phase2_el0_task_create_studio_build(
+               &identity42, owner->id, 10000, &staleExecution) && staleExecution == 0,
+           "artifact outside the validated integer ELF profile cannot create a child");
+
+    gxos_aarch64_studio_build_identity identity43 = identity42;
+    identity43.build_generation = 101;
+    set_test_owned_artifact(elf43, size43, identity43.owner_identity,
+                            identity43.build_generation, 1);
+    uint64_t execution43 = 0;
+    expect(phase2_el0_task_create_studio_build(
+               &identity43, owner->id, 10000, &execution43) &&
+           execution42 != execution43,
+           "a second Build generation creates a distinct scheduled child identity");
+    kernel::scheduler::Task* task42 = static_cast<kernel::scheduler::Task*>(
+        find_execution_task(execution42));
+    kernel::scheduler::Task* task43 = static_cast<kernel::scheduler::Task*>(
+        find_execution_task(execution43));
+    expect(task42 && task43 && task42->execution_address_space != task43->execution_address_space &&
+           task42->execution_context != task43->execution_context,
+           "compiled ELF tasks have distinct scheduler contexts and private roots");
+
+    bool images_present = task42 && task43;
+    bool trampolines_valid = task42 && task43;
+    for (uint32_t child = 0; child < 2; ++child) {
+        kernel::scheduler::Task* task = child == 0 ? task42 : task43;
+        const uint8_t* expected_elf = child == 0 ? elf42 : elf43;
+        if (!task) continue;
+        gxos_aarch64_el0_address_space* space =
+            static_cast<gxos_aarch64_el0_address_space*>(task->execution_address_space);
+        gxos_aarch64_el0_context* context =
+            static_cast<gxos_aarch64_el0_context*>(task->execution_context);
+        const gxos_aarch64_el0_mapping* image_mapping = nullptr;
+        const gxos_aarch64_el0_mapping* entry_mapping = nullptr;
+        const gxos_aarch64_el0_mapping* trampoline_mapping = nullptr;
+        for (uint64_t i = 0; i < space->mapping_count; ++i) {
+            if (space->mappings[i].virtual_address == GXOS_AARCH64_STUDIO_ELF_BASE + 0x1000)
+                image_mapping = &space->mappings[i];
+            if (space->mappings[i].virtual_address == GXOS_AARCH64_STUDIO_ELF_TRAMPOLINE_VA)
+                trampoline_mapping = &space->mappings[i];
+        }
+        for (uint64_t i = 0; i < space->mapping_count; ++i)
+            if (space->mappings[i].virtual_address == (context->entry_pc & ~UINT64_C(0xfff)))
+                entry_mapping = &space->mappings[i];
+        const uint8_t* code = image_mapping ? static_cast<const uint8_t*>(
+            phase2_el0_host_physical_pointer(image_mapping->physical_address)) : nullptr;
+        const uint8_t* trampoline = trampoline_mapping ? static_cast<const uint8_t*>(
+            phase2_el0_host_physical_pointer(trampoline_mapping->physical_address)) : nullptr;
+        bool code_matches = image_mapping && code;
+        if (code_matches) {
+            for (uint32_t i = 0; i < 12; ++i)
+                if (code[i] != expected_elf[0x1000 + i]) code_matches = false;
+        }
+        images_present = images_present && code_matches &&
+            context->entry_pc == GXOS_AARCH64_STUDIO_ELF_TRAMPOLINE_VA &&
+            task->execution_state == kernel::scheduler::EXECUTION_CREATED &&
+            task->execution_budget != 0 && space->page_count == 7 && space->table_count == 7;
+        trampolines_valid = trampolines_valid && entry_mapping && trampoline &&
+            read_le32(trampoline, 0) == UINT32_C(0xaa1f03e0) &&
+            read_le32(trampoline, 8) == UINT32_C(0x93407c00) &&
+            read_le32(trampoline, 12) == UINT32_C(0xd2800028) &&
+            read_le32(trampoline, 16) == UINT32_C(0xd4000001) &&
+            read_le32(trampoline, 20) == UINT32_C(0x14000000);
+        if (entry_mapping && trampoline) {
+            const uint32_t bl = read_le32(trampoline, 4);
+            int64_t displacement = static_cast<int64_t>(bl & UINT32_C(0x03ffffff));
+            if (displacement & INT64_C(0x02000000)) displacement |= ~INT64_C(0x03ffffff);
+            const int64_t target = static_cast<int64_t>(context->entry_pc + 4) +
+                                   displacement * 4;
+            trampolines_valid = trampolines_valid &&
+                target == static_cast<int64_t>(GXOS_AARCH64_STUDIO_ELF_BASE + 0x1000);
+        }
+    }
+    expect(images_present,
+           "ELF file bytes are copied into RX child pages and stack stays separate");
+    expect(trampolines_valid,
+           "EL0 entry trampoline calls gx_main, sign-extends w0, issues exit SVC, then cannot fall through");
+
+    gxos_aarch64_el0_task_result result{};
+    expect(phase2_el0_task_cancel(execution42, owner->id) &&
+           phase2_el0_task_query(execution42, owner->id, &result) &&
+           result.state == kernel::scheduler::EXECUTION_CANCELLED && result.result_kind ==
+               kernel::scheduler::EXECUTION_RESULT_CANCEL && result.resources_cleaned,
+           "cancel-before-launch cleans the compiled ELF child before reap");
+    // Reap once, then ensure a repeated reap is stale and cannot release twice.
+    expect(phase2_el0_task_reap(execution42, owner->id) &&
+           !phase2_el0_task_reap(execution42, owner->id),
+           "compiled ELF child resources and task record are reaped exactly once");
+    expect(phase2_el0_task_cancel(execution43, owner->id) &&
+           phase2_el0_task_query(execution43, owner->id, &result) &&
+           result.state == kernel::scheduler::EXECUTION_CANCELLED &&
+           result.result_kind == kernel::scheduler::EXECUTION_RESULT_CANCEL &&
+           phase2_el0_task_reap(execution43, owner->id),
+           "43 artifact cancellation is distinct and preserves no synthetic exit result");
 }
 
 static void test_context_and_svc_exit()
@@ -471,9 +832,10 @@ static bool release_scheduler_pages(uint64_t base, uint64_t pages)
 
 static void* find_execution_task(uint64_t execution_id)
 {
+    if (execution_id == 0) return nullptr;
     for (uint32_t i = 0; i < 16; ++i) {
         kernel::scheduler::Task* task = kernel::scheduler::task_at(i);
-        if (task && task->execution_id == execution_id) return task;
+        if (task && task->execution_id != 0 && task->execution_id == execution_id) return task;
     }
     return nullptr;
 }
@@ -504,6 +866,7 @@ static void test_scheduled_el0_runtime_host_simulation()
            "common scheduler owns the current launch task");
     expect(phase2_el0_task_runtime_ready(),
            "EL0 runtime reports its timer and scheduler dependencies ready");
+    test_compiler_elf_task_preparation(owner);
 
     uint64_t finite_id = 0;
     uint64_t loop_id = 0;
@@ -784,10 +1147,35 @@ static void test_scheduled_el0_runtime_host_simulation()
 
     expect(g_timer_start_count == 5,
            "each started execution arms the existing architectural timer path");
-    printf("EL0 scheduled-task controls used hosted timer/exception simulation; no native proof.\n");
+    std::printf("EL0 scheduled-task controls used hosted timer/exception simulation; no native proof.\n");
 }
 
 } // namespace
+
+namespace kernel { namespace compiler { namespace BareMetalBuildService {
+bool current_artifact(uint64_t owner_identity, uint64_t build_generation,
+                      const char* project_id, const char* artifact_path,
+                      uint64_t artifact_size, const char* architecture,
+                      const char* abi, const char* package_path,
+                      uint64_t package_generation, const char* artifact_sha256,
+                      OwnedArtifactView* output)
+{
+    if (output) *output = {};
+    if (!output || !project_id || !artifact_path || !architecture || !abi ||
+        !package_path || !artifact_sha256 || owner_identity != g_testOwnedArtifact.ownerIdentity ||
+        build_generation != g_testOwnedArtifact.buildGeneration ||
+        artifact_size != g_testOwnedArtifact.artifactSize ||
+        std::strcmp(project_id, g_testOwnedArtifact.projectId) != 0 ||
+        std::strcmp(artifact_path, g_testOwnedArtifact.artifactPath) != 0 ||
+        std::strcmp(architecture, g_testOwnedArtifact.architecture) != 0 ||
+        std::strcmp(abi, g_testOwnedArtifact.abi) != 0 ||
+        std::strcmp(package_path, g_testOwnedArtifact.packagePath) != 0 ||
+        package_generation != g_testOwnedArtifact.packageGeneration ||
+        std::strcmp(artifact_sha256, g_testOwnedArtifact.artifactSha256) != 0) return false;
+    *output = g_testOwnedArtifact;
+    return true;
+}
+} } }
 
 extern "C" void* phase2_el0_host_physical_pointer(uint64_t physical_address)
 {
@@ -926,19 +1314,21 @@ bool context_to_interrupt(void* context, void* destination)
 int main()
 {
     reset_fake_memory();
+    test_studio_elf_validation_negatives();
     test_permissions_and_ownership();
+    test_studio_fixed_address_is_private();
     test_context_and_svc_exit();
     test_faults_and_owner_integrity();
     test_invalid_descriptors_and_repeated_cleanup();
     test_kernel_and_mmio_negative_probes();
     test_scheduled_el0_runtime_host_simulation();
     if (g_failures != 0) {
-        printf("AARCH64_EL0_HOST_FAIL assertions=%llu failures=%llu\n",
+        std::printf("AARCH64_EL0_HOST_FAIL assertions=%llu failures=%llu\n",
                static_cast<unsigned long long>(g_assertions),
                static_cast<unsigned long long>(g_failures));
         return 1;
     }
-    printf("AARCH64_EL0_HOST_PASS assertions=%llu scope=structural-and-hosted-scheduler-simulation\n",
+    std::printf("AARCH64_EL0_HOST_PASS assertions=%llu scope=structural-and-hosted-scheduler-simulation\n",
            static_cast<unsigned long long>(g_assertions));
     return 0;
 }

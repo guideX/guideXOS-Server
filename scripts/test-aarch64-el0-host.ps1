@@ -27,10 +27,18 @@ $testExe = Join-Path $OutputDirectory 'aarch64-el0-isolation-host-tests.exe'
 $source = Join-Path $repoRoot 'tests\aarch64_el0_isolation_host_tests.cpp'
 $implementation = Join-Path $repoRoot 'kernel\arch\arm64\phase2_el0.cpp'
 $runtime = Join-Path $repoRoot 'kernel\arch\arm64\phase2_el0_runtime.cpp'
+$studioElf = Join-Path $repoRoot 'kernel\arch\arm64\studio_elf_image.cpp'
 $scheduler = Join-Path $repoRoot 'kernel\core\common_scheduler.cpp'
 Write-Host '[1/2] Building production-backed AArch64 EL0 structural controls...' -ForegroundColor Yellow
 & $CxxPath '-std=c++17' '-Wall' '-Wextra' '-O2' '-DGXOS_AARCH64_EL0_HOST_TEST' `
-    '-iquote' $repoRoot $source $implementation $runtime $scheduler '-o' $testExe
+    '-I' (Join-Path $repoRoot 'kernel') `
+    '-iquote' (Join-Path $repoRoot 'kernel\core\include') `
+    '-iquote' (Join-Path $repoRoot 'sdk\include') `
+    '-iquote' $repoRoot $source $implementation $runtime $studioElf $scheduler `
+    (Join-Path $repoRoot 'kernel\core\compiler\elf_writer.cpp') `
+    (Join-Path $repoRoot 'kernel\core\compiler\compiler_target.cpp') `
+    (Join-Path $repoRoot 'kernel\core\native_architecture.cpp') `
+    (Join-Path $repoRoot 'kernel\arch\arm64\compiler_backend.cpp') '-o' $testExe
 if ($LASTEXITCODE -ne 0) { throw 'AArch64 EL0 host-test compilation failed.' }
 & $testExe
 if ($LASTEXITCODE -ne 0) { throw 'AArch64 EL0 host controls failed.' }
@@ -94,6 +102,13 @@ foreach ($required in @('phase2_el0_suspend_for_schedule', 'phase2_el0_resume_fo
         'phase3_timer_counter()', 'phase2_el0_task_finish_exception',
         'trusted_image_valid', 'execution_consumed >= task->execution_budget')) {
     if (!$el0RuntimeText.Contains($required)) { throw "Scheduled EL0 runtime contract is missing: $required" }
+}
+foreach ($required in @('phase2_el0_task_create_studio_elf', 'phase2_el0_task_create_studio_build',
+        'current_artifact', 'identity->source_sha256', 'artifact.el0IntegerProfileValid',
+        'make_studio_return_trampoline',
+        'GXOS_AARCH64_STUDIO_ELF_TRAMPOLINE_VA', 'GXOS_AARCH64_EL0_EXIT_SERVICE',
+        'phase2_el0_copy_owned_memory')) {
+    if (!$el0RuntimeText.Contains($required)) { throw "RUNSAFE4-A compiled ELF lifecycle contract is missing: $required" }
 }
 foreach ($required in @('EXECUTION_TIMED_OUT', 'execution_consumed',
         'timer_interrupt_at', 'request_el0_cancel', 'reap_task', 'PHASE_SCHEDULED',

@@ -8,7 +8,8 @@ param(
     [switch]$StudioGuestQualification,
     [switch]$El0Qualification,
     [switch]$El0NegativeQualification,
-    [switch]$El0ScheduledQualification
+    [switch]$El0ScheduledQualification,
+    [switch]$Runsafe4BQualification
 )
 
 $ErrorActionPreference = 'Stop'
@@ -52,6 +53,9 @@ if ($El0NegativeQualification -and !$El0Qualification) {
 if ($El0ScheduledQualification -and (!$Phase12Proof -or !$El0Qualification -or !$El0NegativeQualification)) {
     throw 'El0ScheduledQualification requires Phase12Proof, El0Qualification, and El0NegativeQualification.'
 }
+if ($Runsafe4BQualification -and !$El0ScheduledQualification) {
+    throw 'Runsafe4BQualification requires the RUNSAFE3-B scheduled EL0 qualification profile.'
+}
 function Invoke-Checked { param([string]$FilePath, [string[]]$Arguments)
     Write-Host "      $([IO.Path]::GetFileName($FilePath)) $($Arguments -join ' ')" -ForegroundColor DarkGray
     & $FilePath @Arguments
@@ -86,6 +90,7 @@ $studioGuestDefine = if ($StudioGuestQualification) { '-DGXOS_AARCH64_ABI3_STUDI
 $el0QualificationDefine = if ($El0Qualification) { '-DGXOS_AARCH64_EL0_QUALIFICATION' } else { }
 $el0NegativeDefine = if ($El0NegativeQualification) { '-DGXOS_AARCH64_EL0_NEGATIVE_QUALIFICATION' } else { }
 $el0ScheduledDefine = if ($El0ScheduledQualification) { '-DGXOS_AARCH64_RUNSAFE3B_DIAGNOSTICS' } else { }
+$runsafe4BDefine = if ($Runsafe4BQualification) { '-DGXOS_AARCH64_RUNSAFE4B_QUALIFICATION' } else { }
 $el0ScheduledRevisionInclude = @()
 if ($El0ScheduledQualification) {
     $sourceRevision = (& git -C $repoRoot rev-parse HEAD 2>&1 | Out-String).Trim()
@@ -117,7 +122,7 @@ $kernelSources = @(
     'kernel\arch\arm64\phase3_serial.cpp','kernel\arch\arm64\phase4_serial.cpp','kernel\arch\arm64\serial_console.cpp',
     'kernel\arch\arm64\phase2_platform.cpp','kernel\arch\arm64\phase2_mmu.cpp','kernel\arch\arm64\phase2_el0.cpp','kernel\arch\arm64\phase5_mmu_permissions.cpp',
     'kernel\arch\arm64\phase2_gic.cpp','kernel\arch\arm64\gicv3_controller.cpp','kernel\arch\arm64\phase3_timer.cpp','kernel\arch\arm64\phase3_arch.cpp',
-    'kernel\arch\arm64\phase3_exceptions.cpp','kernel\arch\arm64\phase2_el0_runtime.cpp','kernel\arch\arm64\phase4_main.cpp','kernel\arch\arm64\phase6_platform_stubs.cpp',
+    'kernel\arch\arm64\phase3_exceptions.cpp','kernel\arch\arm64\phase2_el0_runtime.cpp','kernel\arch\arm64\studio_elf_image.cpp','kernel\arch\arm64\phase4_main.cpp','kernel\arch\arm64\phase6_platform_stubs.cpp',
     'kernel\core\common_scheduler.cpp','kernel\core\common_kernel_entry.cpp','kernel\core\common_boot_info.cpp',
     'kernel\core\common_physical_allocator.cpp','kernel\core\application_event_service.cpp','kernel\core\application_runtime.cpp',
     'kernel\core\irq_registry.cpp','kernel\core\cxx_runtime.cpp','kernel\core\block_device.cpp','kernel\core\ramdisk.cpp',
@@ -130,7 +135,7 @@ $kernelFlags = @(
     '--target=aarch64-none-elf','-std=c++14','-march=armv8-a','-O2','-ffreestanding','-nostdlib','-nostdinc++','-fno-builtin','-fno-stack-protector',
     '-fno-exceptions','-fno-rtti','-fno-unwind-tables','-fno-asynchronous-unwind-tables','-fno-pic','-fno-pie','-mcmodel=small',
     '-mgeneral-regs-only','-mstrict-align','-mno-outline-atomics','-ffunction-sections','-fdata-sections','-Wno-c++11-narrowing',
-    '-DGXOS_AARCH64_PHASE4','-DGXOS_AARCH64_PHASE5','-DGXOS_AARCH64_PHASE6','-DGXOS_AARCH64_PHASE7','-DGXOS_AARCH64_PHASE8','-DGXOS_AARCH64_PHASE9','-DGXOS_AARCH64_PHASE10',$phase11Define,$phase12Define,$studioGuestDefine,$el0QualificationDefine,$el0NegativeDefine,$el0ScheduledDefine,
+    '-DGXOS_AARCH64_PHASE4','-DGXOS_AARCH64_PHASE5','-DGXOS_AARCH64_PHASE6','-DGXOS_AARCH64_PHASE7','-DGXOS_AARCH64_PHASE8','-DGXOS_AARCH64_PHASE9','-DGXOS_AARCH64_PHASE10',$phase11Define,$phase12Define,$studioGuestDefine,$el0QualificationDefine,$el0NegativeDefine,$el0ScheduledDefine,$runsafe4BDefine,
     $el0ScheduledRevisionInclude,
     '-DGXOS_AARCH64_EL0_ISOLATION',
     '-DGXOS_BARE_METAL','-DKERNEL_HAS_VIRTIO_INPUT','-DKERNEL_HAS_COMMON_INPUT_QUEUE','-I',$repoRoot,'-I',(Join-Path $repoRoot 'kernel'),'-I',(Join-Path $repoRoot 'sdk\include'),'-I',(Join-Path $repoRoot 'kernel\core\include'),

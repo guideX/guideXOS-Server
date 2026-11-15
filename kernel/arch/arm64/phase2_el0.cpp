@@ -45,6 +45,8 @@ static const uint64_t kPxn = UINT64_C(1) << 53;
 static const uint64_t kUxn = UINT64_C(1) << 54;
 static const uint64_t kUserRootIndex =
     (GXOS_AARCH64_EL0_USER_BASE >> 39) & UINT64_C(0x1ff);
+static const uint64_t kStudioImageBase = UINT64_C(0x51000000);
+static const uint64_t kStudioImageLimit = UINT64_C(0x51200000);
 static const uint64_t kExpectedUserPstate = UINT64_C(0x3c0); // EL0t, D/A/I/F masked.
 static const uint64_t kScheduledUserPstate = UINT64_C(0x340); // EL0t, IRQs enabled.
 static const uint64_t kQualificationOwner = UINT64_C(0x454c305155414c31); // "EL0QUAL1"
@@ -88,9 +90,11 @@ static bool aligned_page(uint64_t address)
 
 static bool in_user_window(uint64_t virtual_address)
 {
-    return virtual_address >= GXOS_AARCH64_EL0_USER_BASE &&
-           virtual_address < GXOS_AARCH64_EL0_USER_LIMIT &&
-           (virtual_address & ~kAddressMask) == 0;
+    const bool ordinary = virtual_address >= GXOS_AARCH64_EL0_USER_BASE &&
+                          virtual_address < GXOS_AARCH64_EL0_USER_LIMIT;
+    const bool studio_image = virtual_address >= kStudioImageBase &&
+                              virtual_address < kStudioImageLimit;
+    return (ordinary || studio_image) && (virtual_address & ~kAddressMask) == 0;
 }
 
 static bool valid_flags(uint64_t flags)
@@ -172,6 +176,34 @@ static bool owned_child_table(gxos_aarch64_el0_address_space* space,
     return *table != nullptr;
 }
 
+// Child roots initially share the kernel's EL1-only identity map. The fixed
+// Studio image slot is inside that low identity range, so clone each table on
+// the path before replacing its leaf. The kernel root and its descriptors are
+// never modified; every cloned table is recorded in the child's cleanup list.
+static bool private_child_table(gxos_aarch64_el0_address_space* space,
+                                uint64_t* parent_entry, uint64_t** table,
+                                bool inherited_allowed)
+{
+    if (!space || !parent_entry || !table) return false;
+    if (*parent_entry == 0) {
+        if (!allocate_owned_table(space, table)) return false;
+        *parent_entry = (space->table_pages[space->table_count - 1] & kPhysicalMask) |
+                        kTableDescriptor;
+        return true;
+    }
+    if (owned_child_table(space, *parent_entry, table)) return true;
+    if (!inherited_allowed || (*parent_entry & 3) != kTableDescriptor ||
+        (*parent_entry & kPhysicalMask) >= kPhysicalLimit) return false;
+    uint64_t* shared = static_cast<uint64_t*>(physical_pointer(*parent_entry & kPhysicalMask));
+    uint64_t* copy = nullptr;
+    if (!shared || !allocate_owned_table(space, &copy)) return false;
+    for (uint32_t i = 0; i < 512; ++i) copy[i] = shared[i];
+    *parent_entry = (space->table_pages[space->table_count - 1] & kPhysicalMask) |
+                    kTableDescriptor;
+    *table = copy;
+    return true;
+}
+
 static bool ensure_user_l3(gxos_aarch64_el0_address_space* space,
                            uint64_t virtual_address, uint64_t** l3)
 {
@@ -182,34 +214,15 @@ static bool ensure_user_l3(gxos_aarch64_el0_address_space* space,
     const uint32_t l0_index = static_cast<uint32_t>((virtual_address >> 39) & 0x1ff);
     const uint32_t l1_index = static_cast<uint32_t>((virtual_address >> 30) & 0x1ff);
     const uint32_t l2_index = static_cast<uint32_t>((virtual_address >> 21) & 0x1ff);
+    const bool inherited_allowed = l0_index == 0 &&
+        virtual_address >= kStudioImageBase && virtual_address < kStudioImageLimit;
     uint64_t* l1 = nullptr;
     uint64_t* l2 = nullptr;
 
-    if (l0_index != kUserRootIndex) return false;
-    if (root[l0_index] == 0) {
-        if (!allocate_owned_table(space, &l1)) return false;
-        root[l0_index] = ((uint64_t)(uintptr_t)space->table_pages[space->table_count - 1] & kPhysicalMask) |
-                         kTableDescriptor;
-    } else if (!owned_child_table(space, root[l0_index], &l1)) {
-        return false;
-    }
-
-    if (l1[l1_index] == 0) {
-        if (!allocate_owned_table(space, &l2)) return false;
-        l1[l1_index] = ((uint64_t)(uintptr_t)space->table_pages[space->table_count - 1] & kPhysicalMask) |
-                       kTableDescriptor;
-    } else if (!owned_child_table(space, l1[l1_index], &l2)) {
-        return false;
-    }
-
-    if (l2[l2_index] == 0) {
-        if (!allocate_owned_table(space, l3)) return false;
-        l2[l2_index] = ((uint64_t)(uintptr_t)space->table_pages[space->table_count - 1] & kPhysicalMask) |
-                       kTableDescriptor;
-    } else if (!owned_child_table(space, l2[l2_index], l3)) {
-        return false;
-    }
-    return true;
+    if (l0_index != kUserRootIndex && l0_index != 0) return false;
+    return private_child_table(space, &root[l0_index], &l1, inherited_allowed) &&
+           private_child_table(space, &l1[l1_index], &l2, inherited_allowed) &&
+           private_child_table(space, &l2[l2_index], l3, inherited_allowed);
 }
 
 static uint64_t make_user_descriptor(uint64_t physical_address, uint64_t flags);
@@ -398,8 +411,10 @@ extern "C" uint8_t phase2_el0_map_owned_page(
         physical_address >= kPhysicalLimit || !valid_flags(flags) ||
         !page_owned(space, physical_address) || space->mapping_count >= 16) return 0;
     uint64_t virtual_end = 0;
+    const uint64_t window_limit = virtual_address >= kStudioImageBase &&
+        virtual_address < kStudioImageLimit ? kStudioImageLimit : GXOS_AARCH64_EL0_USER_LIMIT;
     if (!add_u64(virtual_address, GXOS_AARCH64_EL0_PAGE_SIZE, &virtual_end) ||
-        virtual_end > GXOS_AARCH64_EL0_USER_LIMIT) return 0;
+        virtual_end > window_limit) return 0;
     for (uint64_t i = 0; i < space->mapping_count; ++i) {
         const uint64_t existing = space->mappings[i].virtual_address;
         uint64_t existing_end = 0;
@@ -411,7 +426,16 @@ extern "C" uint8_t phase2_el0_map_owned_page(
     uint64_t* l3 = nullptr;
     if (!ensure_user_l3(space, virtual_address, &l3)) return 0;
     const uint32_t index = static_cast<uint32_t>((virtual_address >> 12) & 0x1ff);
-    if (l3[index] != 0) return 0;
+    if (l3[index] != 0) {
+        // The only replaceable inherited leaf is a normal-memory EL1-only
+        // identity mapping inside the compiler's reserved image slot.
+        const uint64_t inherited = l3[index];
+        if (virtual_address < kStudioImageBase || virtual_address >= kStudioImageLimit ||
+            (inherited & 3) != kPageDescriptor ||
+            (inherited & kPhysicalMask) != virtual_address ||
+            ((inherited >> 2) & 7) != (kAttrNormal >> 2) ||
+            ((inherited >> 6) & 3) != 0) return 0;
+    }
     const uint64_t descriptor = make_user_descriptor(physical_address, flags);
     if ((descriptor & 3) != kPageDescriptor ||
         ((descriptor >> 6) & 3) == 0 ||
@@ -431,12 +455,39 @@ extern "C" uint8_t phase2_el0_allocate_page(
     gxos_aarch64_el0_address_space* space, uint64_t owner_id,
     uint64_t virtual_address, uint64_t flags, uint64_t* physical_address)
 {
+    if (physical_address) *physical_address = 0;
     if (!space || !physical_address || !valid_flags(flags) ||
         space->state != GXOS_AARCH64_EL0_SPACE_CREATED || space->page_count >= 16) return 0;
     uint64_t physical = 0;
     if (!allocate_owned_page(space, &physical, false)) return 0;
     if (!phase2_el0_map_owned_page(space, owner_id, virtual_address, physical, flags)) return 0;
     *physical_address = physical;
+    return 1;
+}
+
+extern "C" uint8_t phase2_el0_copy_owned_memory(
+    gxos_aarch64_el0_address_space* space, uint64_t owner_id,
+    uint64_t virtual_address, const uint8_t* bytes, uint64_t byte_count)
+{
+    if (!space || space->state != GXOS_AARCH64_EL0_SPACE_CREATED ||
+        owner_id == 0 || owner_id != space->owner_id || !bytes || byte_count == 0 ||
+        virtual_address > UINT64_MAX - byte_count) return 0;
+    uint64_t copied = 0;
+    while (copied < byte_count) {
+        const uint64_t current = virtual_address + copied;
+        const gxos_aarch64_el0_mapping* mapping = nullptr;
+        if (!mapping_for(space, current, &mapping) ||
+            !page_owned(space, mapping->physical_address)) return 0;
+        uint8_t* destination = static_cast<uint8_t*>(physical_pointer(mapping->physical_address));
+        if (!destination) return 0;
+        const uint64_t in_page = current & kPageMask;
+        uint64_t amount = GXOS_AARCH64_EL0_PAGE_SIZE - in_page;
+        if (amount > byte_count - copied) amount = byte_count - copied;
+        for (uint64_t i = 0; i < amount; ++i) destination[in_page + i] = bytes[copied + i];
+        if ((mapping->flags & GXOS_AARCH64_EL0_PAGE_EXECUTE) != 0)
+            sync_user_instruction_page(mapping->physical_address);
+        copied += amount;
+    }
     return 1;
 }
 

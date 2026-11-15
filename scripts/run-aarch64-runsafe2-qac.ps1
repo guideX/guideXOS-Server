@@ -10,7 +10,8 @@ param(
     [ValidateRange(30, 900)] [int]$RuntimeSeconds = 300,
     [ValidateRange(5, 180)] [int]$ChildCleanupSeconds = 45,
     [ValidateRange(5, 120)] [int]$ReservationCleanupSeconds = 20,
-    [switch]$ScheduledEl0Qualification
+    [switch]$ScheduledEl0Qualification,
+    [switch]$Runsafe4BQualification
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,10 +21,13 @@ $QacCliPath = [IO.Path]::GetFullPath($QacCliPath)
 $QemuPath = [IO.Path]::GetFullPath($QemuPath)
 $FirmwareCode = [IO.Path]::GetFullPath($FirmwareCode)
 $FirmwareVarsTemplate = [IO.Path]::GetFullPath($FirmwareVarsTemplate)
+if ($Runsafe4BQualification -and !$ScheduledEl0Qualification) {
+    throw 'RUNSAFE4-B qualification requires the RUNSAFE3-B scheduled EL0 controls.'
+}
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $null = Import-Module (Join-Path $PSScriptRoot 'aarch64-runsafe2-qac-supervisor.psm1') -Force
-$project = if ($ScheduledEl0Qualification) { 'guideXOSServer-AARCH64-RUNSAFE3B-Scheduled-EL0' } else { 'guideXOSServer-AARCH64-RUNSAFE2-EL0-Negative' }
-$sessionPrefix = if ($ScheduledEl0Qualification) { 'runsafe3b-' } else { 'el0-negative-' }
+$project = if ($Runsafe4BQualification) { 'guideXOSServer-AARCH64-RUNSAFE4B-Compiled-ELF-EL0' } elseif ($ScheduledEl0Qualification) { 'guideXOSServer-AARCH64-RUNSAFE3B-Scheduled-EL0' } else { 'guideXOSServer-AARCH64-RUNSAFE2-EL0-Negative' }
+$sessionPrefix = if ($Runsafe4BQualification) { 'runsafe4b-' } elseif ($ScheduledEl0Qualification) { 'runsafe3b-' } else { 'el0-negative-' }
 $sessionId = $sessionPrefix + (Get-Date -Format 'yyyyMMdd-HHmmss-fff')
 $script:scheduledSourceRevision = ''
 $sessionDirectory = Join-Path $ArtifactRoot $sessionId
@@ -781,10 +785,52 @@ function Assert-ScheduledEl0GuestEvidence([string]$Text) {
         (Get-RecordField $continuationLine 'exceptions') -ne '0') {
         throw 'Final result marker does not match the candidate revision or measured guest continuation.'
     }
+    $compiledElfEvidence = $null
+    if ($Runsafe4BQualification) {
+        $invalidElfLines = @($lines | Where-Object { $_ -match '^\[RUNSAFE4B\] INVALID ELF REJECT PASS ' })
+        $compiledElfLines = @($lines | Where-Object { $_ -match '^\[RUNSAFE4B\] COMPILED ELF PASS ' })
+        $noncooperativeLines = @($lines | Where-Object { $_ -match '^\[RUNSAFE4B\] NONCOOPERATIVE UNSUPPORTED ' })
+        $runsafe4bMarkers = @($lines | Where-Object { $_ -match '^AARCH64_RUNSAFE4B_PASS ' })
+        if ($invalidElfLines.Count -ne 1 -or $compiledElfLines.Count -ne 1 -or
+            $noncooperativeLines.Count -ne 1 -or $runsafe4bMarkers.Count -ne 1) {
+            throw 'Guest did not report each RUNSAFE4-B compiled-ELF, invalid-image, and unsupported-loop outcome exactly once.'
+        }
+        $compiledElfLine = [string]$compiledElfLines[0]
+        $runsafe4bMarker = [string]$runsafe4bMarkers[0]
+        $generation = Get-RunSafe3BField $compiledElfLine 'generation'
+        $identityChecks = [ordered]@{
+            result = (Get-RunSafe3BField $compiledElfLine 'result') -eq 42
+            user_pages = (Get-RunSafe3BField $compiledElfLine 'user_pages') -eq 7
+            page_tables = (Get-RunSafe3BField $compiledElfLine 'page_table_pages') -ne 0
+            cleanup = (Get-RecordField $compiledElfLine 'cleanup') -eq '1'
+            reap = (Get-RecordField $compiledElfLine 'reap') -eq '1'
+            root_restored = (Get-RecordField $compiledElfLine 'root_restored') -eq '1'
+            studio_run_disabled = (Get-RecordField $compiledElfLine 'arbitrary_studio_run') -eq 'disabled'
+            invalid_machine_rejected = (Get-RecordField ([string]$invalidElfLines[0]) 'control') -eq 'wrong-machine'
+            unsupported_profile = (Get-RecordField ([string]$noncooperativeLines[0]) 'reason') -eq 'resident-compiler-profile'
+            generation = $generation -ne 0
+            source_revision = (Get-RecordField $runsafe4bMarker 'source') -eq $script:scheduledSourceRevision
+            final_generation = (Get-RunSafe3BField $runsafe4bMarker 'build_generation') -eq $generation
+            expected_return = (Get-RunSafe3BField $runsafe4bMarker 'expected_return') -eq 42
+            final_invalid_rejected = (Get-RecordField $runsafe4bMarker 'invalid_elf_rejected') -eq '1'
+            final_cleanup = (Get-RecordField $runsafe4bMarker 'cleanup') -eq '1'
+        }
+        if (@($identityChecks.Values | Where-Object { !$_ }).Count -ne 0) {
+            throw "Compiled Studio ELF result does not match the immutable Build generation and cleanup evidence: checks=$($identityChecks | ConvertTo-Json -Compress) compiled=$compiledElfLine final=$runsafe4bMarker"
+        }
+        $compiledElfEvidence = [pscustomobject]@{
+            BuildGeneration = $generation
+            CompiledElf = $compiledElfLine.Trim()
+            InvalidElf = ([string]$invalidElfLines[0]).Trim()
+            Noncooperative = ([string]$noncooperativeLines[0]).Trim()
+            FinalMarker = $runsafe4bMarker.Trim()
+        }
+    }
     return [pscustomobject]@{
         SourceRevision = $source
         Finite = $finite.Trim(); Timeout = $timeout.Trim(); Cancellation = $cancel.Trim(); Fault = $fault.Trim()
         Continuation = $continuationLine.Trim(); FinalMarker = $finalMarker.Trim()
+        CompiledElfQualification = $compiledElfEvidence
         FinitePreemptions = [uint64](Get-RunSafe3BField $finite 'preemptions')
         TimerDelta = [uint64](Get-RunSafe3BField $continuationLine 'timer_delta')
         ContextSwitchDelta = [uint64](Get-RunSafe3BField $continuationLine 'context_switch_delta')
@@ -980,7 +1026,8 @@ try {
     $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
     if ($ScheduledEl0Qualification) {
         $payloads = $manifest.artifacts.scheduledEl0Payloads
-        if ($manifest.profile -ne 'runsafe3b-scheduled-el0' -or
+        $expectedProfile = if ($Runsafe4BQualification) { 'runsafe4b-compiled-el0' } else { 'runsafe3b-scheduled-el0' }
+        if ($manifest.profile -ne $expectedProfile -or
             !$manifest.overlay.el0QualificationDefine -or
             !$manifest.overlay.el0NegativeQualificationDefine -or
             !$manifest.overlay.el0ScheduledQualificationDefine -or
@@ -988,11 +1035,22 @@ try {
             $manifest.artifacts.el0NegativeProbes.Count -ne 2 -or
             !$payloads -or
             $payloads.source -notmatch 'internal phase2_el0_runtime.cpp qualification fixtures') {
-            throw 'Candidate manifest does not identify the scheduled RUNSAFE3-B and preserved RUNSAFE2 diagnostic profile.'
+            throw 'Candidate manifest does not identify the scheduled RUNSAFE3-B/RUNSAFE4-B and preserved RUNSAFE2 diagnostic profile.'
         }
         foreach ($payloadName in @('finite', 'timeout', 'cancellation', 'fault')) {
             if ([string]$payloads.$payloadName -notmatch '^[0-9a-f]{64}$') {
                 throw "Candidate manifest has no valid SHA-256 for the internal $payloadName payload."
+            }
+        }
+        if ($Runsafe4BQualification) {
+            $compiledElf = $manifest.artifacts.compiledStudioElfQualification
+            if (!$manifest.overlay.runsafe4BQualificationDefine -or !$compiledElf -or
+                $compiledElf.guestProject -ne '/Runsafe4BProject' -or
+                $compiledElf.projectId -ne 'com.guidexos.runsafe4b' -or
+                $compiledElf.expectedReturn -ne 42 -or
+                [string]$compiledElf.sourceSha256 -notmatch '^[0-9a-f]{64}$' -or
+                $compiledElf.source -notmatch 'resident Build service compiles') {
+                throw 'Candidate manifest does not identify the source-matched RUNSAFE4-B Build artifact fixture.'
             }
         }
         if ([string]$manifest.server.head -notmatch '^[0-9a-f]{40}$') {

@@ -150,10 +150,12 @@ static void print_smoke_result(const char* name, bool pass)
 
 } // namespace
 
-bool compile_for_target(const char* sourcePath,
-                        const char* outputPath,
-                        CompilerTarget target,
-                        CompileSummary* summary)
+static bool compile_for_target_internal(const char* sourcePath,
+                                       const char* outputPath,
+                                       CompilerTarget target,
+                                       const uint8_t* capturedSource,
+                                       uint32_t capturedSourceBytes,
+                                       CompileSummary* summary)
 {
     CompileSummary local = {};
     if (summary) *summary = local;
@@ -171,22 +173,31 @@ bool compile_for_target(const char* sourcePath,
     serial::puts(outputPath);
     serial::putc('\n');
 
-    vfs::FileInfo sourceInfo = {};
-    if (vfs::stat(sourcePath, &sourceInfo) != vfs::VFS_OK ||
-        sourceInfo.type != vfs::FILE_TYPE_REGULAR) {
-        diagnostics.error(driverLocation, "unable to read regular source file", "path");
-        return fail_build(diagnostics, summary);
-    }
-    if (sourceInfo.size > COMPILER_MAX_SOURCE_BYTES) {
-        diagnostics.error(driverLocation, "source exceeds 64 KiB compiler limit", "source");
-        return fail_build(diagnostics, summary);
-    }
-
-    const uint32_t sourceBytes = static_cast<uint32_t>(sourceInfo.size);
-    const int32_t readBytes = sourceBytes == 0 ? 0 : vfs::read_file(sourcePath, s_source, sourceBytes);
-    if (readBytes < 0 || static_cast<uint32_t>(readBytes) != sourceBytes) {
-        diagnostics.error(driverLocation, "source read was shorter than filesystem metadata", "filesystem");
-        return fail_build(diagnostics, summary);
+    uint32_t sourceBytes = 0;
+    if (capturedSource) {
+        if (capturedSourceBytes == 0 || capturedSourceBytes > COMPILER_MAX_SOURCE_BYTES) {
+            diagnostics.error(driverLocation, "captured source is empty or exceeds 64 KiB compiler limit", "source");
+            return fail_build(diagnostics, summary);
+        }
+        sourceBytes = capturedSourceBytes;
+        for (uint32_t i = 0; i < sourceBytes; ++i) s_source[i] = capturedSource[i];
+    } else {
+        vfs::FileInfo sourceInfo = {};
+        if (vfs::stat(sourcePath, &sourceInfo) != vfs::VFS_OK ||
+            sourceInfo.type != vfs::FILE_TYPE_REGULAR) {
+            diagnostics.error(driverLocation, "unable to read regular source file", "path");
+            return fail_build(diagnostics, summary);
+        }
+        if (sourceInfo.size > COMPILER_MAX_SOURCE_BYTES) {
+            diagnostics.error(driverLocation, "source exceeds 64 KiB compiler limit", "source");
+            return fail_build(diagnostics, summary);
+        }
+        sourceBytes = static_cast<uint32_t>(sourceInfo.size);
+        const int32_t readBytes = sourceBytes == 0 ? 0 : vfs::read_file(sourcePath, s_source, sourceBytes);
+        if (readBytes < 0 || static_cast<uint32_t>(readBytes) != sourceBytes) {
+            diagnostics.error(driverLocation, "source read was shorter than filesystem metadata", "filesystem");
+            return fail_build(diagnostics, summary);
+        }
     }
     s_source[sourceBytes] = '\0';
     const uint64_t sourceHash = hash_bytes(s_source, sourceBytes);
@@ -319,6 +330,26 @@ bool compile_for_target(const char* sourcePath,
     serial::puts("Compiler: ELF validation PASS\n");
     serial::puts("Compiler: build PASS\n");
     return true;
+}
+
+bool compile_for_target(const char* sourcePath,
+                        const char* outputPath,
+                        CompilerTarget target,
+                        CompileSummary* summary)
+{
+    return compile_for_target_internal(sourcePath, outputPath, target, nullptr, 0, summary);
+}
+
+bool compile_for_target_from_bytes(const char* sourcePath,
+                                   const uint8_t* sourceBytes,
+                                   uint32_t sourceByteCount,
+                                   const char* outputPath,
+                                   CompilerTarget target,
+                                   CompileSummary* summary)
+{
+    if (!sourceBytes) return false;
+    return compile_for_target_internal(sourcePath, outputPath, target,
+                                       sourceBytes, sourceByteCount, summary);
 }
 
 bool compile(const char* sourcePath,

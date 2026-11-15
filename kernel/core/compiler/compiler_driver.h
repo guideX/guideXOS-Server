@@ -41,6 +41,16 @@ bool compile_for_target(const char* sourcePath,
                         CompilerTarget target,
                         CompileSummary* summary);
 
+// Compile from an immutable caller-owned source snapshot. This is used by the
+// Build service so its recorded source digest describes the exact bytes that
+// the compiler parsed, even if the VFS path changes while the Build runs.
+bool compile_for_target_from_bytes(const char* sourcePath,
+                                   const uint8_t* sourceBytes,
+                                   uint32_t sourceByteCount,
+                                   const char* outputPath,
+                                   CompilerTarget target,
+                                   CompileSummary* summary);
+
 // Opt-in startup proof used by the Phase 27B QEMU smoke.  Normal boots do not
 // call this routine and generated applications are never executed here.
 void run_bootstrap_smoke();

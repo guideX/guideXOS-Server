@@ -1,10 +1,12 @@
 #include <stdint.h>
 
 #include "phase2_el0.h"
+#include "studio_elf_image.h"
 #include "phase2_mmu.h"
 #include "phase3_timer.h"
 #include "../../../kernel/core/include/kernel/arch_interface.h"
 #include "../../../kernel/core/include/kernel/common_scheduler.h"
+#include "../../../kernel/core/compiler/compiler_build_service.h"
 
 extern "C" uint64_t phase3_el0_enter(gxos_aarch64_el0_context* context);
 
@@ -100,6 +102,15 @@ static void zero_bytes(void* destination, uint64_t size)
 {
     uint8_t* bytes = static_cast<uint8_t*>(destination);
     for (uint64_t i = 0; i < size; ++i) bytes[i] = 0;
+}
+
+static bool exact_text(const char* left, const char* right)
+{
+    if (!left || !right) return left == right;
+    while (*left && *right) {
+        if (*left++ != *right++) return false;
+    }
+    return *left == '\0' && *right == '\0';
 }
 
 static bool owner_is_current_kernel_task(uint64_t owner_id)
@@ -216,6 +227,79 @@ static bool clean_record_resources(RuntimeRecord* record)
     if (!phase2_el0_cleanup(&record->space)) return false;
     record->resources_cleaned = 1;
     if (record->task) record->task->resources_cleaned = 1;
+    return true;
+}
+
+static void scheduled_el0_entry(void* argument);
+
+static void write_le32(uint8_t* destination, uint32_t value)
+{
+    destination[0] = static_cast<uint8_t>(value);
+    destination[1] = static_cast<uint8_t>(value >> 8);
+    destination[2] = static_cast<uint8_t>(value >> 16);
+    destination[3] = static_cast<uint8_t>(value >> 24);
+}
+
+static bool make_studio_return_trampoline(uint64_t trampoline_va,
+                                          uint64_t gx_main_va,
+                                          uint8_t* bytes,
+                                          uint64_t capacity)
+{
+    if (!bytes || capacity < 24 || (trampoline_va & 3) != 0 ||
+        (gx_main_va & 3) != 0 || trampoline_va > UINT64_MAX - 4) return false;
+    const uint64_t call_pc = trampoline_va + 4;
+    int64_t delta = 0;
+    if (gx_main_va >= call_pc) {
+        const uint64_t forward = gx_main_va - call_pc;
+        if (forward > UINT64_C(0x07fffffc)) return false;
+        delta = static_cast<int64_t>(forward);
+    } else {
+        const uint64_t backward = call_pc - gx_main_va;
+        if (backward > UINT64_C(0x08000000)) return false;
+        delta = -static_cast<int64_t>(backward);
+    }
+    if ((delta & 3) != 0) return false;
+    const uint32_t branch_imm = static_cast<uint32_t>(delta / 4) & UINT32_C(0x03ffffff);
+    const uint32_t words[6] = {
+        UINT32_C(0xaa1f03e0),             // mov x0, xzr: gx_main receives null ctx
+        UINT32_C(0x94000000) | branch_imm, // bl gx_main
+        UINT32_C(0x93407c00),              // sxtw x0, w0: preserve signed int result
+        UINT32_C(0xd2800028),              // mov x8, #EL0_EXIT
+        UINT32_C(0xd4000001),              // svc #0; dispatcher records x0
+        UINT32_C(0x14000000)               // fail-closed self-loop if SVC returned
+    };
+    for (uint32_t i = 0; i < 6; ++i) write_le32(bytes + i * 4, words[i]);
+    return true;
+}
+
+static bool create_scheduler_record(RuntimeRecord* record, uint64_t owner_id,
+                                    uint64_t budget_ticks, uint64_t entry_pc,
+                                    uint64_t stack_pointer, uint64_t* execution_id)
+{
+    if (!record || !execution_id || !record->execution_id || !record->space.identity ||
+        !record->space.owner_id || record->space.owner_id != record->execution_id) return false;
+    zero_bytes(&record->context, sizeof(record->context));
+    record->context.sp_el0 = stack_pointer;
+    record->context.entry_pc = entry_pc;
+    record->context.pstate = kRuntimePstate;
+    record->context.address_space_id = record->space.identity;
+    record->context.owner_id = record->space.owner_id;
+    record->context.state = GXOS_AARCH64_EL0_CONTEXT_PREPARED;
+    if (!phase2_el0_validate_context(&record->space, &record->context,
+                                    record->space.owner_id)) return false;
+
+    if (g_next_task_id >= UINT32_C(0x7fffffff)) return false;
+    const uint32_t task_id = static_cast<uint32_t>(kTaskIdBase | g_next_task_id++);
+    record->task = kernel::scheduler::create_task(
+        task_id, "studio-el0-child", scheduled_el0_entry, record, false);
+    if (!record->task || !kernel::scheduler::configure_el0_task(
+            record->task, record->execution_id, owner_id, budget_ticks,
+            &record->context, &record->space)) return false;
+    record->in_use = 1;
+    record->final_state = kernel::scheduler::EXECUTION_CREATED;
+    record->user_page_count = record->space.page_count;
+    record->user_table_page_count = record->space.table_count;
+    *execution_id = record->execution_id;
     return true;
 }
 
@@ -385,6 +469,119 @@ extern "C" uint8_t phase2_el0_task_create(
     record->final_state = kernel::scheduler::EXECUTION_CREATED;
     *execution_id = record->execution_id;
     return 1;
+}
+
+extern "C" uint8_t phase2_el0_task_create_studio_elf(
+    const uint8_t* validated_elf, uint64_t elf_size, uint64_t owner_id,
+    uint64_t budget_microseconds, uint64_t* execution_id)
+{
+    if (execution_id) *execution_id = 0;
+    gxos_aarch64_studio_elf_image image{};
+    if (!execution_id || !validated_elf ||
+        !gxos_aarch64_studio_elf_validate(validated_elf, elf_size, &image)) return 0;
+    InterruptGuard guard;
+    if (!owner_is_current_kernel_task(owner_id) || g_next_execution_id == 0 ||
+        g_next_execution_id == UINT64_MAX || g_next_task_id >= UINT32_C(0x7fffffff)) return 0;
+    uint64_t budget_ticks = 0;
+    if (!budget_to_counter_ticks(budget_microseconds, &budget_ticks)) return 0;
+    RuntimeRecord* record = allocate_record();
+    if (!record) return 0;
+
+    record->execution_id = g_next_execution_id++;
+    record->parent_owner_id = owner_id;
+    const uint64_t child_owner = record->execution_id;
+    if (!phase2_el0_address_space_create(&record->space, child_owner)) {
+        zero_bytes(record, sizeof(*record));
+        return 0;
+    }
+
+    const uint64_t rx_flags = kReadExecuteFlags;
+    const uint64_t stack_flags = kStackFlags;
+    bool prepared = true;
+    for (uint64_t page = 0; page < image.image_page_count; ++page) {
+        uint64_t physical = 0;
+        if (!phase2_el0_allocate_page(
+                &record->space, child_owner,
+                image.image_base + page * GXOS_AARCH64_EL0_PAGE_SIZE,
+                rx_flags, &physical)) {
+            prepared = false;
+            break;
+        }
+    }
+    if (prepared) {
+        prepared = phase2_el0_copy_owned_memory(
+            &record->space, child_owner, image.image_base,
+            validated_elf + image.segment_file_offset,
+            image.segment_file_bytes) != 0;
+    }
+
+    uint64_t trampoline_physical = 0;
+    uint8_t trampoline[24] = {};
+    if (prepared) {
+        prepared = phase2_el0_allocate_page(
+            &record->space, child_owner,
+            GXOS_AARCH64_STUDIO_ELF_TRAMPOLINE_VA,
+            rx_flags, &trampoline_physical) != 0 &&
+            make_studio_return_trampoline(
+                GXOS_AARCH64_STUDIO_ELF_TRAMPOLINE_VA,
+                image.entry_point, trampoline, sizeof(trampoline)) &&
+            phase2_el0_copy_owned_memory(
+                &record->space, child_owner,
+                GXOS_AARCH64_STUDIO_ELF_TRAMPOLINE_VA,
+                trampoline, sizeof(trampoline)) != 0;
+    }
+
+    const uint64_t stack_end = GXOS_AARCH64_EL0_USER_LIMIT - GXOS_AARCH64_EL0_PAGE_SIZE;
+    const uint64_t stack_base = stack_end - GXOS_AARCH64_STUDIO_ELF_STACK_BYTES;
+    for (uint64_t offset = 0; prepared &&
+         offset < GXOS_AARCH64_STUDIO_ELF_STACK_BYTES;
+         offset += GXOS_AARCH64_EL0_PAGE_SIZE) {
+        uint64_t physical = 0;
+        prepared = phase2_el0_allocate_page(
+            &record->space, child_owner, stack_base + offset,
+            stack_flags, &physical) != 0;
+    }
+
+    if (!prepared || !create_scheduler_record(
+            record, owner_id, budget_ticks,
+            GXOS_AARCH64_STUDIO_ELF_TRAMPOLINE_VA,
+            stack_end, execution_id)) {
+        if (record->task) {
+            kernel::scheduler::discard_unstarted_task(record->task);
+            record->task = nullptr;
+        }
+        record->space.state = GXOS_AARCH64_EL0_SPACE_TERMINAL;
+        (void)phase2_el0_cleanup(&record->space);
+        zero_bytes(record, sizeof(*record));
+        *execution_id = 0;
+        return 0;
+    }
+    return 1;
+}
+
+extern "C" uint8_t phase2_el0_task_create_studio_build(
+    const gxos_aarch64_studio_build_identity* identity, uint64_t owner_id,
+    uint64_t budget_microseconds, uint64_t* execution_id)
+{
+    if (execution_id) *execution_id = 0;
+    if (!execution_id || !identity || !identity->source_sha256) return 0;
+    InterruptGuard guard;
+    kernel::compiler::BareMetalBuildService::OwnedArtifactView artifact{};
+    if (!kernel::compiler::BareMetalBuildService::current_artifact(
+            identity->owner_identity, identity->build_generation,
+            identity->project_id, identity->artifact_path, identity->artifact_size,
+            identity->architecture, identity->abi, identity->package_path,
+            identity->package_generation, identity->artifact_sha256,
+            &artifact) ||
+        !artifact.el0IntegerProfileValid || !artifact.bytes ||
+        !exact_text(identity->source_sha256, artifact.sourceSha256)) return 0;
+
+    // Copy from the immutable kernel-owned Build snapshot into child-owned RX
+    // pages while the Build identity is still current. The child never reopens
+    // the VFS artifact path after this point.
+    return phase2_el0_task_create_studio_elf(
+        artifact.bytes, artifact.artifactSize, owner_id,
+        budget_microseconds, execution_id);
 }
 
 extern "C" uint8_t phase2_el0_task_start(uint64_t execution_id, uint64_t owner_id)

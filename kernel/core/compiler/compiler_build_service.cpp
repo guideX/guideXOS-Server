@@ -2,6 +2,7 @@
 
 #include "compiler_driver.h"
 #include "compiler_target.h"
+#include "kernel/arch/arm64/studio_elf_image.h"
 #include "kernel/serial_debug.h"
 #include "kernel/vfs.h"
 
@@ -24,15 +25,38 @@ static const uint32_t kMaxArtifactBytes = COMPILER_MAX_OUTPUT_BYTES;
 struct BuildJob {
     bool used;
     gx_build_handle handle;
+    uint64_t ownerIdentity;
     gx_build_snapshot snapshot;
+};
+
+struct OwnedArtifactSnapshot {
+    uint8_t valid;
+    uint8_t el0IntegerProfileValid;
+    uint8_t reserved[6];
+    uint64_t generation;
+    uint64_t ownerIdentity;
+    uint64_t size;
+    uint64_t packageGeneration;
+    char projectId[96];
+    char artifactPath[GX_BUILD_MAX_ARTIFACT_PATH_BYTES];
+    char packagePath[GX_BUILD_MAX_ARTIFACT_PATH_BYTES];
+    char architecture[32];
+    char abi[96];
+    char sourceSha256[GX_BUILD_MAX_SHA256_BYTES];
+    char artifactSha256[GX_BUILD_MAX_SHA256_BYTES];
+    uint8_t bytes[kMaxArtifactBytes];
 };
 
 static BuildJob s_job = {};
 static gx_build_handle s_nextHandle = 1;
+static OwnedArtifactSnapshot s_ownedArtifact = {};
 static char s_projectText[kMaxText + 1] = {};
 static char s_manifestText[kMaxText + 1] = {};
 static uint8_t s_artifactBytes[kMaxArtifactBytes] = {};
 static uint8_t s_artifactReadback[kMaxArtifactBytes] = {};
+static uint8_t s_sourceBytes[COMPILER_MAX_SOURCE_BYTES] = {};
+static uint32_t s_sourceByteCount = 0;
+static char s_sourceSha256[GX_BUILD_MAX_SHA256_BYTES] = {};
 
 static const char* find_text(const char* text, const char* needle);
 
@@ -431,15 +455,34 @@ static uint64_t hash_bytes(const uint8_t* bytes, uint32_t count)
     return hash;
 }
 
-static bool artifact_sha256(const char* path, uint64_t expectedSize, char* output, uint32_t capacity)
+static bool artifact_sha256(const char* path, uint64_t expectedSize, char* output,
+                            uint32_t capacity, uint8_t* capture,
+                            uint32_t captureCapacity)
 {
     vfs::FileInfo info = {};
     if (!path || vfs::stat(path, &info) != vfs::VFS_OK || info.type != vfs::FILE_TYPE_REGULAR ||
         info.size == 0 || info.size > kMaxArtifactBytes || info.size != expectedSize) return false;
     const uint32_t bytes = static_cast<uint32_t>(info.size);
+    if (capture && bytes > captureCapacity) return false;
     const int32_t read = vfs::read_file(path, s_artifactBytes, bytes);
-    return read >= 0 && static_cast<uint32_t>(read) == bytes &&
-        sha256_hex(s_artifactBytes, bytes, output, capacity);
+    if (read < 0 || static_cast<uint32_t>(read) != bytes ||
+        !sha256_hex(s_artifactBytes, bytes, output, capacity)) return false;
+    if (capture) for (uint32_t i = 0; i < bytes; ++i) capture[i] = s_artifactBytes[i];
+    return true;
+}
+
+static bool source_sha256(const char* path, char* output, uint32_t capacity)
+{
+    vfs::FileInfo info = {};
+    if (!path || vfs::stat(path, &info) != vfs::VFS_OK ||
+        info.type != vfs::FILE_TYPE_REGULAR ||
+        info.size > sizeof(s_sourceBytes)) return false;
+    const uint32_t bytes = static_cast<uint32_t>(info.size);
+    const int32_t read = bytes == 0 ? 0 : vfs::read_file(path, s_sourceBytes, bytes);
+    if (read < 0 || static_cast<uint32_t>(read) != bytes ||
+        !sha256_hex(s_sourceBytes, bytes, output, capacity)) return false;
+    s_sourceByteCount = bytes;
+    return true;
 }
 
 static bool copy_artifact(const char* source, const char* destination, uint64_t* outSize, uint64_t* outHash)
@@ -559,6 +602,9 @@ static bool build(const gx_build_request* request)
         !append(sourcePath, sizeof(sourcePath), sourceEntry)) {
         fail(GX_BUILD_ERROR_SOURCE_SELECTION, "source path is outside the project root"); return false;
     }
+    if (!source_sha256(sourcePath, s_sourceSha256, sizeof(s_sourceSha256))) {
+        fail(GX_BUILD_ERROR_SOURCE_SELECTION, "source revision could not be captured from the selected VFS file"); return false;
+    }
     char directory[kMaxPath] = {};
     char armDirectory[kMaxPath] = {}; char amdDirectory[kMaxPath] = {};
     if (!join(request->projectRoot, "build", directory, sizeof(directory)) || !ensure_directory(directory) ||
@@ -602,7 +648,8 @@ static bool build(const gx_build_request* request)
     serial::putc('\n');
     output_line(resolvedFirst == CompilerTarget::Amd64 ?
         "Compiling AMD64 source inside guideXOS" : "Compiling ARM64 source inside guideXOS", 1);
-    if (!compile_for_target(sourcePath, primaryPath, resolvedFirst, primarySummary)) {
+    if (!compile_for_target_from_bytes(sourcePath, s_sourceBytes, s_sourceByteCount,
+                                       primaryPath, resolvedFirst, primarySummary)) {
         if (vfs::exists(armPath)) (void)vfs::unlink(armPath);
         if (vfs::exists(amdPath)) (void)vfs::unlink(amdPath);
         output_compile_diagnostic(*primarySummary);
@@ -616,7 +663,8 @@ static bool build(const gx_build_request* request)
     bool amdOkay = false;
     if (targetCount == 2) {
         output_line("Compiling AMD64 sibling from the same source tree inside guideXOS", 1);
-        amdOkay = compile_for_target(sourcePath, amdPath, second, &amdSummary);
+        amdOkay = compile_for_target_from_bytes(sourcePath, s_sourceBytes, s_sourceByteCount,
+                                               amdPath, second, &amdSummary);
         if (!amdOkay) {
             if (vfs::exists(armPath)) (void)vfs::unlink(armPath);
             if (vfs::exists(amdPath)) (void)vfs::unlink(amdPath);
@@ -647,8 +695,13 @@ static bool build(const gx_build_request* request)
     }
     char primarySha256[GX_BUILD_MAX_SHA256_BYTES] = {};
     char siblingSha256[GX_BUILD_MAX_SHA256_BYTES] = {};
-    if (!artifact_sha256(primaryPath, primaryInfo.size, primarySha256, sizeof(primarySha256)) ||
-        (targetCount == 2 && !artifact_sha256(amdPath, amdInfo.size, siblingSha256, sizeof(siblingSha256)))) {
+    uint8_t* primaryCapture = resolvedFirst == CompilerTarget::Arm64
+        ? s_ownedArtifact.bytes : nullptr;
+    if (!artifact_sha256(primaryPath, primaryInfo.size, primarySha256,
+                         sizeof(primarySha256), primaryCapture,
+                         primaryCapture ? sizeof(s_ownedArtifact.bytes) : 0) ||
+        (targetCount == 2 && !artifact_sha256(amdPath, amdInfo.size,
+                         siblingSha256, sizeof(siblingSha256), nullptr, 0))) {
         if (vfs::exists(armPath)) (void)vfs::unlink(armPath);
         if (vfs::exists(amdPath)) (void)vfs::unlink(amdPath);
         fail(GX_BUILD_ERROR_ARTIFACT_MISSING, "compiled ELF could not be read back for its SHA-256 identity"); return false;
@@ -677,6 +730,24 @@ static bool build(const gx_build_request* request)
         s_job.snapshot.packageWritten = 1;
         s_job.snapshot.packageGeneration = s_job.handle;
         copy(s_job.snapshot.packagePath, sizeof(s_job.snapshot.packagePath), packageRoot);
+    }
+    if (resolvedFirst == CompilerTarget::Arm64) {
+        s_ownedArtifact.size = primaryInfo.size;
+        s_ownedArtifact.generation = s_job.handle;
+        s_ownedArtifact.ownerIdentity = s_job.ownerIdentity;
+        copy(s_ownedArtifact.projectId, sizeof(s_ownedArtifact.projectId), request->projectId);
+        copy(s_ownedArtifact.artifactPath, sizeof(s_ownedArtifact.artifactPath), request->expectedArtifact);
+        s_ownedArtifact.packageGeneration = s_job.snapshot.packageGeneration;
+        copy(s_ownedArtifact.packagePath, sizeof(s_ownedArtifact.packagePath),
+             s_job.snapshot.packagePath);
+        copy(s_ownedArtifact.architecture, sizeof(s_ownedArtifact.architecture), "arm64");
+        copy(s_ownedArtifact.abi, sizeof(s_ownedArtifact.abi), kAbi);
+        copy(s_ownedArtifact.sourceSha256, sizeof(s_ownedArtifact.sourceSha256), s_sourceSha256);
+        copy(s_ownedArtifact.artifactSha256, sizeof(s_ownedArtifact.artifactSha256), primarySha256);
+        gxos_aarch64_studio_elf_image isolatedImage{};
+        s_ownedArtifact.el0IntegerProfileValid = gxos_aarch64_studio_elf_validate(
+            s_ownedArtifact.bytes, s_ownedArtifact.size, &isolatedImage);
+        s_ownedArtifact.valid = 1;
     }
     output_line(resolvedFirst == CompilerTarget::Amd64 ?
         "AMD64: build succeeded | machine=EM_X86_64 | W^X=PASS" :
@@ -714,14 +785,26 @@ bool artifact_storage_path(const char* logicalPath, char* storagePath, uint32_t 
 
 gx_result start(const gx_build_request* request, gx_build_handle* outHandle)
 {
+    return start_for_owner(request, outHandle, 0);
+}
+
+gx_result start_for_owner(const gx_build_request* request, gx_build_handle* outHandle,
+                          uint64_t owner_identity)
+{
     if (!outHandle) return GX_ERROR_INVALID_ARGUMENT;
     *outHandle = 0;
     if (!request || request->size < sizeof(gx_build_request) || request->version != GX_BUILD_API_VERSION) return GX_ERROR_INVALID_ARGUMENT;
     if (s_job.used) return GX_ERROR_BUSY;
+    // A new invocation replaces the runnable result even when compilation or
+    // publication later fails. The previous ELF must never remain runnable.
+    s_ownedArtifact = {};
+    s_sourceByteCount = 0;
+    s_sourceSha256[0] = '\0';
+    if (s_nextHandle == 0 || s_nextHandle == UINT64_MAX) return GX_ERROR_FAILED;
     s_job = {};
     s_job.used = true;
     s_job.handle = s_nextHandle++;
-    if (s_job.handle == 0) s_job.handle = s_nextHandle++;
+    s_job.ownerIdentity = owner_identity;
     clear_snapshot(&s_job.snapshot, s_job.handle);
     *outHandle = s_job.handle;
     const bool okay = build(request);
@@ -758,6 +841,43 @@ gx_result release(gx_build_handle handle)
     if (!s_job.used || handle == 0 || handle != s_job.handle) return GX_ERROR_INVALID_ARGUMENT;
     s_job = {};
     return GX_OK;
+}
+
+bool current_artifact(uint64_t owner_identity, uint64_t build_generation,
+                      const char* project_id, const char* artifact_path,
+                      uint64_t artifact_size, const char* architecture,
+                      const char* abi, const char* package_path,
+                      uint64_t package_generation, const char* artifact_sha256,
+                      OwnedArtifactView* output)
+{
+    if (output) *output = {};
+    if (!output || !s_ownedArtifact.valid || !project_id || !artifact_path ||
+        !architecture || !abi || !package_path || !artifact_sha256 || build_generation == 0 ||
+        s_ownedArtifact.ownerIdentity != owner_identity ||
+        s_ownedArtifact.generation != build_generation ||
+        s_ownedArtifact.size != artifact_size ||
+        !equal(s_ownedArtifact.projectId, project_id) ||
+        !equal(s_ownedArtifact.artifactPath, artifact_path) ||
+        !equal(s_ownedArtifact.packagePath, package_path) ||
+        s_ownedArtifact.packageGeneration != package_generation ||
+        !equal(s_ownedArtifact.architecture, architecture) ||
+        !equal(s_ownedArtifact.abi, abi) ||
+        !equal(s_ownedArtifact.artifactSha256, artifact_sha256)) return false;
+
+    output->buildGeneration = s_ownedArtifact.generation;
+    output->ownerIdentity = s_ownedArtifact.ownerIdentity;
+    output->artifactSize = s_ownedArtifact.size;
+    output->packageGeneration = s_ownedArtifact.packageGeneration;
+    output->el0IntegerProfileValid = s_ownedArtifact.el0IntegerProfileValid;
+    output->bytes = s_ownedArtifact.bytes;
+    copy(output->projectId, sizeof(output->projectId), s_ownedArtifact.projectId);
+    copy(output->artifactPath, sizeof(output->artifactPath), s_ownedArtifact.artifactPath);
+    copy(output->packagePath, sizeof(output->packagePath), s_ownedArtifact.packagePath);
+    copy(output->architecture, sizeof(output->architecture), s_ownedArtifact.architecture);
+    copy(output->abi, sizeof(output->abi), s_ownedArtifact.abi);
+    copy(output->sourceSha256, sizeof(output->sourceSha256), s_ownedArtifact.sourceSha256);
+    copy(output->artifactSha256, sizeof(output->artifactSha256), s_ownedArtifact.artifactSha256);
+    return true;
 }
 
 } // namespace BareMetalBuildService
