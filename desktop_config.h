@@ -11,6 +11,7 @@
 #include "clock_time_settings.h"
 #include "desktop_theme.h"
 #include "display_model.h"
+#include "taskbar_customization_core.h"
 
 namespace gxos { namespace gui {
     constexpr uint64_t kDesktopConfigMaxBytes = 1024 * 1024;
@@ -67,6 +68,11 @@ namespace gxos { namespace gui {
         std::string desktopThemeId; // stable theme id, e.g. classic or scifi
         std::string backgroundScaleMode; // fill, fit, stretch, center, or tile
         std::string taskbarPosition; // bottom, top, left, or right
+        std::string taskbarSize; // compact, standard, or expanded
+        std::string taskbarPresentation; // icons-only or icons-labels
+        bool taskbarAutoHide{false};
+        bool taskbarShowPreviews{true};
+        bool taskbarShowActivity{true};
         std::string displayMode; // mirror or extend
         std::string displayPrimaryDisplayId; // stable monitor id if known
         std::string displayArrangement; // serialized monitor layout, if known
@@ -121,6 +127,11 @@ namespace gxos { namespace gui {
             if(out.desktopThemeId.empty() && extractSection(txt, "desktop.theme", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.desktopThemeId); } }
             if(extractSection(txt, "desktop.background.scale", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.backgroundScaleMode); } }
             if(extractSection(txt, "desktop.taskbar.position", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.taskbarPosition); } }
+            if(extractSection(txt, "desktop.taskbar.size", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.taskbarSize); } }
+            if(extractSection(txt, "desktop.taskbar.presentation", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.taskbarPresentation); } }
+            if(extractSection(txt, "desktop.taskbar.autoHide", section)){ size_t i=0; skipWS(section,i); parseJSONBool(section, i, out.taskbarAutoHide); }
+            if(extractSection(txt, "desktop.taskbar.showPreviews", section)){ size_t i=0; skipWS(section,i); parseJSONBool(section, i, out.taskbarShowPreviews); }
+            if(extractSection(txt, "desktop.taskbar.showActivity", section)){ size_t i=0; skipWS(section,i); parseJSONBool(section, i, out.taskbarShowActivity); }
             if(extractSection(txt, "desktop.display.mode", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.displayMode); } }
             if(extractSection(txt, "desktop.display.primaryId", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.displayPrimaryDisplayId); } }
             if(extractSection(txt, "desktop.display.arrangement", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.displayArrangement); } }
@@ -177,6 +188,9 @@ namespace gxos { namespace gui {
                 out.desktopThemeId = DesktopThemeIdToString(themeId);
             }
             out.displayMode = normalizeDisplayModeName(out.displayMode);
+            out.taskbarPosition = TaskbarDockName(ParseTaskbarDock(out.taskbarPosition.c_str()));
+            out.taskbarSize = TaskbarSizeModeName(ParseTaskbarSizeMode(out.taskbarSize.c_str()));
+            out.taskbarPresentation = TaskbarPresentationName(ParseTaskbarPresentation(out.taskbarPresentation.c_str()));
             if (out.displayPrimaryDisplayId.empty()) out.displayPrimaryDisplayId = "display-1";
             out.timeZoneId = gxos::clocktime::NormalizeTimeZoneId(out.timeZoneId);
             return true;
@@ -226,6 +240,11 @@ namespace gxos { namespace gui {
             f << "  \"desktop.theme.id\": " << jsonEscape(DesktopThemeIdToString(themeId)) << ",\n";
             f << "  \"desktop.background.scale\": " << jsonEscape(data.backgroundScaleMode.empty() ? "fill" : data.backgroundScaleMode) << ",\n";
             f << "  \"desktop.taskbar.position\": " << jsonEscape(data.taskbarPosition.empty() ? "bottom" : data.taskbarPosition) << ",\n";
+            f << "  \"desktop.taskbar.size\": " << jsonEscape(TaskbarSizeModeName(ParseTaskbarSizeMode(data.taskbarSize.c_str()))) << ",\n";
+            f << "  \"desktop.taskbar.presentation\": " << jsonEscape(TaskbarPresentationName(ParseTaskbarPresentation(data.taskbarPresentation.c_str()))) << ",\n";
+            f << "  \"desktop.taskbar.autoHide\": " << (data.taskbarAutoHide ? "true" : "false") << ",\n";
+            f << "  \"desktop.taskbar.showPreviews\": " << (data.taskbarShowPreviews ? "true" : "false") << ",\n";
+            f << "  \"desktop.taskbar.showActivity\": " << (data.taskbarShowActivity ? "true" : "false") << ",\n";
             f << "  \"desktop.display.mode\": " << jsonEscape(normalizeDisplayModeName(data.displayMode)) << ",\n";
             f << "  \"desktop.display.primaryId\": " << jsonEscape(data.displayPrimaryDisplayId.empty() ? "display-1" : data.displayPrimaryDisplayId) << ",\n";
             f << "  \"desktop.display.arrangement\": " << jsonEscape(data.displayArrangement) << ",\n";
@@ -269,8 +288,25 @@ namespace gxos { namespace gui {
             f << "}\n";
             const std::string serialized = f.str();
             if (serialized.size() > kDesktopConfigMaxBytes) { err = "desktop config exceeds its byte limit"; return false; }
+            const std::string temporaryPath = path + ".taskbar-tmp";
             std::vector<uint8_t> bytes(serialized.begin(), serialized.end());
-            if (!FS::writeAll(path, bytes)) { err = "write fail"; return false; }
+            if (!FS::writeAll(temporaryPath, bytes)) {
+                FS::removeFile(temporaryPath);
+                err = "temporary write failed";
+                return false;
+            }
+            std::vector<uint8_t> verification;
+            const FSResult verifyResult = FS::readAll(temporaryPath, verification, kDesktopConfigMaxBytes);
+            if (!verifyResult.success || verification != bytes) {
+                FS::removeFile(temporaryPath);
+                err = "temporary desktop config verification failed";
+                return false;
+            }
+            if (!FS::renameFile(temporaryPath, path, true)) {
+                FS::removeFile(temporaryPath);
+                err = "atomic desktop config replacement failed";
+                return false;
+            }
             return true;
         }
     };

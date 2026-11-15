@@ -252,6 +252,9 @@ namespace gxos { namespace gui {
         static void pinAction(const std::string& act);
         static void unpinAction(const std::string& act);
         static void saveDesktopConfig();
+        static void syncTaskbarPreferencesFromConfig();
+        static bool updateHostedTaskbarAutoHide(
+            int mx, int my, const DisplayVirtualDesktop& desktop, const DisplayViewport& viewport);
         static void addRecent(const std::string& act);
         static void refreshDesktopItems();
         static void refreshAllProgramsList();

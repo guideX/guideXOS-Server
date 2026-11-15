@@ -14,6 +14,7 @@
 #include "kernel/types.h"
 #include "kernel/kernel_app.h"
 #include "../../../../taskbar_application_model_core.h"
+#include "../../../../taskbar_customization_core.h"
 
 namespace kernel {
 namespace compositor {
@@ -260,6 +261,8 @@ public:
     static void init(uint32_t screenW, uint32_t screenH, uint32_t taskbarH, uint32_t startX);
     static void setLayout(uint32_t taskbarX, uint32_t taskbarY, uint32_t taskbarW, uint32_t taskbarH,
                           bool vertical, uint32_t buttonStartX, uint32_t buttonStartY);
+    static void setPresentation(gxos::gui::TaskbarSizeMode size, bool showLabels,
+                                bool showActivity, bool showPreviews, bool taskbarVisible);
     static void updateButtons();
     static void drawButtons();
     static bool handleClick(int32_t mx, int32_t my);
@@ -292,6 +295,11 @@ private:
     static uint32_t s_taskbarY;
     static uint32_t s_taskbarW;
     static bool s_vertical;
+    static gxos::gui::TaskbarSizeMode s_sizeMode;
+    static bool s_showLabels;
+    static bool s_showActivity;
+    static bool s_showPreviews;
+    static bool s_taskbarVisible;
     static uint32_t s_startY;
     static int32_t s_mouseX;
     static int32_t s_mouseY;

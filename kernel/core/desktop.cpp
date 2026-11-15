@@ -781,7 +781,7 @@ static uint8_t s_netConfigDNS[4] = {0, 0, 0, 0};
 static int s_networkConfigBtnHover = -1;  // 0 = OK, 1 = Cancel
 
 // Layout constants
-static const uint32_t kTaskbarH = 40;
+static uint32_t kTaskbarH = 40;
 static const uint32_t kTaskbarSnapThreshold = 48;
 static const uint32_t kStartBtnW = 100;
 static const uint32_t kSearchBoxW = 160;
@@ -801,7 +801,7 @@ static bool s_systemDesktopIconVisibilityLoaded = false;
 static const uint32_t kTrayIconSize = 16;
 static const uint32_t kTrayIconGap = 6;
 static const uint32_t kTaskbarBtnMaxW = 150;
-static const uint32_t kTaskbarBtnH = 28;
+static uint32_t kTaskbarBtnH = 28;
 static const uint32_t kTaskbarBtnGap = 4;
 static bool s_enableStartMenuIcons = true;
 static uint32_t s_startMenuIconSize = 16;
@@ -822,6 +822,14 @@ enum class TaskbarDockPosition : uint8_t {
 };
 
 static TaskbarDockPosition s_taskbarDockPosition = TaskbarDockPosition::Bottom;
+static gxos::gui::TaskbarSizeMode s_taskbarSizeMode = gxos::gui::TaskbarSizeMode::Standard;
+static gxos::gui::TaskbarPresentation s_taskbarPresentation = gxos::gui::TaskbarPresentation::IconsAndLabels;
+static gxos::gui::TaskbarAutoHideController s_taskbarAutoHideController{};
+static bool s_taskbarAutoHide = false;
+static bool s_taskbarShowPreviews = true;
+static bool s_taskbarShowActivity = true;
+static bool s_taskbarSettingsOpen = false;
+static DesktopRect s_taskbarSettingsRect{0, 0, 0, 0};
 static bool s_taskbarDragging = false;
 
 static bool is_vertical_taskbar(TaskbarDockPosition position)
@@ -831,38 +839,35 @@ static bool is_vertical_taskbar(TaskbarDockPosition position)
 
 static DesktopRect get_taskbar_rect(uint32_t screenW, uint32_t screenH, TaskbarDockPosition position)
 {
-    DesktopRect r;
-    switch (position) {
-        case TaskbarDockPosition::Top:
-            r = {0, 0, screenW, kTaskbarH};
-            break;
-        case TaskbarDockPosition::Left:
-            r = {0, 0, kTaskbarH, screenH};
-            break;
-        case TaskbarDockPosition::Right:
-            r = {screenW > kTaskbarH ? screenW - kTaskbarH : 0, 0, kTaskbarH, screenH};
-            break;
-        case TaskbarDockPosition::Bottom:
-        default:
-            r = {0, screenH > kTaskbarH ? screenH - kTaskbarH : 0, screenW, kTaskbarH};
-            break;
-    }
-    return r;
+    const gxos::gui::TaskbarRect rect = gxos::gui::TaskbarGeometryForDisplay(
+        0, 0, static_cast<int>(screenW), static_cast<int>(screenH),
+        static_cast<gxos::gui::TaskbarDock>(position), s_taskbarSizeMode);
+    return {static_cast<uint32_t>(rect.left), static_cast<uint32_t>(rect.top),
+        static_cast<uint32_t>(rect.width()), static_cast<uint32_t>(rect.height())};
 }
 
 static DesktopRect get_desktop_work_area(uint32_t screenW, uint32_t screenH, TaskbarDockPosition position)
 {
-    switch (position) {
-        case TaskbarDockPosition::Top:
-            return {0, kTaskbarH, screenW, screenH > kTaskbarH ? screenH - kTaskbarH : 0};
-        case TaskbarDockPosition::Left:
-            return {kTaskbarH, 0, screenW > kTaskbarH ? screenW - kTaskbarH : 0, screenH};
-        case TaskbarDockPosition::Right:
-            return {0, 0, screenW > kTaskbarH ? screenW - kTaskbarH : 0, screenH};
-        case TaskbarDockPosition::Bottom:
-        default:
-            return {0, 0, screenW, screenH > kTaskbarH ? screenH - kTaskbarH : 0};
-    }
+    const gxos::gui::TaskbarRect rect = gxos::gui::TaskbarWorkAreaForDisplay(
+        0, 0, static_cast<int>(screenW), static_cast<int>(screenH),
+        static_cast<gxos::gui::TaskbarDock>(position), s_taskbarSizeMode, s_taskbarAutoHide);
+    return {static_cast<uint32_t>(rect.left), static_cast<uint32_t>(rect.top),
+        static_cast<uint32_t>(rect.width()), static_cast<uint32_t>(rect.height())};
+}
+
+static DesktopRect get_interactive_taskbar_rect()
+{
+    DesktopRect taskbar = get_taskbar_rect(
+        s_taskbarScreenW != 0u ? s_taskbarScreenW : s_screenW,
+        s_taskbarScreenH != 0u ? s_taskbarScreenH : s_screenH,
+        s_taskbarDockPosition);
+    if (!s_taskbarAutoHide || s_taskbarAutoHideController.visible()) return taskbar;
+    const gxos::gui::TaskbarRect rect = gxos::gui::TaskbarRevealRect(
+        {static_cast<int>(taskbar.x), static_cast<int>(taskbar.y),
+         static_cast<int>(taskbar.x + taskbar.w), static_cast<int>(taskbar.y + taskbar.h)},
+        static_cast<gxos::gui::TaskbarDock>(s_taskbarDockPosition));
+    return {static_cast<uint32_t>(rect.left), static_cast<uint32_t>(rect.top),
+        static_cast<uint32_t>(rect.width()), static_cast<uint32_t>(rect.height())};
 }
 
 static bool point_in_rect(int32_t mx, int32_t my, const DesktopRect& r)
@@ -978,6 +983,11 @@ struct BareMetalDisplayOptionsData {
     char backgroundScaleMode[kBareMetalScaleModeMax];
     char desktopThemeId[kBareMetalThemeIdMax];
     char taskbarPosition[kBareMetalTaskbarPositionMax];
+    char taskbarSize[16];
+    char taskbarPresentation[20];
+    bool taskbarAutoHide;
+    bool taskbarShowPreviews;
+    bool taskbarShowActivity;
     bool showDesktopTrash;
     bool showDesktopThisSystem;
     bool showDesktopFileManager;
@@ -992,6 +1002,11 @@ static void bare_metal_display_options_defaults(BareMetalDisplayOptionsData& sto
     desktop_str_copy(store.backgroundScaleMode, "fill", (int)sizeof(store.backgroundScaleMode));
     desktop_str_copy(store.desktopThemeId, "classic", (int)sizeof(store.desktopThemeId));
     desktop_str_copy(store.taskbarPosition, "bottom", (int)sizeof(store.taskbarPosition));
+    desktop_str_copy(store.taskbarSize, "standard", (int)sizeof(store.taskbarSize));
+    desktop_str_copy(store.taskbarPresentation, "icons-labels", (int)sizeof(store.taskbarPresentation));
+    store.taskbarAutoHide = false;
+    store.taskbarShowPreviews = true;
+    store.taskbarShowActivity = true;
     store.showDesktopTrash = true;
     store.showDesktopThisSystem = true;
     store.showDesktopFileManager = true;
@@ -1005,6 +1020,8 @@ static bool bare_metal_parse_bool_value(const char* value, bool fallback);
 static void bare_metal_trim_in_place(char* value);
 static const char* bare_metal_normalize_scale_mode(const char* value);
 static const char* bare_metal_normalize_taskbar_position(const char* value);
+static const char* bare_metal_normalize_taskbar_size(const char* value);
+static const char* bare_metal_normalize_taskbar_presentation(const char* value);
 
 static bool bare_metal_load_display_options_from_ini_path(const char* path, BareMetalDisplayOptionsData& out, BareMetalDisplayOptionsLoadSource source, BareMetalDisplayOptionsLoadSource* outSource = nullptr)
 {
@@ -1065,6 +1082,21 @@ static bool bare_metal_load_display_options_from_ini_path(const char* path, Bare
             parsedAny = true;
         } else if (desktop_str_eq(line, "taskbarPosition")) {
             desktop_str_copy(out.taskbarPosition, bare_metal_normalize_taskbar_position(sep), (int)sizeof(out.taskbarPosition));
+            parsedAny = true;
+        } else if (desktop_str_eq(line, "taskbarSize")) {
+            desktop_str_copy(out.taskbarSize, bare_metal_normalize_taskbar_size(sep), (int)sizeof(out.taskbarSize));
+            parsedAny = true;
+        } else if (desktop_str_eq(line, "taskbarPresentation")) {
+            desktop_str_copy(out.taskbarPresentation, bare_metal_normalize_taskbar_presentation(sep), (int)sizeof(out.taskbarPresentation));
+            parsedAny = true;
+        } else if (desktop_str_eq(line, "taskbarAutoHide")) {
+            out.taskbarAutoHide = bare_metal_parse_bool_value(sep, out.taskbarAutoHide);
+            parsedAny = true;
+        } else if (desktop_str_eq(line, "taskbarShowPreviews")) {
+            out.taskbarShowPreviews = bare_metal_parse_bool_value(sep, out.taskbarShowPreviews);
+            parsedAny = true;
+        } else if (desktop_str_eq(line, "taskbarShowActivity")) {
+            out.taskbarShowActivity = bare_metal_parse_bool_value(sep, out.taskbarShowActivity);
             parsedAny = true;
         } else if (desktop_str_eq(line, "showDesktopTrash")) {
             out.showDesktopTrash = bare_metal_parse_bool_value(sep, out.showDesktopTrash);
@@ -1183,6 +1215,16 @@ static const char* bare_metal_normalize_taskbar_position(const char* value)
     return "bottom";
 }
 
+static const char* bare_metal_normalize_taskbar_size(const char* value)
+{
+    return gxos::gui::TaskbarSizeModeName(gxos::gui::ParseTaskbarSizeMode(value));
+}
+
+static const char* bare_metal_normalize_taskbar_presentation(const char* value)
+{
+    return gxos::gui::TaskbarPresentationName(gxos::gui::ParseTaskbarPresentation(value));
+}
+
 static bool bare_metal_load_display_options_legacy(BareMetalDisplayOptionsData& store, BareMetalDisplayOptionsLoadSource* outSource = nullptr)
 {
     bare_metal_display_options_defaults(store);
@@ -1249,6 +1291,10 @@ static bool bare_metal_load_display_options(BareMetalDisplayOptionsData& out, Ba
         return true;
     }
 
+    if (bare_metal_load_display_options_from_ini_path("/desktop.bak", out, BareMetalDisplayOptionsLoadSource::Primary, outSource)) {
+        return true;
+    }
+
     if (bare_metal_load_display_options_from_ini_path(kBareMetalDisplayOptionsLegacyStorePath, out, BareMetalDisplayOptionsLoadSource::Legacy, outSource)) {
         return true;
     }
@@ -1301,7 +1347,7 @@ static bool bare_metal_save_display_options(const BareMetalDisplayOptionsData& s
 {
     char text[512];
     int pos = 0;
-    desktop_append_text(text, &pos, sizeof(text), "version=1\n");
+    desktop_append_text(text, &pos, sizeof(text), "version=2\n");
     desktop_append_text(text, &pos, sizeof(text), "wallpaperId=");
     desktop_append_text(text, &pos, sizeof(text), store.wallpaperId[0] ? store.wallpaperId : "");
     desktop_append_text(text, &pos, sizeof(text), "\nbackgroundScaleMode=");
@@ -1310,6 +1356,16 @@ static bool bare_metal_save_display_options(const BareMetalDisplayOptionsData& s
     desktop_append_text(text, &pos, sizeof(text), store.desktopThemeId[0] ? store.desktopThemeId : "classic");
     desktop_append_text(text, &pos, sizeof(text), "\ntaskbarPosition=");
     desktop_append_text(text, &pos, sizeof(text), store.taskbarPosition[0] ? store.taskbarPosition : "bottom");
+    desktop_append_text(text, &pos, sizeof(text), "\ntaskbarSize=");
+    desktop_append_text(text, &pos, sizeof(text), bare_metal_normalize_taskbar_size(store.taskbarSize));
+    desktop_append_text(text, &pos, sizeof(text), "\ntaskbarPresentation=");
+    desktop_append_text(text, &pos, sizeof(text), bare_metal_normalize_taskbar_presentation(store.taskbarPresentation));
+    desktop_append_text(text, &pos, sizeof(text), "\ntaskbarAutoHide=");
+    desktop_append_text(text, &pos, sizeof(text), store.taskbarAutoHide ? "1" : "0");
+    desktop_append_text(text, &pos, sizeof(text), "\ntaskbarShowPreviews=");
+    desktop_append_text(text, &pos, sizeof(text), store.taskbarShowPreviews ? "1" : "0");
+    desktop_append_text(text, &pos, sizeof(text), "\ntaskbarShowActivity=");
+    desktop_append_text(text, &pos, sizeof(text), store.taskbarShowActivity ? "1" : "0");
     desktop_append_text(text, &pos, sizeof(text), "\nshowDesktopTrash=");
     desktop_append_text(text, &pos, sizeof(text), store.showDesktopTrash ? "1" : "0");
     desktop_append_text(text, &pos, sizeof(text), "\nshowDesktopThisSystem=");
@@ -1327,8 +1383,33 @@ static bool bare_metal_save_display_options(const BareMetalDisplayOptionsData& s
         if (outPrimaryWrite) *outPrimaryWrite = vfs::VFS_ERR_INVALID;
         return false;
     }
-    const int32_t primaryWrite = vfs::write_file(kBareMetalDisplayOptionsStorePath, text, (uint32_t)pos);
-    const bool primaryWriteOk = primaryWrite == pos;
+    int32_t primaryWrite = vfs::write_file("/desktop.tmp", text, (uint32_t)pos);
+    bool primaryWriteOk = false;
+    if (primaryWrite == pos) {
+        char verify[512];
+        const int32_t verifyCount = vfs::read_file("/desktop.tmp", verify, sizeof(verify) - 1u);
+        bool exact = verifyCount == pos;
+        for (int32_t i = 0; exact && i < pos; ++i) exact = verify[i] == text[i];
+        if (exact) {
+            vfs::FileInfo currentInfo{};
+            const vfs::Status statStatus = vfs::stat(kBareMetalDisplayOptionsStorePath, &currentInfo);
+            const bool hasCurrent = statStatus == vfs::VFS_OK;
+            if ((hasCurrent && currentInfo.type == vfs::FILE_TYPE_REGULAR) || statStatus == vfs::VFS_ERR_NOT_FOUND) {
+                vfs::unlink("/desktop.bak");
+                bool preservedCurrent = !hasCurrent ||
+                    vfs::rename(kBareMetalDisplayOptionsStorePath, "/desktop.bak") == vfs::VFS_OK;
+                if (preservedCurrent && vfs::rename("/desktop.tmp", kBareMetalDisplayOptionsStorePath) == vfs::VFS_OK) {
+                    primaryWriteOk = true;
+                    vfs::unlink("/desktop.bak");
+                } else {
+                    if (hasCurrent) vfs::rename("/desktop.bak", kBareMetalDisplayOptionsStorePath);
+                    vfs::unlink("/desktop.tmp");
+                }
+            }
+        }
+    }
+    if (!primaryWriteOk) vfs::unlink("/desktop.tmp");
+    primaryWrite = primaryWriteOk ? pos : (primaryWrite < 0 ? primaryWrite : vfs::VFS_ERR_IO);
     if (outPrimaryWrite) {
         *outPrimaryWrite = primaryWrite;
     }
@@ -1386,7 +1467,17 @@ static void persist_taskbar_position()
     BareMetalDisplayOptionsData store;
     bare_metal_load_display_options(store);
     desktop_str_copy(store.taskbarPosition, taskbar_position_name(s_taskbarDockPosition), (int)sizeof(store.taskbarPosition));
+    desktop_str_copy(store.taskbarSize, gxos::gui::TaskbarSizeModeName(s_taskbarSizeMode), (int)sizeof(store.taskbarSize));
+    desktop_str_copy(store.taskbarPresentation, gxos::gui::TaskbarPresentationName(s_taskbarPresentation), (int)sizeof(store.taskbarPresentation));
+    store.taskbarAutoHide = s_taskbarAutoHide;
+    store.taskbarShowPreviews = s_taskbarShowPreviews;
+    store.taskbarShowActivity = s_taskbarShowActivity;
     bare_metal_save_display_options(store);
+}
+
+static void persist_taskbar_preferences()
+{
+    persist_taskbar_position();
 }
 
 static void load_persisted_taskbar_position()
@@ -1395,6 +1486,12 @@ static void load_persisted_taskbar_position()
     BareMetalDisplayOptionsLoadSource source = BareMetalDisplayOptionsLoadSource::None;
     if (!bare_metal_load_display_options(store, &source)) return;
     s_taskbarDockPosition = parse_taskbar_position(store.taskbarPosition);
+    s_taskbarSizeMode = gxos::gui::ParseTaskbarSizeMode(store.taskbarSize);
+    s_taskbarPresentation = gxos::gui::ParseTaskbarPresentation(store.taskbarPresentation);
+    s_taskbarAutoHide = store.taskbarAutoHide;
+    s_taskbarShowPreviews = store.taskbarShowPreviews;
+    s_taskbarShowActivity = store.taskbarShowActivity;
+    s_taskbarAutoHideController.reset();
     serial::puts("[desktop] loaded taskbar position=");
     serial::puts(taskbar_position_name(s_taskbarDockPosition));
     serial::puts(" source=");
@@ -1409,6 +1506,26 @@ static uint32_t taskbar_clock_width();
 
 static void apply_taskbar_layout()
 {
+    const uint32_t screenW = s_taskbarScreenW != 0u ? s_taskbarScreenW : s_screenW;
+    const uint32_t screenH = s_taskbarScreenH != 0u ? s_taskbarScreenH : s_screenH;
+    const int thickness = gxos::gui::TaskbarThickness(s_taskbarSizeMode,
+        static_cast<int>(screenW), static_cast<int>(screenH));
+    kTaskbarH = thickness > 0 ? static_cast<uint32_t>(thickness) : 1u;
+    kTaskbarBtnH = kTaskbarH > 12u ? kTaskbarH - 12u : kTaskbarH;
+
+    const DesktopRect fullTaskbar = get_taskbar_rect(screenW, screenH, s_taskbarDockPosition);
+    const gxos::gui::TaskbarRect reveal = gxos::gui::TaskbarRevealRect(
+        {static_cast<int>(fullTaskbar.x), static_cast<int>(fullTaskbar.y),
+         static_cast<int>(fullTaskbar.x + fullTaskbar.w), static_cast<int>(fullTaskbar.y + fullTaskbar.h)},
+        static_cast<gxos::gui::TaskbarDock>(s_taskbarDockPosition));
+    const bool taskbarPopupOpen = s_taskbarSettingsOpen || s_startMenuOpen || s_rightClickMenuOpen ||
+        s_shutdownDialogOpen || s_appModelDialogOpen || s_controlPanelOpen || s_deviceManagerOpen ||
+        s_networkAdaptersOpen || s_networkConfigOpen || compositor::TaskbarManager::menuVisible();
+    const bool pointerOverTaskbar = point_in_rect(s_mouseX, s_mouseY, fullTaskbar);
+    s_taskbarAutoHideController.advance(s_taskbarAutoHide,
+        reveal.contains(s_mouseX, s_mouseY), pointerOverTaskbar || taskbarPopupOpen,
+        pit::ticks() * 10u);
+
     DesktopRect work = get_current_work_area();
     DesktopRect tb = get_current_taskbar_rect();
     bool vertical = is_vertical_taskbar(s_taskbarDockPosition);
@@ -1448,6 +1565,10 @@ static void apply_taskbar_layout()
     compositor::KernelCompositor::setWorkArea(work.x, work.y, work.w, work.h);
     compositor::TaskbarManager::setLayout(layoutX, layoutY, layoutW, layoutH,
                                           vertical, buttonStartX, buttonStartY);
+    compositor::TaskbarManager::setPresentation(s_taskbarSizeMode,
+        s_taskbarPresentation == gxos::gui::TaskbarPresentation::IconsAndLabels,
+        s_taskbarShowActivity, s_taskbarShowPreviews,
+        !s_taskbarAutoHide || s_taskbarAutoHideController.visible());
 }
 
 // Desktop icon entries with enhanced management
@@ -7372,7 +7493,7 @@ static void draw_taskbar_buttons(uint32_t startX, uint32_t tbY, uint32_t maxX)
         if (btnX + kTaskbarBtnMaxW > maxX) break;
 
         uint32_t tw = (uint32_t)measure_text(s_taskbarEntries[i].title);
-        uint32_t btnW = tw + 30;
+        uint32_t btnW = s_taskbarPresentation == gxos::gui::TaskbarPresentation::IconsOnly ? kTaskbarH : tw + 30;
         if (btnW > kTaskbarBtnMaxW) btnW = kTaskbarBtnMaxW;
 
         // Button background
@@ -7388,13 +7509,16 @@ static void draw_taskbar_buttons(uint32_t startX, uint32_t tbY, uint32_t maxX)
 
         // Small colored icon
         uint32_t iconSz = 14;
-        uint32_t iconX = btnX + 4;
+        uint32_t iconX = s_taskbarPresentation == gxos::gui::TaskbarPresentation::IconsOnly
+            ? btnX + (btnW - iconSz) / 2 : btnX + 4;
         uint32_t iconY2 = btnY + (kTaskbarBtnH - iconSz) / 2;
         framebuffer::fill_rect(iconX, iconY2, iconSz, iconSz, s_taskbarEntries[i].color);
 
         // Title text
-        draw_text(btnX + 22, btnY + (kTaskbarBtnH - kGlyphH) / 2,
-                  s_taskbarEntries[i].title, rgb(230, 230, 240), 1);
+        if (s_taskbarPresentation == gxos::gui::TaskbarPresentation::IconsAndLabels) {
+            draw_text(btnX + 22, btnY + (kTaskbarBtnH - kGlyphH) / 2,
+                      s_taskbarEntries[i].title, rgb(230, 230, 240), 1);
+        }
 
         btnX += btnW + kTaskbarBtnGap;
     }
@@ -7405,7 +7529,7 @@ static void draw_taskbar_buttons(uint32_t startX, uint32_t tbY, uint32_t maxX)
         if (btnX + kTaskbarBtnMaxW <= maxX) {
             const char* title = "Terminal";
             uint32_t tw = (uint32_t)measure_text(title);
-            uint32_t btnW = tw + 30;
+            uint32_t btnW = s_taskbarPresentation == gxos::gui::TaskbarPresentation::IconsOnly ? kTaskbarH : tw + 30;
             if (btnW > kTaskbarBtnMaxW) btnW = kTaskbarBtnMaxW;
             
             // Store button bounds for click detection
@@ -7432,12 +7556,15 @@ static void draw_taskbar_buttons(uint32_t startX, uint32_t tbY, uint32_t maxX)
             
             // Terminal icon (green square)
             uint32_t iconSz = 14;
-            uint32_t iconX = btnX + 4;
+            uint32_t iconX = s_taskbarPresentation == gxos::gui::TaskbarPresentation::IconsOnly
+                ? btnX + (btnW - iconSz) / 2 : btnX + 4;
             uint32_t iconY2 = btnY + (kTaskbarBtnH - iconSz) / 2;
             framebuffer::fill_rect(iconX, iconY2, iconSz, iconSz, rgb(120, 180, 80));
             
             // Title text
-            draw_text(btnX + 22, btnY + (kTaskbarBtnH - kGlyphH) / 2, title, rgb(230, 230, 240), 1);
+            if (s_taskbarPresentation == gxos::gui::TaskbarPresentation::IconsAndLabels) {
+                draw_text(btnX + 22, btnY + (kTaskbarBtnH - kGlyphH) / 2, title, rgb(230, 230, 240), 1);
+            }
         }
     }
 }
@@ -7451,6 +7578,16 @@ static void draw_taskbar()
     apply_taskbar_layout();
     DesktopRect tb = get_current_taskbar_rect();
     bool vertical = is_vertical_taskbar(s_taskbarDockPosition);
+
+    if (s_taskbarAutoHide && !s_taskbarAutoHideController.visible()) {
+        const gxos::gui::TaskbarRect reveal = gxos::gui::TaskbarRevealRect(
+            {static_cast<int>(tb.x), static_cast<int>(tb.y),
+             static_cast<int>(tb.x + tb.w), static_cast<int>(tb.y + tb.h)},
+            static_cast<gxos::gui::TaskbarDock>(s_taskbarDockPosition));
+        framebuffer::fill_rect(static_cast<uint32_t>(reveal.left), static_cast<uint32_t>(reveal.top),
+            static_cast<uint32_t>(reveal.width()), static_cast<uint32_t>(reveal.height()), rgb(85, 145, 220));
+        return;
+    }
 
     // Taskbar background (dark gradient)
     uint32_t tbTop = rgb(45, 45, 55);
@@ -7535,6 +7672,112 @@ static void draw_taskbar()
     
     // Subtle vertical line pattern in show desktop area
     vline(sdX + 2, tb.y + 10, kTaskbarH - 20, rgb(60, 60, 70));
+}
+
+static const uint32_t kTaskbarSettingsRowHeight = 24;
+static const uint32_t kTaskbarSettingsMenuWidth = 232;
+static const uint32_t kTaskbarSettingsRowCount = 6;
+
+static void open_taskbar_settings_menu(int32_t mouseX, int32_t mouseY)
+{
+    const uint32_t width = s_screenW < kTaskbarSettingsMenuWidth ? s_screenW : kTaskbarSettingsMenuWidth;
+    const uint32_t height = kTaskbarSettingsRowCount * kTaskbarSettingsRowHeight + 8;
+    int32_t x = mouseX;
+    int32_t y = mouseY;
+    if (x + static_cast<int32_t>(width) > static_cast<int32_t>(s_screenW)) x = static_cast<int32_t>(s_screenW) - static_cast<int32_t>(width);
+    if (y + static_cast<int32_t>(height) > static_cast<int32_t>(s_screenH)) y = static_cast<int32_t>(s_screenH) - static_cast<int32_t>(height);
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    s_taskbarSettingsRect = {static_cast<uint32_t>(x), static_cast<uint32_t>(y), width, height};
+    s_taskbarSettingsOpen = true;
+}
+
+static void taskbar_settings_row_text(uint32_t row, char* out, int outSize)
+{
+    if (!out || outSize <= 0) return;
+    const char* title = "";
+    const char* value = "";
+    switch (row) {
+    case 0:
+        title = "Position: ";
+        value = taskbar_position_name(s_taskbarDockPosition);
+        break;
+    case 1:
+        title = "Size: ";
+        value = gxos::gui::TaskbarSizeModeName(s_taskbarSizeMode);
+        break;
+    case 2:
+        title = "Auto-hide: ";
+        value = s_taskbarAutoHide ? "On" : "Off";
+        break;
+    case 3:
+        title = "Application labels: ";
+        value = s_taskbarPresentation == gxos::gui::TaskbarPresentation::IconsAndLabels ? "On" : "Off";
+        break;
+    case 4:
+        title = "Application previews: ";
+        value = s_taskbarShowPreviews ? "On" : "Off";
+        break;
+    case 5:
+        title = "Activity indicators: ";
+        value = s_taskbarShowActivity ? "On" : "Off";
+        break;
+    default:
+        break;
+    }
+    desktop_str_copy(out, title, outSize);
+    int position = desktop_strlen(out);
+    for (int i = 0; value[i] && position + 1 < outSize; ++i) out[position++] = value[i];
+    out[position] = '\0';
+}
+
+static void draw_taskbar_settings_menu()
+{
+    if (!s_taskbarSettingsOpen) return;
+    const DesktopRect rect = s_taskbarSettingsRect;
+    framebuffer::fill_rect(rect.x + 2, rect.y + 2, rect.w, rect.h, rgb(18, 20, 26));
+    framebuffer::fill_rect(rect.x, rect.y, rect.w, rect.h, rgb(42, 45, 55));
+    draw_rect(rect.x, rect.y, rect.w, rect.h, rgb(98, 116, 146));
+    for (uint32_t row = 0; row < kTaskbarSettingsRowCount; ++row) {
+        const uint32_t rowY = rect.y + 4 + row * kTaskbarSettingsRowHeight;
+        if (rowY + kTaskbarSettingsRowHeight > rect.y + rect.h) break;
+        char label[64];
+        taskbar_settings_row_text(row, label, sizeof(label));
+        draw_text(rect.x + 10, rowY + 8, label, rgb(230, 233, 241), 1);
+    }
+}
+
+static void apply_taskbar_settings_row(uint32_t row)
+{
+    switch (row) {
+    case 0:
+        switch (s_taskbarDockPosition) {
+        case TaskbarDockPosition::Bottom: s_taskbarDockPosition = TaskbarDockPosition::Top; break;
+        case TaskbarDockPosition::Top: s_taskbarDockPosition = TaskbarDockPosition::Left; break;
+        case TaskbarDockPosition::Left: s_taskbarDockPosition = TaskbarDockPosition::Right; break;
+        case TaskbarDockPosition::Right: s_taskbarDockPosition = TaskbarDockPosition::Bottom; break;
+        }
+        break;
+    case 1:
+        s_taskbarSizeMode = s_taskbarSizeMode == gxos::gui::TaskbarSizeMode::Compact
+            ? gxos::gui::TaskbarSizeMode::Standard
+            : s_taskbarSizeMode == gxos::gui::TaskbarSizeMode::Standard
+                ? gxos::gui::TaskbarSizeMode::Expanded : gxos::gui::TaskbarSizeMode::Compact;
+        break;
+    case 2:
+        s_taskbarAutoHide = !s_taskbarAutoHide;
+        s_taskbarAutoHideController.reset();
+        break;
+    case 3:
+        s_taskbarPresentation = s_taskbarPresentation == gxos::gui::TaskbarPresentation::IconsOnly
+            ? gxos::gui::TaskbarPresentation::IconsAndLabels : gxos::gui::TaskbarPresentation::IconsOnly;
+        break;
+    case 4: s_taskbarShowPreviews = !s_taskbarShowPreviews; break;
+    case 5: s_taskbarShowActivity = !s_taskbarShowActivity; break;
+    default: return;
+    }
+    persist_taskbar_preferences();
+    apply_taskbar_layout();
 }
 
 // ============================================================
@@ -9711,12 +9954,22 @@ void draw()
 
     // Draw taskbar buttons for kernel apps after windows so minimized apps remain reachable.
     compositor::TaskbarManager::drawButtons();
+    if (s_taskbarAutoHide && !s_taskbarAutoHideController.visible()) {
+        const DesktopRect taskbar = get_current_taskbar_rect();
+        const gxos::gui::TaskbarRect reveal = gxos::gui::TaskbarRevealRect(
+            {static_cast<int>(taskbar.x), static_cast<int>(taskbar.y),
+             static_cast<int>(taskbar.x + taskbar.w), static_cast<int>(taskbar.y + taskbar.h)},
+            static_cast<gxos::gui::TaskbarDock>(s_taskbarDockPosition));
+        framebuffer::fill_rect(static_cast<uint32_t>(reveal.left), static_cast<uint32_t>(reveal.top),
+            static_cast<uint32_t>(reveal.width()), static_cast<uint32_t>(reveal.height()), rgb(85, 145, 220));
+    }
     
     // Draw start menu LAST so it appears on top of all windows
     draw_start_menu();
 
     // Desktop context menu is a top-level overlay and should stay above windows.
     draw_right_click_menu();
+    draw_taskbar_settings_menu();
     
     // Present the back buffer to the screen (swap buffers)
     // This is the key to preventing flickering - all drawing is done
@@ -11519,6 +11772,13 @@ void handle_key_with_modifiers(uint32_t key, uint32_t modifiers)
     if (file_clipboard::operation_active()) return;
     reset_alt_f4_shortcut_state();
 
+    if (s_taskbarSettingsOpen && key == 27u) {
+        s_taskbarSettingsOpen = false;
+        apply_taskbar_layout();
+        draw();
+        return;
+    }
+
     if (compositor::TaskbarManager::handleKeyDown(key)) {
         draw();
         return;
@@ -12611,7 +12871,37 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
 
     apply_taskbar_layout();
     DesktopRect workArea = get_current_work_area();
-    DesktopRect taskbarRect = get_current_taskbar_rect();
+    DesktopRect taskbarRect = get_interactive_taskbar_rect();
+
+    if (s_taskbarSettingsOpen) {
+        const bool insideSettings = point_in_rect(mx, my, s_taskbarSettingsRect);
+        if ((pressed & 0x01) && insideSettings) {
+            const uint32_t row = my >= static_cast<int32_t>(s_taskbarSettingsRect.y + 4)
+                ? static_cast<uint32_t>(my - static_cast<int32_t>(s_taskbarSettingsRect.y + 4)) / kTaskbarSettingsRowHeight
+                : kTaskbarSettingsRowCount;
+            if (row < kTaskbarSettingsRowCount) apply_taskbar_settings_row(row);
+            draw();
+            draw_cursor(mx, my);
+            return;
+        }
+        if (((pressed & 0x03) != 0u && !insideSettings) || ((buttons & 0x03) == 0u && insideSettings)) {
+            if ((pressed & 0x03) != 0u && !insideSettings) {
+                s_taskbarSettingsOpen = false;
+                apply_taskbar_layout();
+            } else {
+                draw();
+                draw_cursor(mx, my);
+                return;
+            }
+        }
+    }
+
+    if (s_taskbarAutoHide && !s_taskbarAutoHideController.visible() &&
+        point_in_rect(mx, my, taskbarRect)) {
+        draw();
+        draw_cursor(mx, my);
+        return;
+    }
 
     // The taskbar popup is a top-level overlay. Consume clicks while it is
     // open so they cannot activate a window or desktop item underneath it.
@@ -12638,7 +12928,8 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
         // taskbar controls consume the click without opening a desktop menu.
         s_startMenuOpen = false;
         s_rightClickMenuOpen = false;
-        compositor::TaskbarManager::handlePointerDown(mx, my, 2);
+        const bool handled = compositor::TaskbarManager::handlePointerDown(mx, my, 2);
+        if (!handled) open_taskbar_settings_menu(mx, my);
         draw();
         draw_cursor(mx, my);
         return;

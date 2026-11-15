@@ -1,5 +1,6 @@
 #include "desktop_config.h"
 #include "taskbar_application_model.h"
+#include "taskbar_customization_core.h"
 
 #include <filesystem>
 #include <iostream>
@@ -27,6 +28,71 @@ gxos::gui::TaskbarWindowSnapshot window(uint64_t id, const char* title, const ch
 }
 
 int main() {
+    using namespace gxos::gui;
+    check(TaskbarThickness(TaskbarSizeMode::Compact, 1920, 1080) == 32 &&
+          TaskbarThickness(TaskbarSizeMode::Standard, 1920, 1080) == 40 &&
+          TaskbarThickness(TaskbarSizeMode::Expanded, 1920, 1080) == 56,
+        "shared taskbar size modes use bounded supported thicknesses");
+    check(TaskbarThickness(TaskbarSizeMode::Expanded, 24, 16) == 16,
+        "taskbar thickness stays within very small display bounds");
+    const TaskbarRect hostedViewportTaskbar = TaskbarGeometryForViewport(
+        0, 0, 1024, 730, TaskbarDock::Bottom, TaskbarSizeMode::Standard);
+    check(hostedViewportTaskbar.top == 690 && hostedViewportTaskbar.bottom == 730,
+        "hosted taskbar hit-testing can share the compositor client viewport geometry");
+    check(ParseTaskbarPresentation("icons-only") == TaskbarPresentation::IconsOnly &&
+          ParseTaskbarPresentation("icons-labels") == TaskbarPresentation::IconsAndLabels &&
+          std::string(TaskbarPresentationName(TaskbarPresentation::IconsOnly)) == "icons-only",
+        "taskbar presentation modes parse and serialize consistently");
+    const TaskbarRect negativeRight = TaskbarGeometryForDisplay(-1920, 0, 1920, 1080,
+        TaskbarDock::Right, TaskbarSizeMode::Expanded);
+    const TaskbarRect negativeWork = TaskbarWorkAreaForDisplay(-1920, 0, 1920, 1080,
+        TaskbarDock::Right, TaskbarSizeMode::Expanded, false);
+    const TaskbarRect autoHideWork = TaskbarWorkAreaForDisplay(-1920, 0, 1920, 1080,
+        TaskbarDock::Right, TaskbarSizeMode::Expanded, true);
+    check(negativeRight.left == -56 && negativeRight.right == 0 && negativeRight.height() == 1080,
+        "right-docked taskbar geometry preserves negative virtual desktop origins");
+    check(negativeWork.right == negativeRight.left && autoHideWork.right == 0,
+        "work area reserves visible docks and fills display bounds for auto-hide");
+    const TaskbarRect hiddenEdge = TaskbarRevealRect(
+        TaskbarGeometryForDisplay(0, 0, 1280, 720, TaskbarDock::Top, TaskbarSizeMode::Standard),
+        TaskbarDock::Top);
+    check(hiddenEdge.top == 0 && hiddenEdge.bottom == 2 && hiddenEdge.width() == 1280,
+        "hidden taskbar retains a narrow reveal target on the configured edge");
+    const TaskbarRect bottomDock = TaskbarGeometryForDisplay(0, 0, 800, 600,
+        TaskbarDock::Bottom, TaskbarSizeMode::Standard);
+    const TaskbarRect leftDock = TaskbarGeometryForDisplay(0, 0, 800, 600,
+        TaskbarDock::Left, TaskbarSizeMode::Standard);
+    const TaskbarRect rightDock = TaskbarGeometryForDisplay(0, 0, 800, 600,
+        TaskbarDock::Right, TaskbarSizeMode::Standard);
+    check(TaskbarRevealRect(bottomDock, TaskbarDock::Bottom).top == bottomDock.bottom - 2 &&
+          TaskbarRevealRect(leftDock, TaskbarDock::Left).right == leftDock.left + 2 &&
+          TaskbarRevealRect(rightDock, TaskbarDock::Right).left == rightDock.right - 2,
+        "auto-hide reveal edges match bottom, left, and right docking positions");
+    TaskbarAutoHideController hideState;
+    hideState.advance(true, false, false, 100);
+    check(hideState.state == TaskbarAutoHideState::WaitingToHide && hideState.visible(),
+        "auto-hide begins in a visible delay state");
+    hideState.advance(true, false, true, 400);
+    check(hideState.state == TaskbarAutoHideState::Visible,
+        "taskbar popups or active pointer interaction cancel a pending hide");
+    hideState.advance(true, false, false, 500);
+    hideState.advance(true, false, false, 1000);
+    check(hideState.state == TaskbarAutoHideState::Hidden && !hideState.visible(),
+        "auto-hide transitions to hidden using monotonic elapsed time");
+    hideState.advance(true, true, false, 1100);
+    check(hideState.state == TaskbarAutoHideState::WaitingToReveal && !hideState.visible(),
+        "edge contact starts the bounded reveal delay");
+    hideState.advance(true, false, false, 1110);
+    check(hideState.state == TaskbarAutoHideState::Hidden,
+        "leaving the reveal edge cancels reveal without blocking input");
+    hideState.advance(true, true, false, 1200);
+    hideState.advance(true, true, false, 1280);
+    check(hideState.state == TaskbarAutoHideState::Visible,
+        "edge reveal completes after its configured delay");
+    hideState.advance(false, false, false, 1300);
+    check(hideState.state == TaskbarAutoHideState::Visible,
+        "disabling auto-hide restores permanent visibility");
+
     check(gxos::gui::HasCanonicalTaskbarAppIdentity("org.guide.test"), "shared canonical identity accepts app IDs");
     check(!gxos::gui::HasCanonicalTaskbarAppIdentity(""), "shared canonical identity rejects empty IDs");
     check(gxos::gui::SameCanonicalTaskbarAppIdentity("org.guide.test", "org.guide.test"), "shared identity comparison groups exact IDs");
@@ -325,6 +391,23 @@ int main() {
     check(overflowLeft.size() == 5 && overflowLeft.back().entryIndex == kTaskbarOverflowEntry &&
           overflowLeft.back().bottom <= 240,
         "vertical overflow stays bounded and leaves remaining applications reachable");
+    const auto compactIconButtons = LayoutTaskbarButtons({32, 32}, 0, 680, 300, 712,
+        false, 48, 686, 4, 80, 20, 32);
+    check(compactIconButtons.size() == 2 && compactIconButtons[0].right - compactIconButtons[0].left == 32 &&
+          compactIconButtons[0].bottom - compactIconButtons[0].top == 20,
+        "compact icon-only buttons retain a bounded comfortable hit target");
+    const auto labeledButtons = LayoutTaskbarButtons({140}, 0, 0, 500, 40,
+        false, 0, 0, 4, 0, 28, 56);
+    const auto iconOnlyButtons = LayoutTaskbarButtons({32}, 0, 0, 500, 40,
+        false, 0, 0, 4, 0, 28, 32);
+    check(labeledButtons.size() == 1 && labeledButtons[0].right - labeledButtons[0].left == 140 &&
+          iconOnlyButtons.size() == 1 && iconOnlyButtons[0].right - iconOnlyButtons[0].left == 32,
+        "icon-only and labeled presentation use distinct preferred button widths");
+    const auto expandedVerticalButtons = LayoutTaskbarButtons({120, 120}, 0, 0, 56, 260,
+        true, 4, 64, 4, 0, 44, 48);
+    check(!expandedVerticalButtons.empty() && expandedVerticalButtons[0].right - expandedVerticalButtons[0].left == 48 &&
+          expandedVerticalButtons[0].bottom - expandedVerticalButtons[0].top == 44,
+        "expanded vertical layout allocates its larger label and icon rows consistently");
 
     const std::filesystem::path configPath = "tmp/taskbar-application-model-test/desktop.json";
     std::filesystem::create_directories(configPath.parent_path());
@@ -332,6 +415,12 @@ int main() {
     config.pinned = {"Start Menu App"};
     config.pinnedAppIds = {"app.startmenu"};
     config.taskbarPinnedAppIds = {"app.editor", "app.mail"};
+    config.taskbarPosition = "left";
+    config.taskbarSize = "expanded";
+    config.taskbarPresentation = "icons-only";
+    config.taskbarAutoHide = true;
+    config.taskbarShowPreviews = false;
+    config.taskbarShowActivity = false;
     std::string error;
     const bool saved = DesktopConfig::Save(configPath.string(), config, error);
     DesktopConfigData restored;
@@ -341,6 +430,20 @@ int main() {
         "taskbar pins persist separately from Start Menu pins");
     check(loaded && restored.pinnedAppIds == config.pinnedAppIds,
         "taskbar pin persistence preserves existing Start Menu identities");
+    check(loaded && restored.taskbarPosition == "left" && restored.taskbarSize == "expanded" &&
+          restored.taskbarPresentation == "icons-only" && restored.taskbarAutoHide &&
+          !restored.taskbarShowPreviews && !restored.taskbarShowActivity,
+        "taskbar customization preferences persist alongside independent pins");
+
+    config.taskbarPosition = "invalid";
+    config.taskbarSize = "future-size";
+    config.taskbarPresentation = "future-presentation";
+    error.clear();
+    check(DesktopConfig::Save(configPath.string(), config, error) &&
+          DesktopConfig::Load(configPath.string(), restored, error) &&
+          restored.taskbarPosition == "bottom" && restored.taskbarSize == "standard" &&
+          restored.taskbarPresentation == "icons-labels",
+        "unsupported persisted taskbar values normalize to safe defaults");
 
     return failures == 0 ? 0 : 1;
 }

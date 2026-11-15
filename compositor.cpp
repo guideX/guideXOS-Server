@@ -61,7 +61,25 @@ namespace gxos {
         static const char* kGuiChanIn = "gui.input";
         static const char* kGuiSyncChanIn = "gui.sync";
         static const char* kGuiChanOut = "gui.output";
-        static constexpr int kTaskbarSize = 40;
+        static TaskbarSizeMode g_taskbarSizeMode = TaskbarSizeMode::Standard;
+        static TaskbarPresentation g_taskbarPresentation = TaskbarPresentation::IconsAndLabels;
+        static bool g_taskbarAutoHide = false;
+        static bool g_taskbarShowPreviews = true;
+        static bool g_taskbarShowActivity = true;
+        static TaskbarAutoHideController g_taskbarAutoHideController{};
+        static int g_taskbarPointerX = 0;
+        static int g_taskbarPointerY = 0;
+        static bool g_taskbarPointerKnown = false;
+        static bool g_taskbarSettingsVisible = false;
+        static TaskbarRect g_taskbarSettingsRect{};
+        static constexpr int kTaskbarSettingsHeaderHeight = 28;
+        static constexpr int kTaskbarSettingsRowHeight = 24;
+        static constexpr int kTaskbarSettingsRowCount = 6;
+        static uint64_t nowMs();
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+        static constexpr UINT_PTR kHostedTaskbarVisibilityTimerId = 0x47585033u;
+        static constexpr UINT kHostedTaskbarVisibilityIntervalMs = 100u;
+#endif
         static std::unordered_map<std::string, ImageBitmap> g_uiImageCache;
         static TaskbarActivityStore g_taskbarActivityStore;
         static std::mutex g_taskbarActivityLock;
@@ -406,6 +424,10 @@ namespace gxos {
             if (lower == "left") return TaskbarPosition::Left;
             if (lower == "right") return TaskbarPosition::Right;
             return TaskbarPosition::Bottom;
+        }
+
+        static int hostedTaskbarThickness(int width, int height) {
+            return TaskbarThickness(g_taskbarSizeMode, width, height);
         }
 
         static clocktime::ClockDisplaySettings clockDisplaySettingsFromConfig(const DesktopConfigData& cfg) {
@@ -897,17 +919,9 @@ namespace gxos {
         }
 
         static WorkRect taskbarRectForBounds(int width, int height) {
-            switch (g_taskbarPosition) {
-            case TaskbarPosition::Top:
-                return {0, 0, width, std::min(height, kTaskbarSize)};
-            case TaskbarPosition::Left:
-                return {0, 0, std::min(width, kTaskbarSize), height};
-            case TaskbarPosition::Right:
-                return {std::max(0, width - kTaskbarSize), 0, width, height};
-            case TaskbarPosition::Bottom:
-            default:
-                return {0, std::max(0, height - kTaskbarSize), width, height};
-            }
+            const TaskbarRect rect = TaskbarGeometryForDisplay(0, 0, width, height,
+                static_cast<TaskbarDock>(g_taskbarPosition), g_taskbarSizeMode);
+            return {rect.left, rect.top, rect.right, rect.bottom};
         }
 
         static DisplayRect taskbarDisplayRectForBounds(int width, int height)
@@ -917,17 +931,9 @@ namespace gxos {
         }
 
         static WorkRect desktopWorkAreaForBounds(int width, int height) {
-            switch (g_taskbarPosition) {
-            case TaskbarPosition::Top:
-                return {0, std::min(height, kTaskbarSize), width, height};
-            case TaskbarPosition::Left:
-                return {std::min(width, kTaskbarSize), 0, width, height};
-            case TaskbarPosition::Right:
-                return {0, 0, std::max(0, width - kTaskbarSize), height};
-            case TaskbarPosition::Bottom:
-            default:
-                return {0, 0, width, std::max(0, height - kTaskbarSize)};
-            }
+            const TaskbarRect rect = TaskbarWorkAreaForDisplay(0, 0, width, height,
+                static_cast<TaskbarDock>(g_taskbarPosition), g_taskbarSizeMode, g_taskbarAutoHide);
+            return {rect.left, rect.top, rect.right, rect.bottom};
         }
 
         static bool syntheticExtendModeActive(const DisplayVirtualDesktop& desktop)
@@ -972,6 +978,45 @@ namespace gxos {
             return offsetDisplayRect(taskbarLocal, primary->virtualX, primary->virtualY);
         }
 
+        static DisplayRect taskbarReservationDisplayRect(const DisplayVirtualDesktop& desktop)
+        {
+            if (g_taskbarAutoHide) return DisplayRect{};
+            return primaryTaskbarDisplayRect(desktop);
+        }
+
+        static TaskbarRect hostedTaskbarAutoHideRect(
+            const DisplayVirtualDesktop& desktop, const DisplayViewport& viewport)
+        {
+            if (syntheticExtendModeActive(desktop)) {
+                const DisplayRect displayTaskbar = primaryTaskbarDisplayRect(desktop);
+                return TaskbarRect{displayTaskbar.left, displayTaskbar.top,
+                    displayTaskbar.right, displayTaskbar.bottom};
+            }
+            // The hosted taskbar is painted in the compositor client's viewport.
+            // Use that same geometry for input hit-testing; the host window's
+            // client area can be shorter than the persisted display mode because
+            // of its native title bar and borders.
+            return TaskbarGeometryForViewport(viewport.originX, viewport.originY,
+                viewport.width, viewport.height, static_cast<TaskbarDock>(g_taskbarPosition),
+                g_taskbarSizeMode);
+        }
+
+        bool Compositor::updateHostedTaskbarAutoHide(
+            int mx, int my, const DisplayVirtualDesktop& desktop, const DisplayViewport& viewport)
+        {
+            const TaskbarRect taskbar = hostedTaskbarAutoHideRect(desktop, viewport);
+            const TaskbarRect reveal = TaskbarRevealRect(taskbar,
+                static_cast<TaskbarDock>(g_taskbarPosition));
+            const bool popupActive = g_taskbarMenuVisible || g_startMenuVisible ||
+                g_taskbarSettingsVisible || RightClickMenu::IsVisible() ||
+                !g_taskbarPreviewAppId.empty() || g_taskbarPreviewWindowId != 0 || g_modalWindow != 0;
+            const bool pointerAtRevealEdge = g_taskbarPointerKnown && reveal.contains(mx, my);
+            const bool pointerOverTaskbarOrPopup = popupActive ||
+                (g_taskbarPointerKnown && taskbar.contains(mx, my));
+            return g_taskbarAutoHideController.advance(g_taskbarAutoHide,
+                pointerAtRevealEdge, pointerOverTaskbarOrPopup, nowMs());
+        }
+
         static DisplayRect desktopBoundsRect(const DisplayVirtualDesktop& desktop)
         {
             return DisplayRect{ desktop.left, desktop.top, desktop.right, desktop.bottom };
@@ -1006,7 +1051,7 @@ namespace gxos {
             }
 
             const bool syntheticExtend = syntheticExtendModeActive(desktop);
-            const DisplayRect taskbarRect = primaryTaskbarDisplayRect(desktop);
+            const DisplayRect taskbarRect = taskbarReservationDisplayRect(desktop);
             const DisplayRect workArea = desktop.primaryMonitorWorkArea(taskbarRect, syntheticExtend, true);
             return clampRectToBounds(rect, workArea);
         }
@@ -1124,7 +1169,7 @@ namespace gxos {
             }
 
             const bool syntheticExtend = syntheticExtendModeActive(desktop);
-            const DisplayRect taskbarRect = primaryTaskbarDisplayRect(desktop);
+            const DisplayRect taskbarRect = taskbarReservationDisplayRect(desktop);
             return desktop.monitorWorkArea(*monitor, taskbarRect, syntheticExtend, true);
         }
 
@@ -1146,7 +1191,7 @@ namespace gxos {
             }
 
             const bool syntheticExtend = syntheticExtendModeActive(desktop);
-            const DisplayRect taskbarRect = primaryTaskbarDisplayRect(desktop);
+            const DisplayRect taskbarRect = taskbarReservationDisplayRect(desktop);
             return desktop.monitorWorkArea(*monitor, taskbarRect, syntheticExtend, true);
         }
 
@@ -1816,11 +1861,27 @@ namespace gxos {
         }
 
         static RECT hostedStartButtonRect(const DesktopTheme& theme, const RECT& tb) {
-            return RECT{ tb.left + theme.taskbarPadding, tb.top + 6, tb.left + theme.taskbarPadding + 32, tb.top + 34 };
+            const bool vertical = (tb.right - tb.left) < (tb.bottom - tb.top);
+            const int thickness = vertical ? tb.right - tb.left : tb.bottom - tb.top;
+            const int buttonSize = std::max(20, thickness - 8);
+            if (vertical) {
+                const int left = tb.left + (thickness - buttonSize) / 2;
+                return RECT{left, tb.top + 4, left + buttonSize, tb.top + 4 + buttonSize};
+            }
+            return RECT{ tb.left + theme.taskbarPadding, tb.top + (thickness - buttonSize) / 2,
+                tb.left + theme.taskbarPadding + buttonSize, tb.top + (thickness + buttonSize) / 2 };
         }
 
         static RECT hostedStartButtonRect(const DesktopTheme& theme, const WorkRect& tb) {
-            return RECT{ tb.left + theme.taskbarPadding, tb.top + 6, tb.left + theme.taskbarPadding + 32, tb.top + 34 };
+            const bool vertical = (tb.right - tb.left) < (tb.bottom - tb.top);
+            const int thickness = vertical ? tb.right - tb.left : tb.bottom - tb.top;
+            const int buttonSize = std::max(20, thickness - 8);
+            if (vertical) {
+                const int left = tb.left + (thickness - buttonSize) / 2;
+                return RECT{left, tb.top + 4, left + buttonSize, tb.top + 4 + buttonSize};
+            }
+            return RECT{ tb.left + theme.taskbarPadding, tb.top + (thickness - buttonSize) / 2,
+                tb.left + theme.taskbarPadding + buttonSize, tb.top + (thickness + buttonSize) / 2 };
         }
 
         static const bool kEnableStartMenuIcons = true;
@@ -2947,6 +3008,11 @@ namespace gxos {
 
         void Compositor::saveDesktopConfig( ) {
             g_cfg.taskbarPosition = taskbarPositionName(g_taskbarPosition);
+            g_cfg.taskbarSize = TaskbarSizeModeName(g_taskbarSizeMode);
+            g_cfg.taskbarPresentation = TaskbarPresentationName(g_taskbarPresentation);
+            g_cfg.taskbarAutoHide = g_taskbarAutoHide;
+            g_cfg.taskbarShowPreviews = g_taskbarShowPreviews;
+            g_cfg.taskbarShowActivity = g_taskbarShowActivity;
             g_cfg.desktopThemeId = DesktopThemeIdToString(GetCurrentDesktopThemeId());
             g_cfg.backgroundScaleMode = g_backgroundScaleMode;
             ensureDisplayConfigDefaults(g_cfg);
@@ -2964,6 +3030,27 @@ namespace gxos {
             if (!DisplayOptionsStore::Save("display-options.cfg", displayStore, displayErr)) {
                 Logger::write(LogLevel::Warn, "Display options store save failed: " + displayErr);
             }
+        }
+
+        void Compositor::syncTaskbarPreferencesFromConfig()
+        {
+            g_taskbarPosition = parseTaskbarPosition(g_cfg.taskbarPosition);
+            g_taskbarSizeMode = ParseTaskbarSizeMode(g_cfg.taskbarSize.c_str());
+            g_taskbarPresentation = ParseTaskbarPresentation(g_cfg.taskbarPresentation.c_str());
+            g_taskbarAutoHide = g_cfg.taskbarAutoHide;
+            g_taskbarShowPreviews = g_cfg.taskbarShowPreviews;
+            g_taskbarShowActivity = g_cfg.taskbarShowActivity;
+            g_taskbarAutoHideController.reset();
+            g_taskbarSettingsVisible = false;
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            if (g_hwnd) {
+                if (g_taskbarAutoHide) {
+                    SetTimer(g_hwnd, kHostedTaskbarVisibilityTimerId, kHostedTaskbarVisibilityIntervalMs, nullptr);
+                } else {
+                    KillTimer(g_hwnd, kHostedTaskbarVisibilityTimerId);
+                }
+            }
+#endif
         }
         static bool isRightColumnStartMenuShortcut(const std::string& act);
         static void syncRecentProgramsFromService(DesktopConfigData& cfg) {
@@ -4349,26 +4436,60 @@ namespace gxos {
         static std::vector<TaskbarButtonRect> hostedTaskbarButtonLayout(
             const std::vector<TaskbarApplicationEntry>& entries, const WorkRect& tb, const DesktopTheme& theme) {
             const bool vertical = g_taskbarPosition == TaskbarPosition::Left || g_taskbarPosition == TaskbarPosition::Right;
+            const int thickness = hostedTaskbarThickness(tb.right - tb.left, tb.bottom - tb.top);
+            const bool showLabels = g_taskbarPresentation == TaskbarPresentation::IconsAndLabels;
             std::vector<int> preferredWidths;
             preferredWidths.reserve(entries.size());
             for (const TaskbarApplicationEntry& entry : entries) {
                 const std::string label = entry.label.empty() ? "Window" : entry.label;
-                int width = measureUiText(label.c_str(), static_cast<int>(label.size()), FontRole::Small) +
-                    theme.taskbarItemPadding * 2 + 22;
-                if (entry.windowCount() > 1) width += 12;
-                preferredWidths.push_back(std::max(64, std::min(180, width)));
+                int width = showLabels
+                    ? measureUiText(label.c_str(), static_cast<int>(label.size()), FontRole::Small) +
+                        theme.taskbarItemPadding * 2 + 22
+                    : thickness;
+                if (showLabels && entry.windowCount() > 1) width += 12;
+                preferredWidths.push_back(showLabels ? std::max(64, std::min(180, width)) : std::max(32, thickness));
             }
-            const int startX = vertical ? tb.left + 4 : tb.left + 216;
-            const int startY = vertical ? tb.top + 48 : tb.top + 6;
+            const int startX = vertical ? tb.left + 4 : tb.left + (g_taskbarSizeMode == TaskbarSizeMode::Compact ? thickness + 8 : 216);
+            const int startY = vertical ? tb.top + thickness + 8 : tb.top + 6;
             const int reservedRight = vertical ? 0 : 184;
-            return LayoutTaskbarButtons(preferredWidths, tb.left, tb.top, tb.right, tb.bottom,
+            WorkRect buttonArea = tb;
+            if (vertical) buttonArea.bottom = std::max(buttonArea.top, buttonArea.bottom - 44);
+            const int buttonHeight = vertical ? std::max(24, thickness - 8) : std::max(22, thickness - 12);
+            return LayoutTaskbarButtons(preferredWidths, buttonArea.left, buttonArea.top, buttonArea.right, buttonArea.bottom,
                 vertical, startX, startY, vertical ? 4 : theme.taskbarItemPadding / 2,
-                reservedRight, 28);
+                reservedRight, buttonHeight, showLabels ? 56 : std::max(32, thickness));
         }
 
         static TaskbarRect hostedTaskbarDisplayBounds(const DisplayViewport& viewport) {
             return TaskbarRect{viewport.originX, viewport.originY,
                 viewport.originX + viewport.width, viewport.originY + viewport.height};
+        }
+
+        static std::vector<std::string> hostedTaskbarSettingsLabels()
+        {
+            return {
+                "Position: " + std::string(TaskbarDockName(static_cast<TaskbarDock>(g_taskbarPosition))),
+                "Size: " + std::string(TaskbarSizeModeName(g_taskbarSizeMode)),
+                std::string("Auto-hide: ") + (g_taskbarAutoHide ? "On" : "Off"),
+                std::string("Application labels: ") +
+                    (g_taskbarPresentation == TaskbarPresentation::IconsAndLabels ? "On" : "Off"),
+                std::string("Application previews: ") + (g_taskbarShowPreviews ? "On" : "Off"),
+                std::string("Activity indicators: ") + (g_taskbarShowActivity ? "On" : "Off")
+            };
+        }
+
+        static void openHostedTaskbarSettingsMenu(int mx, int my, const DisplayViewport& viewport)
+        {
+            const TaskbarRect bounds = hostedTaskbarDisplayBounds(viewport);
+            const int width = std::min(264, bounds.width());
+            const int height = std::min(kTaskbarSettingsHeaderHeight + kTaskbarSettingsRowCount * kTaskbarSettingsRowHeight + 8,
+                bounds.height());
+            if (width <= 0 || height <= 0) return;
+            const int left = std::clamp(mx, bounds.left, bounds.right - width);
+            const int top = std::clamp(my, bounds.top, bounds.bottom - height);
+            g_taskbarSettingsRect = TaskbarRect{left, top, left + width, top + height};
+            g_taskbarSettingsVisible = true;
+            g_taskbarAutoHideController.reset();
         }
 
         static bool hostedTaskbarPointInPreview(int x, int y,
@@ -4383,7 +4504,7 @@ namespace gxos {
             const std::string previousAppId = g_taskbarPreviewAppId;
             const uint64_t previousWindowId = g_taskbarPreviewWindowId;
             pointerOverPreview = false;
-            if (RightClickMenu::IsVisible() || popupSuppressed ||
+            if (!g_taskbarShowPreviews || RightClickMenu::IsVisible() || popupSuppressed ||
                 !hostedPrimaryTaskbarVisibleInViewport(desktop, viewport)) {
                 g_taskbarPreviewAppId.clear();
                 g_taskbarPreviewWindowId = 0;
@@ -4884,6 +5005,9 @@ namespace gxos {
                 if (timerId == 0) {
                     Logger::write(LogLevel::Warn, "Hosted compositor UI refresh timer failed");
                 }
+                if (g_taskbarAutoHide) {
+                    SetTimer(g_hwnd, kHostedTaskbarVisibilityTimerId, kHostedTaskbarVisibilityIntervalMs, nullptr);
+                }
             }
 #endif
         }
@@ -4895,6 +5019,7 @@ namespace gxos {
             }
             if (g_hwnd) {
                 KillTimer(g_hwnd, kHostedUiRefreshTimerId);
+                KillTimer(g_hwnd, kHostedTaskbarVisibilityTimerId);
             }
 #endif
             releaseHostedPaintSurface();
@@ -5091,6 +5216,18 @@ namespace gxos {
                     }
                     return 0;
                 }
+                if (w == kHostedTaskbarVisibilityTimerId) {
+                    RECT cr{};
+                    GetClientRect(h, &cr);
+                    const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg);
+                    const DisplayViewport viewport = hostedViewportForWindow(
+                        h, desktop, cr.right - cr.left, cr.bottom - cr.top);
+                    if (updateHostedTaskbarAutoHide(
+                            g_taskbarPointerX, g_taskbarPointerY, desktop, viewport)) {
+                        requestRepaint();
+                    }
+                    return 0;
+                }
 #endif
                 break;
             case WM_PAINT: {
@@ -5113,7 +5250,10 @@ namespace gxos {
                 const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg);
                 const DisplayRenderTarget renderTarget = hostedRenderTargetForWindow(h, desktop, clientW, clientH);
                 const DisplayViewport viewport = renderTarget.viewportDescriptor();
-                const bool taskbarVisible = hostedPrimaryTaskbarVisibleInViewport(desktop, viewport);
+                updateHostedTaskbarAutoHide(
+                    g_taskbarPointerX, g_taskbarPointerY, desktop, viewport);
+                const bool taskbarOwnedByViewport = hostedPrimaryTaskbarVisibleInViewport(desktop, viewport);
+                const bool taskbarVisible = taskbarOwnedByViewport && g_taskbarAutoHideController.visible();
                 if (hostedSyntheticDualWindowOutputEnabled()) {
                     hostedDualWindowTrace(
                         std::string("WM_PAINT hwnd=")
@@ -5306,9 +5446,9 @@ namespace gxos {
                 POINT cursor = viewportCursor;
                 RECT startBtn{};
                 if (taskbarVisible) {
-                    int taskbarH = kTaskbarSize;
                     WorkRect tbWork = taskbarWorkRectForViewport(desktop, viewport, cr.right - cr.left, cr.bottom - cr.top);
                     RECT tb{ tbWork.left, tbWork.top, tbWork.right, tbWork.bottom };
+                    int taskbarH = hostedTaskbarThickness(tb.right - tb.left, tb.bottom - tb.top);
                     bool taskbarVertical = (g_taskbarPosition == TaskbarPosition::Left || g_taskbarPosition == TaskbarPosition::Right);
                     int taskbarSpan = taskbarVertical ? (tb.right - tb.left) : (tb.bottom - tb.top);
                     const uint32_t taskbarSurface = hostedTaskbarSurfaceColor(theme);
@@ -5388,7 +5528,9 @@ namespace gxos {
                     }
                     drawBitmapCentered(dc, g_startBtnBmp, startBtn);
                     // Search box placeholder (after start button)
-                    if (!taskbarVertical) drawTaskbarSearchBox(dc, tb.left + 48, tb.top + 8, 160, (tb.bottom - tb.top) - 16);
+                    if (!taskbarVertical && g_taskbarSizeMode != TaskbarSizeMode::Compact)
+                        drawTaskbarSearchBox(dc, tb.left + 48, tb.top + std::max(2, (taskbarH - 24) / 2),
+                            160, std::max(8, std::min(24, taskbarH - 8)));
                     // Taskbar entries are derived from live windows plus stable App Model pins.
                     const std::vector<TaskbarApplicationEntry> taskbarEntries = Compositor::taskbarApplications();
                     const std::vector<TaskbarButtonRect> taskbarButtons = hostedTaskbarButtonLayout(
@@ -5453,29 +5595,43 @@ namespace gxos {
                             const auto window = g_windows.find(entry.windows.front().id);
                             if (window != g_windows.end()) icon = window->second.taskbarIcon;
                         }
-                        RECT iconRect = taskbarVertical
-                            ? RECT{br.left + 8, br.top + 6, br.left + 24, br.top + 22}
-                            : RECT{br.left + 4, br.top + 4, br.left + 20, br.top + 20};
+                        const int iconSize = taskbarVertical
+                            ? (g_taskbarSizeMode == TaskbarSizeMode::Compact ? 8 : 12)
+                            : (g_taskbarPresentation == TaskbarPresentation::IconsOnly ? 16 : 16);
+                        const int iconX = taskbarVertical || g_taskbarPresentation == TaskbarPresentation::IconsOnly
+                            ? br.left + std::max(0, (static_cast<int>(br.right - br.left) - iconSize) / 2) : br.left + 4;
+                        const int iconY = taskbarVertical
+                            ? br.top + 2
+                            : br.top + std::max(0, (static_cast<int>(br.bottom - br.top) - iconSize) / 2);
+                        RECT iconRect{iconX, iconY, iconX + iconSize, iconY + iconSize};
                         drawBitmapCentered(dc, icon, iconRect);
-                        if (!taskbarVertical) {
+                        if (g_taskbarPresentation == TaskbarPresentation::IconsAndLabels) {
+                            if (taskbarVertical) {
+                                RECT labelClip{br.left + 2, br.top + iconSize + 3, br.right - 2, br.bottom - 2};
+                                const int savedDc = SaveDC(dc);
+                                IntersectClipRect(dc, labelClip.left, labelClip.top, labelClip.right, labelClip.bottom);
+                                drawUiText(dc, labelClip.left + 1, labelClip.top, entry.label, RGB(230, 230, 240), FontRole::Small);
+                                if (savedDc != 0) RestoreDC(dc, savedDc);
+                            } else {
                             RECT labelClip{br.left + theme.taskbarItemPadding + 18, br.top + 2, br.right - 5, br.bottom - 2};
                             const int savedDc = SaveDC(dc);
                             IntersectClipRect(dc, labelClip.left, labelClip.top, labelClip.right, labelClip.bottom);
-                            drawUiText(dc, labelClip.left, br.top + 8, entry.label, RGB(230, 230, 240), FontRole::Small);
+                            drawUiText(dc, labelClip.left, br.top + std::max(2, (static_cast<int>(br.bottom - br.top) - uiTextHeight(FontRole::Small)) / 2), entry.label, RGB(230, 230, 240), FontRole::Small);
                             if (savedDc != 0) RestoreDC(dc, savedDc);
                             if (entry.windowCount() > 1) {
                                 const std::string count = std::to_string(entry.windowCount());
-                                drawUiText(dc, br.right - 15, br.top + 8, count, RGB(190, 205, 235), FontRole::Small);
+                                drawUiText(dc, br.right - 15, br.top + std::max(2, (static_cast<int>(br.bottom - br.top) - uiTextHeight(FontRole::Small)) / 2), count, RGB(190, 205, 235), FontRole::Small);
+                            }
                             }
                         }
-                        if (entry.activity.attention && br.right - br.left >= 30 && br.bottom - br.top >= 15) {
+                        if (g_taskbarShowActivity && entry.activity.attention && br.right - br.left >= 30 && br.bottom - br.top >= 15) {
                             HBRUSH attention = CreateSolidBrush(RGB(235, 105, 84));
                             RECT badge{br.right - 14, br.top + 3, br.right - 5, br.top + 12};
                             FillRect(dc, &badge, attention);
                             DeleteObject(attention);
                             drawUiText(dc, badge.left + 2, badge.top, "!", RGB(255, 255, 255), FontRole::Small);
                         }
-                        if (entry.activity.progress != TaskbarProgressState::None && br.bottom - br.top >= 4) {
+                        if (g_taskbarShowActivity && entry.activity.progress != TaskbarProgressState::None && br.bottom - br.top >= 4) {
                             const uint32_t statusColor = entry.activity.progress == TaskbarProgressState::Failed
                                 ? RGB(238, 105, 91) : entry.activity.progress == TaskbarProgressState::Completed
                                     ? RGB(91, 190, 130) : RGB(102, 174, 235);
@@ -5499,8 +5655,10 @@ namespace gxos {
                                 taskbarVertical ? (br.top + br.bottom) / 2 : tb.top, tooltip.c_str());
                         }
                     }
-                    drawHostedTaskbarPreview(dc, taskbarEntries, taskbarButtons,
-                        hostedTaskbarDisplayBounds(viewport), theme, sciFiTheme);
+                    if (g_taskbarShowPreviews) {
+                        drawHostedTaskbarPreview(dc, taskbarEntries, taskbarButtons,
+                            hostedTaskbarDisplayBounds(viewport), theme, sciFiTheme);
+                    }
                     // System tray area (before clock)
                     if (!taskbarVertical) drawSystemTray(dc, cr, taskbarH);
                     // Taskbar clock/date display (right side, matching Legacy Taskbar.cs)
@@ -5513,10 +5671,21 @@ namespace gxos {
                         int lineH = uiTextHeight(FontRole::Small);
                         int clockW = (timeW > dateW ? timeW : dateW) + 16;
                         int clockX = tb.right - clockW - theme.taskbarPadding;
-                        int timeY = tb.top + 6;
+                        int timeY = tb.top + std::max(2, (taskbarH - (lineH * 2 - 1)) / 2);
                         int dateY = timeY + lineH - 1;
                         drawUiText(dc, clockX + (clockW - timeW) / 2, timeY, timeText.c_str(), (int)timeText.size(), RGB(200, 200, 210), FontRole::Small);
                         drawUiText(dc, clockX + (clockW - dateW) / 2, dateY, dateText.c_str(), (int)dateText.size(), RGB(150, 150, 165), FontRole::Small);
+                    } else if (taskbarVertical) {
+                        const std::time_t now = std::time(nullptr);
+                        const std::string timeText = clocktime::formatTimeOfDay(now, g_clockDisplaySettings, false);
+                        const std::string dateText = clocktime::formatShortDate(now, g_clockDisplaySettings);
+                        const int clockTop = tb.bottom - 44;
+                        const int lineH = uiTextHeight(FontRole::Small);
+                        const int savedDc = SaveDC(dc);
+                        IntersectClipRect(dc, tb.left + 1, clockTop, tb.right - 1, tb.bottom - 6);
+                        drawUiText(dc, tb.left + 2, clockTop + 3, timeText.c_str(), (int)timeText.size(), RGB(200, 200, 210), FontRole::Small);
+                        drawUiText(dc, tb.left + 2, clockTop + 3 + lineH, dateText.c_str(), (int)dateText.size(), RGB(150, 150, 165), FontRole::Small);
+                        if (savedDc != 0) RestoreDC(dc, savedDc);
                     }
                     // Show Desktop button (thin sliver on far right, matching Legacy)
                     {
@@ -5526,12 +5695,17 @@ namespace gxos {
                         FillRect(dc, &sdRect, sdBrush); DeleteObject(sdBrush);
                     }
                     if (g_taskbarMenuVisible) {
-                        const int tmItemH = 28; const int tmMenuW = 180; const int tmPad = 6;
-                        static const char* tmLabels[] = { "Task Manager", "Reboot", "Log Off" };
-                        const int tmItemCount = 3;
-                        int tmH = tmItemH * tmItemCount + tmPad * 2;
-                        g_taskbarMenuRect = { g_taskbarMenuRect.left, g_taskbarMenuRect.top,
-                            g_taskbarMenuRect.left + tmMenuW, g_taskbarMenuRect.top + tmH };
+                        const int tmItemH = 28; const int tmPad = 6;
+                        static const char* tmLabels[] = { "Task Manager", "Reboot", "Log Off", "Taskbar Settings..." };
+                        const int tmItemCount = 4;
+                        const TaskbarRect menuBounds = hostedTaskbarDisplayBounds(viewport);
+                        const int tmMenuW = std::min(180, menuBounds.width());
+                        const int tmH = std::min(tmItemH * tmItemCount + tmPad * 2, menuBounds.height());
+                        const int tmX = std::clamp(static_cast<int>(g_taskbarMenuRect.left),
+                            menuBounds.left, menuBounds.right - tmMenuW);
+                        const int tmY = std::clamp(static_cast<int>(g_taskbarMenuRect.top),
+                            menuBounds.top, menuBounds.bottom - tmH);
+                        g_taskbarMenuRect = { tmX, tmY, tmX + tmMenuW, tmY + tmH };
                         HBRUSH tmBg = CreateSolidBrush(colorFromTheme(sciFiTheme ? hostedPanelSurfaceColor(theme) : RGB(42, 42, 42)));
                         FillRect(dc, &g_taskbarMenuRect, tmBg); DeleteObject(tmBg);
                         if (sciFiTheme) {
@@ -5561,6 +5735,16 @@ namespace gxos {
                             drawUiText(dc, itemR.left + 8, itemR.top + 6, tmLabels[tmi], RGB(230, 230, 240), FontRole::Small);
                         }
                     }
+                }
+                if (taskbarOwnedByViewport && g_taskbarAutoHide && !g_taskbarAutoHideController.visible()) {
+                    const DisplayRect displayTaskbar = primaryTaskbarDisplayRect(desktop);
+                    const TaskbarRect reveal = TaskbarRevealRect(
+                        TaskbarRect{displayTaskbar.left, displayTaskbar.top, displayTaskbar.right, displayTaskbar.bottom},
+                        static_cast<TaskbarDock>(g_taskbarPosition));
+                    RECT revealRect{reveal.left, reveal.top, reveal.right, reveal.bottom};
+                    HBRUSH revealBrush = CreateSolidBrush(colorFromTheme(hostedTaskbarHighlightColor(theme)));
+                    FillRect(dc, &revealRect, revealBrush);
+                    DeleteObject(revealBrush);
                 }
                 // Notification toasts (top-right, matching Legacy NotificationManager.cs)
                 {
@@ -5740,6 +5924,52 @@ namespace gxos {
                 // Right-click context menus are top-level popups over Start and desktop surfaces.
                 RightClickMenu::Draw(dc);
 
+                if (g_taskbarSettingsVisible) {
+                    const DesktopTheme& settingsTheme = GetCurrentDesktopTheme();
+                    const bool settingsSciFi = settingsTheme.id == DesktopThemeId::SciFi;
+                    RECT settingsRect{g_taskbarSettingsRect.left, g_taskbarSettingsRect.top,
+                        g_taskbarSettingsRect.right, g_taskbarSettingsRect.bottom};
+                    HBRUSH settingsBg = CreateSolidBrush(colorFromTheme(settingsSciFi
+                        ? hostedPanelSurfaceColor(settingsTheme) : RGB(42, 42, 42)));
+                    FillRect(dc, &settingsRect, settingsBg);
+                    DeleteObject(settingsBg);
+                    HPEN settingsBorder = CreatePen(PS_SOLID, 1, colorFromTheme(settingsSciFi
+                        ? hostedPanelBorderColor(settingsTheme) : RGB(70, 70, 76)));
+                    HGDIOBJ oldSettingsPen = SelectObject(dc, settingsBorder);
+                    HGDIOBJ oldSettingsBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
+                    Rectangle(dc, settingsRect.left, settingsRect.top, settingsRect.right, settingsRect.bottom);
+                    SelectObject(dc, oldSettingsPen);
+                    SelectObject(dc, oldSettingsBrush);
+                    DeleteObject(settingsBorder);
+                    RECT headerRect{settingsRect.left + 1, settingsRect.top + 1,
+                        settingsRect.right - 1, settingsRect.top + kTaskbarSettingsHeaderHeight};
+                    HBRUSH headerBrush = CreateSolidBrush(colorFromTheme(settingsSciFi
+                        ? WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(settingsTheme), settingsTheme.accent, 16)
+                        : RGB(54, 62, 76)));
+                    FillRect(dc, &headerRect, headerBrush);
+                    DeleteObject(headerBrush);
+                    drawUiText(dc, headerRect.left + 9, headerRect.top + 7,
+                        "Taskbar settings", RGB(238, 241, 248), FontRole::Small);
+                    SetBkMode(dc, TRANSPARENT);
+                    const std::vector<std::string> settingsLabels = hostedTaskbarSettingsLabels();
+                    for (int row = 0; row < kTaskbarSettingsRowCount && row < static_cast<int>(settingsLabels.size()); ++row) {
+                        const int rowTop = settingsRect.top + kTaskbarSettingsHeaderHeight + row * kTaskbarSettingsRowHeight;
+                        RECT rowRect{settingsRect.left + 1, rowTop,
+                            settingsRect.right - 1, rowTop + kTaskbarSettingsRowHeight};
+                        if (g_taskbarPointerKnown && g_taskbarPointerX >= rowRect.left &&
+                            g_taskbarPointerX < rowRect.right && g_taskbarPointerY >= rowRect.top &&
+                            g_taskbarPointerY < rowRect.bottom) {
+                            HBRUSH hoverBrush = CreateSolidBrush(colorFromTheme(settingsSciFi
+                                ? WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(settingsTheme), settingsTheme.accent, 20)
+                                : RGB(61, 77, 105)));
+                            FillRect(dc, &rowRect, hoverBrush);
+                            DeleteObject(hoverBrush);
+                        }
+                        drawUiText(dc, rowRect.left + 9, rowRect.top + 5,
+                            settingsLabels[static_cast<size_t>(row)].c_str(), RGB(226, 230, 239), FontRole::Small);
+                    }
+                }
+
                 // Capture framebuffer for VNC if server is running.
                 // When using the GDI backend we still capture from the
                 // window DC because the compositor paints via GDI calls.
@@ -5854,8 +6084,20 @@ namespace gxos {
                 const DisplayRenderTarget renderTarget = hostedRenderTargetForWindow(h, desktop, cr.right - cr.left, cr.bottom - cr.top);
                 const DisplayViewport viewport = renderTarget.viewportDescriptor();
                 const bool syntheticExtend = syntheticExtendModeActive(desktop);
-                const bool taskbarVisible = hostedPrimaryTaskbarVisibleInViewport(desktop, viewport);
                 mapHostedInputPointToVirtual(mx, my, desktop, viewport);
+                g_taskbarPointerX = mx;
+                g_taskbarPointerY = my;
+                g_taskbarPointerKnown = true;
+                if (updateHostedTaskbarAutoHide(mx, my, desktop, viewport)) requestRepaint();
+                const TaskbarRect clickReveal = TaskbarRevealRect(
+                    hostedTaskbarAutoHideRect(desktop, viewport),
+                    static_cast<TaskbarDock>(g_taskbarPosition));
+                if (g_taskbarAutoHide && !g_taskbarAutoHideController.visible() && clickReveal.contains(mx, my)) {
+                    requestRepaint();
+                    return 0;
+                }
+                const bool taskbarVisible = hostedPrimaryTaskbarVisibleInViewport(desktop, viewport) &&
+                    g_taskbarAutoHideController.visible();
                 if (hostedSyntheticDualWindowOutputEnabled()) {
                     hostedDualWindowTrace(
                         std::string("WM_LBUTTONDOWN hwnd=")
@@ -5884,19 +6126,70 @@ namespace gxos {
                     return 0;
                 }
                 { std::lock_guard<std::mutex> lk(g_lock); if (blockInputBehindModal(mx, my)) { requestRepaint( ); return 0; } }
+                if (g_taskbarSettingsVisible) {
+                    const bool insideSettings = mx >= g_taskbarSettingsRect.left && mx < g_taskbarSettingsRect.right &&
+                        my >= g_taskbarSettingsRect.top && my < g_taskbarSettingsRect.bottom;
+                    if (insideSettings) {
+                        const int rowOffset = my - g_taskbarSettingsRect.top - kTaskbarSettingsHeaderHeight;
+                        const int row = rowOffset < 0 ? -1 : rowOffset / kTaskbarSettingsRowHeight;
+                        if (row >= 0 && row < kTaskbarSettingsRowCount) {
+                            if (row == 0) {
+                                g_taskbarPosition = static_cast<TaskbarPosition>(
+                                    (static_cast<int>(g_taskbarPosition) + 1) % 4);
+                            } else if (row == 1) {
+                                g_taskbarSizeMode = static_cast<TaskbarSizeMode>(
+                                    (static_cast<int>(g_taskbarSizeMode) + 1) % 3);
+                            } else if (row == 2) {
+                                g_taskbarAutoHide = !g_taskbarAutoHide;
+                            } else if (row == 3) {
+                                g_taskbarPresentation = g_taskbarPresentation == TaskbarPresentation::IconsAndLabels
+                                    ? TaskbarPresentation::IconsOnly : TaskbarPresentation::IconsAndLabels;
+                            } else if (row == 4) {
+                                g_taskbarShowPreviews = !g_taskbarShowPreviews;
+                            } else if (row == 5) {
+                                g_taskbarShowActivity = !g_taskbarShowActivity;
+                            }
+                            g_taskbarSettingsVisible = false;
+                            saveDesktopConfig();
+                            syncTaskbarPreferencesFromConfig();
+                            {
+                                std::lock_guard<std::mutex> lk(g_lock);
+                                for (auto& item : g_windows) {
+                                    WinInfo& wi = item.second;
+                                    if (!wi.maximized || wi.minimized || wi.tombstoned) continue;
+                                    const DisplayRect oldRect{wi.x, wi.y, wi.x + wi.w, wi.y + wi.h};
+                                    const DisplayRect work = monitorWorkAreaForWindow(desktop, viewport, oldRect);
+                                    wi.x = work.left;
+                                    wi.y = work.top;
+                                    wi.w = work.width();
+                                    wi.h = work.height();
+                                    wi.dirty = true;
+                                }
+                            }
+                        } else {
+                            g_taskbarSettingsVisible = false;
+                        }
+                        requestRepaint();
+                        return 0;
+                    }
+                    g_taskbarSettingsVisible = false;
+                }
                 // Dismiss right-click menu on any left click
                 if (RightClickMenu::IsVisible( )) { RightClickMenu::HandleClick(mx, my); requestRepaint( ); return 0; }
                 // Handle taskbar right-click menu click
                 if (g_taskbarMenuVisible) {
                     const int tmItemH = 28; const int tmPad = 6;
-                    static const char* tmActions[] = { "TaskManager", "Reboot", "LogOff" };
-                    const int tmItemCount = 3;
+                    const int tmItemCount = 4;
                     if (mx >= g_taskbarMenuRect.left && mx <= g_taskbarMenuRect.right &&
                         my >= g_taskbarMenuRect.top && my <= g_taskbarMenuRect.bottom) {
-                        int idx = (my - g_taskbarMenuRect.top - tmPad) / tmItemH;
+                        const int itemOffset = my - g_taskbarMenuRect.top - tmPad;
+                        const int idx = itemOffset < 0 ? -1 : itemOffset / tmItemH;
                         if (idx >= 0 && idx < tmItemCount) {
                             g_taskbarMenuVisible = false;
-                            if (idx == 0) { launchAction("TaskManager"); } else if (idx == 1) { publishOut(MsgType::MT_WidgetEvt, "REBOOT"); } else if (idx == 2) { publishOut(MsgType::MT_WidgetEvt, "LOGOFF"); }
+                            if (idx == 0) { launchAction("TaskManager"); }
+                            else if (idx == 1) { publishOut(MsgType::MT_WidgetEvt, "REBOOT"); }
+                            else if (idx == 2) { publishOut(MsgType::MT_WidgetEvt, "LOGOFF"); }
+                            else openHostedTaskbarSettingsMenu(g_taskbarMenuRect.left, g_taskbarMenuRect.top, viewport);
                             requestRepaint( ); return 0;
                         }
                     }
@@ -6091,6 +6384,17 @@ namespace gxos {
                 const DisplayViewport viewport = hostedViewportForWindow(h, desktop, cr.right - cr.left, cr.bottom - cr.top);
                 const bool syntheticExtend = syntheticExtendModeActive(desktop);
                 mapHostedInputPointToVirtual(mx, my, desktop, viewport);
+                g_taskbarPointerX = mx;
+                g_taskbarPointerY = my;
+                g_taskbarPointerKnown = true;
+                if (updateHostedTaskbarAutoHide(mx, my, desktop, viewport)) requestRepaint();
+                const TaskbarRect clickReveal = TaskbarRevealRect(
+                    hostedTaskbarAutoHideRect(desktop, viewport),
+                    static_cast<TaskbarDock>(g_taskbarPosition));
+                if (g_taskbarAutoHide && !g_taskbarAutoHideController.visible() && clickReveal.contains(mx, my)) {
+                    requestRepaint();
+                    return 0;
+                }
                 if (Compositor::isDesktopFolderRenameActive()) {
                     // Keep the editor exclusive while rename mode is active; cancel only if the click leaves the target.
                     if (!Compositor::desktopFolderRenameContainsPoint(mx, my)) {
@@ -6138,13 +6442,21 @@ namespace gxos {
                     if (entryIndex < entries.size()) {
                         RightClickMenu::ShowForTaskbarApp(mx, my, entries[entryIndex]);
                     } else {
-                        const int tmItemH = 28; const int tmItemCount = 3; const int tmPad = 6;
+                        const int tmItemH = 28; const int tmItemCount = 4; const int tmPad = 6;
                         int tmH = tmItemH * tmItemCount + tmPad * 2;
                         int tmW = 180;
-                        int tmX = mx; int tmY = (g_taskbarPosition == TaskbarPosition::Top) ? tbWork.bottom + 4 : tbWork.top - tmH;
-                        if (tmX + tmW > cr.right) tmX = cr.right - tmW - 2;
-                        if (tmY + tmH > cr.bottom) tmY = cr.bottom - tmH - 2;
-                        if (tmY < 0) tmY = 0;
+                        const TaskbarRect displayBounds = hostedTaskbarDisplayBounds(viewport);
+                        tmW = std::min(tmW, displayBounds.width());
+                        tmH = std::min(tmH, displayBounds.height());
+                        const bool verticalTaskbar = g_taskbarPosition == TaskbarPosition::Left ||
+                            g_taskbarPosition == TaskbarPosition::Right;
+                        int tmX = verticalTaskbar
+                            ? (g_taskbarPosition == TaskbarPosition::Left ? tbWork.right + 4 : tbWork.left - tmW - 4)
+                            : mx;
+                        int tmY = verticalTaskbar ? my :
+                            (g_taskbarPosition == TaskbarPosition::Top ? tbWork.bottom + 4 : tbWork.top - tmH);
+                        tmX = std::clamp(tmX, displayBounds.left, displayBounds.right - tmW);
+                        tmY = std::clamp(tmY, displayBounds.top, displayBounds.bottom - tmH);
                         g_taskbarMenuRect = { tmX, tmY, tmX + tmW, tmY + tmH };
                         g_taskbarMenuVisible = true;
                         g_taskbarMenuSel = -1;
@@ -6278,6 +6590,14 @@ namespace gxos {
                 const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg);
                 const DisplayViewport viewport = hostedViewportForWindow(h, desktop, cr.right - cr.left, cr.bottom - cr.top);
                 mapHostedInputPointToVirtual(mx, my, desktop, viewport);
+                g_taskbarPointerX = mx;
+                g_taskbarPointerY = my;
+                g_taskbarPointerKnown = true;
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+                TRACKMOUSEEVENT trackMouse{sizeof(TRACKMOUSEEVENT), TME_LEAVE, h, 0};
+                TrackMouseEvent(&trackMouse);
+#endif
+                if (updateHostedTaskbarAutoHide(mx, my, desktop, viewport)) requestRepaint();
                 { std::lock_guard<std::mutex> lk(g_lock); if (blockInputBehindModal(mx, my)) { requestRepaint( ); return 0; } }
                 if (RightClickMenu::IsVisible()) {
                     if (RightClickMenu::ContainsPoint(mx, my) || RightClickMenu::IsStartMenuAppMenuVisible()) {
@@ -6388,6 +6708,18 @@ namespace gxos {
                 }
                 break;
             }
+            case WM_MOUSELEAVE:
+                g_taskbarPointerKnown = false;
+                {
+                    RECT cr{};
+                    GetClientRect(h, &cr);
+                    const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg);
+                    const DisplayViewport viewport = hostedViewportForWindow(
+                        h, desktop, cr.right - cr.left, cr.bottom - cr.top);
+                    if (updateHostedTaskbarAutoHide(
+                            g_taskbarPointerX, g_taskbarPointerY, desktop, viewport)) requestRepaint();
+                }
+                return 0;
             case WM_KEYDOWN: case WM_SYSKEYDOWN: {
                 int key = (int)w;
                 uint64_t traceOwnerPid = 0;
@@ -6410,7 +6742,7 @@ namespace gxos {
                 // Taskbar menu keyboard handling
                 if (g_taskbarMenuVisible) {
                     if (key == VK_ESCAPE) { g_taskbarMenuVisible = false; requestRepaint( ); return 0; }
-                    const int tmItemCount = 3;
+                    const int tmItemCount = 4;
                     if (key == VK_UP) { if (g_taskbarMenuSel > 0) g_taskbarMenuSel--; else g_taskbarMenuSel = tmItemCount - 1; requestRepaint( ); return 0; }
                     if (key == VK_DOWN) { if (g_taskbarMenuSel < tmItemCount - 1) g_taskbarMenuSel++; else g_taskbarMenuSel = 0; requestRepaint( ); return 0; }
                     if (key == VK_RETURN && g_taskbarMenuSel >= 0) {
@@ -6418,6 +6750,14 @@ namespace gxos {
                         if (sel == 0) launchAction("TaskManager");
                         else if (sel == 1) publishOut(MsgType::MT_WidgetEvt, "REBOOT");
                         else if (sel == 2) publishOut(MsgType::MT_WidgetEvt, "LOGOFF");
+                        else if (sel == 3) {
+                            RECT client{};
+                            GetClientRect(g_hwnd, &client);
+                            const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg);
+                            const DisplayViewport viewport = hostedViewportForWindow(
+                                g_hwnd, desktop, client.right - client.left, client.bottom - client.top);
+                            openHostedTaskbarSettingsMenu(g_taskbarMenuRect.left, g_taskbarMenuRect.top, viewport);
+                        }
                         requestRepaint( ); return 0;
                     }
                 }
@@ -7676,7 +8016,7 @@ namespace gxos {
                     g_clockDisplaySettings = clockDisplaySettingsFromConfig(g_cfg);
                     syncDesktopThemeFromConfig(g_cfg);
                     FocusIndicator::SetEnhancedFocusEnabled(g_cfg.enhancedFocusIndicator);
-                    g_taskbarPosition = parseTaskbarPosition(g_cfg.taskbarPosition);
+                    syncTaskbarPreferencesFromConfig();
                     g_cfg.taskbarPosition = taskbarPositionName(g_taskbarPosition);
                     g_backgroundScaleMode = WallpaperRegistry::NormalizeScaleModeOrDefault(g_cfg.backgroundScaleMode.empty() ? "fill" : g_cfg.backgroundScaleMode);
                     g_cfg.backgroundScaleMode = g_backgroundScaleMode;
@@ -8092,7 +8432,7 @@ namespace gxos {
             Logger::write(LogLevel::Info, std::string("Compositor display options store loaded=") + (displayOk ? "true" : "false") + " err=" + displayErr);
             syncDesktopThemeFromConfig(g_cfg);
             FocusIndicator::SetEnhancedFocusEnabled(g_cfg.enhancedFocusIndicator);
-            g_taskbarPosition = parseTaskbarPosition(g_cfg.taskbarPosition);
+            syncTaskbarPreferencesFromConfig();
             g_cfg.taskbarPosition = taskbarPositionName(g_taskbarPosition);
             Logger::write(LogLevel::Info, std::string("Compositor taskbar position=") + g_cfg.taskbarPosition);
             std::string configuredScale = g_cfg.backgroundScaleMode.empty() ? "fill" : g_cfg.backgroundScaleMode;
@@ -8277,7 +8617,7 @@ namespace gxos {
             const bool syntheticExtend = syntheticExtendModeActive(desktop);
             const bool taskbarPrimaryOnly = true;
             const bool taskbarVisible = hostedPrimaryTaskbarVisibleInViewport(desktop, viewport);
-            const DisplayRect taskbarRect = primaryTaskbarDisplayRect(desktop);
+            const DisplayRect taskbarRect = taskbarReservationDisplayRect(desktop);
             const DisplayMonitorDescriptor* activeMonitor = desktop.activeViewportMonitor(viewport);
             const DisplayMonitorDescriptor* primaryMonitor = desktop.primaryMonitor();
             const DisplayRect activeMonitorBounds = activeMonitor ? desktop.monitorBounds(*activeMonitor) : DisplayRect{ desktop.left, desktop.top, desktop.right, desktop.bottom };
@@ -8322,7 +8662,7 @@ namespace gxos {
             const bool syntheticExtend = syntheticExtendModeActive(desktop);
             const bool taskbarPrimaryOnly = true;
             const bool taskbarVisible = hostedPrimaryTaskbarVisibleInViewport(desktop, viewport);
-            const DisplayRect taskbarRect = primaryTaskbarDisplayRect(desktop);
+            const DisplayRect taskbarRect = taskbarReservationDisplayRect(desktop);
             const DisplayMonitorDescriptor* activeMonitor = desktop.activeViewportMonitor(viewport);
             const DisplayMonitorDescriptor* primaryMonitor = desktop.primaryMonitor();
             const DisplayRect activeMonitorBounds = activeMonitor ? desktop.monitorBounds(*activeMonitor) : DisplayRect{ desktop.left, desktop.top, desktop.right, desktop.bottom };

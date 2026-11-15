@@ -184,10 +184,24 @@ void KernelCompositor::init(uint32_t screenW, uint32_t screenH, uint32_t taskbar
 }
 
 void KernelCompositor::setWorkArea(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    const bool changed = s_workX != x || s_workY != y || s_workW != w || s_workH != h;
     s_workX = x;
     s_workY = y;
     s_workW = w;
     s_workH = h;
+    if (!changed) return;
+    for (int i = 0; i < MAX_WINDOWS; ++i) {
+        if (!s_windows[i].valid || !s_windows[i].window) continue;
+        app::KernelWindow* window = s_windows[i].window;
+        if (!(window->flags & app::WF_MAXIMIZED)) continue;
+        if (window->x == static_cast<int>(s_workX) && window->y == static_cast<int>(s_workY) &&
+            window->w == static_cast<int>(s_workW) && window->h == static_cast<int>(s_workH)) continue;
+        window->x = static_cast<int>(s_workX);
+        window->y = static_cast<int>(s_workY);
+        window->w = static_cast<int>(s_workW);
+        window->h = static_cast<int>(s_workH);
+        window->dirty = true;
+    }
 }
 
 void KernelCompositor::reconcileDisplayTopology(uint32_t screenW, uint32_t screenH) {
@@ -1268,6 +1282,11 @@ uint32_t TaskbarManager::s_taskbarX = 0;
 uint32_t TaskbarManager::s_taskbarY = 0;
 uint32_t TaskbarManager::s_taskbarW = 0;
 bool TaskbarManager::s_vertical = false;
+gxos::gui::TaskbarSizeMode TaskbarManager::s_sizeMode = gxos::gui::TaskbarSizeMode::Standard;
+bool TaskbarManager::s_showLabels = true;
+bool TaskbarManager::s_showActivity = true;
+bool TaskbarManager::s_showPreviews = true;
+bool TaskbarManager::s_taskbarVisible = true;
 uint32_t TaskbarManager::s_startY = 0;
 int32_t TaskbarManager::s_mouseX = -1;
 int32_t TaskbarManager::s_mouseY = -1;
@@ -1316,6 +1335,16 @@ void TaskbarManager::setLayout(uint32_t taskbarX, uint32_t taskbarY, uint32_t ta
     s_vertical = vertical;
     s_startX = buttonStartX;
     s_startY = buttonStartY;
+}
+
+void TaskbarManager::setPresentation(gxos::gui::TaskbarSizeMode size, bool showLabels,
+                                     bool showActivity, bool showPreviews, bool taskbarVisible) {
+    s_sizeMode = size;
+    s_showLabels = showLabels;
+    s_showActivity = showActivity;
+    s_showPreviews = showPreviews;
+    s_taskbarVisible = taskbarVisible;
+    if (!s_showPreviews) closePreview();
 }
 
 void TaskbarManager::updateButtons() {
@@ -1403,8 +1432,8 @@ void TaskbarManager::updateButtons() {
                 button.windowId = window->id;
             }
         }
-        button.activity = s_activityStore.resolve(button.appId, button.windowIds,
-            static_cast<size_t>(button.windowCount));
+        button.activity = s_showActivity ? s_activityStore.resolve(button.appId, button.windowIds,
+            static_cast<size_t>(button.windowCount)) : gxos::gui::TaskbarActivity{};
     }
 
     // Preserve application order while the focused window and z-order change.
@@ -1431,17 +1460,22 @@ void TaskbarManager::updateButtons() {
     int y = static_cast<int>(s_startY);
     const int maxX = static_cast<int>(s_taskbarX + s_taskbarW);
     const int maxY = static_cast<int>(s_taskbarY + s_taskbarH);
+    const int taskbarThickness = s_vertical ? static_cast<int>(s_taskbarW) : static_cast<int>(s_taskbarH);
+    const int buttonHeight = s_vertical
+        ? (taskbarThickness > 8 ? taskbarThickness - 8 : taskbarThickness)
+        : (taskbarThickness > 12 ? taskbarThickness - 12 : taskbarThickness);
     int totalPreferred = 0;
     for (int i = 0; i < s_buttonCount; ++i) {
-        const int desired = measureText(s_buttons[i].title) + 34;
-        totalPreferred += desired < 58 ? 58 : (desired > kTaskbarButtonMaxWidth ? kTaskbarButtonMaxWidth : desired);
+        const int desired = s_showLabels ? measureText(s_buttons[i].title) + 34 : taskbarThickness;
+        const int minimum = s_showLabels ? 58 : (taskbarThickness < 36 ? 36 : taskbarThickness);
+        totalPreferred += desired < minimum ? minimum : (desired > kTaskbarButtonMaxWidth ? kTaskbarButtonMaxWidth : desired);
         if (i > 0) totalPreferred += 4;
     }
     const int horizontalAvailable = maxX - x;
     const bool needsOverflow = s_vertical
-        ? static_cast<int>(s_buttonCount) > ((maxY - y + 4) / 32)
+        ? static_cast<int>(s_buttonCount) > ((maxY - y + 4) / (buttonHeight + 4))
         : totalPreferred > horizontalAvailable;
-    const int overflowSpace = needsOverflow ? (s_vertical ? 32 : (horizontalAvailable < 40 ? horizontalAvailable : 40)) : 0;
+    const int overflowSpace = needsOverflow ? (s_vertical ? buttonHeight : (horizontalAvailable < 40 ? horizontalAvailable : 40)) : 0;
     const int appLimit = s_vertical ? (maxY - y - overflowSpace) : (maxX - x - overflowSpace - (needsOverflow ? 4 : 0));
     int used = 0;
     s_visibleButtonCount = 0;
@@ -1450,13 +1484,14 @@ void TaskbarManager::updateButtons() {
         TaskbarButton& button = s_buttons[i];
         const int available = s_vertical ? static_cast<int>(s_taskbarW > 8 ? s_taskbarW - 8 : s_taskbarW) : appLimit - used;
         if (available <= 0) break;
-        const int desiredW = s_vertical ? available : measureText(button.title) + 34;
-        const int width = s_vertical ? available : (desiredW < 58 ? 58 : (desiredW > kTaskbarButtonMaxWidth ? kTaskbarButtonMaxWidth : desiredW));
+        const int desiredW = s_vertical ? available : (s_showLabels ? measureText(button.title) + 34 : taskbarThickness);
+        const int minimum = s_showLabels ? 58 : (taskbarThickness < 36 ? 36 : taskbarThickness);
+        const int width = s_vertical ? available : (desiredW < minimum ? minimum : (desiredW > kTaskbarButtonMaxWidth ? kTaskbarButtonMaxWidth : desiredW));
         if (needsOverflow && used > 0 && width + 4 > available) break;
         const int boundedW = width < available ? width : available;
         const int availableH = maxY - y;
         if (availableH <= 0) break;
-        const int desiredH = s_vertical ? 28 : static_cast<int>(s_taskbarH > 12 ? s_taskbarH - 12 : s_taskbarH);
+        const int desiredH = buttonHeight;
         const int height = desiredH < availableH ? desiredH : availableH;
         if (boundedW <= 0 || height <= 0) break;
         button.x = x;
@@ -1477,7 +1512,7 @@ void TaskbarManager::updateButtons() {
         overflow.overflowEntry = true;
         copyTaskbarText(overflow.title, app::MAX_TITLE_LEN, "More");
         if (s_vertical) {
-            const int height = maxY - y < 28 ? maxY - y : 28;
+            const int height = maxY - y < buttonHeight ? maxY - y : buttonHeight;
             if (height > 0) {
                 overflow.x = static_cast<int>(s_taskbarX + 4);
                 overflow.y = y;
@@ -1503,6 +1538,7 @@ void TaskbarManager::updateButtons() {
 }
 
 void TaskbarManager::drawButtons() {
+    if (!s_taskbarVisible) return;
     updateButtons();
 
     const int drawCount = s_visibleButtonCount +
@@ -1516,9 +1552,10 @@ void TaskbarManager::drawButtons() {
                                        KernelCompositor::rgb(55, 58, 70);
         
         KernelCompositor::fillRect(btn.x, btn.y, btn.w, btn.h, bgColor);
-        if (btn.w >= 22 && btn.h >= 12) {
-            const uint32_t iconY = static_cast<uint32_t>(btn.y + (btn.h - 8) / 2);
-            KernelCompositor::fillRect(btn.x + 5, iconY, 8, 8, btn.missingApplication
+        if (btn.w >= 18 && btn.h >= 10) {
+            const int iconX = s_vertical || !s_showLabels ? btn.x + (btn.w - 8) / 2 : btn.x + 5;
+            const int iconY = s_vertical && s_showLabels ? btn.y + 2 : btn.y + (btn.h - 8) / 2;
+            KernelCompositor::fillRect(iconX, iconY, 8, 8, btn.missingApplication
                 ? KernelCompositor::rgb(230, 105, 96) : btn.iconColor);
         }
         if ((btn.active || btn.running) && btn.w > 4 && btn.h >= 3) {
@@ -1526,13 +1563,21 @@ void TaskbarManager::drawButtons() {
                 btn.active ? KernelCompositor::rgb(100, 160, 240) : KernelCompositor::rgb(132, 140, 154));
         }
 
-        char label[app::MAX_TITLE_LEN];
-        const int textWidth = btn.w > 16 ? btn.w - 16 : btn.w;
-        const int labelChars = textWidth / 6;
-        makeTaskbarFitText(label, sizeof(label), btn.title, labelChars);
-        KernelCompositor::drawTextCentered(btn.x + (btn.w >= 22 ? 14 : 2), btn.y,
-                                           btn.w > 16 ? btn.w - 16 : btn.w, btn.h, label,
-                                           KernelCompositor::rgb(230, 230, 240));
+        if (s_showLabels) {
+            char label[app::MAX_TITLE_LEN];
+            const int textWidth = s_vertical ? btn.w - 2 : (btn.w > 16 ? btn.w - 16 : btn.w);
+            const int labelChars = textWidth > 0 ? textWidth / 6 : 0;
+            makeTaskbarFitText(label, sizeof(label), btn.title, labelChars);
+            if (s_vertical) {
+                KernelCompositor::drawTextCentered(btn.x + 1, btn.y + 10,
+                    btn.w > 2 ? btn.w - 2 : btn.w, btn.h > 10 ? btn.h - 10 : 1, label,
+                    KernelCompositor::rgb(230, 230, 240));
+            } else {
+                KernelCompositor::drawTextCentered(btn.x + (btn.w >= 22 ? 14 : 2), btn.y,
+                    btn.w > 16 ? btn.w - 16 : btn.w, btn.h, label,
+                    KernelCompositor::rgb(230, 230, 240));
+            }
+        }
         if (btn.windowCount > 1 && btn.w >= 32) {
             char countLabel[4];
             countLabel[0] = static_cast<char>('0' + (btn.windowCount > 9 ? 9 : btn.windowCount));
@@ -1545,11 +1590,11 @@ void TaskbarManager::drawButtons() {
             KernelCompositor::fillRect(btn.x + btn.w - 7, btn.y + btn.h / 2 - 2, 4, 4,
                                        KernelCompositor::rgb(155, 190, 240));
         }
-        if (btn.activity.attention && btn.w >= 24 && btn.h >= 14) {
+        if (s_showActivity && btn.activity.attention && btn.w >= 24 && btn.h >= 14) {
             KernelCompositor::fillRect(btn.x + btn.w - 10, btn.y + 3, 6, 6,
                 KernelCompositor::rgb(236, 112, 91));
         }
-        if (btn.activity.progress != gxos::gui::TaskbarProgressState::None && btn.w > 4 && btn.h >= 4) {
+        if (s_showActivity && btn.activity.progress != gxos::gui::TaskbarProgressState::None && btn.w > 4 && btn.h >= 4) {
             const uint32_t color = btn.activity.progress == gxos::gui::TaskbarProgressState::Failed
                 ? KernelCompositor::rgb(238, 102, 91)
                 : btn.activity.progress == gxos::gui::TaskbarProgressState::Completed
@@ -1660,6 +1705,10 @@ bool TaskbarManager::handleClick(int32_t mx, int32_t my) {
 void TaskbarManager::updateHover(int32_t mx, int32_t my) {
     s_mouseX = mx;
     s_mouseY = my;
+    if (!s_showPreviews) {
+        closePreview();
+        return;
+    }
     updateButtons();
     gxos::gui::TaskbarPreviewHoverState currentState;
     if (s_previewButtonIndex >= 0)

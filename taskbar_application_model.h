@@ -173,14 +173,15 @@ inline std::vector<TaskbarButtonRect> LayoutTaskbarButtons(
     int startX, int startY,
     int gap,
     int reservedRight,
-    int preferredHeight = 28) {
+    int preferredHeight = 28,
+    int minHorizontalWidth = 56) {
     std::vector<TaskbarButtonRect> result;
     if (preferredWidths.empty() || right <= left || bottom <= top) return result;
 
     const int available = vertical
         ? std::max(0, bottom - startY - 4)
         : std::max(0, right - reservedRight - startX);
-    const int minWidth = vertical ? std::max(0, right - left - 8) : std::min(56, available);
+    const int minWidth = vertical ? std::max(0, right - left - 8) : std::min(std::max(0, minHorizontalWidth), available);
     const int overflowWidth = vertical ? minWidth : std::min(42, available);
     size_t visibleCount = preferredWidths.size();
     const int totalPreferred = [&]() {
@@ -222,7 +223,8 @@ inline std::vector<TaskbarButtonRect> LayoutTaskbarButtons(
         const int width = vertical
             ? std::max(0, right - left - 8)
             : std::min(std::max(minWidth, preferredWidths[i]), perEntry);
-        const int height = vertical ? std::min(preferredHeight, bottom - y) : std::max(0, bottom - top - 12);
+        const int height = vertical ? std::min(preferredHeight, bottom - y)
+            : std::min(std::max(0, preferredHeight), bottom - top);
         if (width <= 0 || height <= 0) break;
         result.push_back(TaskbarButtonRect{x, y, x + width, y + height, i});
         if (vertical) y += height + gap;

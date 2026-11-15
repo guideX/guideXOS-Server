@@ -61,6 +61,8 @@ struct TaskbarRect {
     int top{0};
     int right{0};
     int bottom{0};
+    int width() const { return right > left ? right - left : 0; }
+    int height() const { return bottom > top ? bottom - top : 0; }
     bool empty() const { return right <= left || bottom <= top; }
     bool contains(int x, int y) const { return x >= left && x < right && y >= top && y < bottom; }
 };
