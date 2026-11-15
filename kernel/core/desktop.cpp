@@ -1402,16 +1402,52 @@ static void load_persisted_taskbar_position()
     serial::puts("\n");
 }
 
+static bool search_provider_available();
+static uint32_t taskbar_tray_width();
+static bool taskbar_clock_visible();
+static uint32_t taskbar_clock_width();
+
 static void apply_taskbar_layout()
 {
     DesktopRect work = get_current_work_area();
     DesktopRect tb = get_current_taskbar_rect();
     bool vertical = is_vertical_taskbar(s_taskbarDockPosition);
     DesktopRect start = get_start_button_rect();
+    uint32_t layoutX = tb.x;
+    uint32_t layoutY = tb.y;
+    uint32_t layoutW = tb.w;
+    uint32_t layoutH = tb.h;
     uint32_t buttonStartX = vertical ? tb.x + 4 : start.x + start.w + 8;
     uint32_t buttonStartY = vertical ? start.y + start.h + 8 : tb.y + 6;
+    if (vertical) {
+        uint32_t taskButtonMaxY = tb.y + tb.h - (tb.h >= kShowDesktopW ? kShowDesktopW : tb.h);
+        if (taskbar_clock_visible() && tb.h > 82) {
+            const uint32_t clockTop = tb.y + tb.h - 76;
+            taskButtonMaxY = clockTop > 8 ? clockTop - 8 : tb.y;
+        }
+        if (shell::is_open() && buttonStartY + kTaskbarBtnH <= taskButtonMaxY) {
+            buttonStartY += kTaskbarBtnH + kTaskbarBtnGap;
+        }
+        layoutY = buttonStartY;
+        layoutH = taskButtonMaxY > buttonStartY ? taskButtonMaxY - buttonStartY : 0;
+    } else {
+        if (search_provider_available()) buttonStartX += kSearchBoxW + 8;
+        uint32_t rightReserved = kShowDesktopW + 12;
+        const uint32_t trayWidth = taskbar_tray_width();
+        const uint32_t clockWidth = taskbar_clock_width();
+        if (trayWidth > 0) rightReserved += trayWidth + 10;
+        if (clockWidth > 0) rightReserved += clockWidth + 6;
+        const uint32_t taskButtonMaxX = tb.x + tb.w > rightReserved
+            ? tb.x + tb.w - rightReserved : tb.x;
+        if (shell::is_open() && buttonStartX + kTaskbarBtnMaxW <= taskButtonMaxX) {
+            buttonStartX += (uint32_t)measure_text("Terminal") + 30 + kTaskbarBtnGap;
+        }
+        layoutX = buttonStartX;
+        layoutW = taskButtonMaxX > buttonStartX ? taskButtonMaxX - buttonStartX : 0;
+    }
     compositor::KernelCompositor::setWorkArea(work.x, work.y, work.w, work.h);
-    compositor::TaskbarManager::setLayout(tb.x, tb.y, tb.w, tb.h, vertical, buttonStartX, buttonStartY);
+    compositor::TaskbarManager::setLayout(layoutX, layoutY, layoutW, layoutH,
+                                          vertical, buttonStartX, buttonStartY);
 }
 
 // Desktop icon entries with enhanced management
@@ -7211,6 +7247,16 @@ static uint32_t taskbar_widget_width(TaskbarWidgetType type)
     return kTrayIconSize;
 }
 
+static bool taskbar_clock_visible()
+{
+    return s_taskbarWidgets[(int)TaskbarWidgetType::Clock].visible;
+}
+
+static uint32_t taskbar_clock_width()
+{
+    return taskbar_widget_width(TaskbarWidgetType::Clock);
+}
+
 static uint32_t taskbar_tray_width()
 {
     uint32_t count = 0;
@@ -11473,6 +11519,11 @@ void handle_key_with_modifiers(uint32_t key, uint32_t modifiers)
     if (file_clipboard::operation_active()) return;
     reset_alt_f4_shortcut_state();
 
+    if (compositor::TaskbarManager::handleKeyDown(key)) {
+        draw();
+        return;
+    }
+
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
     if (key == kAltF4KeyCode) {
         serial::puts("[desktop] key f4 candidate=");
@@ -12562,6 +12613,37 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
     DesktopRect workArea = get_current_work_area();
     DesktopRect taskbarRect = get_current_taskbar_rect();
 
+    // The taskbar popup is a top-level overlay. Consume clicks while it is
+    // open so they cannot activate a window or desktop item underneath it.
+    if (compositor::TaskbarManager::menuVisible()) {
+        if (pressed & 0x01) {
+            compositor::TaskbarManager::handlePointerDown(mx, my, 1);
+            draw();
+            draw_cursor(mx, my);
+            return;
+        }
+        if (pressed & 0x02) {
+            compositor::TaskbarManager::handlePointerDown(mx, my, 2);
+            draw();
+            draw_cursor(mx, my);
+            return;
+        }
+        if (compositor::TaskbarManager::handleMenuHover(mx, my)) {
+            draw();
+            draw_cursor(mx, my);
+            return;
+        }
+    } else if ((pressed & 0x02) && point_in_rect(mx, my, taskbarRect)) {
+        // Right-clicking taskbar application entries opens their menu. Other
+        // taskbar controls consume the click without opening a desktop menu.
+        s_startMenuOpen = false;
+        s_rightClickMenuOpen = false;
+        compositor::TaskbarManager::handlePointerDown(mx, my, 2);
+        draw();
+        draw_cursor(mx, my);
+        return;
+    }
+
     if (s_desktopRename.active) {
         if ((pressed & 0x03) || (released & 0x03)) {
             // Click-away cancels rename in the bare-metal shell; Enter is the only commit path.
@@ -12619,7 +12701,8 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
     // BUT: Start menu and modal dialogs take priority over compositor windows
     bool overStartMenu = is_point_in_start_menu(mx, my);
     bool overModalDialog = is_point_in_modal_dialog(mx, my);
-    bool overUIOverlay = overStartMenu || overModalDialog || s_rightClickMenuOpen;
+    bool overUIOverlay = overStartMenu || overModalDialog || s_rightClickMenuOpen ||
+        compositor::TaskbarManager::menuVisible();
 #if defined(GXOS_PS2_CLICK_TRACE)
     app::KernelWindow* traceTargetWindow = nullptr;
     const compositor::HitTestResult traceWindowHit = overUIOverlay
@@ -12671,6 +12754,8 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
     
     // Check for taskbar button clicks (for kernel apps)
     if ((pressed & 0x01) && point_in_rect(mx, my, taskbarRect)) {
+        s_startMenuOpen = false;
+        s_rightClickMenuOpen = false;
         if (point_in_rect(mx, my, get_show_desktop_rect())) {
             toggle_show_desktop();
             draw();
@@ -13605,9 +13690,16 @@ void handle_mouse_wheel(int32_t mx, int32_t my, int8_t wheelDelta)
 
     apply_taskbar_layout();
 
+    if (compositor::TaskbarManager::handleWheel(mx, my, wheelDelta)) {
+        draw();
+        draw_cursor(mx, my);
+        return;
+    }
+
     bool overStartMenu = is_point_in_start_menu(mx, my);
     bool overModalDialog = is_point_in_modal_dialog(mx, my);
-    bool overUIOverlay = overStartMenu || overModalDialog || s_rightClickMenuOpen;
+    bool overUIOverlay = overStartMenu || overModalDialog || s_rightClickMenuOpen ||
+        compositor::TaskbarManager::menuVisible();
     if (overUIOverlay) return;
 
     if (compositor::KernelCompositor::isPointOverWindow(mx, my)) {

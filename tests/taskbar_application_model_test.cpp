@@ -27,6 +27,16 @@ gxos::gui::TaskbarWindowSnapshot window(uint64_t id, const char* title, const ch
 }
 
 int main() {
+    check(gxos::gui::HasCanonicalTaskbarAppIdentity("org.guide.test"), "shared canonical identity accepts app IDs");
+    check(!gxos::gui::HasCanonicalTaskbarAppIdentity(""), "shared canonical identity rejects empty IDs");
+    check(gxos::gui::SameCanonicalTaskbarAppIdentity("org.guide.test", "org.guide.test"), "shared identity comparison groups exact IDs");
+    check(!gxos::gui::SameCanonicalTaskbarAppIdentity("", ""), "shared identity comparison never groups anonymous windows");
+    check(gxos::gui::DecideTaskbarCoreClick(2, false, false, true) ==
+          gxos::gui::TaskbarCoreClickAction::ShowWindowChooser, "shared click policy selects grouped windows");
+    check(gxos::gui::DecideTaskbarCoreClick(1, true, false, true) ==
+          gxos::gui::TaskbarCoreClickAction::Minimize, "shared click policy minimizes focused window");
+    check(gxos::gui::DecideTaskbarCoreClick(0, false, false, true) ==
+          gxos::gui::TaskbarCoreClickAction::Launch, "shared click policy launches an idle pinned app");
     using namespace gxos::gui;
 
     const std::vector<std::string> pins{"app.editor", "app.editor", "app.mail"};
@@ -43,10 +53,23 @@ int main() {
         "pinned app groups its running windows and keeps pin order");
     check(entries[1].pinned && entries[1].appId == "app.mail" && entries[1].windowCount() == 1,
         "second pinned app remains a separate taskbar entry");
+    check(entries[0].appId != entries[1].appId && entries[0].windows.front().title == entries[1].windows.front().title,
+        "unrelated applications with identical titles remain separate");
     check(entries[2].appId == "" && entries[2].windowCount() == 1 && entries[3].windowCount() == 1,
         "windows without canonical identity remain individual entries");
     check(entries[0].label == "app.editor" && entries[0].focusedWindowId() == 10,
         "group uses canonical app identity and tracks focused member");
+
+    const std::vector<TaskbarWindowSnapshot> reorderedWindows{
+        window(42, "Second", "app.alpha"),
+        window(31, "Same title", "app.beta"),
+        window(43, "First", "app.alpha")
+    };
+    const std::vector<TaskbarApplicationEntry> orderedEntries =
+        BuildTaskbarApplicationEntries({}, reorderedWindows);
+    check(orderedEntries.size() == 2 && orderedEntries[0].appId == "app.beta" &&
+          orderedEntries[1].appId == "app.alpha",
+        "running app order remains stable when z-order changes");
 
     TaskbarApplicationEntry single;
     single.appId = "app.editor";
@@ -61,6 +84,9 @@ int main() {
     check(click.action == TaskbarClickAction::Activate && click.windowId == 20,
         "clicking a minimized single window restores it");
 
+    check(DecideTaskbarCoreClick(1, true, true, true) == TaskbarCoreClickAction::Activate,
+        "shared click policy restores a focused-but-minimized window");
+
     TaskbarApplicationEntry launcher;
     launcher.appId = "app.reader";
     launcher.label = "Reader";
@@ -73,6 +99,30 @@ int main() {
     click = DecideTaskbarEntryClick(launcher);
     check(click.action == TaskbarClickAction::Activate && click.windowId == 30,
         "pinned launcher activates its running window");
+    launcher.windows.clear();
+    check(DecideTaskbarEntryClick(launcher).action == TaskbarClickAction::Launch,
+        "closing the final window leaves a pinned launcher ready to launch");
+    launcher.pinned = false;
+    const std::vector<TaskbarContextAction> unpinnedLauncherActions = BuildTaskbarContextActions(launcher);
+    check(std::any_of(unpinnedLauncherActions.begin(), unpinnedLauncherActions.end(), [](const TaskbarContextAction& action) {
+        return action.kind == TaskbarContextActionKind::PinApp;
+    }), "installed unpinned application exposes Pin to Taskbar");
+    launcher.pinned = true;
+    const std::vector<TaskbarContextAction> pinnedLauncherActions = BuildTaskbarContextActions(launcher);
+    check(std::any_of(pinnedLauncherActions.begin(), pinnedLauncherActions.end(), [](const TaskbarContextAction& action) {
+        return action.kind == TaskbarContextActionKind::UnpinApp;
+    }), "pinned application exposes Unpin from Taskbar");
+
+    TaskbarApplicationEntry unavailable;
+    unavailable.appId = "app.removed";
+    unavailable.label = "app.removed";
+    unavailable.pinned = true;
+    unavailable.missingApplication = true;
+    const std::vector<TaskbarContextAction> unavailableActions = BuildTaskbarContextActions(unavailable);
+    check(DecideTaskbarEntryClick(unavailable).action == TaskbarClickAction::None &&
+          std::any_of(unavailableActions.begin(), unavailableActions.end(), [](const TaskbarContextAction& action) {
+              return action.kind == TaskbarContextActionKind::UnpinApp;
+          }), "unavailable pinned identity stays visible and can be removed safely");
 
     TaskbarApplicationEntry group = entries.front();
     check(DecideTaskbarEntryClick(group).action == TaskbarClickAction::ShowWindowChooser,
@@ -88,6 +138,11 @@ int main() {
     }
     check(hasCloseAll && hasMinimize && hasMaximize,
         "multi-window context actions expose supported window controls");
+    check(std::count_if(groupActions.begin(), groupActions.end(), [](const TaskbarContextAction& action) {
+        return action.kind == TaskbarContextActionKind::ActivateWindow;
+    }) == 2 && std::any_of(groupActions.begin(), groupActions.end(), [](const TaskbarContextAction& action) {
+        return action.kind == TaskbarContextActionKind::CloseWindow && action.windowId == 10;
+    }), "group menu targets each member and its focused-window controls by window ID");
     TaskbarApplicationEntry oneWindow = entries[1];
     const std::vector<TaskbarContextAction> singleActions = BuildTaskbarContextActions(oneWindow);
     check(std::none_of(singleActions.begin(), singleActions.end(), [](const TaskbarContextAction& action) {
@@ -123,6 +178,19 @@ int main() {
     check(!right.empty() && right.front().left == 1884 && right.front().top == -72 &&
           right.back().bottom <= 956,
         "right taskbar layout stays within a vertically docked non-origin monitor");
+    const auto compactBottom = LayoutTaskbarButtons({120}, 0, 212, 320, 240,
+        false, 44, 218, 4, 260, 20);
+    check(compactBottom.size() == 1 && compactBottom.front().left >= 0 &&
+          compactBottom.front().top >= 212 && compactBottom.front().right <= 260 &&
+          compactBottom.front().bottom <= 240 &&
+          HitTestTaskbarButton(compactBottom, compactBottom.front().left, compactBottom.front().top) == 0,
+        "compact bottom taskbar layout and hit testing stay inside a small display");
+    const auto compactLeft = LayoutTaskbarButtons({120}, 0, 0, 32, 240,
+        true, 4, 60, 4, 0, 28);
+    check(compactLeft.size() == 1 && compactLeft.front().left >= 0 &&
+          compactLeft.front().right <= 32 && compactLeft.front().top >= 0 &&
+          compactLeft.front().bottom <= 240,
+        "compact vertical taskbar layout stays inside a small display");
 
     const std::filesystem::path configPath = "tmp/taskbar-application-model-test/desktop.json";
     std::filesystem::create_directories(configPath.parent_path());

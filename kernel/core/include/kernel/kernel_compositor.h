@@ -218,15 +218,38 @@ private:
 
 struct TaskbarButton {
     uint32_t windowId;
+    char appId[app::MAX_APP_ID];
     char title[app::MAX_TITLE_LEN];
+    uint32_t windowIds[MAX_WINDOWS];
+    char windowTitles[MAX_WINDOWS][app::MAX_TITLE_LEN];
+    uint32_t iconColor;
+    int windowCount;
+    bool pinned;
+    bool relaunchable;
+    bool missingApplication;
+    bool running;
+    bool minimized;
     bool active;
     bool hover;
     int x, y, w, h;
     
-    TaskbarButton() : windowId(0), active(false), hover(false),
+    TaskbarButton() : windowId(0), iconColor(0xFF4690C8), windowCount(0),
+                      pinned(false), relaunchable(false), missingApplication(false),
+                      running(false), minimized(false), active(false), hover(false),
                       x(0), y(0), w(0), h(0) {
+        appId[0] = '\0';
         title[0] = '\0';
+        for (int i = 0; i < MAX_WINDOWS; ++i) {
+            windowIds[i] = 0;
+            windowTitles[i][0] = '\0';
+        }
     }
+};
+
+enum class TaskbarPinPersistenceState : uint8_t {
+    Ready,
+    Unsupported,
+    StorageFailure
 };
 
 class TaskbarManager {
@@ -238,9 +261,19 @@ public:
     static void drawButtons();
     static bool handleClick(int32_t mx, int32_t my);
     static void updateHover(int32_t mx, int32_t my);
+    static bool handlePointerDown(int32_t mx, int32_t my, uint8_t button);
+    static bool handleKeyDown(uint32_t keyCode);
+    static bool handleMenuHover(int32_t mx, int32_t my);
+    static bool handleWheel(int32_t mx, int32_t my, int8_t wheelDelta);
+    static bool menuVisible();
+    static bool menuContainsPoint(int32_t mx, int32_t my);
+    static bool isTaskbarButtonAt(int32_t mx, int32_t my);
+    static void closeMenu();
     
 private:
-    static const int MAX_TASKBAR_BUTTONS = 8;
+    static const int MAX_TASKBAR_PINS = 8;
+    static const int MAX_TASKBAR_BUTTONS = MAX_WINDOWS + MAX_TASKBAR_PINS;
+    static const int MAX_TASKBAR_MENU_ITEMS = MAX_WINDOWS + 8;
     static TaskbarButton s_buttons[MAX_TASKBAR_BUTTONS];
     static int s_buttonCount;
     static uint32_t s_screenW;
@@ -252,6 +285,55 @@ private:
     static uint32_t s_taskbarW;
     static bool s_vertical;
     static uint32_t s_startY;
+    static int32_t s_mouseX;
+    static int32_t s_mouseY;
+    static char s_pinnedAppIds[MAX_TASKBAR_PINS][app::MAX_APP_ID];
+    static int s_pinCount;
+    static TaskbarPinPersistenceState s_pinPersistence;
+    static bool s_pinStoreCorrupt;
+
+    enum class MenuCommand : uint8_t {
+        None,
+        ActivateWindow,
+        MinimizeWindow,
+        ToggleMaximizeWindow,
+        CloseWindow,
+        CloseAllWindows,
+        PinApp,
+        UnpinApp,
+        LaunchApp
+    };
+
+    struct MenuItem {
+        char label[64];
+        uint32_t windowId;
+        MenuCommand command;
+        bool enabled;
+    };
+
+    static MenuItem s_menuItems[MAX_TASKBAR_MENU_ITEMS];
+    static int s_menuItemCount;
+    static int s_menuHover;
+    static int s_menuScroll;
+    static int s_menuX;
+    static int s_menuY;
+    static int s_menuW;
+    static int s_menuH;
+    static bool s_menuOpen;
+    static char s_menuAppId[app::MAX_APP_ID];
+
+    static void loadPinnedApplications();
+    static bool savePinnedApplications();
+    static bool pinApplication(const char* appId);
+    static bool unpinApplication(const char* appId);
+    static void openMenuForButton(int buttonIndex, int32_t mx, int32_t my);
+    static void appendMenuItem(const char* label, MenuCommand command, uint32_t windowId = 0, bool enabled = true);
+    static void layoutMenu(int32_t anchorX, int32_t anchorY);
+    static int menuVisibleRowCount();
+    static int menuItemAt(int32_t mx, int32_t my);
+    static void dispatchMenuItem(int index);
+    static void activateWindow(uint32_t windowId);
+    static int findButtonAt(int32_t mx, int32_t my);
 };
 
 } // namespace compositor

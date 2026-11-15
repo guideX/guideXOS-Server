@@ -3033,12 +3033,6 @@ namespace gxos {
         }
 
         std::vector<TaskbarApplicationEntry> Compositor::taskbarApplications() {
-            std::vector<std::string> validPins;
-            validPins.reserve(g_cfg.taskbarPinnedAppIds.size());
-            for (const std::string& appId : g_cfg.taskbarPinnedAppIds) {
-                if (taskbarAppHasRelaunchTarget(appId)) validPins.push_back(appId);
-            }
-
             std::vector<TaskbarWindowSnapshot> windows;
             {
                 std::lock_guard<std::mutex> lk(g_lock);
@@ -3061,10 +3055,11 @@ namespace gxos {
             }
 
             std::vector<TaskbarApplicationEntry> entries =
-                BuildTaskbarApplicationEntries(validPins, windows);
+                BuildTaskbarApplicationEntries(g_cfg.taskbarPinnedAppIds, windows);
             for (TaskbarApplicationEntry& entry : entries) {
                 apps::LaunchTarget target;
                 entry.relaunchable = taskbarAppHasRelaunchTarget(entry.appId, &target);
+                entry.missingApplication = entry.pinned && !entry.relaunchable;
                 if (!target.displayName.empty()) entry.label = target.displayName;
                 if (entry.label.empty()) entry.label = entry.appId.empty() ? "Window" : entry.appId;
             }
@@ -5024,7 +5019,7 @@ namespace gxos {
                             cursor.y >= button.top && cursor.y < button.bottom;
                         RECT br{button.left, button.top, button.right, button.bottom};
                         const uint32_t fillColor = hostedTaskbarItemFillColor(
-                            theme, focusedWindow != 0, hover, allMinimized, false);
+                            theme, focusedWindow != 0, hover, allMinimized, entry.missingApplication);
                         HBRUSH bbg = CreateSolidBrush(colorFromTheme(fillColor));
                         FillRect(dc, &br, bbg);
                         DeleteObject(bbg);

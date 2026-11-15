@@ -294,6 +294,10 @@ public:
     
     // Launch an app by name
     static bool launchApp(const char* name);
+
+    // Launch an app by its trusted canonical App Model identity. An existing
+    // instance with the same identity is activated instead of duplicated.
+    static bool launchAppById(const char* appId);
     
     // Launch an app with a parameter (e.g., filename)
     static bool launchAppWithParam(const char* name, const char* param);
@@ -309,6 +313,9 @@ public:
     
     // Get app info by name
     static const AppInfo* getAppInfo(const char* name);
+
+    // Resolve an installed kernel app by canonical App Model identity.
+    static const AppInfo* getAppInfoById(const char* appId);
     
     // Process input event for focused app
     static void processInput(const InputEvent& event);

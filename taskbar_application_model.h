@@ -1,5 +1,7 @@
 #pragma once
 
+#include "taskbar_application_model_core.h"
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -26,6 +28,7 @@ struct TaskbarApplicationEntry {
     std::string label;
     bool pinned{false};
     bool relaunchable{false};
+    bool missingApplication{false};
     std::vector<TaskbarWindowSnapshot> windows;
 
     bool running() const { return !windows.empty(); }
@@ -61,7 +64,7 @@ inline std::vector<TaskbarApplicationEntry> BuildTaskbarApplicationEntries(
     std::unordered_set<uint64_t> seenWindowIds;
 
     for (const std::string& appId : pinnedAppIds) {
-        if (appId.empty() || !seenPins.insert(appId).second) continue;
+        if (!HasCanonicalTaskbarAppIdentity(appId.c_str()) || !seenPins.insert(appId).second) continue;
         TaskbarApplicationEntry entry;
         entry.appId = appId;
         entry.label = appId;
@@ -69,10 +72,11 @@ inline std::vector<TaskbarApplicationEntry> BuildTaskbarApplicationEntries(
         appEntryById.emplace(appId, entries.size());
         entries.push_back(std::move(entry));
     }
+    const size_t pinnedEntryCount = entries.size();
 
     for (const TaskbarWindowSnapshot& window : windows) {
         if (window.id == 0 || !seenWindowIds.insert(window.id).second) continue;
-        if (!window.appId.empty()) {
+        if (HasCanonicalTaskbarAppIdentity(window.appId.c_str())) {
             auto found = appEntryById.find(window.appId);
             if (found == appEntryById.end()) {
                 TaskbarApplicationEntry entry;
@@ -93,6 +97,20 @@ inline std::vector<TaskbarApplicationEntry> BuildTaskbarApplicationEntries(
         entry.windows.push_back(window);
         entries.push_back(std::move(entry));
     }
+
+    // Running entries are ordered by their oldest live window ID so focus and
+    // z-order changes do not shuffle applications around the taskbar.
+    std::stable_sort(entries.begin() + pinnedEntryCount, entries.end(),
+        [](const TaskbarApplicationEntry& left, const TaskbarApplicationEntry& right) {
+            const auto orderKey = [](const TaskbarApplicationEntry& entry) {
+                uint64_t key = UINT64_MAX;
+                for (const TaskbarWindowSnapshot& window : entry.windows) {
+                    if (window.id < key) key = window.id;
+                }
+                return key;
+            };
+            return orderKey(left) < orderKey(right);
+        });
     return entries;
 }
 
@@ -188,17 +206,18 @@ struct TaskbarClickDecision {
 };
 
 inline TaskbarClickDecision DecideTaskbarEntryClick(const TaskbarApplicationEntry& entry) {
-    if (entry.windows.empty()) {
-        return { entry.relaunchable ? TaskbarClickAction::Launch : TaskbarClickAction::None, 0 };
+    const bool focused = !entry.windows.empty() && entry.windows.front().focused;
+    const bool minimized = entry.windows.empty() || entry.windows.front().minimized || entry.windows.front().tombstoned;
+    const TaskbarCoreClickAction action = DecideTaskbarCoreClick(
+        static_cast<unsigned int>(entry.windows.size()), focused, minimized, entry.relaunchable);
+    switch (action) {
+    case TaskbarCoreClickAction::Launch: return { TaskbarClickAction::Launch, 0 };
+    case TaskbarCoreClickAction::Activate: return { TaskbarClickAction::Activate, entry.windows.front().id };
+    case TaskbarCoreClickAction::Minimize: return { TaskbarClickAction::Minimize, entry.windows.front().id };
+    case TaskbarCoreClickAction::ShowWindowChooser: return { TaskbarClickAction::ShowWindowChooser, 0 };
+    case TaskbarCoreClickAction::None:
+    default: return { TaskbarClickAction::None, 0 };
     }
-    if (entry.windows.size() > 1) {
-        return { TaskbarClickAction::ShowWindowChooser, 0 };
-    }
-    const TaskbarWindowSnapshot& window = entry.windows.front();
-    if (window.focused && !window.minimized && !window.tombstoned) {
-        return { TaskbarClickAction::Minimize, window.id };
-    }
-    return { TaskbarClickAction::Activate, window.id };
 }
 
 enum class TaskbarContextActionKind {
@@ -241,9 +260,8 @@ inline std::vector<TaskbarContextAction> BuildTaskbarContextActions(
         }
         if (entry.windows.size() > 1) actions.push_back({TaskbarContextActionKind::CloseAllWindows, 0});
     }
-    if (entry.relaunchable) {
-        actions.push_back({entry.pinned ? TaskbarContextActionKind::UnpinApp : TaskbarContextActionKind::PinApp, 0});
-    }
+    if (entry.pinned) actions.push_back({TaskbarContextActionKind::UnpinApp, 0});
+    else if (entry.relaunchable) actions.push_back({TaskbarContextActionKind::PinApp, 0});
     return actions;
 }
 
