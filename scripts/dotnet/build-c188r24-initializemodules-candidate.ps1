@@ -122,9 +122,21 @@ foreach ($relative in $packageRelative) {
 }
 
 $binaryTest = Join-Path $RepoRoot 'scripts\dotnet\test-c188r24-initializemodules.py'
-$binaryOutput = (& $python $binaryTest '--candidate-root' $candidate 2>&1 | Out-String)
-$binaryCode = $LASTEXITCODE
-if ($binaryCode -eq 0) {
+$binaryOutput = ''
+$binaryCode = 0
+if ($C188R30ThreadAttachmentTrace) {
+    # This R24 check attributes a direct call from the isolated R6 helper.
+    # R30 deliberately uses the persistent R21 production lifecycle; its
+    # separate linked qualification verifies generated InitializeModules ->
+    # RhpReversePInvoke -> stock attachment -> first array allocation.
+    $binaryOutput = 'R24 R6 shared-helper call-site assertion is not applicable to R30 persistent lifecycle; R30 linked qualification owns generated-entry verification.'
+    $addresses.initializeModulesCallSite = $null
+    $addresses.initializeModulesCallReturn = $null
+} else {
+    $binaryOutput = (& $python $binaryTest '--candidate-root' $candidate 2>&1 | Out-String)
+    $binaryCode = $LASTEXITCODE
+}
+if ($binaryCode -eq 0 -and -not $C188R30ThreadAttachmentTrace) {
     $callOffsetMatch = [regex]::Match($binaryOutput,'R24_INITIALIZEMODULES_SHARED_CALL_OFFSET=(0x[0-9a-fA-F]+)')
     if (-not $callOffsetMatch.Success) { throw 'R24 ELF test did not identify the linked InitializeModules call site.' }
     $helperAddress = [Convert]::ToUInt64($stateHelper,16)
@@ -171,6 +183,7 @@ $manifest.phase='C188R24_INITIALIZEMODULES_REGISTRATION'
 $manifest.buildProfile=[string]$manifest.buildProfile + '+R24InitializeModulesRegistrationObservation'
 $manifest.nativeBootTarget='Pause on readiness timeout and classify vCPU RIP/registers against exact linked initializer/import ranges; capture M2-M7 without guest instrumentation'
 $manifest | Add-Member -NotePropertyName r24RuntimeAddresses -NotePropertyValue $addressesPath -Force
+$manifest | Add-Member -NotePropertyName r24SharedCallsiteQualification -NotePropertyValue $(if ($C188R30ThreadAttachmentTrace) { 'NOT_APPLICABLE_R30_LINKED_INITIALIZER_QUALIFICATION' } else { 'PASS' }) -Force
 $manifest | Add-Member -NotePropertyName r24RuntimeAddressesSha256 -NotePropertyValue ((Get-FileHash -LiteralPath $addressesPath -Algorithm SHA256).Hash.ToUpperInvariant()) -Force
 $manifest | Add-Member -NotePropertyName r24HostedQualification -NotePropertyValue $hostedLog -Force
 $manifest | Add-Member -NotePropertyName r24HostedQualificationSha256 -NotePropertyValue ((Get-FileHash -LiteralPath $hostedLog -Algorithm SHA256).Hash.ToUpperInvariant()) -Force
@@ -192,5 +205,5 @@ $manifest.candidateFiles=$files
 $manifestPath = Join-Path $candidate 'candidate-manifest.json'
 $manifest | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath $manifestPath -Encoding utf8
 Write-Output "C188R24_CANDIDATE=PASS ROOT=$candidate KERNEL_SHA256=$($manifest.kernelSha256) SETTINGS_ELF_SHA256=$($manifest.managedElfSha256)"
-Write-Output "C188R24_INTEGRITY_FILES=$($files.Count) R24_ASSERTIONS=$((([regex]::Match($binaryOutput,'R24_INITIALIZEMODULES_HOSTED_ASSERTIONS=(\d+)')).Groups[1].Value)) SNAPSHOT_ASSERTIONS=$((([regex]::Match($snapshotOutput,'R24_INITIALIZEMODULES_SNAPSHOT_ASSERTIONS=(\d+)')).Groups[1].Value))"
+Write-Output "C188R24_INTEGRITY_FILES=$($files.Count) R24_ASSERTIONS=$(if ($C188R30ThreadAttachmentTrace) { 'NOT_APPLICABLE_R30_PROFILE' } else { ([regex]::Match($binaryOutput,'R24_INITIALIZEMODULES_HOSTED_ASSERTIONS=(\d+)')).Groups[1].Value }) SNAPSHOT_ASSERTIONS=$((([regex]::Match($snapshotOutput,'R24_INITIALIZEMODULES_SNAPSHOT_ASSERTIONS=(\d+)')).Groups[1].Value))"
 Write-Output "C188R24_CANDIDATE_MANIFEST=$manifestPath"

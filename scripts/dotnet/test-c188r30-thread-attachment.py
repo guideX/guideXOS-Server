@@ -286,9 +286,14 @@ class ReverseEntrySourceTests(unittest.TestCase):
 
     def test_candidate_build_selects_the_proven_stock_attachment_profile(self) -> None:
         builder = R30_BUILDER.read_text(encoding="utf-8")
+        r24_builder = (ROOT / "scripts/dotnet/build-c188r24-initializemodules-candidate.ps1").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("-C188R30ThreadAttachmentTrace", builder)
         self.assertIn("c188r30ThreadAttachmentTrace", builder)
         self.assertIn("c188r12r4r5r4ThreadStoreReadiness -or", builder)
+        self.assertIn("NOT_APPLICABLE_R30_LINKED_INITIALIZER_QUALIFICATION", r24_builder)
+        self.assertIn("test-c188r30-thread-attachment.py", builder)
         self.assertIn("sourceInputs=$sourceInputs", builder)
 
 
