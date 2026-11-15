@@ -113,8 +113,16 @@ try {
         }
     }
     $hosted = Get-Content -LiteralPath (Join-Path $candidate 'r24-hosted-qualification.log') -Raw
-    if ($hosted -notmatch 'R24_INITIALIZEMODULES_HOSTED_ASSERTIONS=\d+ RESULT=PASS' -or
-        $hosted -notmatch 'R24_INITIALIZEMODULES_SNAPSHOT_ASSERTIONS=\d+ RESULT=PASS') {
+    $standardHostedQualificationPassed =
+        $hosted -match 'R24_INITIALIZEMODULES_HOSTED_ASSERTIONS=\d+ RESULT=PASS'
+    $r30ScopedHostedQualification = $hosted -match (
+        '(?m)^R24 R6 shared-helper call-site assertion is not applicable to R30 persistent lifecycle; ' +
+        'R30 linked qualification owns generated-entry verification\.$'
+    )
+    $snapshotQualificationPassed =
+        $hosted -match 'R24_INITIALIZEMODULES_SNAPSHOT_ASSERTIONS=\d+ RESULT=PASS'
+    if ((-not $standardHostedQualificationPassed -and -not $r30ScopedHostedQualification) -or
+        -not $snapshotQualificationPassed) {
         throw 'R24 hosted reconstruction or snapshot tests did not pass.'
     }
     foreach ($objectName in @($integrity.preservedModifiedObjects.PSObject.Properties.Name)) {

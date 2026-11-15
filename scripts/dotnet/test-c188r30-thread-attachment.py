@@ -20,6 +20,10 @@ R30_RUNNER = ROOT / "scripts/dotnet/run-c188r30-thread-attachment.ps1"
 R30_BUILDER = ROOT / "scripts/dotnet/build-c188r30-thread-attachment-candidate.ps1"
 PINNED_RUNTIME = "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3"
 RUNTIME_ROOT = ROOT / "out/dotnet/gc-feasibility-baseline/nativeaot-runtime/src/coreclr/nativeaot/Runtime"
+R24_R30_SCOPE_MARKER = (
+    "R24 R6 shared-helper call-site assertion is not applicable to R30 persistent lifecycle; "
+    "R30 linked qualification owns generated-entry verification."
+)
 LINKED_CANDIDATE: Path | None = None
 
 
@@ -86,6 +90,13 @@ def require_call_or_tail_jump(elf: Path, base: int, length: int,
     if len(matches) != 1:
         raise ValueError(f"expected one {description} call or tail jump, found {len(matches)}")
     return matches[0]
+
+
+def r24_hosted_qualification_passes(log_text: str) -> bool:
+    standard = re.search(r"R24_INITIALIZEMODULES_HOSTED_ASSERTIONS=\d+ RESULT=PASS", log_text)
+    r30_scoped = R24_R30_SCOPE_MARKER in log_text.splitlines()
+    snapshot = re.search(r"R24_INITIALIZEMODULES_SNAPSHOT_ASSERTIONS=\d+ RESULT=PASS", log_text)
+    return (standard is not None or r30_scoped) and snapshot is not None
 
 
 def map_symbol(map_text: str, name: str) -> int:
@@ -321,6 +332,16 @@ class ReverseEntrySourceTests(unittest.TestCase):
         self.assertIn("rhp_array_return", runner)
         self.assertIn("THREAD_ATTACHMENT_GUEST_DEFERRED", runner)
 
+    def test_r24_runner_accepts_only_the_explicit_r30_scope_marker_with_snapshot_pass(self) -> None:
+        runner = (ROOT / "scripts/dotnet/run-c188r24-initializemodules.ps1").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("R24 R6 shared-helper call-site assertion is not applicable to R30 persistent lifecycle; ", runner)
+        self.assertIn("R30 linked qualification owns generated-entry verification", runner)
+        self.assertIn("$standardHostedQualificationPassed", runner)
+        self.assertIn("$r30ScopedHostedQualification", runner)
+        self.assertIn("$snapshotQualificationPassed", runner)
+
     def test_candidate_build_selects_the_proven_stock_attachment_profile(self) -> None:
         builder = R30_BUILDER.read_text(encoding="utf-8")
         r24_builder = (ROOT / "scripts/dotnet/build-c188r24-initializemodules-candidate.ps1").read_text(
@@ -332,6 +353,24 @@ class ReverseEntrySourceTests(unittest.TestCase):
         self.assertIn("NOT_APPLICABLE_R30_LINKED_INITIALIZER_QUALIFICATION", r24_builder)
         self.assertIn("test-c188r30-thread-attachment.py", builder)
         self.assertIn("sourceInputs=$sourceInputs", builder)
+
+
+class R24HostedQualificationTests(unittest.TestCase):
+    def test_standard_r24_log_remains_accepted(self) -> None:
+        log = "R24_INITIALIZEMODULES_HOSTED_ASSERTIONS=39 RESULT=PASS\nR24_INITIALIZEMODULES_SNAPSHOT_ASSERTIONS=14 RESULT=PASS"
+        self.assertTrue(r24_hosted_qualification_passes(log))
+
+    def test_r30_scoped_log_is_accepted_with_snapshot_and_linked_marker(self) -> None:
+        log = f"{R24_R30_SCOPE_MARKER}\nR24_INITIALIZEMODULES_SNAPSHOT_ASSERTIONS=14 RESULT=PASS"
+        self.assertTrue(r24_hosted_qualification_passes(log))
+
+    def test_r30_scope_without_snapshot_is_rejected(self) -> None:
+        self.assertFalse(r24_hosted_qualification_passes(R24_R30_SCOPE_MARKER))
+
+    def test_missing_standard_or_scoped_qualification_is_rejected(self) -> None:
+        self.assertFalse(r24_hosted_qualification_passes(
+            "R24_INITIALIZEMODULES_SNAPSHOT_ASSERTIONS=14 RESULT=PASS"
+        ))
 
 
 class LinkedCandidateTests(unittest.TestCase):
