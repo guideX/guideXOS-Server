@@ -179,6 +179,38 @@ class RoundResult(ctypes.Structure):
     ]
 
 
+class TimeEstimateInfo(ctypes.Structure):
+    _fields_ = [
+        ("state", ctypes.c_uint8),
+        ("scope", ctypes.c_uint8),
+        ("reason", ctypes.c_uint8),
+        ("available", ctypes.c_uint8),
+        ("agreement_satisfied", ctypes.c_uint8),
+        ("configured_source_count", ctypes.c_uint8),
+        ("accepted_source_count", ctypes.c_uint8),
+        ("distinct_operator_count", ctypes.c_uint8),
+        ("operator_identity_count", ctypes.c_uint8),
+        ("key_identity_count", ctypes.c_uint8),
+        ("production_policy_accepted", ctypes.c_uint8),
+        ("system_clock_changed", ctypes.c_uint8),
+        ("public_https_enabled", ctypes.c_uint8),
+        ("policy_identity", ctypes.c_uint32),
+        ("operator_identities", ctypes.c_uint32 * 3),
+        ("server_key_identities", (ctypes.c_uint8 * 32) * 3),
+        ("agreed_earliest_unix_seconds", ctypes.c_uint64),
+        ("agreed_latest_unix_seconds", ctypes.c_uint64),
+        ("current_earliest_unix_seconds", ctypes.c_uint64),
+        ("current_latest_unix_seconds", ctypes.c_uint64),
+        ("measurement_anchor_monotonic_ns", ctypes.c_uint64),
+        ("last_observed_monotonic_ns", ctypes.c_uint64),
+        ("maximum_age_seconds", ctypes.c_uint64),
+        ("evidence_age_at_anchor_seconds", ctypes.c_uint64),
+        ("maximum_uncertainty_seconds", ctypes.c_uint64),
+        ("current_uncertainty_seconds", ctypes.c_uint64),
+        ("remaining_freshness_seconds", ctypes.c_uint64),
+    ]
+
+
 class AcquisitionResult(ctypes.Structure):
     _fields_ = [
         ("status", ctypes.c_int),
@@ -404,10 +436,31 @@ class PortableRoughtimeTests(unittest.TestCase):
             capture_output=True,
             text=True,
         )
+        time_estimate_obj = build / "gxos_time_estimate.o"
+        subprocess.run(
+            [gxx, "-std=c++14", "-Wall", "-Wextra", "-Werror", "-fno-exceptions",
+             "-fno-rtti", "-fno-builtin", "-ffreestanding", "-O2", "-DGXOS_BARE_METAL",
+             *common_includes, "-c", str(ROOT / "kernel/core/gxos_time_estimate.cpp"),
+             "-o", str(time_estimate_obj)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        time_estimate_bridge_obj = build / "roughtime_time_estimate_test_bridge.o"
+        subprocess.run(
+            [gxx, "-std=c++14", "-Wall", "-Wextra", "-Werror", "-fno-exceptions",
+             "-fno-rtti", "-fno-builtin", "-O2", *common_includes,
+             "-c", str(ROOT / "tests/roughtime_time_estimate_test_bridge.cpp"),
+             "-o", str(time_estimate_bridge_obj)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
         # The shared harness includes the bounded acquisition and agreement
         # code used by the freestanding kernel.
         link_args = [gxx, "-shared", "-o", str(library_path), str(component_obj),
                      str(acquisition_obj), str(agreement_obj), str(round_obj),
+                     str(time_estimate_obj), str(time_estimate_bridge_obj),
                      *(str(obj) for obj in objects)]
         if is_windows:
             link_args.append("-Wl,--export-all-symbols")
@@ -486,6 +539,24 @@ class PortableRoughtimeTests(unittest.TestCase):
             cls.round_test_provider_type, ctypes.c_void_p,
         ]
         cls.round_test_function.restype = ctypes.c_int
+
+        cls.time_estimate_reset_function = cls.library.gxos_time_estimate_test_reset
+        cls.time_estimate_reset_function.argtypes = [ctypes.c_uint32]
+        cls.time_estimate_accept_function = cls.library.gxos_time_estimate_test_accept
+        cls.time_estimate_accept_function.argtypes = [
+            ctypes.c_uint32, ctypes.POINTER(RoundConfiguration), ctypes.POINTER(RoundResult),
+            ctypes.c_uint64,
+        ]
+        cls.time_estimate_accept_function.restype = ctypes.c_int
+        cls.time_estimate_query_function = cls.library.gxos_time_estimate_test_query
+        cls.time_estimate_query_function.argtypes = [
+            ctypes.c_uint32, ctypes.c_uint64, ctypes.POINTER(TimeEstimateInfo),
+        ]
+        cls.time_estimate_query_function.restype = ctypes.c_int
+        cls.time_estimate_invalidate_function = cls.library.gxos_time_estimate_test_invalidate
+        cls.time_estimate_invalidate_function.argtypes = [ctypes.c_uint32, ctypes.c_uint8]
+        cls.time_estimate_discontinuity_function = cls.library.gxos_time_estimate_test_discontinuity
+        cls.time_estimate_discontinuity_function.argtypes = [ctypes.c_uint32]
 
     @classmethod
     def tearDownClass(cls):
@@ -1730,6 +1801,224 @@ void raw_values_must_not_mint_or_evaluate(
         self.assertEqual(status, 0)
         self.assertEqual(result.continuity_checked, 0)
         self.assertEqual(new_boot_state.initialized, 1)
+
+    def accept_fixture_round(self, slot, configuration, result, *, now_ns=None):
+        now_ns = result.agreement.evaluated_monotonic_ns if now_ns is None else now_ns
+        self.time_estimate_reset_function(slot)
+        return self.time_estimate_accept_function(
+            slot, ctypes.byref(configuration), ctypes.byref(result), now_ns,
+        )
+
+    def query_fixture_estimate(self, slot, now_ns):
+        info = TimeEstimateInfo()
+        self.time_estimate_query_function(slot, now_ns, ctypes.byref(info))
+        return info
+
+    def valid_navhttps15_fixture_round(self, **kwargs):
+        kwargs.setdefault("operators", [401, 402, 403])
+        return self.run_udp_acquisition_round(**kwargs)
+
+    def test_fixture_two_of_three_agreement_is_retained_read_only(self):
+        configuration, result = self.valid_navhttps15_fixture_round()
+        self.assertEqual(result.agreement.status, 0)
+        self.assertEqual(result.agreement.profile, 2)
+        self.assertEqual(result.agreement.production_policy_accepted, 0)
+        self.assertEqual(self.accept_fixture_round(0, configuration, result), 0)
+
+        info = self.query_fixture_estimate(0, result.agreement.evaluated_monotonic_ns)
+        self.assertEqual(info.state, 1)  # Fresh
+        self.assertEqual(info.scope, 1)  # FixtureOnly
+        self.assertEqual(info.available, 1)
+        self.assertEqual(info.agreement_satisfied, 1)
+        self.assertEqual(info.configured_source_count, 3)
+        self.assertEqual(info.accepted_source_count, 3)
+        self.assertEqual(info.distinct_operator_count, 3)
+        self.assertEqual(info.operator_identity_count, 3)
+        self.assertEqual(info.policy_identity, 0x1501)
+        self.assertLessEqual(info.agreed_earliest_unix_seconds,
+                             info.agreed_latest_unix_seconds)
+        self.assertEqual(info.current_earliest_unix_seconds,
+                         info.agreed_earliest_unix_seconds)
+        self.assertEqual(info.current_latest_unix_seconds,
+                         info.agreed_latest_unix_seconds)
+        self.assertEqual(info.production_policy_accepted, 0)
+        self.assertEqual(info.system_clock_changed, 0)
+        self.assertEqual(info.public_https_enabled, 0)
+
+    def test_fixture_time_rejects_one_source_duplicate_operator_and_unpinned_key(self):
+        configuration, one_source = self.valid_navhttps15_fixture_round(
+            modes=["normal", "timeout", "network_failure"],
+        )
+        self.assertEqual(one_source.agreement.status, 1)
+        self.assertEqual(self.accept_fixture_round(1, configuration, one_source), 3)
+
+        duplicate_configuration, duplicate_result = self.valid_navhttps15_fixture_round(
+            operators=[401, 401, 403],
+        )
+        self.assertEqual(duplicate_result.agreement.status, 0)
+        self.assertEqual(self.accept_fixture_round(2, duplicate_configuration, duplicate_result), 2)
+
+        pinned_configuration, pinned_result = self.valid_navhttps15_fixture_round()
+        pinned_configuration.sources[0].server_public_key[0] ^= 1
+        self.assertEqual(self.accept_fixture_round(3, pinned_configuration, pinned_result), 2)
+
+    def test_fixture_time_rejects_invalid_signature_rejected_and_ambiguous_agreements(self):
+        invalid_configuration, invalid_result = self.valid_navhttps15_fixture_round(
+            modes=["invalid_signature", "timeout", "timeout"],
+        )
+        self.assertNotEqual(invalid_result.agreement.status, 0)
+        self.assertNotEqual(
+            self.accept_fixture_round(4, invalid_configuration, invalid_result), 0,
+        )
+
+        ambiguous_configuration, ambiguous_result = self.valid_navhttps15_fixture_round(
+            midpoints=[FIXTURE_TIME, FIXTURE_TIME + 15, FIXTURE_TIME + 30],
+            radii=[10, 10, 10], maximum_uncertainty=30,
+        )
+        self.assertEqual(ambiguous_result.agreement.status, 9)
+        self.assertNotEqual(
+            self.accept_fixture_round(5, ambiguous_configuration, ambiguous_result), 0,
+        )
+
+    def test_fixture_time_rejects_caller_fabricated_agreement_interval(self):
+        configuration, result = self.valid_navhttps15_fixture_round()
+        forged = RoundResult.from_buffer_copy(result)
+        forged.agreement.earliest_unix_seconds += 1
+        forged.agreement.latest_unix_seconds += 1
+        forged.agreement.estimated_midpoint_unix_seconds += 1
+        self.assertEqual(self.accept_fixture_round(2, configuration, forged), 1)
+        rejected = self.query_fixture_estimate(
+            2, result.agreement.evaluated_monotonic_ns,
+        )
+        self.assertEqual(rejected.available, 0)
+        self.assertEqual(rejected.state, 8)  # Rejected
+
+    def test_fixture_time_advances_interval_and_grows_uncertainty(self):
+        configuration, result = self.valid_navhttps15_fixture_round()
+        anchor = result.agreement.evaluated_monotonic_ns
+        self.assertEqual(self.accept_fixture_round(6, configuration, result), 0)
+        initial = self.query_fixture_estimate(6, anchor)
+        advanced = self.query_fixture_estimate(6, anchor + 10_000_000_000)
+        self.assertEqual(advanced.state, 2)  # Advanced
+        self.assertEqual(advanced.last_observed_monotonic_ns, anchor + 10_000_000_000)
+        self.assertGreater(advanced.current_earliest_unix_seconds,
+                           initial.current_earliest_unix_seconds)
+        self.assertGreater(advanced.current_latest_unix_seconds,
+                           initial.current_latest_unix_seconds)
+        self.assertGreater(advanced.current_uncertainty_seconds,
+                           initial.current_uncertainty_seconds)
+        self.assertLessEqual(advanced.current_uncertainty_seconds, 30)
+        self.assertLess(advanced.remaining_freshness_seconds,
+                        initial.remaining_freshness_seconds)
+
+    def test_fixture_time_expiry_rollback_discontinuity_and_explicit_invalidation(self):
+        configuration, result = self.valid_navhttps15_fixture_round()
+        anchor = result.agreement.evaluated_monotonic_ns
+        self.assertEqual(self.accept_fixture_round(7, configuration, result), 0)
+        expired = self.query_fixture_estimate(7, anchor + 300_000_000_000)
+        self.assertEqual(expired.state, 3)
+        self.assertEqual(expired.available, 0)
+        self.assertEqual(expired.remaining_freshness_seconds, 0)
+
+        self.assertEqual(self.accept_fixture_round(8, configuration, result), 0)
+        rollback = self.query_fixture_estimate(8, anchor - 1)
+        self.assertEqual(rollback.state, 6)
+        self.assertEqual(rollback.available, 0)
+
+        self.assertEqual(self.accept_fixture_round(9, configuration, result), 0)
+        self.time_estimate_discontinuity_function(9)
+        discontinuity = self.query_fixture_estimate(9, anchor)
+        self.assertEqual(discontinuity.state, 5)
+        self.assertEqual(discontinuity.available, 0)
+
+        self.assertEqual(self.accept_fixture_round(10, configuration, result), 0)
+        self.time_estimate_invalidate_function(10, 17)  # ExplicitInvalidation
+        invalidated = self.query_fixture_estimate(10, anchor)
+        self.assertEqual(invalidated.state, 7)
+        self.assertEqual(invalidated.available, 0)
+
+    def test_fixture_time_rejects_evidence_anchored_in_the_monotonic_future(self):
+        configuration, result = self.valid_navhttps15_fixture_round()
+        anchor = result.agreement.evaluated_monotonic_ns
+        self.assertGreater(anchor, 0)
+        self.assertEqual(self.accept_fixture_round(1, configuration, result,
+                                                   now_ns=anchor - 1), 10)
+        rollback = self.query_fixture_estimate(1, anchor)
+        self.assertEqual(rollback.state, 6)  # RollbackSuspected
+        self.assertEqual(rollback.reason, 10)  # MonotonicWentBackwards
+        self.assertEqual(rollback.available, 0)
+        self.assertEqual(self.time_estimate_accept_function(
+            1, ctypes.byref(configuration), ctypes.byref(result), anchor,
+        ), 10)
+
+    def test_fixture_time_detects_conflict_rollback_and_excessive_forward_evidence(self):
+        first_configuration, first = self.valid_navhttps15_fixture_round()
+        anchor = first.agreement.evaluated_monotonic_ns
+
+        self.assertEqual(self.accept_fixture_round(11, first_configuration, first), 0)
+        next_configuration, conflicting = self.valid_navhttps15_fixture_round(
+            midpoints=[FIXTURE_TIME + 100] * 3,
+        )
+        self.assertEqual(self.time_estimate_accept_function(
+            11, ctypes.byref(next_configuration), ctypes.byref(conflicting), anchor,
+        ), 9)  # ConflictingEvidence
+        self.assertEqual(self.query_fixture_estimate(11, anchor).state, 4)
+
+        self.assertEqual(self.accept_fixture_round(12, first_configuration, first), 0)
+        _configuration, rollback = self.valid_navhttps15_fixture_round(
+            midpoints=[FIXTURE_TIME - 100] * 3,
+        )
+        self.assertEqual(self.time_estimate_accept_function(
+            12, ctypes.byref(first_configuration), ctypes.byref(rollback), anchor,
+        ), 10)  # RollbackDetected
+
+        self.assertEqual(self.accept_fixture_round(13, first_configuration, first), 0)
+        _configuration, forward = self.valid_navhttps15_fixture_round(
+            midpoints=[FIXTURE_TIME + 1000] * 3,
+        )
+        self.assertEqual(self.time_estimate_accept_function(
+            13, ctypes.byref(first_configuration), ctypes.byref(forward), anchor,
+        ), 11)  # ExcessiveForwardMovement
+
+    def test_fixture_time_checks_policy_change_interval_bounds_and_expiry_overflow(self):
+        configuration, result = self.valid_navhttps15_fixture_round()
+        anchor = result.agreement.evaluated_monotonic_ns
+        self.assertEqual(self.accept_fixture_round(14, configuration, result), 0)
+        changed_policy = RoundConfiguration.from_buffer_copy(configuration)
+        changed_policy.policy_identity = 0x1502
+        self.assertEqual(self.time_estimate_accept_function(
+            14, ctypes.byref(changed_policy), ctypes.byref(result), anchor,
+        ), 8)  # SourcePolicyChanged
+
+        bad_interval = RoundResult.from_buffer_copy(result)
+        bad_interval.agreement.earliest_unix_seconds = 1
+        self.assertNotEqual(self.accept_fixture_round(15, configuration, bad_interval), 0)
+
+        overflow = RoundResult.from_buffer_copy(result)
+        overflow.agreement.evaluated_monotonic_ns = 0xFFFFFFFFFFFFFFFF - 1
+        self.assertEqual(self.accept_fixture_round(
+            15, configuration, overflow,
+            now_ns=overflow.agreement.evaluated_monotonic_ns,
+        ), 1)  # InvalidRound: the timestamp no longer matches issued tokens.
+
+        self.assertEqual(self.accept_fixture_round(15, configuration, result), 0)
+        end_of_counter = self.query_fixture_estimate(15, 0xFFFFFFFFFFFFFFFF)
+        self.assertEqual(end_of_counter.state, 3)  # Expired, without wrapped freshness.
+        self.assertEqual(end_of_counter.available, 0)
+        self.assertEqual(end_of_counter.remaining_freshness_seconds, 0)
+
+    def test_fixture_time_has_no_cross_boot_persistence_or_production_authority(self):
+        configuration, result = self.valid_navhttps15_fixture_round()
+        anchor = result.agreement.evaluated_monotonic_ns
+        self.assertEqual(self.accept_fixture_round(0, configuration, result), 0)
+        self.time_estimate_reset_function(0)  # Simulated reboot with no secure persistent state.
+        after_reboot = self.query_fixture_estimate(0, anchor + 10_000_000_000)
+        self.assertEqual(after_reboot.state, 0)  # NoEvidence
+        self.assertEqual(after_reboot.scope, 0)
+        self.assertEqual(after_reboot.reason, 1)  # NoAuthenticatedPersistentState
+        self.assertEqual(after_reboot.production_policy_accepted, 0)
+        self.assertEqual(after_reboot.system_clock_changed, 0)
+        self.assertEqual(after_reboot.public_https_enabled, 0)
 
 
 if __name__ == "__main__":

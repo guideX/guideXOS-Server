@@ -1373,6 +1373,26 @@ $localTlsSelectedBlockedRegexChecks = @{
     '\[NAVIGATOR-SMOKE\] tls_smoke\.failure\.verify_flags=0' = "[NAVIGATOR-SMOKE] tls_smoke.failure.verify_flags=0"
 }
 
+# A missing production trust profile is expected to block the selected
+# controlled-qualification policy and to make trust-dependent local TLS
+# checks fail closed. Keep the overall Navigator failure visible while
+# classifying the trust-policy assertions independently.
+$missingTrustProfileChecks = @($commonChecks | Where-Object {
+    $_ -ne "[NAVIGATOR-SMOKE] tls_smoke.result=PASS" -and
+    $_ -ne "[NAVIGATOR-SMOKE] result=PASS"
+}) + @(
+    "[NAVIGATOR-SMOKE] tls_smoke.result=FAIL",
+    "[NAVIGATOR-SMOKE] result=FAIL",
+    "[NAVIGATOR-SMOKE] https.case.policy_validated.plain_tcp_connect_attempts=0",
+    "[NAVIGATOR-SMOKE] https.case.policy_validated.tls_tcp_connect_attempts=0",
+    "[NAVIGATOR-SMOKE] https.case.policy_validated.transport_selection=BlockedPolicy",
+    "[NAVIGATOR-SMOKE] https.case.policy_validated.tls_status=PolicyBlocked"
+)
+$missingTrustProfileRegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra @{
+    '\[NAVIGATOR-SMOKE\] tls_smoke\.failure\.verify_flags=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] tls_smoke.failure.verify_flags=<positive fail-closed certificate flags>"
+}
+$missingTrustProfileRegexChecks.Remove('\[NAVIGATOR-SMOKE\] tls_smoke\.failure\.verify_flags=0')
+
 $localTlsExplicitPolicyTrustMismatchRegexChecks = @{
     '\[NAVIGATOR-SMOKE\] tls_smoke\.verify_flags=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] tls_smoke.verify_flags=<positive failure flags>"
     '\[NAVIGATOR-SMOKE\] tls_smoke\.failure\.verify_flags=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] tls_smoke.failure.verify_flags=<positive mismatch flags>"
@@ -2007,7 +2027,7 @@ $scenarioDefinitions = @(
         TrustProfileMode = "missing"
         TlsCert = $defaultHttpsCert
         TlsKey = $defaultHttpsKey
-        Checks = $commonChecks + @(
+        Checks = $missingTrustProfileChecks + @(
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=ControlledQualification",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=Disabled",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_blocker=Trust profile metadata is missing.",
@@ -2016,7 +2036,7 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] https.case.policy_validated.enabled=no",
             "[NAVIGATOR-SMOKE] https.case.policy_validated.result=PASS"
         )
-        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsSelectedBlockedRegexChecks
+        RegexChecks = $missingTrustProfileRegexChecks
     },
     [pscustomobject]@{
         Name = "production_trust_profile_unsupported_version"

@@ -27,6 +27,8 @@
 #include "include/gxos_roughtime_acquisition.h"
 #include "include/gxos_roughtime_round.h"
 #include "include/gxos_roughtime_guest_test.h"
+#include "include/gxos_time_estimate.h"
+#include "roughtime_multisource_guest_fixture_keys.h"
 
 // Forward declarations for power functions (defined in desktop.cpp, outside any namespace)
 extern void perform_shutdown();
@@ -182,6 +184,7 @@ static char s_cwd[256] = "/";
 static const char* s_hostname = "guideXOS";
 static const char* s_username = "root";
 static gxos_roughtime_agreement_continuity s_roughtime_agreement_continuity = {};
+static gxos_roughtime_agreement_continuity s_roughtime_fixture_continuity = {};
 
 // Uptime counter (incremented externally)
 static uint32_t s_uptimeSeconds = 0;
@@ -406,6 +409,8 @@ static void cmd_help() {
     output_string("  roughtime-selftest - Verify immutable Roughtime guest vectors\n");
     output_string("  roughtime-fetch <ip> <port> <key-hex> - Fetch one pinned v1 response\n");
     output_string("  roughtime-agree <ip port operator key-hex> x3 - Experimental 2-of-3 UDP agreement\n");
+    output_string("  roughtime-fixture-time - Acquire pinned NAVHTTPS15 test evidence (fixture-only)\n");
+    output_string("  roughtime-time - Query the within-boot time-evidence estimate\n");
     output_string("\n");
     output_string("Desktop:\n");
     output_string("  apps           - List applications\n");
@@ -6521,6 +6526,160 @@ static void cmd_roughtime_agree(char args[MAX_ARGS][65])
     output_string("\n  production policy accepted: no; trusted_time=not-accepted; clock_unchanged=yes; public_https=disabled\n");
 }
 
+static bool roughtime_monotonic_now_ns(uint64_t* nowNs)
+{
+    if (!nowNs) return false;
+    const uint64_t ticks = pit::ticks();
+    const uint64_t tickNs = gxos::clockassurance::kTimeEstimatePitTickNanoseconds;
+    if (ticks > (~static_cast<uint64_t>(0) / tickNs)) return false;
+    *nowNs = ticks * tickNs;
+    return true;
+}
+
+static void output_time_estimate(const gxos::clockassurance::TimeEstimateInfo& info)
+{
+    char number[24];
+    output_string("Read-only Roughtime time estimate\n  state: ");
+    output_string(gxos::clockassurance::time_estimate_state_name(info.state));
+    output_string("\n  evidence available: ");
+    output_string(info.available ? "yes" : "no");
+    output_string("\n  agreement satisfied: ");
+    output_string(info.agreementSatisfied ? "yes" : "no");
+    output_string("\n  configured / accepted source count: ");
+    uint_to_str(info.configuredSourceCount, number);
+    output_string(number);
+    output_string(" / ");
+    uint_to_str(info.acceptedSourceCount, number);
+    output_string(number);
+    output_string("\n  distinct operator count: ");
+    uint_to_str(info.distinctOperatorCount, number);
+    output_string(number);
+    output_string("\n  policy identity: ");
+    uint_to_str(info.policyIdentity, number);
+    output_string(number);
+    output_string("\n  evidence scope: ");
+    output_string(gxos::clockassurance::time_estimate_scope_name(info.scope));
+    output_string("\n  accepted interval earliest (Unix seconds): ");
+    if (info.policyIdentity != 0 && info.acceptedSourceCount != 0) {
+        uint64_to_str(info.agreedEarliestUnixSeconds, number);
+        output_string(number);
+        output_string("\n  accepted interval latest (Unix seconds): ");
+        uint64_to_str(info.agreedLatestUnixSeconds, number);
+        output_string(number);
+    } else {
+        output_string("unavailable");
+        output_string("\n  accepted interval latest (Unix seconds): unavailable");
+    }
+    output_string("\n  current monotonic-adjusted interval: ");
+    if (info.available) {
+        output_string("[");
+        uint64_to_str(info.currentEarliestUnixSeconds, number);
+        output_string(number);
+        output_string(", ");
+        uint64_to_str(info.currentLatestUnixSeconds, number);
+        output_string(number);
+        output_string("] Unix seconds");
+    } else {
+        output_string("unavailable");
+    }
+    output_string("\n  measurement anchor monotonic ns: ");
+    uint64_to_str(info.measurementAnchorMonotonicNs, number);
+    output_string(number);
+    output_string("\n  maximum / current uncertainty (seconds): ");
+    uint64_to_str(info.maximumUncertaintySeconds, number);
+    output_string(number);
+    output_string(" / ");
+    uint64_to_str(info.currentUncertaintySeconds, number);
+    output_string(number);
+    output_string("\n  maximum age / evidence age at anchor / remaining freshness (seconds): ");
+    uint64_to_str(info.maximumAgeSeconds, number);
+    output_string(number);
+    output_string(" / ");
+    uint64_to_str(info.evidenceAgeAtAnchorSeconds, number);
+    output_string(number);
+    output_string(" / ");
+    uint64_to_str(info.remainingFreshnessSeconds, number);
+    output_string(number);
+    output_string("\n  rejection / invalidation reason: ");
+    output_string(gxos::clockassurance::time_estimate_reason_name(info.reason));
+    output_string("\n  production policy accepted: ");
+    output_string(info.productionPolicyAccepted ? "yes" : "no");
+    output_string("\n  system clock changed: ");
+    output_string(info.systemClockChanged ? "yes" : "no");
+    output_string("\n  public HTTPS enabled: ");
+    output_string(info.publicHttpsEnabled ? "yes" : "no");
+    output_string("\n");
+}
+
+static void cmd_roughtime_time()
+{
+    gxos::clockassurance::TimeEstimateStore& store =
+        gxos::clockassurance::time_estimate_store();
+    uint64_t nowNs = 0;
+    if (!roughtime_monotonic_now_ns(&nowNs)) {
+        store.report_clock_discontinuity();
+        output_string("Time estimate unavailable: monotonic counter conversion failed; evidence invalidated.\n");
+        output_string("system_clock_changed=no public_https=disabled\n");
+        return;
+    }
+    gxos::clockassurance::TimeEstimateInfo info = {};
+    store.query(nowNs, &info);
+    output_time_estimate(info);
+}
+
+static void cmd_roughtime_fixture_time()
+{
+    gxos_roughtime_round_configuration configuration = {};
+    configuration.policy_identity = 0x1501U;
+    configuration.source_count = GXOS_ROUGHTIME_ROUND_MAX_SOURCES;
+    configuration.quorum = 2;
+    configuration.maximum_age_seconds = gxos::clockassurance::kFixtureTimeEstimateMaximumAgeSeconds;
+    configuration.maximum_source_uncertainty_seconds =
+        gxos::clockassurance::kFixtureTimeEstimateMaximumUncertaintySeconds;
+    configuration.maximum_transport_delay_ms = 2000U;
+    configuration.maximum_forward_jump_seconds = 300U;
+    static const uint16_t ports[3] = { 5319U, 5320U, 5321U };
+    for (uint8_t i = 0; i < GXOS_ROUGHTIME_ROUND_MAX_SOURCES; ++i) {
+        gxos_roughtime_round_source& source = configuration.sources[i];
+        source.server_ipv4 = 0x0a000202U; // QEMU user-network host alias.
+        source.server_port = ports[i];
+        source.operator_identity = 401U + i;
+        for (uint8_t byte = 0; byte < 32; ++byte) {
+            source.server_public_key[byte] = gxos_roughtime_navhttps15_fixture_keys[i][byte];
+        }
+    }
+
+    gxos_roughtime_round_result result = {};
+    const gxos_roughtime_round_status roundStatus =
+        kernel::roughtime::acquire_agreement_round(
+            &configuration, &s_roughtime_fixture_continuity, &result);
+    gxos::clockassurance::TimeEstimateStore& store =
+        gxos::clockassurance::time_estimate_store();
+    uint64_t nowNs = 0;
+    if (!roughtime_monotonic_now_ns(&nowNs)) {
+        store.report_clock_discontinuity();
+        output_string("Fixture time acquisition rejected: monotonic counter conversion failed.\n");
+        output_string("system_clock_changed=no public_https=disabled\n");
+        return;
+    }
+    if (roundStatus != GXOS_ROUGHTIME_ROUND_EVALUATED) {
+        output_string("Fixture time acquisition rejected: ");
+        output_string(gxos_roughtime_round_status_name(roundStatus));
+        output_string("\ntrusted_time=not-accepted clock_unchanged=yes public_https=disabled\n");
+        cmd_roughtime_time();
+        return;
+    }
+
+    const gxos::clockassurance::TimeEstimateAcceptResult acceptResult =
+        store.accept_fixture_round(configuration, result, nowNs);
+    output_string("NAVHTTPS15 fixture agreement: ");
+    output_string(gxos_roughtime_agreement_status_name(result.agreement.status));
+    output_string("\nNAVHTTPS16 time evidence: ");
+    output_string(gxos::clockassurance::time_estimate_accept_result_name(acceptResult));
+    output_string("\n");
+    cmd_roughtime_time();
+}
+
 static void parse_args(const char* cmd, char args[MAX_ARGS][65], uint32_t& argCount) {
     argCount = 0;
     uint32_t i = 0;
@@ -6580,6 +6739,18 @@ static void execute_command(const char* cmd) {
             output_string("Usage: roughtime-agree <ip1 port1 operator1 key1> <ip2 port2 operator2 key2> <ip3 port3 operator3 key3>\n");
         } else {
             cmd_roughtime_agree(args);
+        }
+    } else if (str_eq(command, "roughtime-fixture-time")) {
+        if (argCount != 1) {
+            output_string("Usage: roughtime-fixture-time\n");
+        } else {
+            cmd_roughtime_fixture_time();
+        }
+    } else if (str_eq(command, "roughtime-time")) {
+        if (argCount != 1) {
+            output_string("Usage: roughtime-time\n");
+        } else {
+            cmd_roughtime_time();
         }
     } else if (str_eq(command, "help") || str_eq(command, "?")) {
         cmd_help();

@@ -5,6 +5,7 @@ param(
     [string]$OvmfVarsTemplatePath = (Join-Path $env:ProgramFiles 'qemu/share/edk2-i386-vars.fd'),
     [string]$TemplateEsp = (Join-Path (Split-Path -Parent $PSScriptRoot) 'tmp/navhttps13-guest-run/ESP'),
     [int]$TimeoutSeconds = 90,
+    [switch]$RequireNavhttps16,
     [switch]$SkipNavhttps7TrustScenario
 )
 
@@ -136,10 +137,15 @@ try {
                 $serialText.Contains('[NAVHTTPS13R-GUEST] unsigned_timestamp_formatter=PASS') -and
                 $serialText.Contains('[NAVHTTPS13-GUEST-B] result=success') -and
                 $serialText.Contains('[NAVHTTPS15-GUEST] result=PASS')
+            if ($RequireNavhttps16) {
+                $guestPassed = $guestPassed -and
+                    $serialText.Contains('[NAVHTTPS16-GUEST] result=PASS')
+            }
             if ($guestPassed) { break }
             if ($serialText.Contains('[NAVHTTPS13-GUEST-A] hook_result=FAIL') -or
                 $serialText.Contains('[NAVHTTPS13R-GUEST] unsigned_timestamp_formatter=FAIL') -or
-                $serialText.Contains('[NAVHTTPS15-GUEST] result=FAIL')) {
+                $serialText.Contains('[NAVHTTPS15-GUEST] result=FAIL') -or
+                ($RequireNavhttps16 -and $serialText.Contains('[NAVHTTPS16-GUEST] result=FAIL'))) {
                 throw "Guest emitted a qualification failure marker. Evidence: $runDir"
             }
         }
@@ -185,6 +191,9 @@ try {
         Write-Output "NAVHTTPS7 guest trust result=PASS evidence=$navhttps7Log"
     }
 
+    if ($RequireNavhttps16) {
+        Write-Output "NAVHTTPS16 guest time-estimate result=PASS evidence=$serialPath"
+    }
     Write-Output "NAVHTTPS15 guest result=PASS evidence=$runDir"
 } finally {
     if ($guestProcess -and -not $guestProcess.HasExited) {

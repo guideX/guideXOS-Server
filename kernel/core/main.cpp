@@ -73,8 +73,10 @@
 #include "roughtime_guest_vectors.h"
 #endif
 
-#if defined(GXOS_NAVHTTPS15_GUEST_QUALIFICATION_ACTIVE)
+#if defined(GXOS_NAVHTTPS15_GUEST_QUALIFICATION_ACTIVE) || \
+    defined(GXOS_NAVHTTPS16_GUEST_QUALIFICATION_ACTIVE)
 #include "include/gxos_roughtime_round.h"
+#include "include/gxos_time_estimate.h"
 #include "roughtime_multisource_guest_fixture_keys.h"
 #endif
 
@@ -1260,6 +1262,101 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts(" max_age=");
         kernel::serial::put_hex64(guestRoundResult.agreement.maximum_evidence_age_seconds);
         kernel::serial::puts(" production_policy_accepted=0 trusted_time=not-accepted clock_unchanged=yes public_https=disabled\n");
+#if defined(GXOS_NAVHTTPS16_GUEST_QUALIFICATION_ACTIVE)
+        gxos::clockassurance::TimeEstimateStore& timeEstimateStore =
+            gxos::clockassurance::time_estimate_store();
+        const gxos::clockassurance::TimeEstimateAcceptResult timeAcceptResult =
+            timeEstimateStore.accept_fixture_round(
+                guestRoundConfiguration, guestRoundResult,
+                guestRoundResult.agreement.evaluated_monotonic_ns);
+        gxos::clockassurance::TimeEstimateInfo timeEstimateInfo = {};
+        timeEstimateStore.query(guestRoundResult.agreement.evaluated_monotonic_ns,
+                                &timeEstimateInfo);
+        const bool timeAccepted = timeAcceptResult ==
+            gxos::clockassurance::TimeEstimateAcceptResult::Accepted &&
+            timeEstimateInfo.available && timeEstimateInfo.scope ==
+                gxos::clockassurance::TimeEstimateScope::FixtureOnly;
+        kernel::serial::puts("[NAVHTTPS16-GUEST] acceptance=");
+        kernel::serial::puts(gxos::clockassurance::time_estimate_accept_result_name(
+            timeAcceptResult));
+        kernel::serial::puts(" state=");
+        kernel::serial::puts(gxos::clockassurance::time_estimate_state_name(
+            timeEstimateInfo.state));
+        kernel::serial::puts(" scope=");
+        kernel::serial::puts(gxos::clockassurance::time_estimate_scope_name(
+            timeEstimateInfo.scope));
+        kernel::serial::puts(" available=");
+        kernel::serial::puts(timeEstimateInfo.available ? "yes" : "no");
+        kernel::serial::puts(" sources=");
+        kernel::serial::put_hex32(timeEstimateInfo.acceptedSourceCount);
+        kernel::serial::puts(" operators=");
+        kernel::serial::put_hex32(timeEstimateInfo.distinctOperatorCount);
+        kernel::serial::puts(" accepted_interval=");
+        kernel::serial::put_hex64(timeEstimateInfo.agreedEarliestUnixSeconds);
+        kernel::serial::putc('-');
+        kernel::serial::put_hex64(timeEstimateInfo.agreedLatestUnixSeconds);
+        kernel::serial::puts(" production_policy_accepted=0 system_clock_changed=0 public_https=0\n");
+
+        const uint64_t ticksBeforeAdvance = kernel::pit::ticks();
+        const uint64_t maximumCounter = ~static_cast<uint64_t>(0);
+        bool monotonicSafe = ticksBeforeAdvance <= maximumCounter - 25U;
+        uint64_t advancedNowNs = 0;
+        if (monotonicSafe) {
+            const uint64_t waitUntilTick = ticksBeforeAdvance + 25U;
+            while (kernel::pit::ticks() < waitUntilTick) kernel::arch::halt();
+            const uint64_t advancedTicks = kernel::pit::ticks();
+            monotonicSafe = advancedTicks <= maximumCounter /
+                gxos::clockassurance::kTimeEstimatePitTickNanoseconds;
+            if (monotonicSafe) {
+                advancedNowNs = advancedTicks *
+                    gxos::clockassurance::kTimeEstimatePitTickNanoseconds;
+            }
+        }
+        if (monotonicSafe) {
+            timeEstimateStore.query(advancedNowNs, &timeEstimateInfo);
+        } else {
+            timeEstimateStore.report_clock_discontinuity();
+            timeEstimateStore.query(guestRoundResult.agreement.evaluated_monotonic_ns,
+                                    &timeEstimateInfo);
+        }
+        const bool timeAdvanced = monotonicSafe && timeEstimateInfo.available &&
+            timeEstimateInfo.state == gxos::clockassurance::TimeEstimateState::Advanced &&
+            timeEstimateInfo.currentLatestUnixSeconds >
+                timeEstimateInfo.agreedLatestUnixSeconds;
+        kernel::serial::puts("[NAVHTTPS16-GUEST] advance=");
+        kernel::serial::puts(timeAdvanced ? "PASS" : "FAIL");
+        kernel::serial::puts(" state=");
+        kernel::serial::puts(gxos::clockassurance::time_estimate_state_name(
+            timeEstimateInfo.state));
+        kernel::serial::puts(" current_interval=");
+        kernel::serial::put_hex64(timeEstimateInfo.currentEarliestUnixSeconds);
+        kernel::serial::putc('-');
+        kernel::serial::put_hex64(timeEstimateInfo.currentLatestUnixSeconds);
+        kernel::serial::puts(" uncertainty=");
+        kernel::serial::put_hex64(timeEstimateInfo.currentUncertaintySeconds);
+        kernel::serial::puts(" remaining_seconds=");
+        kernel::serial::put_hex64(timeEstimateInfo.remainingFreshnessSeconds);
+        kernel::serial::puts(" system_clock_changed=0 public_https=0\n");
+
+        if (monotonicSafe) {
+            timeEstimateStore.invalidate(
+                gxos::clockassurance::TimeEstimateReason::ExplicitInvalidation);
+            timeEstimateStore.query(advancedNowNs, &timeEstimateInfo);
+        }
+        const bool timeInvalidated = !timeEstimateInfo.available &&
+            timeEstimateInfo.state == gxos::clockassurance::TimeEstimateState::Invalidated;
+        kernel::serial::puts("[NAVHTTPS16-GUEST] invalidation=");
+        kernel::serial::puts(timeInvalidated ? "PASS" : "FAIL");
+        kernel::serial::puts(" reason=");
+        kernel::serial::puts(gxos::clockassurance::time_estimate_reason_name(
+            timeEstimateInfo.reason));
+        kernel::serial::puts(" system_clock_changed=0 public_https=0\n");
+
+        const bool timeEstimatePassed = timeAccepted && timeAdvanced && timeInvalidated;
+        kernel::serial::puts("[NAVHTTPS16-GUEST] result=");
+        kernel::serial::puts(timeEstimatePassed ? "PASS" : "FAIL");
+        kernel::serial::puts(" production_clock_assurance=unchanged production_policy_accepted=0 trusted_time=not-accepted system_clock_changed=0 public_https=0 simulated_independence=yes\n");
+#endif
 #endif
         // I219 Stage 8 is the only diagnostic configuration that enables the
         // NIC hardware interrupt mask, and only after the input/main-loop
