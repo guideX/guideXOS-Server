@@ -45,6 +45,21 @@ def r29_words(
 
 
 class R29RecordTests(unittest.TestCase):
+    def test_failure_block_decoder_ignores_opcode_values_inside_operands(self) -> None:
+        # MOV's ModRM byte is 0xC3 (RET), and the first CALL displacement
+        # contains 0xEB (short JMP); neither is an instruction boundary.
+        code = b"\x4c\x8b\xc3\xe8\xeb\xee\xff\xff\xe8\x00\x00\x00\x00"
+        self.assertTrue(ANALYZER.failure_block_falls_through(code, 0, 8, []))
+
+    def test_failure_block_decoder_rejects_real_terminating_instructions(self) -> None:
+        for code in (
+            b"\x90\xc3\xe8\x00\x00\x00\x00",  # RET
+            b"\x90\xe9\x00\x00\x00\x00\xe8\x00\x00\x00\x00",  # JMP
+        ):
+            with self.subTest(code=code):
+                call = code.index(b"\xe8") if code[0] != 0x90 else code.rindex(b"\xe8")
+                self.assertFalse(ANALYZER.failure_block_falls_through(code, 0, call, []))
+
     def test_threadstore_unavailable_is_not_identity_mismatch(self) -> None:
         words = r29_words(1, -1, ANALYZER.R29_EVAL_THREADSTORE, threadstore=2)
         self.assertEqual(ANALYZER.validate_words(words),

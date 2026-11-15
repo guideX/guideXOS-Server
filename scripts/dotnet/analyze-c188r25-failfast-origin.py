@@ -507,14 +507,135 @@ def conditional_branch_edges(
     return edges
 
 
+def x64_instruction_length(code: bytes, offset: int) -> tuple[int, bool] | None:
+    """Decode the common AMD64 instructions used in a short guard failure block.
+
+    The second value marks instructions that can leave the straight-line block.
+    Decoding instruction boundaries avoids treating bytes inside a ModRM operand
+    or CALL displacement as RET/JMP opcodes.
+    """
+    start = offset
+    operand16 = False
+    rex_w = False
+    while offset < len(code):
+        byte = code[offset]
+        if byte == 0x66:
+            operand16 = True
+        elif 0x40 <= byte <= 0x4F:
+            rex_w = bool(byte & 0x08)
+        elif byte not in (0xF0, 0xF2, 0xF3, 0x2E, 0x36, 0x3E, 0x26, 0x64, 0x65, 0x67):
+            break
+        offset += 1
+    if offset >= len(code):
+        return None
+    opcode = code[offset]
+    offset += 1
+    def with_immediate(size: int, terminal: bool = False) -> tuple[int, bool] | None:
+        end = offset + size
+        return (end - start, terminal) if end <= len(code) else None
+
+    if opcode in (0xE8,):
+        return with_immediate(4)
+    if opcode in (0xE9, 0xEB, 0xE0, 0xE1, 0xE2, 0xE3):
+        return with_immediate(4 if opcode == 0xE9 else 1, True)
+    if 0x70 <= opcode <= 0x7F:
+        return with_immediate(1, True)
+    if opcode in (0xC2, 0xC3, 0xCC, 0xF4):
+        return with_immediate(2 if opcode == 0xC2 else 0, True)
+    if 0x50 <= opcode <= 0x5F or opcode in (0x90, 0x9C, 0x9D, 0xC9):
+        return (offset - start, opcode == 0xCC)
+    if opcode in (0x68, 0xA9):
+        return with_immediate(2 if operand16 else 4)
+    if opcode in (0x6A, 0xA8):
+        return with_immediate(1)
+    if 0xB0 <= opcode <= 0xB7:
+        return with_immediate(1)
+    if 0xB8 <= opcode <= 0xBF:
+        return with_immediate(8 if rex_w else 2 if operand16 else 4)
+
+    if opcode == 0x0F:
+        if offset >= len(code):
+            return None
+        second = code[offset]
+        offset += 1
+        if 0x80 <= second <= 0x8F:
+            return (offset - start + 4, True) if offset + 4 <= len(code) else None
+        if second == 0x0B:
+            return (offset - start, True)
+        if second not in (0x1E, 0x1F, 0xAF, 0xB6, 0xB7, 0xBE, 0xBF) and not (
+            0x40 <= second <= 0x4F or 0x90 <= second <= 0x9F
+        ):
+            return None
+        opcode = second
+
+    modrm_opcodes = {
+        0x00, 0x01, 0x02, 0x03, 0x08, 0x09, 0x0A, 0x0B,
+        0x10, 0x11, 0x12, 0x13, 0x18, 0x19, 0x1A, 0x1B,
+        0x20, 0x21, 0x22, 0x23, 0x28, 0x29, 0x2A, 0x2B,
+        0x30, 0x31, 0x32, 0x33, 0x38, 0x39, 0x3A, 0x3B,
+        0x63, 0x69, 0x6B, 0x80, 0x81, 0x82, 0x83, 0x84, 0x85,
+        0x86, 0x87, 0x88, 0x89, 0x8A, 0x8B, 0x8D, 0x8F,
+        0xC0, 0xC1, 0xC6, 0xC7, 0xD0, 0xD1, 0xD2, 0xD3,
+        0x1E, 0x1F, 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47,
+        0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F,
+        0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97,
+        0x98, 0x99, 0x9A, 0x9B, 0x9C, 0x9D, 0x9E, 0x9F,
+        0xF6, 0xF7, 0xFE, 0xFF,
+    }
+    if opcode not in modrm_opcodes or offset >= len(code):
+        return None
+    modrm = code[offset]
+    offset += 1
+    mod = modrm >> 6
+    group = (modrm >> 3) & 7
+    rm = modrm & 7
+    if mod != 3 and rm == 4:
+        if offset >= len(code):
+            return None
+        sib = code[offset]
+        offset += 1
+        if mod == 0 and (sib & 7) == 5:
+            offset += 4
+    elif mod == 0 and rm == 5:
+        offset += 4
+    if mod == 1:
+        offset += 1
+    elif mod == 2:
+        offset += 4
+
+    immediate = 0
+    if opcode in (0x69, 0x81, 0xC7):
+        immediate = 2 if operand16 else 4
+    elif opcode in (0x6B, 0x80, 0x82, 0x83, 0xC0, 0xC1, 0xC6):
+        immediate = 1
+    elif opcode == 0xF6 and group == 0:
+        immediate = 1
+    elif opcode == 0xF7 and group == 0:
+        immediate = 2 if operand16 else 4
+    if offset + immediate > len(code):
+        return None
+    offset += immediate
+    terminal = opcode == 0xFF and group in (4, 5)
+    return offset - start, terminal
+
+
 def failure_block_falls_through(code: bytes, start: int, call: int,
                                branch_edges: list[tuple[int, int, int, bool]]) -> bool:
-    if start < 0 or call <= start or call > len(code):
+    if start < 0 or call <= start or call >= len(code) or code[call] != 0xE8:
         return False
     if any(start <= branch_offset < call and nonzero_test
            for branch_offset, _target, _condition, nonzero_test in branch_edges):
         return False
-    return not any(byte in (0xC2, 0xC3, 0xE9, 0xEB) for byte in code[start:call])
+    offset = start
+    while offset < call:
+        decoded = x64_instruction_length(code, offset)
+        if decoded is None:
+            return False
+        length, terminal = decoded
+        if terminal or length <= 0 or offset + length > call:
+            return False
+        offset += length
+    return offset == call
 
 
 def resolve_caller(candidate: Path, caller_pc: int) -> dict[str, object]:

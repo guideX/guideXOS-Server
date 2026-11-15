@@ -23,8 +23,8 @@ RUNTIME_ROOT = ROOT / "out/dotnet/gc-feasibility-baseline/nativeaot-runtime/src/
 LINKED_CANDIDATE: Path | None = None
 
 
-def linked_call_sites(elf: Path, base: int, length: int) -> dict[int, int]:
-    """Read a small file-backed ELF virtual range and return direct call targets."""
+def linked_code_range(elf: Path, base: int, length: int) -> bytes:
+    """Read a small file-backed ELF virtual range."""
     data = elf.read_bytes()
     if data[:4] != b"\x7fELF" or data[4] != 2 or data[5] != 1:
         raise ValueError("candidate must be a little-endian ELF64 image")
@@ -42,6 +42,12 @@ def linked_call_sites(elf: Path, base: int, length: int) -> dict[int, int]:
     code = data[file_offset:file_offset + length]
     if len(code) != length:
         raise ValueError("candidate ELF ended inside requested code range")
+    return code
+
+
+def linked_call_sites(elf: Path, base: int, length: int) -> dict[int, int]:
+    """Read direct call targets from a file-backed ELF virtual range."""
+    code = linked_code_range(elf, base, length)
     targets: dict[int, int] = {}
     for offset, opcode in enumerate(code[:-4]):
         if opcode == 0xE8:
@@ -50,10 +56,35 @@ def linked_call_sites(elf: Path, base: int, length: int) -> dict[int, int]:
     return targets
 
 
+def linked_direct_tail_jump_target(elf: Path, base: int, length: int) -> int | None:
+    """Return a function-entry JMP target used for a stock-helper tail call."""
+    code = linked_code_range(elf, base, length)
+    return direct_tail_jump_target(code, base)
+
+
+def direct_tail_jump_target(code: bytes, base: int) -> int | None:
+    """Decode an x64 near relative JMP at a function entry."""
+    if len(code) < 5 or code[0] != 0xE9:
+        return None
+    return base + 5 + struct.unpack_from("<i", code, 1)[0]
+
+
 def require_call(calls: dict[int, int], target: int, description: str) -> int:
     matches = [address for address, call_target in calls.items() if call_target == target]
     if len(matches) != 1:
         raise ValueError(f"expected one {description} call, found {len(matches)}")
+    return matches[0]
+
+
+def require_call_or_tail_jump(elf: Path, base: int, length: int,
+                              target: int, description: str) -> int:
+    calls = linked_call_sites(elf, base, length)
+    matches = [address for address, call_target in calls.items() if call_target == target]
+    tail_target = linked_direct_tail_jump_target(elf, base, length)
+    if tail_target == target:
+        matches.append(base)
+    if len(matches) != 1:
+        raise ValueError(f"expected one {description} call or tail jump, found {len(matches)}")
     return matches[0]
 
 
@@ -101,8 +132,8 @@ def verify_linked_candidate(candidate: Path) -> dict[str, int]:
         addresses["guideXosStockRhpReversePInvoke"],
         "stock NativeAOT reverse-entry attachment",
     )
-    require_call(
-        linked_call_sites(elf, addresses["RhpReversePInvokeReturn"], 0x100),
+    require_call_or_tail_jump(
+        elf, addresses["RhpReversePInvokeReturn"], 0x100,
         addresses["guideXosStockRhpReversePInvokeReturn"],
         "stock NativeAOT reverse-return transition",
     )
@@ -126,6 +157,12 @@ class ReverseEntrySourceTests(unittest.TestCase):
         lock = json.loads((ROOT / "tools/dotnet/runtime-pack/runtime-pack.lock.json").read_text())
         self.assertEqual(lock["ilCompiler"]["commit"], PINNED_RUNTIME)
         self.assertEqual(lock["runtimePack"]["commit"], PINNED_RUNTIME)
+
+    def test_direct_tail_jump_decodes_stock_helper_target(self) -> None:
+        base = 0x100010000
+        target = 0x10001A000
+        code = b"\xe9" + struct.pack("<i", target - (base + 5)) + b"\xcc"
+        self.assertEqual(direct_tail_jump_target(code, base), target)
 
     def test_r29_null_accessor_is_distinct_from_raw_tls_absence(self) -> None:
         # Pinned threadstore.inl returns &tls_CurrentThread, then tests
