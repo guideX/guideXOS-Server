@@ -71,6 +71,59 @@ try {
     Assert-R27 ((Get-FileHash -LiteralPath (Join-Path $bootRoot 'esp\kernel.elf') -Algorithm SHA256).Hash -eq $script:kernelHash) `
         'parent-to-child handoff copied the exact candidate kernel before its offline return'
 
+    $candidateR29 = Join-Path $fixtureRoot 'candidate-r29-schema3'
+    $bootRootR29 = Join-Path $fixtureRoot 'boot-authorized-r29-schema3'
+    $null = New-Item -ItemType Directory -Path $candidateR29
+    Copy-Item -LiteralPath (Join-Path $candidate 'esp') -Destination $candidateR29 -Recurse
+    Copy-Item -LiteralPath (Join-Path $candidate 'ramdisk-staging.json') -Destination $candidateR29
+    $runtimeManifestR29 = Join-Path $candidateR29 'runtime-pack.manifest.json'
+    [ordered]@{
+        c188r25FailFastOriginCapture=$true
+        c188r28GcStateGuardDiscriminator=$true
+        c188r28GcStateGuardDiscriminatorMarker='GUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR'
+        c188r29PreallocationGcStateGuard=$true
+        c188r29PreallocationGcStateGuardMarker='GUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD'
+        failFastOriginRecordSchema=3;failFastOriginRecordBytes=192
+    } | ConvertTo-Json | Set-Content -LiteralPath $runtimeManifestR29 -Encoding utf8
+    $candidateManifestR29Path = Join-Path $candidateR29 'candidate-manifest.json'
+    [ordered]@{candidate='r29-schema3-fixture';runtimePackManifest=$runtimeManifestR29} |
+        ConvertTo-Json | Set-Content -LiteralPath $candidateManifestR29Path -Encoding utf8
+    $candidateIntegrityR29Path = Join-Path $candidateR29 'candidate-integrity.json'
+    Set-Content -LiteralPath $candidateIntegrityR29Path -Value '{"fixture":"r29-schema3"}' -Encoding utf8
+    $candidateManifestR29Hash = (Get-FileHash -LiteralPath $candidateManifestR29Path -Algorithm SHA256).Hash
+    $candidateIntegrityR29Hash = (Get-FileHash -LiteralPath $candidateIntegrityR29Path -Algorithm SHA256).Hash
+    $r25ManifestR29Path = Join-Path $fixtureRoot 'candidate-r29-schema3-r25-candidate-manifest.json'
+    [ordered]@{
+        schema='GUIDEXOS_C188R25_CANDIDATE_V1';candidateRoot=$candidateR29
+        candidateManifestSha256=$candidateManifestR29Hash
+        runtimePackManifest=$runtimeManifestR29
+        runtimePackManifestSha256=(Get-FileHash -LiteralPath $runtimeManifestR29 -Algorithm SHA256).Hash
+        diagnostics=[ordered]@{
+            recordAddress='0x00000001001E14E0';recordBytes=192;schemaVersion=3
+            gcStateGuardDiscriminator=$true;preallocationGcStateGuardDiscriminator=$true
+        }
+    } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $r25ManifestR29Path -Encoding utf8
+    $guardPathR29 = Join-Path $guardRoot ('attempt-r25-' + [guid]::NewGuid().ToString('N') + '.json')
+    $guardR29 = [ordered]@{
+        schema='GUIDEXOS_C188R25_ONE_BOOT_GUARD_V1';candidateRoot=$candidateR29
+        candidateManifestSha256=$candidateManifestR29Hash;candidateIntegritySha256=$candidateIntegrityR29Hash
+        bootEvidencePath=$bootRootR29;attemptNumber=1;maxGuestBoots=1
+        automaticRetry=$false;retryAllowed=$false;consumed=$true;syntheticFixture=$true
+    }
+    $guardR29 | ConvertTo-Json | Set-Content -LiteralPath $guardPathR29 -Encoding utf8
+    $null = New-Item -ItemType Directory -Path $bootRootR29
+    [ordered]@{
+        schema='GUIDEXOS_C188R25_FAILFAST_CAPTURE_CONFIG_V1'
+        recordAddress='0x00000001001E14E0';recordBytes=192;recordSchema=3
+        candidateManifestSha256=$candidateManifestR29Hash
+    } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $bootRootR29 'r25-failfast-capture.json') -Encoding utf8
+    $authorizedR29Config = Invoke-NestedRehearsal $candidateR29 $bootRootR29 $guardPathR29
+    Assert-R27 ($authorizedR29Config.exitCode -eq 0 -and $null -ne $authorizedR29Config.proof -and
+        [bool]$authorizedR29Config.proof.precreatedEvidenceRoot -and
+        -not [bool]$authorizedR29Config.proof.qacInvoked -and -not [bool]$authorizedR29Config.proof.qemuLaunched -and
+        (Get-FileHash -LiteralPath (Join-Path $bootRootR29 'esp\kernel.elf') -Algorithm SHA256).Hash -eq $script:kernelHash) `
+        'the nested runner accepts a candidate-bound R29 schema-3 evidence directory and completes the offline media handoff'
+
     Remove-Item -LiteralPath (Join-Path $bootRoot 'r25-failfast-capture.json') -Force
     $guard.bootEvidencePath = $emptyRoot
     $guard | ConvertTo-Json | Set-Content -LiteralPath $guardPath -Encoding utf8

@@ -14,6 +14,7 @@ param(
     [switch]$C188R23SettingsPreparationTrace,
     [switch]$C188R25FailFastOriginCapture,
     [switch]$C188R28GcStateGuardDiscriminator,
+    [switch]$C188R29PreallocationGcStateGuard,
     [switch]$C188R12R4R5R1InitDiagnostics,
     [switch]$C188R12R4R5R3InitReturnContract,
     [switch]$C188R12R4R5R4ThreadStoreReadiness,
@@ -164,6 +165,10 @@ function Assert-StockPack([string]$Root, $Lock) {
 $RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
 if ($C188R28GcStateGuardDiscriminator -and -not $C188R25FailFastOriginCapture) {
     throw 'R28 GC-state guard discrimination requires the R25 first-failure record.'
+}
+if ($C188R29PreallocationGcStateGuard -and
+    (-not $C188R25FailFastOriginCapture -or -not $C188R28GcStateGuardDiscriminator)) {
+    throw 'R29 pre-allocation discrimination requires the R25 capture and R28 guard profile.'
 }
 $RuntimePackRoot = [System.IO.Path]::GetFullPath($RuntimePackRoot)
 if ([string]::IsNullOrWhiteSpace($ArtifactRoot)) { $ArtifactRoot = Join-Path $RepoRoot "out\dotnet" }
@@ -1459,6 +1464,9 @@ if ($C188R25FailFastOriginCapture) {
 if ($C188R28GcStateGuardDiscriminator) {
     $platformProfileDefines += ' /DGUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR'
 }
+if ($C188R29PreallocationGcStateGuard) {
+    $platformProfileDefines += ' /DGUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD'
+}
 if ($C188R12R4R5R2R3ManagedEntryProbe) {
     $platformProfileDefines += ' /DGUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE'
 }
@@ -1625,7 +1633,7 @@ if ($C188R12R4R5R4R5R2R2NativeAllocationAttribution) {
 $manifest = [ordered]@{
     schemaVersion = 2
     c51Identifier = if ($NativeAotFpRepair) { "C011EC51" } else { $null }
-    identity = if ($C188R28GcStateGuardDiscriminator) { "guidexos-nativeaot-runtime-pack-amd64-c188r28-gc-state-guard-discriminator-v1" } elseif ($C188R25FailFastOriginCapture) { "guidexos-nativeaot-runtime-pack-amd64-c188r25-failfast-origin-v1" } elseif ($C188R23SettingsPreparationTrace) { "guidexos-nativeaot-runtime-pack-amd64-c188r23-settings-preparation-trace-workstationgc-v1" } elseif ($C188R22SettingsBootstrapHandoff) { "guidexos-nativeaot-runtime-pack-amd64-c188r22-settings-bootstrap-handoff-workstationgc-v1" } elseif ($C188R21ManagedSettingsFactory) { "guidexos-nativeaot-runtime-pack-amd64-c188r21-settings-factory-workstationgc-v1" } elseif ($C188R12R4R5R2R3ManagedSettingsObjectProbe) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r2r3-managed-settings-object-v1" } elseif ($C188R12R4R5R2R3ManagedEntryProbe) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r2r3-managed-entry-v1" } elseif ($C188R12R4R5R2R3InitializeModulesAttribution) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r2r3-transition-attribution-v1" } elseif ($C188R12R4R5R2R2R4SafeHandoff) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r2r2r4-safe-handoff-v1" } elseif ($C188R12R4R5R4R5R2R2NativeAllocationAttribution) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4r5r2r2-native-allocation-v1" } elseif ($C188R12R4R5R4R5R2SemiSharedAttribution) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4r5r2-semishared-v1" } elseif ($C188R12R4R5R4R5GcInitProbes) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4r5-gc-init-probes-v1" } elseif ($C188R12R4R5R4ThreadStoreReadiness) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4-threadstore-readiness-v1" } elseif ($C188R12R4R5R3InitReturnContract) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r3-init-return-contract-v1" } elseif ($C188R12R4R5R1InitDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r1-init-attribution-v1" } elseif ($C188R12R4R5GcOwnershipProof) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5-gc-ownership-proof-v1" } elseif ($C188R12R4FactoryAttribution) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4-factory-attribution-v1" } elseif ($ThreadStaticLifecycleDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c108-threadstatic-lifecycle-v1" } elseif ($PersistentCompositeLifecycle) { "guidexos-nativeaot-runtime-pack-amd64-persistent-composite-lifecycle-v1" } elseif ($ProductionApplication) { "guidexos-nativeaot-runtime-pack-amd64-production-application-v1" } elseif ($NativeAotFpRepair) { "guidexos-nativeaot-runtime-pack-amd64-workstationgc-fp-repair-v1" } elseif ($ManagedRepeatedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1" } elseif ($ManagedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
+    identity = if ($C188R29PreallocationGcStateGuard) { "guidexos-nativeaot-runtime-pack-amd64-c188r29-preallocation-gc-state-guard-v1" } elseif ($C188R28GcStateGuardDiscriminator) { "guidexos-nativeaot-runtime-pack-amd64-c188r28-gc-state-guard-discriminator-v1" } elseif ($C188R25FailFastOriginCapture) { "guidexos-nativeaot-runtime-pack-amd64-c188r25-failfast-origin-v1" } elseif ($C188R23SettingsPreparationTrace) { "guidexos-nativeaot-runtime-pack-amd64-c188r23-settings-preparation-trace-workstationgc-v1" } elseif ($C188R22SettingsBootstrapHandoff) { "guidexos-nativeaot-runtime-pack-amd64-c188r22-settings-bootstrap-handoff-workstationgc-v1" } elseif ($C188R21ManagedSettingsFactory) { "guidexos-nativeaot-runtime-pack-amd64-c188r21-settings-factory-workstationgc-v1" } elseif ($C188R12R4R5R2R3ManagedSettingsObjectProbe) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r2r3-managed-settings-object-v1" } elseif ($C188R12R4R5R2R3ManagedEntryProbe) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r2r3-managed-entry-v1" } elseif ($C188R12R4R5R2R3InitializeModulesAttribution) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r2r3-transition-attribution-v1" } elseif ($C188R12R4R5R2R2R4SafeHandoff) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r2r2r4-safe-handoff-v1" } elseif ($C188R12R4R5R4R5R2R2NativeAllocationAttribution) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4r5r2r2-native-allocation-v1" } elseif ($C188R12R4R5R4R5R2SemiSharedAttribution) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4r5r2-semishared-v1" } elseif ($C188R12R4R5R4R5GcInitProbes) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4r5-gc-init-probes-v1" } elseif ($C188R12R4R5R4ThreadStoreReadiness) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4-threadstore-readiness-v1" } elseif ($C188R12R4R5R3InitReturnContract) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r3-init-return-contract-v1" } elseif ($C188R12R4R5R1InitDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r1-init-attribution-v1" } elseif ($C188R12R4R5GcOwnershipProof) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5-gc-ownership-proof-v1" } elseif ($C188R12R4FactoryAttribution) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4-factory-attribution-v1" } elseif ($ThreadStaticLifecycleDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c108-threadstatic-lifecycle-v1" } elseif ($PersistentCompositeLifecycle) { "guidexos-nativeaot-runtime-pack-amd64-persistent-composite-lifecycle-v1" } elseif ($ProductionApplication) { "guidexos-nativeaot-runtime-pack-amd64-production-application-v1" } elseif ($NativeAotFpRepair) { "guidexos-nativeaot-runtime-pack-amd64-workstationgc-fp-repair-v1" } elseif ($ManagedRepeatedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1" } elseif ($ManagedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
     repository = [ordered]@{ root = $RepoRoot; head = $repoHead; subject = $repoSubject; branch = (& git -C $RepoRoot branch --show-current).Trim(); upstream = $repoUpstream; aheadBehind = $repoAheadBehind }
     runtimeIdentity = [ordered]@{ nativeAot = $lock.ilCompiler.version; architecture = "AMD64"; gc = "Workstation"; gcInterface = "5.3"; eeInterface = "2"; targetFramework = $lock.targetFramework; runtimeIdentifier = $lock.runtimeIdentifier; sourceCommit = $lock.ilCompiler.commit }
     architecture = $lock.architecture
@@ -1697,12 +1705,15 @@ $manifest = [ordered]@{
     c188r12r4r5r2r3InitializeModulesAttribution = [bool]$C188R12R4R5R2R3InitializeModulesAttribution
     c188r25FailFastOriginCapture = [bool]$C188R25FailFastOriginCapture
     c188r25FailFastOriginCaptureMarker = if ($C188R25FailFastOriginCapture) { 'GUIDEXOS_NATIVEAOT_C188R25_FAILFAST_ORIGIN' } else { $null }
-    failFastOriginRecordSchema = if ($C188R25FailFastOriginCapture) { if ($C188R28GcStateGuardDiscriminator) { 2 } else { 1 } } else { $null }
-    failFastOriginRecordBytes = if ($C188R25FailFastOriginCapture) { if ($C188R28GcStateGuardDiscriminator) { 144 } else { 80 } } else { $null }
+    failFastOriginRecordSchema = if ($C188R25FailFastOriginCapture) { if ($C188R29PreallocationGcStateGuard) { 3 } elseif ($C188R28GcStateGuardDiscriminator) { 2 } else { 1 } } else { $null }
+    failFastOriginRecordBytes = if ($C188R25FailFastOriginCapture) { if ($C188R29PreallocationGcStateGuard) { 192 } elseif ($C188R28GcStateGuardDiscriminator) { 144 } else { 80 } } else { $null }
     failFastOriginHeaderSha256 = if ($C188R25FailFastOriginCapture) { Get-Hash (Join-Path $RuntimePackRoot 'src\platform\guidexos_nativeaot_failfast_origin.h') } else { $null }
     c188r28GcStateGuardDiscriminator = [bool]$C188R28GcStateGuardDiscriminator
     c188r28GcStateGuardDiscriminatorMarker = if ($C188R28GcStateGuardDiscriminator) { 'GUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR' } else { $null }
     c188r28GcStateGuardHeaderSha256 = if ($C188R28GcStateGuardDiscriminator) { Get-Hash (Join-Path $RuntimePackRoot 'src\platform\guidexos_nativeaot_gc_state_guard.h') } else { $null }
+    c188r29PreallocationGcStateGuard = [bool]$C188R29PreallocationGcStateGuard
+    c188r29PreallocationGcStateGuardMarker = if ($C188R29PreallocationGcStateGuard) { 'GUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD' } else { $null }
+    c188r29PreallocationGcStateGuardHeaderSha256 = if ($C188R29PreallocationGcStateGuard) { Get-Hash (Join-Path $RuntimePackRoot 'src\platform\guidexos_nativeaot_r29_preallocation_guard.h') } else { $null }
     c188r12r4r5r2r3InitializeModulesAttributionMarker = if ($C188R12R4R5R2R3InitializeModulesAttribution) { 'C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION' } else { $null }
     c188r12r4r5r2r3InitializeModulesAttributionTransition = if ($C188R12R4R5R2R3InitializeModulesAttribution) { 'explicit preflight gate; calls generated InitializeModules through its stock reverse-P/Invoke prologue; no ManagedMain dispatch' } else { $null }
     c188r12r4r5r2r3ManagedEntryProbe = [bool]$C188R12R4R5R2R3ManagedEntryProbe

@@ -3,7 +3,8 @@ param(
     [string]$ArtifactRoot = 'E:\CodexArtifacts\guideXOSServerV1.1_DOTNET_SUPPORT',
     [string]$CandidateRoot = '',
     [switch]$C188R25FailFastOriginCapture,
-    [switch]$C188R28GcStateGuardDiscriminator
+    [switch]$C188R28GcStateGuardDiscriminator,
+    [switch]$C188R29PreallocationGcStateGuard
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -27,7 +28,8 @@ $buildLog = Join-Path (Split-Path -Parent $candidate) ('r24-r23-build-' + [guid]
 $buildOutput = (& $pwsh -NoProfile -File $r23Builder -RepoRoot $RepoRoot `
     -ArtifactRoot $ArtifactRoot -CandidateRoot $candidate `
     -C188R25FailFastOriginCapture:$C188R25FailFastOriginCapture `
-    -C188R28GcStateGuardDiscriminator:$C188R28GcStateGuardDiscriminator 2>&1 | Out-String)
+    -C188R28GcStateGuardDiscriminator:$C188R28GcStateGuardDiscriminator `
+    -C188R29PreallocationGcStateGuard:$C188R29PreallocationGcStateGuard 2>&1 | Out-String)
 $buildCode = $LASTEXITCODE
 Set-Content -LiteralPath $buildLog -Value $buildOutput -Encoding utf8
 if ($buildCode -ne 0) { throw "R23 source build failed while preparing R24; see $buildLog" }

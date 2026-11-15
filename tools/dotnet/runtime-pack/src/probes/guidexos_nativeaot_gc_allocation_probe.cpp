@@ -33,6 +33,12 @@ namespace WKS {
 #pragma comment(linker, "/alternatename:?find_segment@gc_heap@WKS@@SAPEAVheap_segment@2@PEAEH@Z=?find_segment@gc_heap@WKS@@CAPEAVheap_segment@2@PEAEH@Z")
 
 #include <stdint.h>
+#if defined(_MSC_VER)
+#include <excpt.h>
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD)
+#include "guidexos_nativeaot_r29_preallocation_guard.h"
+#endif
 
 extern "C" int32_t guidexos_nativeaot_gc_read_state(
     uintptr_t* allocationContext,
@@ -93,6 +99,108 @@ extern "C" int32_t guidexos_nativeaot_gc_read_state(
     }
     return 0;
 }
+
+#if defined(GUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD)
+extern "C" int32_t guidexos_nativeaot_gc_read_state_r29(
+    uintptr_t* allocationContext,
+    uintptr_t* allocationLimit,
+    uintptr_t* currentThread,
+    uintptr_t* gcHeap,
+    uint32_t* gcCount,
+    uintptr_t* allocatedBytes,
+    uint32_t* finalizableObjects,
+    uint32_t* gcInProgress,
+    uint32_t* gcMode,
+    uintptr_t* contextIdentity,
+    uintptr_t* allocBytes,
+    uintptr_t* allocBytesUoh,
+    GuideXosR29GcStateReadEvidence* evidence) {
+    if (evidence != nullptr) *evidence = {};
+    // The R29 reader is diagnostic qualification code around the original
+    // pre-allocation guard. Keep the observation path allocation-free and
+    // translate only an access violation in these reads into an explicit
+    // discriminator result. Other SEH exceptions continue to their owner.
+    __try {
+        Thread* thread = ThreadStore::GetCurrentThreadIfAvailable();
+        if (evidence != nullptr) {
+            evidence->prerequisiteEvaluationMask |= kGuideXosR29EvalThreadStore;
+            evidence->threadStoreResult = thread == nullptr
+                ? kGuideXosR29CheckUnavailable : kGuideXosR29CheckAvailable;
+            evidence->observedCurrentThread = reinterpret_cast<uintptr_t>(thread);
+        }
+        if (thread == nullptr) return -1;
+
+        gc_alloc_context* context = thread->GetAllocContext();
+        if (evidence != nullptr) {
+            evidence->prerequisiteEvaluationMask |= kGuideXosR29EvalAllocationContext;
+            evidence->allocationContextResult = context == nullptr
+                ? kGuideXosR29CheckUnavailable : kGuideXosR29CheckAvailable;
+        }
+        if (context == nullptr) return -1;
+
+        const bool heapInitialized = GCHeapUtilities::IsGCHeapInitialized();
+        if (evidence != nullptr) {
+            evidence->prerequisiteEvaluationMask |= kGuideXosR29EvalGcHeapInitialization;
+            evidence->gcHeapInitializationResult = heapInitialized
+                ? kGuideXosR29CheckAvailable : kGuideXosR29CheckUnavailable;
+        }
+        if (!heapInitialized) return -1;
+
+        IGCHeap* heap = GCHeapUtilities::GetGCHeap();
+        if (evidence != nullptr) {
+            evidence->prerequisiteEvaluationMask |= kGuideXosR29EvalGcHeapPointer;
+            evidence->observedGcHeap = reinterpret_cast<uintptr_t>(heap);
+        }
+        if (heap == nullptr) return -1;
+
+        if (allocationContext != nullptr) {
+            *allocationContext = reinterpret_cast<uintptr_t>(context->alloc_ptr);
+        }
+        if (allocationLimit != nullptr) {
+            *allocationLimit = reinterpret_cast<uintptr_t>(context->alloc_limit);
+        }
+        if (currentThread != nullptr) {
+            *currentThread = reinterpret_cast<uintptr_t>(thread);
+        }
+        if (gcHeap != nullptr) {
+            *gcHeap = reinterpret_cast<uintptr_t>(heap);
+        }
+        if (gcCount != nullptr) *gcCount = heap->GetGcCount();
+        if (allocatedBytes != nullptr) {
+            *allocatedBytes = static_cast<uintptr_t>(heap->GetTotalAllocatedBytes());
+        }
+        if (finalizableObjects != nullptr) {
+            *finalizableObjects = static_cast<uint32_t>(heap->GetNumberOfFinalizable());
+        }
+        if (gcInProgress != nullptr) {
+            *gcInProgress = heap->IsGCInProgressHelper(false) ? 1u : 0u;
+        }
+        if (gcMode != nullptr) {
+            *gcMode = thread->IsCurrentThreadInCooperativeMode() ? 1u : 0u;
+        }
+        if (contextIdentity != nullptr) {
+            *contextIdentity = reinterpret_cast<uintptr_t>(context);
+        }
+        if (allocBytes != nullptr) {
+            *allocBytes = static_cast<uintptr_t>(context->alloc_bytes);
+        }
+        if (allocBytesUoh != nullptr) {
+            *allocBytesUoh = static_cast<uintptr_t>(context->alloc_bytes_uoh);
+        }
+        if (evidence != nullptr) {
+            evidence->prerequisiteEvaluationMask |= kGuideXosR29EvalStateOutputs;
+            evidence->safeReadResult = kGuideXosR29SafeReadCompleted;
+        }
+        return 0;
+    } __except (GetExceptionCode() == 0xC0000005u
+            ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
+        if (evidence != nullptr) {
+            evidence->safeReadResult = kGuideXosR29SafeReadFailed;
+        }
+        return -2;
+    }
+}
+#endif
 
 extern "C" int32_t guidexos_nativeaot_gc_describe_object(
     void* object,

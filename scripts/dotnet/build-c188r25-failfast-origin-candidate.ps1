@@ -2,7 +2,8 @@ param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
     [string]$ArtifactRoot = 'E:\CodexArtifacts\guideXOSServerV1.1_DOTNET_SUPPORT',
     [string]$CandidateRoot = '',
-    [switch]$C188R28GcStateGuardDiscriminator
+    [switch]$C188R28GcStateGuardDiscriminator,
+    [switch]$C188R29PreallocationGcStateGuard
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -26,7 +27,8 @@ $python = (Get-Command python.exe -ErrorAction Stop | Select-Object -First 1).So
 $r24Builder = Join-Path $RepoRoot 'scripts\dotnet\build-c188r24-initializemodules-candidate.ps1'
 $builderOutput = & $pwsh -NoProfile -File $r24Builder -RepoRoot $RepoRoot `
     -ArtifactRoot $ArtifactRoot -CandidateRoot $candidate -C188R25FailFastOriginCapture `
-    -C188R28GcStateGuardDiscriminator:$C188R28GcStateGuardDiscriminator 2>&1 | Out-String
+    -C188R28GcStateGuardDiscriminator:$C188R28GcStateGuardDiscriminator `
+    -C188R29PreallocationGcStateGuard:$C188R29PreallocationGcStateGuard 2>&1 | Out-String
 $builderExit = $LASTEXITCODE
 $r25BuildLog = Join-Path $phaseRoot ('r25-build-' + [guid]::NewGuid().ToString('N') + '.log')
 Set-Content -LiteralPath $r25BuildLog -Value $builderOutput -Encoding utf8
@@ -50,6 +52,13 @@ if ($C188R28GcStateGuardDiscriminator -and
      [string]$runtimeManifest.c188r28GcStateGuardDiscriminatorMarker -cne 'GUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR')) {
     throw 'The linked runtime-pack manifest does not identify the R28 GC-state guard discriminator.'
 }
+if ($C188R29PreallocationGcStateGuard -and
+    (-not [bool]$runtimeManifest.c188r29PreallocationGcStateGuard -or
+     [string]$runtimeManifest.c188r29PreallocationGcStateGuardMarker -cne 'GUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD' -or
+     [int]$runtimeManifest.failFastOriginRecordSchema -ne 3 -or
+     [int]$runtimeManifest.failFastOriginRecordBytes -ne 192)) {
+    throw 'The linked runtime-pack manifest does not identify the R29 schema-3 pre-allocation discriminator.'
+}
 $analyzer = Join-Path $RepoRoot 'scripts\dotnet\analyze-c188r25-failfast-origin.py'
 $qualification = (& $python $analyzer '--candidate-root' $candidate 2>&1 | Out-String)
 if ($LASTEXITCODE -ne 0) { throw "R25 linked-image qualification failed: $qualification" }
@@ -69,12 +78,19 @@ if ($C188R28GcStateGuardDiscriminator) {
     $r28TestOutput = & $python $r28TestPath 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { throw "R28 GC-state guard qualification failed: $r28TestOutput" }
 }
+$r29TestOutput = ''
+if ($C188R29PreallocationGcStateGuard) {
+    $r29TestPath = Join-Path $RepoRoot 'scripts\dotnet\test-c188r29-preallocation-gc-state-guard.py'
+    $r29TestOutput = & $python $r29TestPath 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) { throw "R29 pre-allocation GC-state guard qualification failed: $r29TestOutput" }
+}
 $hostedQualificationPath = Join-Path $phaseRoot ($candidateToken + '-hosted-qualification.log')
-Set-Content -LiteralPath $hostedQualificationPath -Value ($testOutput + "`n" + $pythonTestOutput + "`n" + $r28TestOutput) -Encoding utf8
+Set-Content -LiteralPath $hostedQualificationPath -Value ($testOutput + "`n" + $pythonTestOutput + "`n" + $r28TestOutput + "`n" + $r29TestOutput) -Encoding utf8
 $recordAddress = [string]$qualificationObject.candidate.recordAddress
 $sourcePaths = @(
     'scripts/dotnet/build-c188r25-failfast-origin-candidate.ps1',
     'scripts/dotnet/build-c188r28-gc-state-guard-candidate.ps1',
+    'scripts/dotnet/build-c188r29-preallocation-gc-state-guard-candidate.ps1',
     'scripts/dotnet/build-c188r24-initializemodules-candidate.ps1',
     'scripts/dotnet/build-c188r23-settings-candidate.ps1',
     'scripts/dotnet/build-managed-hostlog-proof.ps1',
@@ -82,16 +98,23 @@ $sourcePaths = @(
     'tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_platform.cpp',
     'tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_failfast_origin.h',
     'tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_gc_state_guard.h',
+    'tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_r29_preallocation_guard.h',
+    'tools/dotnet/runtime-pack/src/probes/guidexos_nativeaot_gc_allocation_probe.cpp',
     'scripts/dotnet/run-c188-qac-guest.ps1',
     'scripts/dotnet/run-c188r24-initializemodules.ps1',
+    'scripts/dotnet/run-c188r12r1-settings-handoff.ps1',
     'scripts/dotnet/run-c188r25-failfast-origin.ps1',
     'scripts/dotnet/c188r26-precreated-evidence-root.ps1',
     'scripts/dotnet/c188r25-failfast-runner-predicates.ps1',
     'scripts/dotnet/analyze-c188r25-failfast-origin.py',
     'scripts/dotnet/test-c188r25-failfast-origin.ps1',
     'scripts/dotnet/test-c188r25-failfast-origin.py',
+    'scripts/dotnet/test-c188r26-precreated-evidence-root.ps1',
+    'scripts/dotnet/test-c188r27-prelaunch-rehearsal.ps1',
     'scripts/dotnet/test-c188r28-gc-state-guard.py',
-    'scripts/dotnet/run-c188r28-gc-state-guard.ps1')
+    'scripts/dotnet/test-c188r29-preallocation-gc-state-guard.py',
+    'scripts/dotnet/run-c188r28-gc-state-guard.ps1',
+    'scripts/dotnet/run-c188r29-preallocation-gc-state-guard.ps1')
 $sourceInputs = @($sourcePaths | ForEach-Object {
     $path = Join-Path $RepoRoot $_
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "R25 source input is missing: $_" }
@@ -116,7 +139,7 @@ $r25Manifest = [ordered]@{
     runtimePackManifestSha256=(Get-FileHash -LiteralPath $runtimeManifestPath -Algorithm SHA256).Hash.ToUpperInvariant()
     runtimeSourceCommit=[string]$runtimeManifest.runtimeIdentity.sourceCommit
     profile=[string]$runtimeManifest.identity
-    diagnostics=[ordered]@{recordAddress=$recordAddress;recordBytes=[int]$runtimeManifest.failFastOriginRecordBytes;schemaVersion=[int]$runtimeManifest.failFastOriginRecordSchema;fastFailCode=7;marker='[C188R25-FAILFAST-CAPTURED]';firstFailureOnly=$true;threadAndTransitionStateCaptured=$false;gcStateGuardDiscriminator=[bool]$C188R28GcStateGuardDiscriminator}
+    diagnostics=[ordered]@{recordAddress=$recordAddress;recordBytes=[int]$runtimeManifest.failFastOriginRecordBytes;schemaVersion=[int]$runtimeManifest.failFastOriginRecordSchema;fastFailCode=7;marker='[C188R25-FAILFAST-CAPTURED]';firstFailureOnly=$true;threadAndTransitionStateCaptured=$false;gcStateGuardDiscriminator=[bool]$C188R28GcStateGuardDiscriminator;preallocationGcStateGuardDiscriminator=[bool]$C188R29PreallocationGcStateGuard}
     r24Baseline=[ordered]@{phase=[string]$candidateManifest.phase;candidateSourceHead=[string]$candidateManifest.sourceHead;preservedModifiedObjects=$candidateIntegrity.preservedModifiedObjects}
     linkedQualificationPath=$qualPath;hostedQualificationPath=$hostedQualificationPath;sourceInputs=$sourceInputs
     buildLog=$r25BuildLog
@@ -130,3 +153,4 @@ Write-Output ($qualificationObject | ConvertTo-Json -Compress -Depth 5)
 Write-Output ($testOutput.Trim())
 Write-Output ($pythonTestOutput.Trim())
 if ($r28TestOutput) { Write-Output ($r28TestOutput.Trim()) }
+if ($r29TestOutput) { Write-Output ($r29TestOutput.Trim()) }

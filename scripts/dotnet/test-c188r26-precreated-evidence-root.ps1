@@ -83,6 +83,59 @@ try {
     $validR28 = Test-C188R26PrecreatedR25EvidenceRoot $evidenceR28 $candidateR28 $guardPathR28
     Assert-R26 ([bool]$validR28.accepted) 'R28 capture is accepted when its 144-byte record is bound to both candidate manifests'
 
+    $candidateR29 = Join-Path $tempRoot 'candidate-r29'
+    $evidenceR29 = Join-Path $tempRoot 'evidence-r29'
+    $null = New-Item -ItemType Directory -Path $candidateR29,$evidenceR29
+    $runtimeManifestR29 = Join-Path $candidateR29 'runtime-pack.manifest.json'
+    [ordered]@{
+        c188r25FailFastOriginCapture=$true
+        c188r28GcStateGuardDiscriminator=$true
+        c188r28GcStateGuardDiscriminatorMarker='GUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR'
+        c188r29PreallocationGcStateGuard=$true
+        c188r29PreallocationGcStateGuardMarker='GUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD'
+        failFastOriginRecordSchema=3
+        failFastOriginRecordBytes=192
+    } | ConvertTo-Json | Set-Content -LiteralPath $runtimeManifestR29 -Encoding utf8
+    $candidateManifestR29 = Join-Path $candidateR29 'candidate-manifest.json'
+    [ordered]@{candidate='frozen-r29';runtimePackManifest=$runtimeManifestR29} |
+        ConvertTo-Json | Set-Content -LiteralPath $candidateManifestR29 -Encoding utf8
+    $candidateIntegrityR29 = Join-Path $candidateR29 'candidate-integrity.json'
+    Set-Content -LiteralPath $candidateIntegrityR29 -Value '{"candidate":"frozen-r29-integrity"}' -Encoding utf8
+    $manifestHashR29 = (Get-FileHash -LiteralPath $candidateManifestR29 -Algorithm SHA256).Hash
+    $integrityHashR29 = (Get-FileHash -LiteralPath $candidateIntegrityR29 -Algorithm SHA256).Hash
+    $guardPathR29 = Join-Path $guardRoot ('attempt-r25-' + [guid]::NewGuid().ToString('N') + '.json')
+    $recordAddressR29 = '0x00000001001E14E0'
+    [ordered]@{
+        schema='GUIDEXOS_C188R25_ONE_BOOT_GUARD_V1';candidateRoot=$candidateR29
+        candidateManifestSha256=$manifestHashR29;candidateIntegritySha256=$integrityHashR29
+        bootEvidencePath=$evidenceR29;attemptNumber=1;maxGuestBoots=1
+        automaticRetry=$false;retryAllowed=$false;consumed=$true
+    } | ConvertTo-Json | Set-Content -LiteralPath $guardPathR29 -Encoding utf8
+    [ordered]@{
+        schema='GUIDEXOS_C188R25_CANDIDATE_V1'
+        candidateRoot=$candidateR29
+        candidateManifestSha256=$manifestHashR29
+        runtimePackManifest=$runtimeManifestR29
+        runtimePackManifestSha256=(Get-FileHash -LiteralPath $runtimeManifestR29 -Algorithm SHA256).Hash
+        diagnostics=[ordered]@{
+            recordAddress=$recordAddressR29;recordBytes=192;schemaVersion=3
+            gcStateGuardDiscriminator=$true;preallocationGcStateGuardDiscriminator=$true
+        }
+    } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $tempRoot 'candidate-r29-r25-candidate-manifest.json') -Encoding utf8
+    $capturePathR29 = Join-Path $evidenceR29 'r25-failfast-capture.json'
+    [ordered]@{
+        schema='GUIDEXOS_C188R25_FAILFAST_CAPTURE_CONFIG_V1'
+        recordAddress=$recordAddressR29;recordBytes=192;recordSchema=3
+        candidateManifestSha256=$manifestHashR29
+    } | ConvertTo-Json | Set-Content -LiteralPath $capturePathR29 -Encoding utf8
+    $validR29 = Test-C188R26PrecreatedR25EvidenceRoot $evidenceR29 $candidateR29 $guardPathR29
+    Assert-R26 ([bool]$validR29.accepted) 'R29 capture is accepted only when its schema-3 record and linked R28/R29 markers are bound'
+    $runtimeR29 = Get-Content -LiteralPath $runtimeManifestR29 -Raw | ConvertFrom-Json
+    $runtimeR29.c188r29PreallocationGcStateGuardMarker = 'wrong-marker'
+    $runtimeR29 | ConvertTo-Json | Set-Content -LiteralPath $runtimeManifestR29 -Encoding utf8
+    $wrongR29Marker = Test-C188R26PrecreatedR25EvidenceRoot $evidenceR29 $candidateR29 $guardPathR29
+    Assert-R26 (-not [bool]$wrongR29Marker.accepted) 'R29 evidence roots reject a schema-3 capture with an unbound discriminator marker'
+
     $captureR28 = Get-Content -LiteralPath $capturePathR28 -Raw | ConvertFrom-Json
     $captureR28.recordBytes = 80
     $captureR28 | ConvertTo-Json | Set-Content -LiteralPath $capturePathR28 -Encoding utf8

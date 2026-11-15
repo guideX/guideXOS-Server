@@ -18,7 +18,8 @@ function Assert-R25([bool]$Condition,[string]$Name) {
 }
 
 Assert-R25 ($header -match 'kGuideXosR25FailFastOriginRecordBytes = 80u' -and
-    $header -match 'kGuideXosR25FailFastOriginRecordBytes = 144u') 'versioned bounded R25/R28 record sizes'
+    $header -match 'kGuideXosR25FailFastOriginRecordBytes = 144u' -and
+    $header -match 'kGuideXosR25FailFastOriginRecordBytes = 192u') 'versioned bounded R25/R28/R29 record sizes'
 Assert-R25 ($header -match 'kGuideXosR25FailFastFastFailCode = 7u') 'exact FAST_FAIL_FATAL_APP_EXIT mapping'
 Assert-R25 ($source -match 'return reinterpret_cast<uintptr_t>\(_ReturnAddress\(\)\)') 'caller capture helper uses compiler return-address intrinsic'
 Assert-R25 ($source -match '_InterlockedCompareExchange\(&g_guideXosR25FailFastClaim, 1, 0\) == 0') 'first failure claims record once'
@@ -38,7 +39,7 @@ Assert-R25 ($source.IndexOf('#define guideXosFailFast(reason)') -ge 0 -and
 Assert-R25 ($header -match 'originalReason' -and $header -match 'callerCaptureReturnAddress' -and
     $header -match 'failFastImplementationAddress' -and $header -match 'initializationStage' -and
     $header -match 'published') 'bounded record carries reason, caller, implementation, stage, and validity fields'
-Assert-R25 ($guestRunner -match 'r25CaptureConfig\.recordBytes\s*-notin @\(80,144\)' -and
+Assert-R25 ($guestRunner -match 'r25CaptureConfig\.recordBytes\s*-notin @\(80,144,192\)' -and
     $guestRunner -match 'Get-C188R25HmpWords \$snapshot\.recordText' -and
     $guestRunner -match 'x/\{0\}gx' -and $guestRunner -match 'x/8gx ' ) 'guest capture validates the configured record size and bounds record/stack reads'
 $pauseIndex = $guestRunner.IndexOf("Invoke-Qmp 'stop'")

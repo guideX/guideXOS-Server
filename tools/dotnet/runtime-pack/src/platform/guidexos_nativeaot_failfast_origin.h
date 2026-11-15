@@ -10,7 +10,31 @@ static constexpr uint32_t kGuideXosR25FailFastStageNativeModulePreparation = 1u;
 static constexpr uint32_t kGuideXosR25FailFastStageBeforeInitializeModules = 2u;
 static constexpr uint32_t kGuideXosR25FailFastStageInitializeModulesReturned = 3u;
 
-#if defined(GUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR)
+#if defined(GUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD)
+static constexpr uint64_t kGuideXosR25FailFastOriginSchema = 3u;
+static constexpr uint64_t kGuideXosR25FailFastOriginRecordBytes = 192u;
+static constexpr uint64_t kGuideXosR29GuardLocationNone = 0u;
+static constexpr uint64_t kGuideXosR29GuardLocationPreallocation = 1u;
+static constexpr uint64_t kGuideXosR29GuardLocationPostallocation = 2u;
+static constexpr uint64_t kGuideXosR29GuardSubconditionNone = 0u;
+static constexpr uint64_t kGuideXosR29GuardThreadStoreUnavailable = 1u;
+static constexpr uint64_t kGuideXosR29GuardAllocationContextUnavailable = 2u;
+static constexpr uint64_t kGuideXosR29GuardGcHeapUninitialized = 3u;
+static constexpr uint64_t kGuideXosR29GuardGcHeapPointerUnavailable = 4u;
+static constexpr uint64_t kGuideXosR29GuardStateReadFailed = 5u;
+static constexpr uint64_t kGuideXosR29GuardCurrentThreadOutputNull = 6u;
+static constexpr uint64_t kGuideXosR29GuardGcHeapOutputNull = 7u;
+static constexpr uint64_t kGuideXosR29GuardSafeReadFailed = 8u;
+static constexpr uint64_t kGuideXosR29GuardStateReadIncomplete = 9u;
+static constexpr uint64_t kGuideXosR29CheckNotEvaluated = 0u;
+static constexpr uint64_t kGuideXosR29CheckAvailable = 1u;
+static constexpr uint64_t kGuideXosR29CheckUnavailable = 2u;
+static constexpr uint64_t kGuideXosR29CheckCompleted = 3u;
+static constexpr uint64_t kGuideXosR29SafeReadNotEvaluated = 0u;
+static constexpr uint64_t kGuideXosR29SafeReadCompleted = 1u;
+static constexpr uint64_t kGuideXosR29SafeReadFailed = 2u;
+
+#elif defined(GUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR)
 static constexpr uint64_t kGuideXosR25FailFastOriginSchema = 2u;
 static constexpr uint64_t kGuideXosR25FailFastOriginRecordBytes = 144u;
 static constexpr uint64_t kGuideXosR28GuardSubconditionNone = 0u;
@@ -57,6 +81,14 @@ struct GuideXosR25FailFastOriginRecord {
     uint64_t observedCurrentThread;
     uint64_t expectedGcHeap;
     uint64_t observedGcHeap;
+#if defined(GUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD)
+    uint64_t r29GuardLocation;
+    uint64_t r29PrerequisiteEvaluationMask;
+    uint64_t r29ThreadStoreResult;
+    uint64_t r29AllocationContextResult;
+    uint64_t r29GcHeapInitializationResult;
+    uint64_t r29SafeReadResult;
+#endif
 #endif
     uint64_t published;
 };

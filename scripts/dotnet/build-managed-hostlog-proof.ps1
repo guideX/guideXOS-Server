@@ -41,6 +41,7 @@ param(
     [switch]$C188R12R4R5R2R3InitializeModulesAttribution,
     [switch]$C188R25FailFastOriginCapture,
     [switch]$C188R28GcStateGuardDiscriminator,
+    [switch]$C188R29PreallocationGcStateGuard,
     [switch]$C188R12R4R5R2R3ManagedEntryProbe,
     [switch]$C188R12R4R5R2R3ManagedSettingsObjectProbe,
     [switch]$C188R13ManagedGcRootProbe,
@@ -278,6 +279,7 @@ if ($UseGuideXosRuntimePack) {
     if ($C188R12R4R5R2R3InitializeModulesAttribution) { $runtimePackBuildArguments += "-C188R12R4R5R2R3InitializeModulesAttribution" }
     if ($C188R25FailFastOriginCapture) { $runtimePackBuildArguments += "-C188R25FailFastOriginCapture" }
     if ($C188R28GcStateGuardDiscriminator) { $runtimePackBuildArguments += "-C188R28GcStateGuardDiscriminator" }
+    if ($C188R29PreallocationGcStateGuard) { $runtimePackBuildArguments += "-C188R29PreallocationGcStateGuard" }
     if ($C188R12R4R5R2R3ManagedEntryProbe) { $runtimePackBuildArguments += "-C188R12R4R5R2R3ManagedEntryProbe" }
     if ($C188R12R4R5R2R3ManagedSettingsObjectProbe -or $C188R13ManagedGcRootProbe) { $runtimePackBuildArguments += "-C188R12R4R5R2R3ManagedSettingsObjectProbe" }
     if ($ThreadStaticLifecycleDiagnostics) { $runtimePackBuildArguments += "-ThreadStaticLifecycleDiagnostics" }
@@ -378,6 +380,14 @@ if ($UseGuideXosRuntimePack) {
          [string]$runtimePackManifestObject.runtimeIdentity.gc -cne 'Workstation' -or
          [bool]$runtimePackManifestObject.imageBackedArenaPresent)) {
         throw 'R28 requires the first-failure discriminator on the pinned Workstation GC path without an image-backed arena.'
+    }
+    if ($C188R29PreallocationGcStateGuard -and
+        (-not $C188R28GcStateGuardDiscriminator -or
+         -not [bool]$runtimePackManifestObject.c188r29PreallocationGcStateGuard -or
+         [string]$runtimePackManifestObject.c188r29PreallocationGcStateGuardMarker -cne 'GUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD' -or
+         [int]$runtimePackManifestObject.failFastOriginRecordSchema -ne 3 -or
+         [int]$runtimePackManifestObject.failFastOriginRecordBytes -ne 192)) {
+        throw 'R29 requires the linked 192-byte schema-3 pre-allocation discriminator on the R28 Workstation GC profile.'
     }
     if ($C188R12R4R5R2R3ManagedEntryProbe -and
         (-not $C188R12R4R5R2R3InitializeModulesAttribution -or
@@ -917,6 +927,9 @@ try {
             }
         }
         $gcProbeDefines = '/DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DHOST_64BIT /DTARGET_64BIT /DHOST_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /D_LIB'
+        if ($C188R29PreallocationGcStateGuard) {
+            $gcProbeDefines += ' /DGUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD'
+        }
         $gcProbeIncludes = "/I`"$gcProbeRuntimeRoot`" /I`"$(Join-Path $gcProbeRuntimeRoot 'windows')`" /I`"$gcProbeCoreclrRoot`" /I`"$gcProbeNativeRoot`" /I`"$(Join-Path $gcProbeCoreclrRoot 'native')`" /I`"$(Join-Path $gcProbeCoreclrRoot 'gc')`" /I`"$(Join-Path $gcProbeCoreclrRoot 'gc\env')`" /I`"$(Join-Path $gcProbeRuntimeRoot 'inc')`" /I`"$(Join-Path $gcProbeRuntimeRoot 'eventpipe')`" /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /I`"$(Join-Path $gcProbeCoreclrRoot 'pal\src\include')`" /FI`"$gcProbeCommonHeader`""
         $gcAllocationProbeCompileBlock = @(
             "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $gcProbeDefines $gcProbeIncludes /Fo:`"$gcAllocationProbeObj`" `"$gcAllocationProbeSource`"",

@@ -7,6 +7,9 @@
 #include <stddef.h>
 #if defined(GUIDEXOS_NATIVEAOT_C188R25_FAILFAST_ORIGIN)
 #include "guidexos_nativeaot_failfast_origin.h"
+#if defined(GUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD)
+#include "guidexos_nativeaot_r29_preallocation_guard.h"
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR)
 #include "guidexos_nativeaot_gc_state_guard.h"
 #endif
@@ -20,6 +23,12 @@ guideXosNativeAotR25CaptureCallerReturnAddress();
 [[noreturn]] void guideXosFailFastImpl(uint32_t reason);
 [[noreturn]] __declspec(noinline) void __cdecl guideXosNativeAotR25FailFast(
     uint32_t reason, uintptr_t callerCaptureReturnAddress);
+#if defined(GUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD)
+[[noreturn]] __declspec(noinline) void __cdecl
+guideXosNativeAotR29FailFastPreallocationGcState(
+    const GuideXosR29PreallocationGcStateEvidence& evidence,
+    uintptr_t callerCaptureReturnAddress);
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR)
 [[noreturn]] __declspec(noinline) void __cdecl
 guideXosNativeAotR28FailFastGcStateGuard(
@@ -30,6 +39,11 @@ guideXosNativeAotR28FailFastGcStateGuard(
 #define guideXosFailFast(reason) \
     guideXosNativeAotR25FailFast( \
         (reason), guideXosNativeAotR25CaptureCallerReturnAddress())
+#if defined(GUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD)
+#define guideXosFailFastR29PreallocationGcState(evidence) \
+    guideXosNativeAotR29FailFastPreallocationGcState( \
+        (evidence), guideXosNativeAotR25CaptureCallerReturnAddress())
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR)
 #define guideXosFailFastGcStateGuard(evidence) \
     guideXosNativeAotR28FailFastGcStateGuard( \
@@ -1101,6 +1115,15 @@ extern "C" int32_t guidexos_nativeaot_gc_read_state(
     gx_uintptr* contextIdentity,
     gx_uintptr* allocBytes,
     gx_uintptr* allocBytesUoh);
+#if defined(GUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD)
+extern "C" int32_t guidexos_nativeaot_gc_read_state_r29(
+    gx_uintptr* allocationContext, gx_uintptr* allocationLimit,
+    gx_uintptr* currentThread, gx_uintptr* gcHeap, gx_uint32* gcCount,
+    gx_uintptr* allocatedBytes, gx_uint32* finalizableObjects,
+    gx_uint32* gcInProgress, gx_uint32* gcMode, gx_uintptr* contextIdentity,
+    gx_uintptr* allocBytes, gx_uintptr* allocBytesUoh,
+    GuideXosR29GcStateReadEvidence* evidence);
+#endif
 extern "C" int32_t guidexos_nativeaot_gc_describe_object(
     void* object,
     gx_uintptr* heapBase,
@@ -32826,6 +32849,22 @@ void guideXosR25TryEmitCapturedMarker() {
         record.initializationStage = g_guideXosR25InitializationStage;
         record.flags = 0x7u;
 #if defined(GUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR)
+#if defined(GUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD)
+        record.guardFailureSubcondition = kGuideXosR29GuardSubconditionNone;
+        record.gcStateReadStatus = 0u;
+        record.threadIdentityResult = kGuideXosR28PredicateNotEvaluated;
+        record.heapIdentityResult = kGuideXosR28PredicateNotEvaluated;
+        record.expectedCurrentThread = 0u;
+        record.observedCurrentThread = 0u;
+        record.expectedGcHeap = 0u;
+        record.observedGcHeap = 0u;
+        record.r29GuardLocation = kGuideXosR29GuardLocationNone;
+        record.r29PrerequisiteEvaluationMask = 0u;
+        record.r29ThreadStoreResult = kGuideXosR29CheckNotEvaluated;
+        record.r29AllocationContextResult = kGuideXosR29CheckNotEvaluated;
+        record.r29GcHeapInitializationResult = kGuideXosR29CheckNotEvaluated;
+        record.r29SafeReadResult = kGuideXosR29CheckNotEvaluated;
+#else
         record.guardFailureSubcondition = kGuideXosR28GuardSubconditionNone;
         record.gcStateReadStatus = 0u;
         record.threadIdentityResult = kGuideXosR28PredicateNotEvaluated;
@@ -32835,6 +32874,7 @@ void guideXosR25TryEmitCapturedMarker() {
         record.expectedGcHeap = 0u;
         record.observedGcHeap = 0u;
 #endif
+#endif
         _InterlockedExchange64(
             reinterpret_cast<volatile __int64*>(&record.published),
             static_cast<__int64>(kGuideXosR25FailFastOriginPublished));
@@ -32842,6 +32882,46 @@ void guideXosR25TryEmitCapturedMarker() {
     }
     guideXosFailFastImpl(reason);
 }
+
+#if defined(GUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD)
+[[noreturn]] __declspec(noinline) void __cdecl
+guideXosNativeAotR29FailFastPreallocationGcState(
+    const GuideXosR29PreallocationGcStateEvidence& evidence,
+    uintptr_t callerCaptureReturnAddress) {
+    if (_InterlockedCompareExchange(&g_guideXosR25FailFastClaim, 1, 0) == 0) {
+        auto& record = g_guideXosR25FailFastOriginRecord;
+        record.magic = kGuideXosR25FailFastOriginMagic;
+        record.schemaVersion = kGuideXosR25FailFastOriginSchema;
+        record.recordBytes = kGuideXosR25FailFastOriginRecordBytes;
+        record.originalReason = 8u;
+        record.fastFailCode = kGuideXosR25FailFastFastFailCode;
+        record.callerCaptureReturnAddress = callerCaptureReturnAddress;
+        record.failFastImplementationAddress = reinterpret_cast<uintptr_t>(
+            &guideXosFailFastImpl);
+        record.initializationStage = g_guideXosR25InitializationStage;
+        record.flags = 0x7u;
+        record.guardFailureSubcondition = evidence.firstFailedSubcondition;
+        record.gcStateReadStatus = evidence.gcStateReadStatus;
+        record.threadIdentityResult = kGuideXosR28PredicateNotEvaluated;
+        record.heapIdentityResult = kGuideXosR28PredicateNotEvaluated;
+        record.expectedCurrentThread = 0u;
+        record.observedCurrentThread = evidence.observedCurrentThread;
+        record.expectedGcHeap = 0u;
+        record.observedGcHeap = evidence.observedGcHeap;
+        record.r29GuardLocation = kGuideXosR29GuardLocationPreallocation;
+        record.r29PrerequisiteEvaluationMask = evidence.prerequisiteEvaluationMask;
+        record.r29ThreadStoreResult = evidence.threadStoreResult;
+        record.r29AllocationContextResult = evidence.allocationContextResult;
+        record.r29GcHeapInitializationResult = evidence.gcHeapInitializationResult;
+        record.r29SafeReadResult = evidence.safeReadResult;
+        _InterlockedExchange64(
+            reinterpret_cast<volatile __int64*>(&record.published),
+            static_cast<__int64>(kGuideXosR25FailFastOriginPublished));
+        guideXosR25TryEmitCapturedMarker();
+    }
+    guideXosFailFastImpl(8u);
+}
+#endif
 
 #if defined(GUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR)
 [[noreturn]] __declspec(noinline) void __cdecl
@@ -32868,6 +32948,14 @@ guideXosNativeAotR28FailFastGcStateGuard(
         record.observedCurrentThread = evidence.observedCurrentThread;
         record.expectedGcHeap = evidence.expectedGcHeap;
         record.observedGcHeap = evidence.observedGcHeap;
+#if defined(GUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD)
+        record.r29GuardLocation = kGuideXosR29GuardLocationPostallocation;
+        record.r29PrerequisiteEvaluationMask = 0u;
+        record.r29ThreadStoreResult = kGuideXosR29CheckNotEvaluated;
+        record.r29AllocationContextResult = kGuideXosR29CheckNotEvaluated;
+        record.r29GcHeapInitializationResult = kGuideXosR29CheckNotEvaluated;
+        record.r29SafeReadResult = kGuideXosR29CheckNotEvaluated;
+#endif
         _InterlockedExchange64(
             reinterpret_cast<volatile __int64*>(&record.published),
             static_cast<__int64>(kGuideXosR25FailFastOriginPublished));
@@ -34710,6 +34798,25 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
         ? reinterpret_cast<gx_uintptr>(
             *reinterpret_cast<void**>(tlsCell + kRuntimeCellTransitionFrameOffset))
         : 0u;
+#if defined(GUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD)
+    GuideXosR29GcStateReadEvidence r29ReadEvidence = {};
+    const int32_t r29ReadStatus = guidexos_nativeaot_gc_read_state_r29(
+        &allocationPointerBefore, &allocationLimitBefore, &currentThread,
+        &gcHeap, &gcCountBefore, &gcBytesBefore, &finalizableBefore,
+        &gcInProgressBefore, &gcModeBefore, &contextIdentityBefore,
+        &allocBytesBefore, &allocBytesUohBefore, &r29ReadEvidence);
+    const GuideXosR29PreallocationGcStateEvidence r29GuardEvidence =
+        guideXosR29ClassifyPreallocationGcState(
+            r29ReadStatus, r29ReadEvidence, currentThread, gcHeap);
+    if (r29GuardEvidence.firstFailedSubcondition !=
+        kGuideXosR29GuardSubconditionNone) {
+        ++g_guideXosAllocationDiagnostics.pointerContractFailures;
+        recordAllocationStage(GUIDEXOS_NATIVEAOT_ALLOC_STAGE_FAILFAST_GC_STATE,
+                              eeType, length, objectSize, allocationPointerBefore,
+                              allocationLimitBefore, currentThread);
+        guideXosFailFastR29PreallocationGcState(r29GuardEvidence);
+    }
+#else
     if (guidexos_nativeaot_gc_read_state(
             &allocationPointerBefore, &allocationLimitBefore, &currentThread,
             &gcHeap, &gcCountBefore, &gcBytesBefore, &finalizableBefore,
@@ -34721,6 +34828,7 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
                               allocationLimitBefore, currentThread);
         guideXosFailFast(8u);
     }
+#endif
     recordAllocationStage(GUIDEXOS_NATIVEAOT_ALLOC_STAGE_A05_ALLOCATION_CONTEXT_LOADED,
                           eeType, length, objectSize, allocationPointerBefore,
                           allocationLimitBefore, currentThread, transitionFrame);

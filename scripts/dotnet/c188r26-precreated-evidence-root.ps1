@@ -88,7 +88,8 @@ function Test-C188R26PrecreatedR25EvidenceRoot(
         try { $config = Get-Content -LiteralPath $children[0].FullName -Raw | ConvertFrom-Json -ErrorAction Stop }
         catch { return [pscustomobject]@{ accepted=$false; reason='capture config is unreadable' } }
         if ($config.schema -cne 'GUIDEXOS_C188R25_FAILFAST_CAPTURE_CONFIG_V1' -or
-            [int]$config.recordBytes -notin @(80,144) -or
+            [int]$config.recordBytes -notin @(80,144,192) -or
+            ([int]$config.recordBytes -eq 192 -and [int]$config.recordSchema -ne 3) -or
             [string]$config.recordAddress -notmatch '^0x[0-9A-Fa-f]{8,16}$' -or
             [string]$config.candidateManifestSha256 -ine $manifestHash) {
             return [pscustomobject]@{ accepted=$false; reason='capture config does not bind the R25 record and candidate manifest' }
@@ -97,7 +98,7 @@ function Test-C188R26PrecreatedR25EvidenceRoot(
         $runtimeManifestPath = if ($null -ne $runtimeManifestProperty) {
             [string]$runtimeManifestProperty.Value
         } else { '' }
-        if ([string]$config.recordBytes -eq '144' -or
+        if ([string]$config.recordBytes -in @('144','192') -or
             (-not [string]::IsNullOrWhiteSpace($runtimeManifestPath) -and
              (Test-Path -LiteralPath $runtimeManifestPath -PathType Leaf))) {
             if ([string]::IsNullOrWhiteSpace($runtimeManifestPath) -or
@@ -113,6 +114,38 @@ function Test-C188R26PrecreatedR25EvidenceRoot(
             if ([string]$config.recordBytes -eq '80') {
                 if ($r28Enabled) {
                     return [pscustomobject]@{ accepted=$false; reason='R28 candidate cannot use the legacy 80-byte capture schema' }
+                }
+            } elseif ([string]$config.recordBytes -eq '192') {
+                $r25ManifestPath = Join-Path ([System.IO.Path]::GetDirectoryName($candidatePath)) `
+                    ((Split-Path -Leaf $candidatePath) + '-r25-candidate-manifest.json')
+                if (-not (Test-Path -LiteralPath $r25ManifestPath -PathType Leaf)) {
+                    return [pscustomobject]@{ accepted=$false; reason='R29 capture config has no bound R25 candidate manifest' }
+                }
+                try { $r25Manifest = Get-Content -LiteralPath $r25ManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop }
+                catch { return [pscustomobject]@{ accepted=$false; reason='R25 candidate manifest is unreadable' } }
+                if ($r25Manifest.schema -cne 'GUIDEXOS_C188R25_CANDIDATE_V1' -or
+                    [System.IO.Path]::GetFullPath([string]$r25Manifest.candidateRoot) -cne $candidatePath -or
+                    [string]$r25Manifest.candidateManifestSha256 -ine $manifestHash -or
+                    [int]$r25Manifest.diagnostics.recordBytes -ne 192 -or
+                    [int]$r25Manifest.diagnostics.schemaVersion -ne 3 -or
+                    -not [bool]$r25Manifest.diagnostics.gcStateGuardDiscriminator -or
+                    -not [bool]$r25Manifest.diagnostics.preallocationGcStateGuardDiscriminator -or
+                    [string]$r25Manifest.diagnostics.recordAddress -ine [string]$config.recordAddress -or
+                    [System.IO.Path]::GetFullPath([string]$r25Manifest.runtimePackManifest) -cne
+                        [System.IO.Path]::GetFullPath($runtimeManifestPath) -or
+                    (Get-FileHash -LiteralPath $runtimeManifestPath -Algorithm SHA256).Hash -ine
+                        [string]$r25Manifest.runtimePackManifestSha256 -or
+                    $null -eq $runtimeManifest.PSObject.Properties['c188r25FailFastOriginCapture'] -or
+                    -not [bool]$runtimeManifest.PSObject.Properties['c188r25FailFastOriginCapture'].Value -or
+                    -not $r28Enabled -or
+                    [string]$runtimeManifest.c188r28GcStateGuardDiscriminatorMarker -cne
+                        'GUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR' -or
+                    -not [bool]$runtimeManifest.c188r29PreallocationGcStateGuard -or
+                    [string]$runtimeManifest.c188r29PreallocationGcStateGuardMarker -cne
+                        'GUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD' -or
+                    [int]$runtimeManifest.failFastOriginRecordSchema -ne 3 -or
+                    [int]$runtimeManifest.failFastOriginRecordBytes -ne 192) {
+                    return [pscustomobject]@{ accepted=$false; reason='R29 capture config does not match the linked discriminator manifests' }
                 }
             } else {
                 if (-not (Test-Path -LiteralPath $r25ManifestPath -PathType Leaf)) {

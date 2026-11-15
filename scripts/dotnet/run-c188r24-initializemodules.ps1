@@ -62,7 +62,8 @@ try {
         if ($r25Manifest.schema -cne 'GUIDEXOS_C188R25_CANDIDATE_V1' -or
             [System.IO.Path]::GetFullPath([string]$r25Manifest.candidateRoot) -cne $candidate -or
             [string]$r25Manifest.diagnostics.recordAddress -notmatch '^0x[0-9A-Fa-f]{8,16}$' -or
-            [int]$r25Manifest.diagnostics.recordBytes -notin @(80,144) -or
+            [int]$r25Manifest.diagnostics.recordBytes -notin @(80,144,192) -or
+            [int]$r25Manifest.diagnostics.schemaVersion -ne $(switch ([int]$r25Manifest.diagnostics.recordBytes) { 80 { 1 } 144 { 2 } 192 { 3 } }) -or
             (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash -ine [string]$r25Manifest.candidateManifestSha256 -or
             (Get-FileHash -LiteralPath $integrityPath -Algorithm SHA256).Hash -ine [string]$r25Manifest.candidateIntegritySha256 -or
             [System.IO.Path]::GetFullPath([string]$r25Manifest.runtimePackManifest) -cne
@@ -70,6 +71,17 @@ try {
             (Get-FileHash -LiteralPath ([string]$r25Manifest.runtimePackManifest) -Algorithm SHA256).Hash -ine
                 [string]$r25Manifest.runtimePackManifestSha256) {
             throw 'R25 manifest does not bind a valid fail-fast record in the requested candidate.'
+        }
+        if ([int]$r25Manifest.diagnostics.recordBytes -eq 192) {
+            $runtimeManifest = Get-Content -LiteralPath ([string]$r25Manifest.runtimePackManifest) -Raw | ConvertFrom-Json -ErrorAction Stop
+            if (-not [bool]$r25Manifest.diagnostics.gcStateGuardDiscriminator -or
+                -not [bool]$r25Manifest.diagnostics.preallocationGcStateGuardDiscriminator -or
+                -not [bool]$runtimeManifest.c188r29PreallocationGcStateGuard -or
+                [string]$runtimeManifest.c188r29PreallocationGcStateGuardMarker -cne 'GUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD' -or
+                [int]$runtimeManifest.failFastOriginRecordSchema -ne 3 -or
+                [int]$runtimeManifest.failFastOriginRecordBytes -ne 192) {
+                throw 'R29 record configuration is not bound to the R28 and R29 linked runtime discriminators.'
+            }
         }
         $r25Analyzer = Join-Path $repo 'scripts\dotnet\analyze-c188r25-failfast-origin.py'
         $python = (Get-Command python.exe -ErrorAction Stop | Select-Object -First 1).Source
@@ -178,7 +190,7 @@ try {
     $guard | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $guardPath -Encoding utf8
     if ($isR25) {
         $null = New-Item -ItemType Directory -Path $bootRoot -Force
-        [ordered]@{schema='GUIDEXOS_C188R25_FAILFAST_CAPTURE_CONFIG_V1';recordAddress=[string]$r25Manifest.diagnostics.recordAddress;recordBytes=$r25RecordBytes;candidateManifestSha256=(Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash} |
+        [ordered]@{schema='GUIDEXOS_C188R25_FAILFAST_CAPTURE_CONFIG_V1';recordAddress=[string]$r25Manifest.diagnostics.recordAddress;recordBytes=$r25RecordBytes;recordSchema=[int]$r25Manifest.diagnostics.schemaVersion;candidateManifestSha256=(Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash} |
             ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $bootRoot 'r25-failfast-capture.json') -Encoding utf8
     }
     $runnerStdoutPath = Join-Path $phaseRoot ($runPrefix + '-runner-' + $runId + '.stdout.log')

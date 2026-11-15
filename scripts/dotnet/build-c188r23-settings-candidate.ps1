@@ -3,7 +3,8 @@ param(
     [string]$ArtifactRoot = 'E:\CodexArtifacts\guideXOSServerV1.1_DOTNET_SUPPORT',
     [string]$CandidateRoot = '',
     [switch]$C188R25FailFastOriginCapture,
-    [switch]$C188R28GcStateGuardDiscriminator
+    [switch]$C188R28GcStateGuardDiscriminator,
+    [switch]$C188R29PreallocationGcStateGuard
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -170,6 +171,12 @@ if ($C188R28GcStateGuardDiscriminator) {
         throw 'R28 discriminator requires the R25 first-failure capture profile.'
     }
     $managedArgs += '-C188R28GcStateGuardDiscriminator'
+}
+if ($C188R29PreallocationGcStateGuard) {
+    if (-not $C188R28GcStateGuardDiscriminator) {
+        throw 'R29 pre-allocation discrimination requires the R28 guard profile.'
+    }
+    $managedArgs += '-C188R29PreallocationGcStateGuard'
 }
 $pwsh = (Get-Command 'pwsh.exe' -ErrorAction Stop | Select-Object -First 1).Source
 $r22Test = Join-Path $RepoRoot 'scripts\dotnet\test-c188r22-settings-bootstrap-handoff.ps1'

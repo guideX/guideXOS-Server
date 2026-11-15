@@ -14,6 +14,8 @@ SCHEMA = 1
 RECORD_BYTES = 80
 R28_SCHEMA = 2
 R28_RECORD_BYTES = 144
+R29_SCHEMA = 3
+R29_RECORD_BYTES = 192
 PUBLISHED = 0x5055424C49534844
 FAST_FAIL_FATAL_APP_EXIT = 7
 MAX_INITIALIZATION_STAGE = 3
@@ -25,6 +27,26 @@ R28_SUBCONDITIONS = {
     3: "GC_HEAP_IDENTITY_MISMATCH",
 }
 R28_PREDICATES = {0, 1, 2}
+R29_GUARD_LOCATIONS = {0: "NONE", 1: "PREALLOCATION", 2: "POSTALLOCATION"}
+R29_SUBCONDITIONS = {
+    0: "NONE",
+    1: "THREADSTORE_CURRENT_THREAD_UNAVAILABLE",
+    2: "THREAD_ALLOCATION_CONTEXT_UNAVAILABLE",
+    3: "GC_HEAP_NOT_INITIALIZED",
+    4: "GC_HEAP_POINTER_UNAVAILABLE",
+    5: "GC_STATE_READ_FAILED_AFTER_PREREQUISITES",
+    6: "CURRENT_THREAD_OUTPUT_NULL",
+    7: "GC_HEAP_OUTPUT_NULL",
+    8: "GC_STATE_SAFE_READ_FAILED",
+    9: "GC_STATE_READ_INCOMPLETE",
+}
+R29_CHECKS = {0, 1, 2}
+R29_EVAL_THREADSTORE = 1 << 0
+R29_EVAL_ALLOCATION_CONTEXT = 1 << 1
+R29_EVAL_GC_HEAP_INITIALIZED = 1 << 2
+R29_EVAL_GC_HEAP_POINTER = 1 << 3
+R29_EVAL_STATE_OUTPUTS = 1 << 4
+R29_EVAL_ALL = (1 << 5) - 1
 
 
 def signed64(value: int) -> int:
@@ -85,6 +107,159 @@ def validate_r28_guard_words(
     return True, R28_SUBCONDITIONS[subcondition], evidence
 
 
+def validate_r29_guard_words(words: list[int]) -> tuple[bool, str, dict[str, object]]:
+    if len(words) != R29_RECORD_BYTES // 8:
+        return False, "record_word_count_invalid", {}
+    subcondition = words[9]
+    read_status = signed64(words[10])
+    thread_result, heap_result = words[11], words[12]
+    expected_thread, observed_thread = words[13], words[14]
+    expected_heap, observed_heap = words[15], words[16]
+    location = words[17]
+    evaluation_mask, threadstore, allocation_context, heap_initialized, safe_read = words[18:23]
+    evidence: dict[str, object] = {
+        "guardLocation": R29_GUARD_LOCATIONS.get(location, "UNKNOWN"),
+        "firstFailedSubcondition": R29_SUBCONDITIONS.get(subcondition, "UNKNOWN"),
+        "gcStateReadStatus": read_status,
+        "prerequisiteEvaluationMask": evaluation_mask,
+        "threadStoreResult": threadstore,
+        "allocationContextResult": allocation_context,
+        "gcHeapInitializationResult": heap_initialized,
+        "safeReadResult": safe_read,
+        "observedCurrentThread": f"0x{observed_thread:016X}",
+        "observedGcHeap": f"0x{observed_heap:016X}",
+        "postAllocationIdentityEvidence": {
+            "threadIdentityResult": thread_result,
+            "heapIdentityResult": heap_result,
+            "expectedCurrentThread": f"0x{expected_thread:016X}",
+            "expectedGcHeap": f"0x{expected_heap:016X}",
+        },
+    }
+    if location not in R29_GUARD_LOCATIONS or subcondition not in R29_SUBCONDITIONS:
+        return False, "r29_guard_identifier_invalid", evidence
+    if location in (1, 2) and words[3] != 8:
+        return False, "r29_guard_original_reason_invalid", evidence
+    if evaluation_mask & ~R29_EVAL_ALL or threadstore not in R29_CHECKS or \
+            allocation_context not in R29_CHECKS or heap_initialized not in R29_CHECKS or \
+            safe_read not in R29_CHECKS:
+        return False, "r29_prerequisite_result_invalid", evidence
+
+    if location == 2:
+        legacy = words[:17] + [PUBLISHED]
+        valid, classification, post = validate_r28_guard_words(legacy, words[3])
+        if not valid:
+            return False, classification, evidence
+        evidence["firstFailedSubcondition"] = post["firstFailedSubcondition"]
+        evidence["gcStateReadStatus"] = post["gcStateReadStatus"]
+        evidence["postAllocationIdentityEvidence"] = post
+        if evaluation_mask != 0 or any((threadstore, allocation_context, heap_initialized, safe_read)):
+            return False, "postallocation_record_contains_preallocation_prerequisite_data", evidence
+        return True, classification, evidence
+
+    if location != 1:
+        empty_guard_words = words[9:23]
+        valid = (subcondition == 0 and read_status == 0 and
+                 evaluation_mask == 0 and not any(empty_guard_words))
+        return valid, ("guard_evidence_not_applicable" if valid else
+                       "r29_empty_guard_evidence_inconsistent"), evidence
+    if thread_result != 0 or heap_result != 0 or expected_thread != 0 or expected_heap != 0:
+        return False, "preallocation_record_claims_identity_comparison", evidence
+    if safe_read == 2:
+        expected_prefix = 0
+        if evaluation_mask & R29_EVAL_THREADSTORE:
+            expected_prefix = R29_EVAL_THREADSTORE
+        if evaluation_mask & R29_EVAL_ALLOCATION_CONTEXT:
+            expected_prefix |= R29_EVAL_ALLOCATION_CONTEXT
+        if evaluation_mask & R29_EVAL_GC_HEAP_INITIALIZED:
+            expected_prefix |= R29_EVAL_GC_HEAP_INITIALIZED
+        if evaluation_mask & R29_EVAL_GC_HEAP_POINTER:
+            expected_prefix |= R29_EVAL_GC_HEAP_POINTER
+        ordered_prefixes = {
+            0,
+            R29_EVAL_THREADSTORE,
+            R29_EVAL_THREADSTORE | R29_EVAL_ALLOCATION_CONTEXT,
+            R29_EVAL_THREADSTORE | R29_EVAL_ALLOCATION_CONTEXT | R29_EVAL_GC_HEAP_INITIALIZED,
+            R29_EVAL_THREADSTORE | R29_EVAL_ALLOCATION_CONTEXT | R29_EVAL_GC_HEAP_INITIALIZED |
+                R29_EVAL_GC_HEAP_POINTER,
+        }
+        prereq_results_consistent = (
+            (not (evaluation_mask & R29_EVAL_THREADSTORE) and threadstore == 0) or
+            (evaluation_mask & R29_EVAL_THREADSTORE and threadstore in (1, 2))
+        )
+        prereq_results_consistent = prereq_results_consistent and (
+            (not (evaluation_mask & R29_EVAL_ALLOCATION_CONTEXT) and allocation_context == 0) or
+            (evaluation_mask & R29_EVAL_ALLOCATION_CONTEXT and threadstore == 1 and allocation_context in (1, 2))
+        )
+        prereq_results_consistent = prereq_results_consistent and (
+            (not (evaluation_mask & R29_EVAL_GC_HEAP_INITIALIZED) and heap_initialized == 0) or
+            (evaluation_mask & R29_EVAL_GC_HEAP_INITIALIZED and allocation_context == 1 and heap_initialized in (1, 2))
+        )
+        valid = (subcondition == 8 and read_status == -2 and
+                 evaluation_mask == expected_prefix and evaluation_mask in ordered_prefixes and
+                 prereq_results_consistent and
+                 (not (evaluation_mask & R29_EVAL_GC_HEAP_POINTER) or heap_initialized == 1) and
+                 not (evaluation_mask & R29_EVAL_STATE_OUTPUTS))
+        return valid, ("GC_STATE_SAFE_READ_FAILED" if valid else
+                       "safe_read_failure_record_inconsistent"), evidence
+    if not (evaluation_mask & R29_EVAL_THREADSTORE) or threadstore not in (1, 2):
+        return False, "threadstore_prerequisite_not_recorded", evidence
+    if threadstore == 2:
+        valid = (subcondition == 1 and read_status != 0 and evaluation_mask == R29_EVAL_THREADSTORE and
+                 allocation_context == 0 and heap_initialized == 0 and safe_read == 0 and
+                 observed_thread == 0 and observed_heap == 0)
+        return valid, ("THREADSTORE_CURRENT_THREAD_UNAVAILABLE" if valid else
+                       "threadstore_unavailable_record_inconsistent"), evidence
+    if not (evaluation_mask & R29_EVAL_ALLOCATION_CONTEXT) or allocation_context not in (1, 2):
+        return False, "allocation_context_prerequisite_not_recorded", evidence
+    if allocation_context == 2:
+        valid = (subcondition == 2 and read_status != 0 and
+                 evaluation_mask == (R29_EVAL_THREADSTORE | R29_EVAL_ALLOCATION_CONTEXT) and
+                 heap_initialized == 0 and safe_read == 0 and observed_thread != 0 and observed_heap == 0)
+        return valid, ("THREAD_ALLOCATION_CONTEXT_UNAVAILABLE" if valid else
+                       "allocation_context_unavailable_record_inconsistent"), evidence
+    if not (evaluation_mask & R29_EVAL_GC_HEAP_INITIALIZED) or heap_initialized not in (1, 2):
+        return False, "gc_heap_initialization_prerequisite_not_recorded", evidence
+    if heap_initialized == 2:
+        valid = (subcondition == 3 and read_status != 0 and
+                 evaluation_mask == (R29_EVAL_THREADSTORE | R29_EVAL_ALLOCATION_CONTEXT | R29_EVAL_GC_HEAP_INITIALIZED) and
+                 safe_read == 0 and observed_thread != 0 and observed_heap == 0)
+        return valid, ("GC_HEAP_NOT_INITIALIZED" if valid else "gc_heap_uninitialized_record_inconsistent"), evidence
+    if evaluation_mask & R29_EVAL_GC_HEAP_POINTER:
+        if observed_heap == 0:
+            valid = (subcondition == 4 and read_status != 0 and safe_read == 0 and
+                     evaluation_mask == (R29_EVAL_THREADSTORE | R29_EVAL_ALLOCATION_CONTEXT |
+                                         R29_EVAL_GC_HEAP_INITIALIZED | R29_EVAL_GC_HEAP_POINTER) and
+                     threadstore == 1 and allocation_context == 1 and heap_initialized == 1 and
+                     observed_thread != 0)
+            return valid, ("GC_HEAP_POINTER_UNAVAILABLE" if valid else "gc_heap_pointer_record_inconsistent"), evidence
+    if read_status != 0:
+        valid = (subcondition == 5 and read_status != 0 and safe_read == 0 and
+                 evaluation_mask == R29_EVAL_ALL and threadstore == 1 and
+                 allocation_context == 1 and heap_initialized == 1 and observed_heap != 0)
+        return valid, ("GC_STATE_READ_FAILED_AFTER_PREREQUISITES" if valid else
+                       "gc_state_read_failure_record_inconsistent"), evidence
+    if subcondition == 9:
+        ordered_masks = {
+            0,
+            R29_EVAL_THREADSTORE,
+            R29_EVAL_THREADSTORE | R29_EVAL_ALLOCATION_CONTEXT,
+            R29_EVAL_THREADSTORE | R29_EVAL_ALLOCATION_CONTEXT | R29_EVAL_GC_HEAP_INITIALIZED,
+            R29_EVAL_THREADSTORE | R29_EVAL_ALLOCATION_CONTEXT | R29_EVAL_GC_HEAP_INITIALIZED |
+                R29_EVAL_GC_HEAP_POINTER,
+            R29_EVAL_ALL,
+        }
+        valid = (evaluation_mask in ordered_masks and safe_read == 0 and
+                 not (evaluation_mask & R29_EVAL_STATE_OUTPUTS))
+        return valid, ("GC_STATE_READ_INCOMPLETE" if valid else
+                       "incomplete_state_read_record_inconsistent"), evidence
+    if read_status == 0 and evaluation_mask == R29_EVAL_ALL and safe_read == 1:
+        if subcondition == 6 and observed_thread != 0:
+            return True, "CURRENT_THREAD_OUTPUT_NULL", evidence
+        if subcondition == 7 and observed_heap != 0:
+            return True, "GC_HEAP_OUTPUT_NULL", evidence
+    return False, "preallocation_guard_failure_record_inconsistent", evidence
+
+
 def parse_hmp_words(text: str) -> list[int]:
     words: list[int] = []
     for line in text.splitlines():
@@ -95,6 +270,25 @@ def parse_hmp_words(text: str) -> list[int]:
 
 
 def validate_words(words: list[int]) -> tuple[bool, str]:
+    if len(words) == R29_RECORD_BYTES // 8 and words[1] == R29_SCHEMA:
+        if words[0] != MAGIC:
+            return False, "record_magic_invalid"
+        if words[2] != R29_RECORD_BYTES:
+            return False, "record_size_invalid"
+        if words[4] != FAST_FAIL_FATAL_APP_EXIT:
+            return False, "fast_fail_code_unexpected"
+        if words[5] == 0:
+            return False, "caller_capture_address_missing"
+        if words[6] == 0:
+            return False, "failfast_implementation_address_missing"
+        if words[7] > MAX_INITIALIZATION_STAGE:
+            return False, "initialization_stage_invalid"
+        if words[8] != EXPECTED_RECORD_FLAGS:
+            return False, "record_flags_invalid"
+        if words[23] != PUBLISHED:
+            return False, "record_not_published"
+        valid, classification, _evidence = validate_r29_guard_words(words)
+        return valid, classification
     if len(words) == R28_RECORD_BYTES // 8 and words[1] == R28_SCHEMA:
         if words[0] != MAGIC:
             return False, "record_magic_invalid"
@@ -222,6 +416,39 @@ def has_direct_call_to_function(
     return False
 
 
+def direct_call_offsets(
+    elf: bytes,
+    segments: list[tuple[int, int, int, int, int]],
+    map_text: str,
+    source_fragment: str,
+    target_fragment: str,
+) -> list[int]:
+    source = map_function_address(map_text, source_fragment)
+    target = map_function_address(map_text, target_fragment)
+    later_functions = []
+    for line in map_text.splitlines():
+        match = re.match(r"\s*\S+\s+\S+\s+([0-9A-Fa-f]{16})\s+f\s+", line)
+        if match:
+            address = int(match.group(1), 16)
+            if address > source:
+                later_functions.append(address)
+    end = min(later_functions, default=source + 0x4000)
+    size = min(end - source, 0x4000)
+    if size < 5:
+        return []
+    try:
+        code = read_va(elf, segments, source, size)
+    except ValueError:
+        return []
+    offsets = []
+    for offset in range(size - 4):
+        if code[offset] == 0xE8:
+            displacement = struct.unpack_from("<i", code, offset + 1)[0]
+            if source + offset + 5 + displacement == target:
+                offsets.append(offset)
+    return offsets
+
+
 def resolve_caller(candidate: Path, caller_pc: int) -> dict[str, object]:
     manifest = json.loads((candidate / "candidate-manifest.json").read_text(encoding="utf-8-sig"))
     map_text = Path(manifest["managedMap"]).read_text(encoding="utf-8", errors="replace")
@@ -273,9 +500,10 @@ def verify_candidate(candidate: Path) -> dict[str, object]:
     capture_helper = map_function_address(map_text, "guideXosNativeAotR25CaptureCallerReturnAddress")
     failfast_implementation = map_function_address(map_text, "guideXosFailFastImpl")
     segments = read_load_segments(elf)
+    r29_enabled = runtime_manifest.get("c188r29PreallocationGcStateGuard") is True
     r28_enabled = runtime_manifest.get("c188r28GcStateGuardDiscriminator") is True
-    expected_schema = R28_SCHEMA if r28_enabled else SCHEMA
-    expected_bytes = R28_RECORD_BYTES if r28_enabled else RECORD_BYTES
+    expected_schema = R29_SCHEMA if r29_enabled else R28_SCHEMA if r28_enabled else SCHEMA
+    expected_bytes = R29_RECORD_BYTES if r29_enabled else R28_RECORD_BYTES if r28_enabled else RECORD_BYTES
     actual_schema = runtime_manifest.get("failFastOriginRecordSchema", SCHEMA)
     actual_bytes = runtime_manifest.get("failFastOriginRecordBytes", RECORD_BYTES)
     writable = any(start <= record and record + expected_bytes <= start + memsz and flags & 2
@@ -289,6 +517,8 @@ def verify_candidate(candidate: Path) -> dict[str, object]:
         actual_bytes != expected_bytes or
         (r28_enabled and runtime_manifest.get("c188r28GcStateGuardDiscriminatorMarker") !=
             "GUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR") or
+        (r29_enabled and runtime_manifest.get("c188r29PreallocationGcStateGuardMarker") !=
+            "GUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD") or
         not writable or not helper_executable or not failfast_executable):
         raise ValueError("R25 record/functions are not enabled in the linked writable/executable ELF segments")
     r28_symbols: dict[str, str] = {}
@@ -314,6 +544,31 @@ def verify_candidate(candidate: Path) -> dict[str, object]:
             "gcStateReaderAddress": f"0x{gc_state_address:016X}",
             "guardFailureHelperAddress": f"0x{r28_helper_address:016X}",
         }
+        if r29_enabled:
+            reader_address = map_function_address(map_text, "guidexos_nativeaot_gc_read_state_r29")
+            preallocation_helper = map_function_address(
+                map_text, "guideXosNativeAotR29FailFastPreallocationGcState")
+            reader_calls = direct_call_offsets(
+                elf, segments, map_text, "RhpNewArray", "guidexos_nativeaot_gc_read_state_r29")
+            failure_calls = direct_call_offsets(
+                elf, segments, map_text, "RhpNewArray", "guideXosNativeAotR29FailFastPreallocationGcState")
+            stock_calls = direct_call_offsets(
+                elf, segments, map_text, "RhpNewArray", "guideXosStockRhpNewArray")
+            if (not reader_calls or not failure_calls or not stock_calls or
+                    min(reader_calls) >= min(failure_calls) or
+                    min(failure_calls) >= min(stock_calls)):
+                raise ValueError("R29 reader and failure discriminator are not linked before stock RhpNewArray")
+            if not all(any(start <= address < start + memsz and flags & 1
+                           for start, _off, _filesz, memsz, flags in segments)
+                       for address in (reader_address, preallocation_helper)):
+                raise ValueError("R29 pre-allocation reader or failure helper is not executable")
+            r28_symbols.update({
+                "preallocationStateReaderAddress": f"0x{reader_address:016X}",
+                "preallocationFailureHelperAddress": f"0x{preallocation_helper:016X}",
+                "preallocationReaderCallOffset": min(reader_calls),
+                "preallocationFailureCallOffset": min(failure_calls),
+                "stockAllocatorCallOffset": min(stock_calls),
+            })
     return {
         "result": "PASS",
         "recordAddress": f"0x{record:016X}",
@@ -362,12 +617,15 @@ def main() -> int:
         if args.candidate_root and valid and words[6] != int(str(result["candidate"]["failFastImplementationAddress"]), 16):
             result["recordValid"] = False
             result["recordClassification"] = "failfast_implementation_address_mismatch"
-        if len(words) in (RECORD_BYTES // 8, R28_RECORD_BYTES // 8):
+        if len(words) in (RECORD_BYTES // 8, R28_RECORD_BYTES // 8, R29_RECORD_BYTES // 8):
             result["originalReason"] = f"0x{words[3]:016X}"
             result["fastFailCode"] = words[4]
             result["fastFailCodeName"] = "FAST_FAIL_FATAL_APP_EXIT" if words[4] == FAST_FAIL_FATAL_APP_EXIT else "unknown"
         if len(words) == R28_RECORD_BYTES // 8 and words[1] == R28_SCHEMA:
             _valid, _classification, guard_evidence = validate_r28_guard_words(words, words[3])
+            result["gcStateGuard"] = guard_evidence
+        if len(words) == R29_RECORD_BYTES // 8 and words[1] == R29_SCHEMA:
+            _valid, _classification, guard_evidence = validate_r29_guard_words(words)
             result["gcStateGuard"] = guard_evidence
         if args.candidate_root and result["recordValid"]:
             result["caller"] = resolve_caller(args.candidate_root.resolve(), words[5])

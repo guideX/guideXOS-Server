@@ -39,7 +39,11 @@ if (Test-Path -LiteralPath $r25CaptureConfigPath -PathType Leaf) {
     catch { throw 'R25 fail-fast capture configuration is malformed; no QAC guest was launched.' }
     if ($r25CaptureConfig.schema -cne 'GUIDEXOS_C188R25_FAILFAST_CAPTURE_CONFIG_V1' -or
         [string]$r25CaptureConfig.recordAddress -notmatch '^0x[0-9A-Fa-f]{8,16}$' -or
-        [int]$r25CaptureConfig.recordBytes -notin @(80,144)) {
+        [int]$r25CaptureConfig.recordBytes -notin @(80,144,192) -or
+        ($null -ne $r25CaptureConfig.PSObject.Properties['recordSchema'] -and
+         [int]$r25CaptureConfig.recordSchema -ne $(switch ([int]$r25CaptureConfig.recordBytes) { 80 { 1 } 144 { 2 } 192 { 3 } })) -or
+        ([int]$r25CaptureConfig.recordBytes -eq 192 -and
+         $null -eq $r25CaptureConfig.PSObject.Properties['recordSchema'])) {
         throw 'R25 fail-fast capture configuration failed validation; no QAC guest was launched.'
     }
 }
@@ -320,7 +324,7 @@ function Save-C188R25FailFastOriginSnapshot([string]$Trigger) {
         $words = @(Get-C188R25HmpWords $snapshot.recordText)
         $snapshot.recordWords = @($words | ForEach-Object { '0x{0:X16}' -f $_ })
         if ($words.Count -eq $recordWordCount) {
-            $expectedSchema = if ($r25CaptureConfig.recordBytes -eq 144) { 2 } else { 1 }
+            $expectedSchema = switch ([int]$r25CaptureConfig.recordBytes) { 80 { 1 } 144 { 2 } 192 { 3 } }
             $snapshot.recordValid = $words[0] -eq 0x4738523235464154 -and
                 $words[1] -eq $expectedSchema -and $words[2] -eq $r25CaptureConfig.recordBytes -and
                 $words[4] -eq 7 -and $words[$words.Count - 1] -eq 0x5055424C49534844 -and $words[5] -ne 0
