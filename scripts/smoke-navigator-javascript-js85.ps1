@@ -19,6 +19,7 @@ $sources = @(
     "navigator_javascript/host.cpp",
     "navigator_javascript/environment.cpp",
     "navigator_javascript/runtime.cpp",
+    "navigator_javascript/object_storage.cpp",
     "navigator_javascript/ast.cpp",
     "navigator_javascript/lexer.cpp",
     "navigator_javascript/parser.cpp",

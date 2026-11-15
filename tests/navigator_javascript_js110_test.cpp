@@ -12,17 +12,17 @@ namespace gxos::javascript {
 struct NavigatorScriptRuntimeTestAccess {
     static std::size_t runtimeObjectSize()
     {
-        return sizeof(RuntimeContext::RuntimeObject);
+        return sizeof(PortableObjectRecord);
     }
 
     static std::size_t runtimePropertySize()
     {
-        return sizeof(RuntimeContext::RuntimeProperty);
+        return sizeof(PortablePropertyRecord);
     }
 
     static std::size_t arrayElementSize()
     {
-        return sizeof(RuntimeContext::RuntimeArrayElement);
+        return sizeof(PortableArrayElementRecord);
     }
 
     static std::size_t functionRecordSize()
@@ -34,7 +34,7 @@ struct NavigatorScriptRuntimeTestAccess {
     {
         const std::vector<Value> noElements;
         RuntimeErrorCode error = RuntimeErrorCode::None;
-        while (runtime.objects_.size() < runtime.limits_.maxObjects) {
+        while (runtime.objectStore_.objectCount() < runtime.limits_.maxObjects) {
             RuntimeObjectId object = kInvalidRuntimeObjectId;
             if (!runtime.createObject(false, noElements, object, error))
                 return false;

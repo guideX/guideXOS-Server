@@ -14,6 +14,7 @@ $build = & g++ -std=c++17 -O2 -Wall -Wextra -pedantic -iquote . `
     navigator_javascript/value.cpp `
     navigator_javascript/environment.cpp `
     navigator_javascript/runtime.cpp `
+    navigator_javascript/object_storage.cpp `
     navigator_javascript/ast.cpp `
     navigator_javascript/lexer.cpp `
     navigator_javascript/parser.cpp -o $exe 2>&1

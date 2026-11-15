@@ -40,8 +40,8 @@ struct NavigatorScriptIteratorTestAccess {
 };
 
 struct NavigatorScriptRuntimeTestAccess {
-    using Property = RuntimeContext::RuntimeProperty;
-    using Object = RuntimeContext::RuntimeObject;
+    using Property = PortablePropertyRecord;
+    using Object = PortableObjectRecord;
     using HostObject = RuntimeContext::HostObjectRecord;
     using Function = RuntimeContext::FunctionRecord;
     using Key = RuntimeContext::PropertyKey;
@@ -67,9 +67,18 @@ struct NavigatorScriptRuntimeTestAccess {
     static std::size_t symbolPropertyCount(const RuntimeContext& runtime)
     {
         std::size_t count = 0u;
-        for (const Object& object : runtime.objects_)
-            for (const Property& property : object.properties)
-                if (property.symbolKey != WellKnownSymbol::None) ++count;
+        for (std::size_t index = 0u;
+            index < runtime.objectStore_.objectCount(); ++index) {
+            const Object& object = runtime.objectRecordStorage_[index];
+            std::uint32_t slot = object.firstProperty;
+            while (slot != kInvalidPortablePropertySlot) {
+                if (slot >= runtime.objectPropertyStorage_.size()) break;
+                const Property& property = runtime.objectPropertyStorage_[slot];
+                if (property.active && property.symbol != WellKnownSymbol::None)
+                    ++count;
+                slot = property.next;
+            }
+        }
         return count;
     }
     static std::size_t objectBytes() { return sizeof(Object); }
@@ -78,7 +87,7 @@ struct NavigatorScriptRuntimeTestAccess {
     static std::size_t propertyKeyBytes() { return sizeof(Key); }
     static std::size_t propertyKeyBytes(const RuntimeContext& runtime)
     {
-        return runtime.totalPropertyKeyBytes_;
+        return runtime.objectStore_.propertyNameBytesUsed();
     }
 };
 

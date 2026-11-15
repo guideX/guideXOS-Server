@@ -71,7 +71,6 @@ bool PortableObjectStore::configure(PortableObjectStorageView storage,
         limits.maxPropertiesPerObject > 0xffffu ||
         limits.maxArrayElements > 0xffffu ||
         limits.maxArrayLength > 0xffffffffu ||
-        limits.maxArrayIndex >= limits.maxArrayLength ||
         limits.maxArrayElements > limits.maxTotalArrayElements ||
         limits.maxPropertyNameLength > limits.maxPropertyNameBytes ||
         (storage.objectCapacity != 0u && storage.objects == nullptr) ||
@@ -160,6 +159,98 @@ bool PortableObjectStore::reset(RuntimeGeneration generation,
     arrayElementCount_ = 0u;
     freeProperty_ = kInvalidPortablePropertySlot;
     freeArrayElement_ = kInvalidPortableArrayElementSlot;
+    return true;
+}
+
+bool PortableObjectStore::rollbackObjects(std::size_t retainedCount,
+    PortableObjectError& error)
+{
+    error.code = PortableObjectErrorCode::None;
+    if (!configured_ || retainedCount > objectCount_) {
+        error.code = PortableObjectErrorCode::InvalidStorage;
+        return false;
+    }
+    const auto referencesRemovedObject = [this, retainedCount](Value value) {
+        return value.isObject() &&
+            runtimeHandleIsValid(value.objectId(), generation_) &&
+            runtimeHandleSlot(value.objectId()) >= retainedCount;
+    };
+    for (std::size_t index = 0u; index < retainedCount; ++index) {
+        const PortableObjectRecord& object = storage_.objects[index];
+        if (object.prototype != kInvalidRuntimeObjectId &&
+            runtimeHandleIsValid(object.prototype, generation_) &&
+            runtimeHandleSlot(object.prototype) >= retainedCount) {
+            error.code = PortableObjectErrorCode::InvalidPrototype;
+            return false;
+        }
+        std::uint32_t property = object.firstProperty;
+        std::size_t inspected = 0u;
+        while (property != kInvalidPortablePropertySlot) {
+            if (property >= limits_.maxProperties ||
+                !storage_.properties[property].active ||
+                inspected++ >= limits_.maxProperties) {
+                error.code =
+                    PortableObjectErrorCode::InternalInvariantFailure;
+                return false;
+            }
+            if (referencesRemovedObject(storage_.properties[property].value)) {
+                error.code = PortableObjectErrorCode::InvalidProperty;
+                return false;
+            }
+            property = storage_.properties[property].next;
+        }
+        std::uint32_t element = object.firstArrayElement;
+        inspected = 0u;
+        while (element != kInvalidPortableArrayElementSlot) {
+            if (element >= limits_.maxTotalArrayElements ||
+                !storage_.arrayElements[element].active ||
+                inspected++ >= limits_.maxTotalArrayElements) {
+                error.code =
+                    PortableObjectErrorCode::InternalInvariantFailure;
+                return false;
+            }
+            if (referencesRemovedObject(storage_.arrayElements[element].value)) {
+                error.code = PortableObjectErrorCode::InvalidProperty;
+                return false;
+            }
+            element = storage_.arrayElements[element].next;
+        }
+    }
+    for (std::size_t index = retainedCount; index < objectCount_; ++index) {
+        PortableObjectRecord& object = storage_.objects[index];
+        while (object.firstProperty != kInvalidPortablePropertySlot) {
+            const std::uint32_t property = object.firstProperty;
+            if (property >= limits_.maxProperties ||
+                !storage_.properties[property].active ||
+                object.propertyCount == 0u) {
+                error.code =
+                    PortableObjectErrorCode::InternalInvariantFailure;
+                return false;
+            }
+            object.firstProperty = storage_.properties[property].next;
+            --object.propertyCount;
+            if (object.firstProperty == kInvalidPortablePropertySlot)
+                object.lastProperty = kInvalidPortablePropertySlot;
+            if (!releaseProperty(property, error)) return false;
+        }
+        while (object.firstArrayElement !=
+            kInvalidPortableArrayElementSlot) {
+            const std::uint32_t element = object.firstArrayElement;
+            if (element >= limits_.maxTotalArrayElements ||
+                !storage_.arrayElements[element].active ||
+                object.arrayElementCount == 0u) {
+                error.code =
+                    PortableObjectErrorCode::InternalInvariantFailure;
+                return false;
+            }
+            object.firstArrayElement =
+                storage_.arrayElements[element].next;
+            --object.arrayElementCount;
+            if (!releaseArrayElement(element, error)) return false;
+        }
+        object = PortableObjectRecord();
+    }
+    objectCount_ = retainedCount;
     return true;
 }
 
@@ -331,8 +422,16 @@ bool PortableObjectStore::setPrototype(RuntimeObjectId object,
 bool PortableObjectStore::propertyKeyMatches(
     const PortablePropertyRecord& property, SourceView key) const
 {
-    if (!property.active || property.symbol != WellKnownSymbol::None ||
-        property.keyLength != key.length) return false;
+    return propertyKeyMatches(property, key, WellKnownSymbol::None);
+}
+
+bool PortableObjectStore::propertyKeyMatches(
+    const PortablePropertyRecord& property, SourceView key,
+    WellKnownSymbol symbol) const
+{
+    if (!property.active || property.symbol != symbol) return false;
+    if (symbol != WellKnownSymbol::None) return true;
+    if (property.keyLength != key.length) return false;
     const char* storedKey = storage_.propertyNameBytes == nullptr
         ? nullptr : storage_.propertyNameBytes + property.keyOffset;
     return equalBytes(SourceView(storedKey, property.keyLength), key);
@@ -340,6 +439,12 @@ bool PortableObjectStore::propertyKeyMatches(
 
 bool PortableObjectStore::findProperty(const PortableObjectRecord& object,
     SourceView key, std::uint32_t& slot) const
+{
+    return findProperty(object, key, WellKnownSymbol::None, slot);
+}
+
+bool PortableObjectStore::findProperty(const PortableObjectRecord& object,
+    SourceView key, WellKnownSymbol symbol, std::uint32_t& slot) const
 {
     slot = object.firstProperty;
     std::size_t inspected = 0u;
@@ -350,7 +455,8 @@ bool PortableObjectStore::findProperty(const PortableObjectRecord& object,
             slot = kInvalidPortablePropertySlot;
             return false;
         }
-        if (propertyKeyMatches(storage_.properties[slot], key)) return true;
+        if (propertyKeyMatches(storage_.properties[slot], key, symbol))
+            return true;
         slot = storage_.properties[slot].next;
         ++inspected;
     }
@@ -405,28 +511,83 @@ bool PortableObjectStore::hasOwnProperty(RuntimeObjectId object,
     return getOwnProperty(object, key, value, found, error);
 }
 
+bool PortableObjectStore::hasOwnProperty(RuntimeObjectId object,
+    WellKnownSymbol symbol, bool& found, PortableObjectError& error) const
+{
+    Value value;
+    return getOwnProperty(object, symbol, value, found, error);
+}
+
 bool PortableObjectStore::getOwnProperty(RuntimeObjectId object,
     SourceView key, Value& value, bool& found,
     PortableObjectError& error) const
 {
+    PortablePropertyEntry entry;
+    if (!getOwnPropertyEntry(object, key, entry, found, error)) {
+        value = Value::undefined();
+        return false;
+    }
+    value = found ? entry.value : Value::undefined();
+    return true;
+}
+
+bool PortableObjectStore::getOwnProperty(RuntimeObjectId object,
+    WellKnownSymbol symbol, Value& value, bool& found,
+    PortableObjectError& error) const
+{
+    PortablePropertyEntry entry;
+    if (!getOwnPropertyEntry(object, symbol, entry, found, error)) {
+        value = Value::undefined();
+        return false;
+    }
+    value = found ? entry.value : Value::undefined();
+    return true;
+}
+
+bool PortableObjectStore::getOwnPropertyEntry(RuntimeObjectId object,
+    SourceView key, PortablePropertyEntry& result, bool& found,
+    PortableObjectError& error) const
+{
+    return getOwnPropertyEntry(object, key, WellKnownSymbol::None, result,
+        found, error);
+}
+
+bool PortableObjectStore::getOwnPropertyEntry(RuntimeObjectId object,
+    WellKnownSymbol symbol, PortablePropertyEntry& result, bool& found,
+    PortableObjectError& error) const
+{
+    return getOwnPropertyEntry(object, SourceView(), symbol, result, found,
+        error);
+}
+
+bool PortableObjectStore::getOwnPropertyEntry(RuntimeObjectId object,
+    SourceView key, WellKnownSymbol symbol, PortablePropertyEntry& result,
+    bool& found, PortableObjectError& error) const
+{
     error.code = PortableObjectErrorCode::None;
-    value = Value::undefined();
     found = false;
-    if (!validBytes(key)) {
+    result = PortablePropertyEntry();
+    if (!validBytes(key) ||
+        (symbol != WellKnownSymbol::None && key.length != 0u)) {
         error.code = PortableObjectErrorCode::InvalidProperty;
         return false;
     }
     PortableObjectRecord* record = nullptr;
     if (!objectRecord(object, record, error)) return false;
-    if (record->array && key.length == 6u && key.data != nullptr &&
+    if (symbol == WellKnownSymbol::None && record->array &&
+        key.length == 6u && key.data != nullptr &&
         key.data[0] == 'l' && key.data[1] == 'e' && key.data[2] == 'n' &&
         key.data[3] == 'g' && key.data[4] == 't' && key.data[5] == 'h') {
-        value = Value::number(static_cast<double>(record->arrayLength));
+        result.key = SourceView("length", 6u);
+        result.value = Value::number(static_cast<double>(record->arrayLength));
+        result.attributes = 0x01u;
+        result.isArrayLength = true;
         found = true;
         return true;
     }
     std::uint32_t index = 0u;
-    if (record->array && parseArrayIndex(key, index)) {
+    if (symbol == WellKnownSymbol::None && record->array &&
+        parseArrayIndex(key, index)) {
         if (index > limits_.maxArrayIndex) {
             error.code = PortableObjectErrorCode::InvalidIndex;
             return false;
@@ -439,14 +600,26 @@ bool PortableObjectStore::getOwnProperty(RuntimeObjectId object,
         }
         if (slot != kInvalidPortableArrayElementSlot &&
             storage_.arrayElements[slot].index == index) {
-            value = storage_.arrayElements[slot].value;
+            const PortableArrayElementRecord& element =
+                storage_.arrayElements[slot];
+            result.key = key;
+            result.value = element.value;
+            result.attributes = element.attributes;
+            result.arrayIndex = index;
+            result.isArrayElement = true;
             found = true;
             return true;
         }
     }
     std::uint32_t property = kInvalidPortablePropertySlot;
-    if (findProperty(*record, key, property)) {
-        value = storage_.properties[property].value;
+    if (findProperty(*record, key, symbol, property)) {
+        const PortablePropertyRecord& current = storage_.properties[property];
+        const char* keyBytes = storage_.propertyNameBytes == nullptr
+            ? nullptr : storage_.propertyNameBytes + current.keyOffset;
+        result.key = SourceView(keyBytes, current.keyLength);
+        result.value = current.value;
+        result.symbol = current.symbol;
+        result.attributes = current.attributes;
         found = true;
     }
     return true;
@@ -465,6 +638,30 @@ bool PortableObjectStore::getProperty(RuntimeObjectId object,
         if (!objectRecord(current, record, error)) return false;
         bool own = false;
         if (!getOwnProperty(current, key, value, own, error)) return false;
+        if (own) {
+            found = true;
+            return true;
+        }
+        if (record->prototype == kInvalidRuntimeObjectId) return true;
+        current = record->prototype;
+    }
+    error.code = PortableObjectErrorCode::PrototypeDepthExceeded;
+    return false;
+}
+
+bool PortableObjectStore::getProperty(RuntimeObjectId object,
+    WellKnownSymbol symbol, Value& value, bool& found,
+    PortableObjectError& error) const
+{
+    error.code = PortableObjectErrorCode::None;
+    value = Value::undefined();
+    found = false;
+    RuntimeObjectId current = object;
+    for (std::size_t depth = 0u; depth < limits_.maxPrototypeDepth; ++depth) {
+        PortableObjectRecord* record = nullptr;
+        if (!objectRecord(current, record, error)) return false;
+        bool own = false;
+        if (!getOwnProperty(current, symbol, value, own, error)) return false;
         if (own) {
             found = true;
             return true;
@@ -568,21 +765,41 @@ bool PortableObjectStore::setOwnProperty(RuntimeObjectId object,
     SourceView key, Value value, PortableObjectError& error,
     std::uint8_t attributes)
 {
+    return setOwnPropertyImpl(object, key, WellKnownSymbol::None, value,
+        error, attributes);
+}
+
+bool PortableObjectStore::setOwnProperty(RuntimeObjectId object,
+    WellKnownSymbol symbol, Value value, PortableObjectError& error,
+    std::uint8_t attributes)
+{
+    return setOwnPropertyImpl(object, SourceView(), symbol, value, error,
+        attributes);
+}
+
+bool PortableObjectStore::setOwnPropertyImpl(RuntimeObjectId object,
+    SourceView key, WellKnownSymbol symbol, Value value,
+    PortableObjectError& error, std::uint8_t attributes)
+{
     error.code = PortableObjectErrorCode::None;
-    if (!configured_ || !validBytes(key) || attributes > 0x07u) {
+    if (!configured_ || !validBytes(key) || attributes > 0x3fu ||
+        (symbol != WellKnownSymbol::None && key.length != 0u)) {
         error.code = PortableObjectErrorCode::InvalidProperty;
         return false;
     }
-    if (key.length > limits_.maxPropertyNameLength) {
+    if (symbol == WellKnownSymbol::None &&
+        key.length > limits_.maxPropertyNameLength) {
         error.code = PortableObjectErrorCode::NameTooLong;
         return false;
     }
     PortableObjectRecord* record = nullptr;
     if (!objectRecord(object, record, error)) return false;
-    if (record->array && key.length == 6u && key.data != nullptr &&
+    if (symbol == WellKnownSymbol::None && record->array &&
+        key.length == 6u && key.data != nullptr &&
         key.data[0] == 'l' && key.data[1] == 'e' && key.data[2] == 'n' &&
         key.data[3] == 'g' && key.data[4] == 't' && key.data[5] == 'h') {
-        if ((attributes != 0x01u && attributes != 0x07u) ||
+        if ((attributes != 0x01u && attributes != 0x07u &&
+                attributes != 0x39u && attributes != 0x3fu) ||
             !value.isNumber()) {
             error.code = PortableObjectErrorCode::InvalidLength;
             return false;
@@ -599,19 +816,20 @@ bool PortableObjectStore::setOwnProperty(RuntimeObjectId object,
             static_cast<std::size_t>(requested), error);
     }
     std::uint32_t index = 0u;
-    if (record->array && parseArrayIndex(key, index)) {
+    if (symbol == WellKnownSymbol::None && record->array &&
+        parseArrayIndex(key, index)) {
         if (index > limits_.maxArrayIndex) {
             error.code = PortableObjectErrorCode::InvalidIndex;
             return false;
         }
-        if (attributes != 0x07u) {
+        if (attributes != 0x07u && attributes != 0x3fu) {
             error.code = PortableObjectErrorCode::InvalidProperty;
             return false;
         }
         return setArrayElement(object, index, value, error, attributes);
     }
     std::uint32_t property = kInvalidPortablePropertySlot;
-    if (findProperty(*record, key, property)) {
+    if (findProperty(*record, key, symbol, property)) {
         PortablePropertyRecord& current = storage_.properties[property];
         if ((current.attributes & 0x01u) != 0u) current.value = value;
         return true;
@@ -621,10 +839,12 @@ bool PortableObjectStore::setOwnProperty(RuntimeObjectId object,
         error.code = PortableObjectErrorCode::PropertyCapacityExceeded;
         return false;
     }
-    if (key.length > limits_.maxPropertyNameBytes ||
-        propertyNameBytesUsed_ > limits_.maxPropertyNameBytes - key.length ||
-        key.length > storage_.propertyNameCapacity ||
-        propertyNameBytesUsed_ > storage_.propertyNameCapacity - key.length) {
+    const std::size_t nameLength = symbol == WellKnownSymbol::None
+        ? key.length : 0u;
+    if (nameLength > limits_.maxPropertyNameBytes ||
+        propertyNameBytesUsed_ > limits_.maxPropertyNameBytes - nameLength ||
+        nameLength > storage_.propertyNameCapacity ||
+        propertyNameBytesUsed_ > storage_.propertyNameCapacity - nameLength) {
         error.code = PortableObjectErrorCode::NameStorageExhausted;
         return false;
     }
@@ -632,9 +852,10 @@ bool PortableObjectStore::setOwnProperty(RuntimeObjectId object,
     if (!allocateProperty(newProperty, error)) return false;
     PortablePropertyRecord& inserted = storage_.properties[newProperty];
     inserted.keyOffset = static_cast<std::uint32_t>(propertyNameBytesUsed_);
-    inserted.keyLength = static_cast<std::uint32_t>(key.length);
-    if (key.length != 0u) {
-        for (std::size_t cursor = 0u; cursor < key.length; ++cursor)
+    inserted.keyLength = static_cast<std::uint32_t>(nameLength);
+    inserted.symbol = symbol;
+    if (nameLength != 0u) {
+        for (std::size_t cursor = 0u; cursor < nameLength; ++cursor)
             storage_.propertyNameBytes[propertyNameBytesUsed_ + cursor] =
                 key.data[cursor];
     }
@@ -648,7 +869,88 @@ bool PortableObjectStore::setOwnProperty(RuntimeObjectId object,
     record->lastProperty = newProperty;
     ++record->propertyCount;
     ++propertyCount_;
-    propertyNameBytesUsed_ += key.length;
+    propertyNameBytesUsed_ += nameLength;
+    return true;
+}
+
+bool PortableObjectStore::updateOwnProperty(RuntimeObjectId object,
+    SourceView key, Value value, std::uint8_t attributes,
+    PortableObjectError& error)
+{
+    return updateOwnPropertyImpl(object, key, WellKnownSymbol::None, value,
+        attributes, error);
+}
+
+bool PortableObjectStore::updateOwnProperty(RuntimeObjectId object,
+    WellKnownSymbol symbol, Value value, std::uint8_t attributes,
+    PortableObjectError& error)
+{
+    return updateOwnPropertyImpl(object, SourceView(), symbol, value,
+        attributes, error);
+}
+
+bool PortableObjectStore::updateOwnPropertyImpl(RuntimeObjectId object,
+    SourceView key, WellKnownSymbol symbol, Value value,
+    std::uint8_t attributes, PortableObjectError& error)
+{
+    error.code = PortableObjectErrorCode::None;
+    if (!validBytes(key) || attributes > 0x3fu ||
+        (symbol != WellKnownSymbol::None && key.length != 0u)) {
+        error.code = PortableObjectErrorCode::InvalidProperty;
+        return false;
+    }
+    PortableObjectRecord* record = nullptr;
+    if (!objectRecord(object, record, error)) return false;
+    if (symbol == WellKnownSymbol::None && record->array &&
+        key.length == 6u && key.data != nullptr &&
+        key.data[0] == 'l' && key.data[1] == 'e' && key.data[2] == 'n' &&
+        key.data[3] == 'g' && key.data[4] == 't' && key.data[5] == 'h') {
+        if (!value.isNumber()) {
+            error.code = PortableObjectErrorCode::InvalidLength;
+            return false;
+        }
+        const double requested = value.numberValue();
+        if (!(requested >= 0.0) || requested >
+                static_cast<double>(limits_.maxArrayLength) ||
+            static_cast<double>(static_cast<std::size_t>(requested)) !=
+                requested) {
+            error.code = PortableObjectErrorCode::InvalidLength;
+            return false;
+        }
+        return setArrayLengthRecord(*record,
+            static_cast<std::size_t>(requested), error);
+    }
+    std::uint32_t index = 0u;
+    if (symbol == WellKnownSymbol::None && record->array &&
+        parseArrayIndex(key, index)) {
+        if (index > limits_.maxArrayIndex) {
+            error.code = PortableObjectErrorCode::InvalidIndex;
+            return false;
+        }
+        std::uint32_t slot = kInvalidPortableArrayElementSlot;
+        std::uint32_t previous = kInvalidPortableArrayElementSlot;
+        if (!findArrayElement(*record, index, slot, previous)) {
+            error.code = PortableObjectErrorCode::InternalInvariantFailure;
+            return false;
+        }
+        if (slot == kInvalidPortableArrayElementSlot ||
+            storage_.arrayElements[slot].index != index) {
+            error.code = PortableObjectErrorCode::InvalidProperty;
+            return false;
+        }
+        PortableArrayElementRecord& element = storage_.arrayElements[slot];
+        element.value = value;
+        element.attributes = attributes;
+        return true;
+    }
+    std::uint32_t slot = kInvalidPortablePropertySlot;
+    if (!findProperty(*record, key, symbol, slot)) {
+        error.code = PortableObjectErrorCode::InvalidProperty;
+        return false;
+    }
+    PortablePropertyRecord& property = storage_.properties[slot];
+    property.value = value;
+    property.attributes = attributes;
     return true;
 }
 
@@ -710,20 +1012,38 @@ bool PortableObjectStore::releaseProperty(std::uint32_t slot,
 bool PortableObjectStore::deleteOwnProperty(RuntimeObjectId object,
     SourceView key, bool& deleted, PortableObjectError& error)
 {
+    return deleteOwnPropertyImpl(object, key, WellKnownSymbol::None, deleted,
+        error);
+}
+
+bool PortableObjectStore::deleteOwnProperty(RuntimeObjectId object,
+    WellKnownSymbol symbol, bool& deleted, PortableObjectError& error)
+{
+    return deleteOwnPropertyImpl(object, SourceView(), symbol, deleted,
+        error);
+}
+
+bool PortableObjectStore::deleteOwnPropertyImpl(RuntimeObjectId object,
+    SourceView key, WellKnownSymbol symbol, bool& deleted,
+    PortableObjectError& error)
+{
     error.code = PortableObjectErrorCode::None;
     deleted = false;
-    if (!validBytes(key)) {
+    if (!validBytes(key) ||
+        (symbol != WellKnownSymbol::None && key.length != 0u)) {
         error.code = PortableObjectErrorCode::InvalidProperty;
         return false;
     }
     PortableObjectRecord* record = nullptr;
     if (!objectRecord(object, record, error)) return false;
-    if (record->array && key.length == 6u && key.data != nullptr &&
+    if (symbol == WellKnownSymbol::None && record->array &&
+        key.length == 6u && key.data != nullptr &&
         key.data[0] == 'l' && key.data[1] == 'e' && key.data[2] == 'n' &&
         key.data[3] == 'g' && key.data[4] == 't' && key.data[5] == 'h')
         return true;
     std::uint32_t index = 0u;
-    if (record->array && parseArrayIndex(key, index)) {
+    if (symbol == WellKnownSymbol::None && record->array &&
+        parseArrayIndex(key, index)) {
         if (index > limits_.maxArrayIndex) return true;
         return deleteArrayElement(object, index, deleted, error);
     }
@@ -738,7 +1058,7 @@ bool PortableObjectStore::deleteOwnProperty(RuntimeObjectId object,
             return false;
         }
         PortablePropertyRecord& current = storage_.properties[property];
-        if (propertyKeyMatches(current, key)) {
+        if (propertyKeyMatches(current, key, symbol)) {
             if ((current.attributes & 0x04u) == 0u) return true;
             if (record->propertyCount == 0u || propertyCount_ == 0u) {
                 error.code = PortableObjectErrorCode::InternalInvariantFailure;
@@ -1022,7 +1342,7 @@ bool PortableObjectStore::setArrayElement(RuntimeObjectId object,
         error.code = PortableObjectErrorCode::InvalidIndex;
         return false;
     }
-    if (index >= limits_.maxArrayLength || attributes != 0x07u) {
+    if (index >= limits_.maxArrayLength || attributes > 0x3fu) {
         error.code = PortableObjectErrorCode::ArrayCapacityExceeded;
         return false;
     }

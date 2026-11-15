@@ -12,12 +12,12 @@ namespace gxos::javascript {
 struct NavigatorScriptRuntimeTestAccess {
     static std::size_t runtimeObjectSize()
     {
-        return sizeof(RuntimeContext::RuntimeObject);
+        return sizeof(PortableObjectRecord);
     }
 
     static std::size_t arrayElementSize()
     {
-        return sizeof(RuntimeContext::RuntimeArrayElement);
+        return sizeof(PortableArrayElementRecord);
     }
 };
 

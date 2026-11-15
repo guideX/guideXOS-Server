@@ -15,59 +15,64 @@ namespace gxos::javascript {
 
 struct NavigatorScriptRuntimeTestAccess {
     using Attributes = RuntimeContext::PropertyAttributes;
-    using Object = RuntimeContext::RuntimeObject;
+
+    static PortablePropertyRecord* findProperty(RuntimeContext& runtime,
+        RuntimeObjectId id, const std::string& key,
+        WellKnownSymbol symbol = WellKnownSymbol::None)
+    {
+        PortableObjectError error;
+        if (!runtime.objectStore_.validObject(id, error) ||
+            error.code != PortableObjectErrorCode::None) return nullptr;
+        const std::size_t objectSlot = runtimeHandleSlot(id);
+        if (objectSlot >= runtime.objectRecordStorage_.size()) return nullptr;
+        std::uint32_t propertySlot =
+            runtime.objectRecordStorage_[objectSlot].firstProperty;
+        while (propertySlot != kInvalidPortablePropertySlot) {
+            if (propertySlot >= runtime.objectPropertyStorage_.size()) return nullptr;
+            PortablePropertyRecord& property =
+                runtime.objectPropertyStorage_[propertySlot];
+            if (property.active && property.symbol == symbol &&
+                property.keyLength == key.size() &&
+                std::char_traits<char>::compare(
+                    runtime.propertyNameStorage_.data() + property.keyOffset,
+                    key.data(), key.size()) == 0) return &property;
+            propertySlot = property.next;
+        }
+        return nullptr;
+    }
 
     static bool setAttributes(RuntimeContext& runtime, RuntimeObjectId id,
         const std::string& key, bool writable, bool enumerable,
         bool configurable)
     {
-        Object* object = runtime.objectAt(id);
-        if (object == nullptr) return false;
-        for (RuntimeContext::RuntimeProperty& property : object->properties) {
-            if (property.symbolKey == WellKnownSymbol::None &&
-                property.key == key) {
-                property.attributes.bits = static_cast<std::uint8_t>(
-                    Attributes::WritableKnown | Attributes::EnumerableKnown |
-                    Attributes::ConfigurableKnown |
-                    (writable ? static_cast<std::uint8_t>(
-                        Attributes::Writable) : 0u) |
-                    (enumerable ? static_cast<std::uint8_t>(
-                        Attributes::Enumerable) : 0u) |
-                    (configurable ? static_cast<std::uint8_t>(
-                        Attributes::Configurable) : 0u));
-                return true;
-            }
-        }
-        return false;
+        PortablePropertyRecord* property = findProperty(runtime, id, key);
+        if (property == nullptr) return false;
+        property->attributes = static_cast<std::uint8_t>(
+            Attributes::WritableKnown | Attributes::EnumerableKnown |
+            Attributes::ConfigurableKnown |
+            (writable ? static_cast<std::uint8_t>(Attributes::Writable) : 0u) |
+            (enumerable ? static_cast<std::uint8_t>(Attributes::Enumerable) : 0u) |
+            (configurable ? static_cast<std::uint8_t>(Attributes::Configurable) : 0u));
+        return true;
     }
 
     static bool setPartialAttributes(RuntimeContext& runtime,
         RuntimeObjectId id, const std::string& key)
     {
-        Object* object = runtime.objectAt(id);
-        if (object == nullptr) return false;
-        for (RuntimeContext::RuntimeProperty& property : object->properties) {
-            if (property.symbolKey == WellKnownSymbol::None &&
-                property.key == key) {
-                property.attributes = Attributes::writableOnly(false);
-                return true;
-            }
-        }
-        return false;
+        PortablePropertyRecord* property = findProperty(runtime, id, key);
+        if (property == nullptr) return false;
+        property->attributes = Attributes::writableOnly(false).bits;
+        return true;
     }
 
     static bool setPartialSymbolAttributes(RuntimeContext& runtime,
         RuntimeObjectId id, WellKnownSymbol symbol)
     {
-        Object* object = runtime.objectAt(id);
-        if (object == nullptr) return false;
-        for (RuntimeContext::RuntimeProperty& property : object->properties) {
-            if (property.symbolKey == symbol) {
-                property.attributes = Attributes::writableOnly(false);
-                return true;
-            }
-        }
-        return false;
+        PortablePropertyRecord* property = findProperty(runtime, id,
+            std::string(), symbol);
+        if (property == nullptr) return false;
+        property->attributes = Attributes::writableOnly(false).bits;
+        return true;
     }
 
     static bool setArrayPrototypeIndex(RuntimeContext& runtime,
@@ -82,31 +87,34 @@ struct NavigatorScriptRuntimeTestAccess {
     static bool linkPrototype(RuntimeContext& runtime, RuntimeObjectId object,
         RuntimeObjectId prototype)
     {
-        Object* target = runtime.objectAt(object);
-        if (target == nullptr || runtime.objectAt(prototype) == nullptr)
-            return false;
-        target->prototype = prototype;
-        return true;
+        PortableObjectError error;
+        return runtime.objectStore_.setPrototype(object, prototype, error) &&
+            error.code == PortableObjectErrorCode::None;
     }
 
     static bool descriptorFieldsHaveOrdinaryAttributes(
         const RuntimeContext& runtime, RuntimeObjectId id)
     {
-        const Object* object = runtime.objectAt(id);
-        if (object == nullptr || object->array ||
-            object->properties.size() != 4u) return false;
+        bool isArray = false;
+        PortableObjectError error;
+        if (!runtime.objectStore_.isArray(id, isArray, error) || isArray ||
+            error.code != PortableObjectErrorCode::None) return false;
         const char* keys[] = {"value", "writable", "enumerable",
             "configurable"};
         for (std::size_t index = 0u; index < 4u; ++index) {
-            const RuntimeContext::RuntimeProperty& property =
-                object->properties[index];
-            if (property.symbolKey != WellKnownSymbol::None ||
-                property.key != keys[index] ||
-                !property.attributes.isValid() ||
-                !property.attributes.isFullyKnown() ||
-                !property.attributes.writable() ||
-                !property.attributes.enumerable() ||
-                !property.attributes.configurable()) return false;
+            PortablePropertyEntry property;
+            bool found = false;
+            if (!runtime.objectStore_.getOwnPropertyAt(id, index, property,
+                    found, error) || error.code !=
+                    PortableObjectErrorCode::None || !found ||
+                property.symbol != WellKnownSymbol::None ||
+                property.key.length != std::char_traits<char>::length(keys[index]) ||
+                std::char_traits<char>::compare(property.key.data, keys[index],
+                    property.key.length) != 0) return false;
+            const RuntimeContext::PropertyAttributes attributes{property.attributes};
+            if (!attributes.isValid() || !attributes.isFullyKnown() ||
+                !attributes.writable() || !attributes.enumerable() ||
+                !attributes.configurable()) return false;
         }
         return true;
     }
@@ -114,17 +122,11 @@ struct NavigatorScriptRuntimeTestAccess {
     static bool readOwn(const RuntimeContext& runtime, RuntimeObjectId id,
         const std::string& key, Value& value)
     {
-        const Object* object = runtime.objectAt(id);
-        if (object == nullptr) return false;
-        for (const RuntimeContext::RuntimeProperty& property :
-            object->properties) {
-            if (property.symbolKey == WellKnownSymbol::None &&
-                property.key == key) {
-                value = property.value;
-                return true;
-            }
-        }
-        return false;
+        bool found = false;
+        PortableObjectError error;
+        return runtime.objectStore_.getOwnProperty(id,
+                SourceView(key.data(), key.size()), value, found, error) &&
+            error.code == PortableObjectErrorCode::None && found;
     }
 
     static void failPropertyInsertionAfter(RuntimeContext& runtime,
@@ -138,11 +140,13 @@ struct NavigatorScriptRuntimeTestAccess {
     static void setObjectLimit(RuntimeContext& runtime, std::size_t limit)
     {
         runtime.limits_.maxObjects = limit;
+        runtime.objectStore_.limits_.maxObjects = limit;
     }
 
     static void setPropertyLimit(RuntimeContext& runtime, std::size_t limit)
     {
         runtime.limits_.maxTotalProperties = limit;
+        runtime.objectStore_.limits_.maxProperties = limit;
     }
 
     static void setStringValueLimit(RuntimeContext& runtime,
@@ -182,14 +186,14 @@ struct NavigatorScriptRuntimeTestAccess {
             attributes.configurable();
     }
 
-    static std::size_t objectBytes() { return sizeof(Object); }
+    static std::size_t objectBytes() { return sizeof(PortableObjectRecord); }
     static std::size_t propertyBytes()
     {
-        return sizeof(RuntimeContext::RuntimeProperty);
+        return sizeof(PortablePropertyRecord);
     }
     static std::size_t arrayElementBytes()
     {
-        return sizeof(RuntimeContext::RuntimeArrayElement);
+        return sizeof(PortableArrayElementRecord);
     }
     static std::size_t attributeBytes() { return sizeof(Attributes); }
 };

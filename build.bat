@@ -99,6 +99,7 @@ navigator_javascript/value.cpp ^
 navigator_javascript/host.cpp ^
 navigator_javascript/environment.cpp ^
 navigator_javascript/runtime.cpp ^
+navigator_javascript/object_storage.cpp ^
 navigator_javascript/lexer.cpp ^
 navigator_javascript/parser.cpp ^
 navigator_javascript/navigator_script_host.cpp ^

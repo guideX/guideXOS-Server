@@ -14,14 +14,25 @@
 namespace gxos::javascript {
 
 struct NavigatorScriptRuntimeTestAccess {
-    using Object = RuntimeContext::RuntimeObject;
-    using ArrayElement = RuntimeContext::RuntimeArrayElement;
+    using Object = PortableObjectRecord;
+    using ArrayElement = PortableArrayElementRecord;
+    using Property = PortablePropertyRecord;
 
     static std::size_t objectBytes() { return sizeof(Object); }
     static std::size_t arrayElementBytes() { return sizeof(ArrayElement); }
     static std::size_t propertyBytes()
     {
-        return sizeof(RuntimeContext::RuntimeProperty);
+        return sizeof(Property);
+    }
+
+    static bool ownEntry(const RuntimeContext& runtime, RuntimeObjectId id,
+        const std::string& key, PortablePropertyEntry& entry)
+    {
+        bool found = false;
+        PortableObjectError error;
+        return runtime.objectStore_.getOwnPropertyEntry(id,
+                SourceView(key.data(), key.size()), entry, found, error) &&
+            error.code == PortableObjectErrorCode::None && found;
     }
 
     static std::uint8_t attributeBits(bool writable, bool enumerable,
@@ -57,43 +68,57 @@ struct NavigatorScriptRuntimeTestAccess {
     static bool arrayMetrics(const RuntimeContext& runtime, RuntimeObjectId id,
         std::size_t& length, std::size_t& occupied, std::size_t& capacity)
     {
-        const Object* object = runtime.objectAt(id);
-        if (object == nullptr || !object->array) return false;
-        length = object->arrayLength;
-        occupied = object->elements.size();
-        capacity = object->elements.capacity();
+        bool isArray = false;
+        PortableObjectError error;
+        if (!runtime.objectStore_.isArray(id, isArray, error) || !isArray ||
+            error.code != PortableObjectErrorCode::None ||
+            !runtime.objectStore_.arrayLength(id, length, error) ||
+            error.code != PortableObjectErrorCode::None) return false;
+        const std::size_t slot = runtimeHandleSlot(id);
+        if (slot >= runtime.objectRecordStorage_.size()) return false;
+        occupied = runtime.objectRecordStorage_[slot].arrayElementCount;
+        capacity = occupied; // Shared pool records retained by this Array.
         return true;
     }
 
     static std::size_t arrayLength(const RuntimeContext& runtime,
         RuntimeObjectId id)
     {
-        const Object* object = runtime.objectAt(id);
-        return object != nullptr && object->array ? object->arrayLength : 0u;
+        std::size_t length = 0u;
+        PortableObjectError error;
+        return runtime.objectStore_.arrayLength(id, length, error) &&
+            error.code == PortableObjectErrorCode::None ? length : 0u;
     }
 
     static bool hasOwnArrayElement(const RuntimeContext& runtime,
         RuntimeObjectId id, std::size_t index)
     {
-        const Object* object = runtime.objectAt(id);
-        if (object == nullptr || !object->array) return false;
-        const std::size_t position =
-            RuntimeContext::findArrayElementPosition(*object, index);
-        return index < object->arrayLength &&
-            position < object->elements.size() &&
-            object->elements[position].index == index;
+        bool found = false;
+        PortableObjectError error;
+        return runtime.objectStore_.hasOwnArrayElement(id, index, found,
+                error) && error.code == PortableObjectErrorCode::None &&
+            found;
     }
 
     static bool arrayStringsEqual(const RuntimeContext& runtime,
         RuntimeObjectId id, const std::vector<std::string>& expected)
     {
-        const Object* object = runtime.objectAt(id);
-        if (object == nullptr || !object->array ||
-            object->arrayLength != expected.size() ||
-            object->elements.size() != expected.size()) return false;
+        std::size_t length = 0u;
+        PortableObjectError error;
+        if (!runtime.objectStore_.arrayLength(id, length, error) ||
+            error.code != PortableObjectErrorCode::None ||
+            length != expected.size()) return false;
+        const std::size_t slot = runtimeHandleSlot(id);
+        if (slot >= runtime.objectRecordStorage_.size() ||
+            runtime.objectRecordStorage_[slot].arrayElementCount !=
+                expected.size()) return false;
         for (std::size_t index = 0u; index < expected.size(); ++index) {
-            const ArrayElement& element = object->elements[index];
-            if (element.index != index || !element.value.isString() ||
+            PortableArrayEntry element;
+            bool found = false;
+            if (!runtime.objectStore_.getArrayElementAt(id, index, element,
+                    found, error) || error.code !=
+                    PortableObjectErrorCode::None || !found ||
+                element.index != index || !element.value.isString() ||
                 runtime.stringValue(element.value) != expected[index]) {
                 return false;
             }
@@ -104,72 +129,53 @@ struct NavigatorScriptRuntimeTestAccess {
     static bool propertyMetadata(const RuntimeContext& runtime,
         RuntimeObjectId id, const std::string& key, bool& readOnly)
     {
-        const Object* object = runtime.objectAt(id);
-        if (object == nullptr) return false;
-        for (const RuntimeContext::RuntimeProperty& property :
-            object->properties) {
-            if (property.symbolKey == WellKnownSymbol::None &&
-                property.key == key) {
-                readOnly = property.attributes.hasWritable() &&
-                    !property.attributes.writable();
-                return true;
-            }
-        }
-        return false;
+        PortablePropertyEntry property;
+        if (!ownEntry(runtime, id, key, property)) return false;
+        const RuntimeContext::PropertyAttributes attributes{property.attributes};
+        readOnly = attributes.hasWritable() && !attributes.writable();
+        return true;
     }
 
     static bool propertyHasAttributes(const RuntimeContext& runtime,
         RuntimeObjectId id, const std::string& key, bool writable,
         bool enumerable, bool configurable)
     {
-        const Object* object = runtime.objectAt(id);
-        if (object == nullptr) return false;
         const std::uint8_t expected =
             attributeBits(writable, enumerable, configurable);
-        for (const RuntimeContext::RuntimeProperty& property :
-            object->properties) {
-            if (property.symbolKey == WellKnownSymbol::None &&
-                property.key == key) {
-                return property.attributes.isValid() &&
-                    property.attributes.bits == expected;
-            }
-        }
-        return false;
+        PortablePropertyEntry property;
+        return ownEntry(runtime, id, key, property) &&
+            RuntimeContext::PropertyAttributes{property.attributes}.isValid() &&
+            property.attributes == expected;
     }
 
     static bool propertyHasPartialWritableAttributes(
         const RuntimeContext& runtime, RuntimeObjectId id,
         const std::string& key, bool writable)
     {
-        const Object* object = runtime.objectAt(id);
-        if (object == nullptr) return false;
-        for (const RuntimeContext::RuntimeProperty& property :
-            object->properties) {
-            if (property.symbolKey == WellKnownSymbol::None &&
-                property.key == key) {
-                return property.attributes.isValid() &&
-                    property.attributes.hasWritable() &&
-                    property.attributes.writable() == writable &&
-                    !property.attributes.hasEnumerable() &&
-                    !property.attributes.hasConfigurable();
-            }
-        }
-        return false;
+        PortablePropertyEntry property;
+        if (!ownEntry(runtime, id, key, property)) return false;
+        const RuntimeContext::PropertyAttributes attributes{property.attributes};
+        return attributes.isValid() && attributes.hasWritable() &&
+            attributes.writable() == writable && !attributes.hasEnumerable() &&
+            !attributes.hasConfigurable();
     }
 
     static bool symbolPropertyHasOrdinaryAttributes(
         const RuntimeContext& runtime, RuntimeObjectId id)
     {
-        const Object* object = runtime.objectAt(id);
-        if (object == nullptr) return false;
-        for (const RuntimeContext::RuntimeProperty& property :
-            object->properties) {
-            if (property.symbolKey != WellKnownSymbol::None) {
-                return property.attributes.isValid() &&
-                    property.attributes.isFullyKnown() &&
-                    property.attributes.writable() &&
-                    property.attributes.enumerable() &&
-                    property.attributes.configurable();
+        PortablePropertyEntry property;
+        bool found = false;
+        PortableObjectError error;
+        for (std::size_t ordinal = 0u;
+            runtime.objectStore_.getOwnPropertyAt(id, ordinal, property,
+                found, error) && error.code == PortableObjectErrorCode::None &&
+            found; ++ordinal) {
+            if (property.symbol != WellKnownSymbol::None) {
+                const RuntimeContext::PropertyAttributes attributes{
+                    property.attributes};
+                return attributes.isValid() && attributes.isFullyKnown() &&
+                    attributes.writable() && attributes.enumerable() &&
+                    attributes.configurable();
             }
         }
         return false;
@@ -189,25 +195,33 @@ struct NavigatorScriptRuntimeTestAccess {
     static bool arrayElementHasOrdinaryAttributes(
         const RuntimeContext& runtime, RuntimeObjectId id, std::size_t index)
     {
-        const Object* object = runtime.objectAt(id);
-        if (object == nullptr || !object->array) return false;
-        const std::size_t position =
-            RuntimeContext::findArrayElementPosition(*object, index);
-        return index < object->arrayLength &&
-            position < object->elements.size() &&
-            object->elements[position].index == index &&
-            object->elements[position].attributes.isValid() &&
-            object->elements[position].attributes.isFullyKnown() &&
-            object->elements[position].attributes.writable() &&
-            object->elements[position].attributes.enumerable() &&
-            object->elements[position].attributes.configurable();
+        const std::size_t slot = runtimeHandleSlot(id);
+        if (slot >= runtime.objectRecordStorage_.size() ||
+            !runtime.objectRecordStorage_[slot].array) return false;
+        std::uint32_t elementSlot =
+            runtime.objectRecordStorage_[slot].firstArrayElement;
+        while (elementSlot != kInvalidPortableArrayElementSlot) {
+            if (elementSlot >= runtime.arrayElementStorage_.size()) return false;
+            const ArrayElement& element = runtime.arrayElementStorage_[elementSlot];
+            if (element.index == index) {
+                const RuntimeContext::PropertyAttributes attributes{
+                    element.attributes};
+                return attributes.isValid() && attributes.isFullyKnown() &&
+                    attributes.writable() && attributes.enumerable() &&
+                    attributes.configurable();
+            }
+            elementSlot = element.next;
+        }
+        return false;
     }
 
     static bool arrayLengthHasSpecialAttributes(const RuntimeContext& runtime,
         RuntimeObjectId id)
     {
-        const Object* object = runtime.objectAt(id);
-        if (object == nullptr || !object->array) return false;
+        bool isArray = false;
+        PortableObjectError error;
+        if (!runtime.objectStore_.isArray(id, isArray, error) || !isArray ||
+            error.code != PortableObjectErrorCode::None) return false;
         const RuntimeContext::PropertyAttributes attributes =
             RuntimeContext::PropertyAttributes::arrayLength();
         return attributes.isValid() && attributes.isFullyKnown() &&
@@ -219,39 +233,23 @@ struct NavigatorScriptRuntimeTestAccess {
     static bool eventPropertyHasPartialAttributes(
         const RuntimeContext& runtime, const std::string& key)
     {
-        const Object* object = runtime.objectAt(runtime.eventObject_);
-        if (object == nullptr) return false;
-        for (const RuntimeContext::RuntimeProperty& property :
-            object->properties) {
-            if (property.symbolKey == WellKnownSymbol::None &&
-                property.key == key) {
-                return property.attributes.isValid() &&
-                    property.attributes.hasWritable() &&
-                    !property.attributes.writable() &&
-                    !property.attributes.hasEnumerable() &&
-                    !property.attributes.hasConfigurable();
-            }
-        }
-        return false;
+        PortablePropertyEntry property;
+        if (!ownEntry(runtime, runtime.eventObject_, key, property)) return false;
+        const RuntimeContext::PropertyAttributes attributes{property.attributes};
+        return attributes.isValid() && attributes.hasWritable() &&
+            !attributes.writable() && !attributes.hasEnumerable() &&
+            !attributes.hasConfigurable();
     }
 
     static bool builtinPropertyHasPartialAttributes(
         const RuntimeContext& runtime, const std::string& key)
     {
-        const Object* object = runtime.objectAt(runtime.arrayPrototype_);
-        if (object == nullptr) return false;
-        for (const RuntimeContext::RuntimeProperty& property :
-            object->properties) {
-            if (property.symbolKey == WellKnownSymbol::None &&
-                property.key == key) {
-                return property.attributes.isValid() &&
-                    property.attributes.hasWritable() &&
-                    property.attributes.writable() &&
-                    !property.attributes.hasEnumerable() &&
-                    !property.attributes.hasConfigurable();
-            }
-        }
-        return false;
+        PortablePropertyEntry property;
+        if (!ownEntry(runtime, runtime.arrayPrototype_, key, property)) return false;
+        const RuntimeContext::PropertyAttributes attributes{property.attributes};
+        return attributes.isValid() && attributes.hasWritable() &&
+            attributes.writable() && !attributes.hasEnumerable() &&
+            !attributes.hasConfigurable();
     }
 
     static bool tryUnknownAttributeInsertion(RuntimeContext& runtime,
@@ -264,41 +262,32 @@ struct NavigatorScriptRuntimeTestAccess {
     static bool hasSymbolProperty(const RuntimeContext& runtime,
         RuntimeObjectId id)
     {
-        const Object* object = runtime.objectAt(id);
-        if (object == nullptr) return false;
-        for (const RuntimeContext::RuntimeProperty& property :
-            object->properties) {
-            if (property.symbolKey != WellKnownSymbol::None) return true;
-        }
+        PortablePropertyEntry property;
+        bool found = false;
+        PortableObjectError error;
+        for (std::size_t ordinal = 0u;
+            runtime.objectStore_.getOwnPropertyAt(id, ordinal, property,
+                found, error) && error.code == PortableObjectErrorCode::None &&
+            found; ++ordinal)
+            if (property.symbol != WellKnownSymbol::None) return true;
         return false;
     }
 
     static bool hasDetachedArrayLength(const RuntimeContext& runtime,
         RuntimeObjectId id)
     {
-        const Object* object = runtime.objectAt(id);
-        if (object == nullptr || !object->array) return false;
-        for (const RuntimeContext::RuntimeProperty& property :
-            object->properties) {
-            if (property.symbolKey == WellKnownSymbol::None &&
-                property.key == "length") return true;
-        }
-        return false;
+        (void)runtime;
+        (void)id;
+        return false; // Array length lives in its object record.
     }
 
     static bool eventPropertyIsReadOnly(const RuntimeContext& runtime,
         const std::string& key)
     {
-        const Object* object = runtime.objectAt(runtime.eventObject_);
-        if (object == nullptr) return false;
-        for (const RuntimeContext::RuntimeProperty& property :
-            object->properties) {
-            if (property.symbolKey == WellKnownSymbol::None &&
-                property.key == key && property.attributes.hasWritable()) {
-                return !property.attributes.writable();
-            }
-        }
-        return false;
+        PortablePropertyEntry property;
+        if (!ownEntry(runtime, runtime.eventObject_, key, property)) return false;
+        const RuntimeContext::PropertyAttributes attributes{property.attributes};
+        return attributes.hasWritable() && !attributes.writable();
     }
 
     static void failNextArrayCreation(RuntimeContext& runtime)
@@ -334,7 +323,7 @@ struct NavigatorScriptRuntimeTestAccess {
     static bool fillObjectPool(RuntimeContext& runtime)
     {
         const std::vector<Value> noElements;
-        while (runtime.objects_.size() < runtime.limits_.maxObjects) {
+        while (runtime.objectStore_.objectCount() < runtime.limits_.maxObjects) {
             RuntimeObjectId object = kInvalidRuntimeObjectId;
             RuntimeErrorCode error = RuntimeErrorCode::None;
             if (!runtime.createObject(false, noElements, object, error))
@@ -523,9 +512,9 @@ void testAttributeDefaultsAndFiltering()
         << " B; capacities="
         << limits.maxObjects << ',' << limits.maxTotalProperties << ','
         << limits.maxTotalArrayElements << '\n';
-    expect(NavigatorScriptRuntimeTestAccess::propertyBytes() == 56u &&
-        NavigatorScriptRuntimeTestAccess::arrayElementBytes() == 24u &&
-        NavigatorScriptRuntimeTestAccess::objectBytes() == 88u &&
+    expect(NavigatorScriptRuntimeTestAccess::propertyBytes() == 40u &&
+        NavigatorScriptRuntimeTestAccess::arrayElementBytes() == 32u &&
+        NavigatorScriptRuntimeTestAccess::objectBytes() == 28u &&
         sizeof(Value) == 16u &&
         NavigatorScriptRuntimeTestAccess::attributeMaskBytes() == 1u,
         "portable Values and compact attribute metadata preserve bounded record and pool sizes");

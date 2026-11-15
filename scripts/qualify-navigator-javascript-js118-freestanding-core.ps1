@@ -1,3 +1,7 @@
+param(
+    [string]$EvidenceDirectory
+)
+
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $Root
@@ -31,7 +35,11 @@ foreach ($tool in @($Ld, $Ar, $Nm, $Objdump)) {
     }
 }
 
-$Evidence = "E:\CodexArtifacts\guideXOSServer_NAVIGATOR_JS_SUPPORT\JS118\freestanding-run-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+$Evidence = $EvidenceDirectory
+if ([string]::IsNullOrWhiteSpace($Evidence)) {
+    $Evidence = "E:\CodexArtifacts\guideXOSServer_NAVIGATOR_JS_SUPPORT\JS118\freestanding-run-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+}
+$Evidence = [System.IO.Path]::GetFullPath($Evidence)
 if (Test-Path -LiteralPath $Evidence) {
     throw "Refusing to overwrite existing JS118 evidence: $Evidence"
 }

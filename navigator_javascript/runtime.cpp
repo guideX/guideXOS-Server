@@ -433,23 +433,6 @@ RuntimeErrorCode runtimeEnvironmentError(EnvironmentErrorCode code)
     return RuntimeErrorCode::InvalidAstState;
 }
 
-bool propertyKeyMatchesArrayIndex(const std::string& key, std::size_t index)
-{
-    if (key.empty()) return false;
-    char digits[sizeof(std::size_t) * 3u] = {};
-    std::size_t digitCount = 0u;
-    do {
-        digits[digitCount++] = static_cast<char>('0' + index % 10u);
-        index /= 10u;
-    } while (index != 0u);
-    if (key.size() != digitCount) return false;
-    for (std::size_t position = 0u; position < digitCount; ++position) {
-        if (key[position] != digits[digitCount - position - 1u])
-            return false;
-    }
-    return true;
-}
-
 } // namespace
 
 class RuntimeContext::Evaluator : public HostFunctionInvoker {
@@ -1896,57 +1879,21 @@ private:
 
     bool hasOwnProperty(RuntimeObjectId objectId, const std::string& key) const
     {
-        const RuntimeContext::RuntimeObject* object =
-            context_.objectAt(objectId);
-        if (object == nullptr) return false;
-        if (object->array && key == "length") return true;
-        std::uint32_t standardIndex = 0u;
-        if (object->array && parseEcmaArrayIndex(key, standardIndex)) {
-            const std::size_t index = static_cast<std::size_t>(standardIndex);
-            if (index > context_.limits_.maxArrayIndex) return false;
-            const std::size_t position =
-                RuntimeContext::findArrayElementPosition(*object, index);
-            return index < object->arrayLength &&
-                position < object->elements.size() &&
-                object->elements[position].index == index;
-        }
-        for (const RuntimeContext::RuntimeProperty& property :
-            object->properties) {
-            if (property.symbolKey == WellKnownSymbol::None &&
-                property.key == key) return true;
-        }
-        return false;
+        RuntimeContext::PropertyKey propertyKey;
+        propertyKey.string = key;
+        bool found = false;
+        RuntimeErrorCode ignored = RuntimeErrorCode::None;
+        return context_.hasOwnStoredProperty(objectId, propertyKey, found,
+            ignored) && found;
     }
 
     bool hasOwnProperty(RuntimeObjectId objectId,
         const RuntimeContext::PropertyKey& key) const
     {
-        const RuntimeContext::RuntimeObject* object =
-            context_.objectAt(objectId);
-        if (object == nullptr) return false;
-        if (!key.isSymbol()) {
-            if (object->array && key.string == "length") return true;
-            std::uint32_t standardIndex = 0u;
-            if (object->array && parseEcmaArrayIndex(key.string,
-                    standardIndex)) {
-                const std::size_t index =
-                    static_cast<std::size_t>(standardIndex);
-                if (index > context_.limits_.maxArrayIndex) return false;
-                const std::size_t position =
-                    RuntimeContext::findArrayElementPosition(*object, index);
-                return index < object->arrayLength &&
-                    position < object->elements.size() &&
-                    object->elements[position].index == index;
-            }
-        }
-        for (const RuntimeContext::RuntimeProperty& property :
-            object->properties) {
-            if (key.isSymbol()
-                    ? property.symbolKey == key.symbol
-                    : property.symbolKey == WellKnownSymbol::None &&
-                        property.key == key.string) return true;
-        }
-        return false;
+        bool found = false;
+        RuntimeErrorCode ignored = RuntimeErrorCode::None;
+        return context_.hasOwnStoredProperty(objectId, key, found, ignored) &&
+            found;
     }
 
     bool hasArrayIndex(RuntimeObjectId objectId, std::size_t index,
@@ -1957,31 +1904,29 @@ private:
         for (std::size_t depth = 0u;
             depth < context_.limits_.maxPrototypeDepth; ++depth) {
             if (!context_.consumeStep(location)) return false;
-            const RuntimeContext::RuntimeObject* object =
-                context_.objectAt(current);
-            if (object == nullptr) {
+            if (context_.objectAt(current) == nullptr) {
                 fail(RuntimeErrorCode::CannotReadProperty, location);
                 return false;
             }
-            if (object->array && index < object->arrayLength) {
-                const std::size_t position =
-                    RuntimeContext::findArrayElementPosition(*object, index);
-                if (position < object->elements.size() &&
-                    object->elements[position].index == index) {
-                    present = true;
-                    return true;
-                }
+            RuntimeContext::PropertyKey key;
+            key.string = std::to_string(index);
+            RuntimeErrorCode ownError = RuntimeErrorCode::None;
+            if (!context_.hasOwnStoredProperty(current, key, present,
+                    ownError)) {
+                fail(ownError, location);
+                return false;
             }
-            for (const RuntimeContext::RuntimeProperty& property :
-                object->properties) {
-                if (property.symbolKey == WellKnownSymbol::None &&
-                    propertyKeyMatchesArrayIndex(property.key, index)) {
-                    present = true;
-                    return true;
-                }
+            if (present) return true;
+            RuntimeObjectId prototype = kInvalidRuntimeObjectId;
+            PortableObjectError objectError;
+            if (!context_.objectStore_.prototypeOf(current, prototype,
+                    objectError)) {
+                fail(context_.mapPortableObjectError(objectError.code),
+                    location);
+                return false;
             }
-            if (object->prototype == kInvalidRuntimeObjectId) return true;
-            current = object->prototype;
+            if (prototype == kInvalidRuntimeObjectId) return true;
+            current = prototype;
         }
         fail(RuntimeErrorCode::PrototypeChainExceeded, location);
         return false;
@@ -2013,7 +1958,10 @@ private:
             ? receiver.objectId() : kInvalidRuntimeObjectId;
         const RuntimeContext::RuntimeObject* array =
             context_.objectAt(arrayId);
-        if (array == nullptr || !array->array) {
+        bool arrayIsArray = false;
+        if (array == nullptr ||
+            !context_.isArrayObject(arrayId, arrayIsArray) ||
+            !arrayIsArray) {
             fail(RuntimeErrorCode::InvalidReceiver, callSite);
             return ArrayTraversalControl::Error;
         }
@@ -2027,9 +1975,12 @@ private:
             return ArrayTraversalControl::Error;
         }
 
-        // Keep only the stable object ID and captured length across callbacks:
-        // reentrant code may grow objects_ and invalidate RuntimeObject pointers.
-        const std::size_t initialLength = array->arrayLength;
+        // Keep only the stable object ID and captured length across callbacks.
+        std::size_t initialLength = 0u;
+        if (!context_.getArrayLength(arrayId, initialLength)) {
+            fail(RuntimeErrorCode::InvalidAstState, callSite);
+            return ArrayTraversalControl::Error;
+        }
         if (initialLength > maximumSupportedArrayLength(context_.limits_)) {
             fail(RuntimeErrorCode::InvalidAstState, callSite);
             return ArrayTraversalControl::Error;
@@ -2171,7 +2122,10 @@ private:
             ? receiver.objectId() : kInvalidRuntimeObjectId;
         const RuntimeContext::RuntimeObject* array =
             context_.objectAt(arrayId);
-        if (array == nullptr || !array->array) {
+        bool arrayIsArray = false;
+        if (array == nullptr ||
+            !context_.isArrayObject(arrayId, arrayIsArray) ||
+            !arrayIsArray) {
             fail(RuntimeErrorCode::InvalidReceiver, callSite);
             return ArrayTraversalControl::Error;
         }
@@ -2185,9 +2139,12 @@ private:
             return ArrayTraversalControl::Error;
         }
 
-        // Reentrant callback execution may grow objects_ and invalidate this
-        // pointer. Retain only the stable source ID and the entry length.
-        const std::size_t initialLength = array->arrayLength;
+        // Retain only the stable source ID and the entry length.
+        std::size_t initialLength = 0u;
+        if (!context_.getArrayLength(arrayId, initialLength)) {
+            fail(RuntimeErrorCode::InvalidAstState, callSite);
+            return ArrayTraversalControl::Error;
+        }
         if (initialLength > maximumSupportedArrayLength(context_.limits_)) {
             fail(RuntimeErrorCode::InvalidAstState, callSite);
             return ArrayTraversalControl::Error;
@@ -2262,7 +2219,10 @@ private:
             ? receiver.objectId() : kInvalidRuntimeObjectId;
         const RuntimeContext::RuntimeObject* array =
             context_.objectAt(arrayId);
-        if (array == nullptr || !array->array) {
+        bool arrayIsArray = false;
+        if (array == nullptr ||
+            !context_.isArrayObject(arrayId, arrayIsArray) ||
+            !arrayIsArray) {
             fail(RuntimeErrorCode::InvalidReceiver, callSite);
             return ArrayTraversalControl::Error;
         }
@@ -2279,7 +2239,11 @@ private:
         // Retain only the stable source ID and captured length across callback
         // execution. The cursor is a one-past-end size_t, so decrementing it
         // before lookup terminates at zero without converting -1 to unsigned.
-        const std::size_t initialLength = array->arrayLength;
+        std::size_t initialLength = 0u;
+        if (!context_.getArrayLength(arrayId, initialLength)) {
+            fail(RuntimeErrorCode::InvalidAstState, callSite);
+            return ArrayTraversalControl::Error;
+        }
         if (initialLength > maximumSupportedArrayLength(context_.limits_)) {
             fail(RuntimeErrorCode::InvalidAstState, callSite);
             return ArrayTraversalControl::Error;
@@ -2347,6 +2311,10 @@ private:
     {
         const RuntimeContext::RuntimeObject* source =
             context_.objectAt(sourceId);
+        bool sourceArray = false;
+        std::size_t sourceLength = 0u;
+        std::vector<RuntimeContext::RuntimeProperty> sourceProperties;
+        std::vector<RuntimeContext::RuntimeArrayElement> sourceElements;
         if (source == nullptr || sourceId == context_.objectPrototype_ ||
             sourceId == context_.arrayPrototype_ ||
             sourceId == context_.mathObject_ ||
@@ -2355,8 +2323,21 @@ private:
             fail(RuntimeErrorCode::InvalidReceiver, callSite);
             return false;
         }
+        RuntimeErrorCode snapshotError = RuntimeErrorCode::None;
+        if (!context_.isArrayObject(sourceId, sourceArray) ||
+            (sourceArray && !context_.getArrayLength(sourceId,
+                sourceLength)) ||
+            !context_.snapshotOwnProperties(sourceId, sourceProperties,
+                snapshotError) ||
+            (sourceArray && !context_.snapshotArrayElements(sourceId,
+                sourceElements, snapshotError))) {
+            fail(snapshotError == RuntimeErrorCode::None
+                    ? RuntimeErrorCode::InvalidAstState : snapshotError,
+                callSite);
+            return false;
+        }
         for (const RuntimeContext::RuntimeProperty& property :
-            source->properties) {
+            sourceProperties) {
             if (property.symbolKey == WellKnownSymbol::None &&
                 (!property.attributes.isValid() ||
                     !property.attributes.isFullyKnown())) {
@@ -2369,7 +2350,7 @@ private:
             }
         }
 
-        std::size_t keyCount = source->array ? source->elements.size() : 0u;
+        std::size_t keyCount = sourceArray ? sourceElements.size() : 0u;
         std::size_t keyBytes = 0u;
         const auto addKeySize = [this, &keyBytes, callSite](
             std::size_t length) {
@@ -2393,16 +2374,16 @@ private:
         };
 
         std::size_t previousArrayIndex = 0u;
-        if (source->array) {
+        if (sourceArray) {
             for (std::size_t position = 0u;
-                position < source->elements.size(); ++position) {
+                position < sourceElements.size(); ++position) {
                 if (!context_.consumeStep(callSite)) return false;
-                const std::size_t index = source->elements[position].index;
-                if (index >= source->arrayLength ||
+                const std::size_t index = sourceElements[position].index;
+                if (index >= sourceLength ||
                     index > context_.limits_.maxArrayIndex ||
-                    !source->elements[position].attributes.isValid() ||
-                    !source->elements[position].attributes.isFullyKnown() ||
-                    !source->elements[position].attributes.enumerable() ||
+                    !sourceElements[position].attributes.isValid() ||
+                    !sourceElements[position].attributes.isFullyKnown() ||
+                    !sourceElements[position].attributes.enumerable() ||
                     (position != 0u && index <= previousArrayIndex)) {
                     fail(RuntimeErrorCode::InvalidAstState, callSite);
                     return false;
@@ -2413,13 +2394,13 @@ private:
         }
 
         for (const RuntimeContext::RuntimeProperty& property :
-            source->properties) {
+            sourceProperties) {
             if (!context_.consumeStep(callSite)) return false;
             if (property.symbolKey != WellKnownSymbol::None ||
-                (source->array && property.key == "length")) continue;
+                (sourceArray && property.key == "length")) continue;
             if (!property.attributes.enumerable()) continue;
             std::uint32_t standardIndex = 0u;
-            if (source->array && parseEcmaArrayIndex(property.key,
+            if (sourceArray && parseEcmaArrayIndex(property.key,
                     standardIndex)) {
                 // Indexed Array properties are stored only in the sorted
                 // elements vector. A duplicate here means the own-key store
@@ -2440,12 +2421,12 @@ private:
         if (keyCount > context_.limits_.maxArrayElements ||
             keyCount > maximumResultLength ||
             keyCount > context_.limits_.maxTotalArrayElements ||
-            context_.totalArrayElements_ >
+            context_.objectStore_.arrayElementCount() >
                 context_.limits_.maxTotalArrayElements - keyCount) {
             fail(RuntimeErrorCode::ArrayLimitExceeded, callSite);
             return false;
         }
-        if (context_.objects_.size() >= context_.limits_.maxObjects) {
+        if (context_.objectStore_.objectCount() >= context_.limits_.maxObjects) {
             fail(RuntimeErrorCode::ObjectLimitExceeded, callSite);
             return false;
         }
@@ -2516,9 +2497,9 @@ private:
                 conversion.ptr - buffer)));
         };
 
-        if (source->array) {
+        if (sourceArray) {
             for (const RuntimeContext::RuntimeArrayElement& element :
-                source->elements) {
+                sourceElements) {
                 if (!element.attributes.enumerable()) continue;
                 if (!appendIndex(element.index)) return false;
             }
@@ -2530,10 +2511,10 @@ private:
                 std::uint32_t smallestIndex = 0u;
                 std::size_t smallestProperty = 0u;
                 for (std::size_t position = 0u;
-                    position < source->properties.size(); ++position) {
+                    position < sourceProperties.size(); ++position) {
                     if (!context_.consumeStep(callSite)) return false;
                     const RuntimeContext::RuntimeProperty& property =
-                        source->properties[position];
+                        sourceProperties[position];
                     if (property.symbolKey != WellKnownSymbol::None ||
                         !property.attributes.enumerable()) continue;
                     std::uint32_t index = 0u;
@@ -2547,7 +2528,7 @@ private:
                 }
                 if (!found) break;
                 const std::string& key =
-                    source->properties[smallestProperty].key;
+                    sourceProperties[smallestProperty].key;
                 if (!appendKey(SourceView(key.data(), key.size()))) return false;
                 previousIndex = smallestIndex;
                 hasPreviousIndex = true;
@@ -2555,13 +2536,13 @@ private:
         }
 
         for (const RuntimeContext::RuntimeProperty& property :
-            source->properties) {
+            sourceProperties) {
             if (!context_.consumeStep(callSite)) return false;
             if (property.symbolKey != WellKnownSymbol::None ||
-                (source->array && property.key == "length") ||
+                (sourceArray && property.key == "length") ||
                 !property.attributes.enumerable()) continue;
             std::uint32_t standardIndex = 0u;
-            if (!source->array && parseEcmaArrayIndex(property.key,
+            if (!sourceArray && parseEcmaArrayIndex(property.key,
                     standardIndex)) continue;
             if (!appendKey(SourceView(property.key.data(), property.key.size())))
                 return false;
@@ -2598,13 +2579,14 @@ private:
         const std::size_t requiredKeyBytes =
             sizeof(valueKey) - 1u + sizeof(writableKey) - 1u +
             sizeof(enumerableKey) - 1u + sizeof(configurableKey) - 1u;
-        if (context_.objects_.size() >= context_.limits_.maxObjects) {
+        if (context_.objectStore_.objectCount() >=
+            context_.limits_.maxObjects) {
             fail(RuntimeErrorCode::ObjectLimitExceeded, callSite);
             return false;
         }
         if (context_.limits_.maxPropertiesPerObject < 4u ||
             context_.limits_.maxTotalProperties < 4u ||
-            context_.totalPropertyCount_ >
+            context_.objectStore_.propertyCount() >
                 context_.limits_.maxTotalProperties - 4u) {
             fail(RuntimeErrorCode::PropertyLimitExceeded, callSite);
             return false;
@@ -2615,7 +2597,7 @@ private:
             return false;
         }
         if (requiredKeyBytes > context_.limits_.maxTotalPropertyKeyBytes ||
-            context_.totalPropertyKeyBytes_ >
+            context_.objectStore_.propertyNameBytesUsed() >
                 context_.limits_.maxTotalPropertyKeyBytes - requiredKeyBytes) {
             fail(RuntimeErrorCode::PropertyLimitExceeded, callSite);
             return false;
@@ -2629,11 +2611,10 @@ private:
             return false;
         }
 
-        std::size_t insertedProperties = 0u;
-        std::size_t insertedKeyBytes = 0u;
+        const std::size_t objectCountBefore =
+            context_.objectStore_.objectCount() - 1u;
         const auto addField = [this, descriptorId, callSite,
-            &insertedProperties, &insertedKeyBytes](const char* key,
-                Value value) {
+            objectCountBefore](const char* key, Value value) {
             RuntimeErrorCode fieldError = RuntimeErrorCode::None;
             RuntimeContext::PropertyKey fieldKey;
             try {
@@ -2648,8 +2629,6 @@ private:
                 fail(fieldError, callSite);
                 return false;
             }
-            ++insertedProperties;
-            insertedKeyBytes += fieldKey.string.size();
             return true;
         };
 
@@ -2659,16 +2638,8 @@ private:
                 Value::boolean(attributes.enumerable())) ||
             !addField(configurableKey,
                 Value::boolean(attributes.configurable()))) {
-            RuntimeContext::RuntimeObject* unpublished =
-                context_.objectAt(descriptorId);
-            if (unpublished != nullptr &&
-                static_cast<std::size_t>(runtimeHandleSlot(descriptorId)) +
-                    1u ==
-                    context_.objects_.size()) {
-                context_.totalPropertyCount_ -= insertedProperties;
-                context_.totalPropertyKeyBytes_ -= insertedKeyBytes;
-                context_.objects_.pop_back();
-            }
+            RuntimeErrorCode rollbackError = RuntimeErrorCode::None;
+            (void)context_.rollbackObjects(objectCountBefore, rollbackError);
             result = Value::undefined();
             return false;
         }
@@ -2706,50 +2677,20 @@ private:
         Value propertyValue = Value::undefined();
         RuntimeContext::PropertyAttributes attributes =
             RuntimeContext::PropertyAttributes::unknown();
-        if (!key.isSymbol() && source->array && key.string == "length") {
-            propertyValue = Value::number(
-                static_cast<double>(source->arrayLength));
-            attributes = RuntimeContext::PropertyAttributes::arrayLength();
-        } else {
-            bool found = false;
-            std::uint32_t standardIndex = 0u;
-            if (!key.isSymbol() && source->array &&
-                parseEcmaArrayIndex(key.string, standardIndex)) {
-                const std::size_t index =
-                    static_cast<std::size_t>(standardIndex);
-                if (index <= context_.limits_.maxArrayIndex &&
-                    index < source->arrayLength) {
-                    const std::size_t position =
-                        RuntimeContext::findArrayElementPosition(*source,
-                            index);
-                    if (position < source->elements.size() &&
-                        source->elements[position].index == index) {
-                        propertyValue = source->elements[position].value;
-                        attributes = source->elements[position].attributes;
-                        found = true;
-                    }
-                }
-            }
-            if (!found) {
-                for (const RuntimeContext::RuntimeProperty& property :
-                    source->properties) {
-                    const bool matches = key.isSymbol()
-                        ? property.symbolKey == key.symbol
-                        : property.symbolKey == WellKnownSymbol::None &&
-                            property.key == key.string;
-                    if (matches) {
-                        propertyValue = property.value;
-                        attributes = property.attributes;
-                        found = true;
-                        break;
-                    }
-                }
-            }
-            if (!found) {
-                fail(RuntimeErrorCode::InvalidAstState, callSite);
-                return false;
-            }
+        PortablePropertyEntry entry;
+        bool found = false;
+        RuntimeErrorCode entryError = RuntimeErrorCode::None;
+        if (!context_.getOwnPropertyEntry(sourceId, key, entry, found,
+                entryError)) {
+            fail(entryError, callSite);
+            return false;
         }
+        if (!found) {
+            fail(RuntimeErrorCode::InvalidAstState, callSite);
+            return false;
+        }
+        propertyValue = entry.value;
+        attributes.bits = entry.attributes;
 
         if (!attributes.isValid() || !attributes.isFullyKnown()) {
             fail(RuntimeErrorCode::UnsupportedFeature, callSite);
@@ -2791,23 +2732,16 @@ private:
         }
         const std::string* input = &inputStorage;
 
-        const std::size_t objectCountBefore = context_.objects_.size();
+        const std::size_t objectCountBefore =
+            context_.objectStore_.objectCount();
         const RuntimeStringMark stringMark = context_.stringStore_.mark();
         const std::size_t stringBytesBefore = context_.totalStringBytes_;
-        const std::size_t propertyCountBefore =
-            context_.totalPropertyCount_;
-        const std::size_t propertyKeyBytesBefore =
-            context_.totalPropertyKeyBytes_;
-        const std::size_t arrayElementsBefore =
-            context_.totalArrayElements_;
         const auto rollback = [&]() {
-            context_.objects_.resize(objectCountBefore);
+            RuntimeErrorCode rollbackError = RuntimeErrorCode::None;
+            (void)context_.rollbackObjects(objectCountBefore, rollbackError);
             RuntimeStringError ignored;
             (void)context_.stringStore_.restore(stringMark, ignored);
             context_.totalStringBytes_ = stringBytesBefore;
-            context_.totalPropertyCount_ = propertyCountBefore;
-            context_.totalPropertyKeyBytes_ = propertyKeyBytesBefore;
-            context_.totalArrayElements_ = arrayElementsBefore;
         };
 
         std::size_t cursor = 0u;
@@ -3084,11 +3018,11 @@ private:
                     if (elements.size() >= maximumSupportedArrayLength(
                             context_.limits_) ||
                         elements.size() >= context_.limits_.maxArrayElements ||
-                        context_.totalArrayElements_ > maxTotalElements ||
+                        context_.objectStore_.arrayElementCount() > maxTotalElements ||
                         pendingArrayElements > maxTotalElements -
-                            context_.totalArrayElements_ ||
+                            context_.objectStore_.arrayElementCount() ||
                         pendingArrayElements >= maxTotalElements -
-                            context_.totalArrayElements_) {
+                            context_.objectStore_.arrayElementCount()) {
                         fail(RuntimeErrorCode::ArrayLimitExceeded, callSite);
                         return false;
                     }
@@ -3243,9 +3177,9 @@ private:
                         frame.initialized = true;
 
                         if (frame.value.isObject()) {
-                            const RuntimeContext::RuntimeObject* object =
-                                context_.objectAt(frame.value.objectId());
-                            if (object == nullptr) {
+                            const RuntimeObjectId containerId =
+                                frame.value.objectId();
+                            if (context_.objectAt(containerId) == nullptr) {
                                 fail(RuntimeErrorCode::TypeError, callSite);
                                 traversalSucceeded = false;
                                 break;
@@ -3258,12 +3192,33 @@ private:
                             }
                             frame.containerDepth =
                                 frame.parentContainerDepth + 1u;
-                            frame.array = object->array;
+                            if (!context_.isArrayObject(containerId,
+                                    frame.array)) {
+                                fail(RuntimeErrorCode::TypeError, callSite);
+                                traversalSucceeded = false;
+                                break;
+                            }
                             if (frame.array) {
-                                frame.capturedArrayLength =
-                                    object->arrayLength;
+                                if (!context_.getArrayLength(containerId,
+                                        frame.capturedArrayLength)) {
+                                    fail(RuntimeErrorCode::TypeError,
+                                        callSite);
+                                    traversalSucceeded = false;
+                                    break;
+                                }
                             } else {
-                                if (object->properties.size() >
+                                std::vector<RuntimeContext::RuntimeProperty>
+                                    ownProperties;
+                                RuntimeErrorCode snapshotError =
+                                    RuntimeErrorCode::None;
+                                if (!context_.snapshotOwnProperties(
+                                        containerId, ownProperties,
+                                        snapshotError)) {
+                                    fail(snapshotError, callSite);
+                                    traversalSucceeded = false;
+                                    break;
+                                }
+                                if (ownProperties.size() >
                                     context_.limits_.maxPropertiesPerObject) {
                                     fail(RuntimeErrorCode::PropertyLimitExceeded,
                                         callSite);
@@ -3271,7 +3226,7 @@ private:
                                     break;
                                 }
                                 for (const RuntimeContext::RuntimeProperty& property :
-                                    object->properties) {
+                                    ownProperties) {
                                     if (!context_.consumeStep(callSite)) {
                                         traversalSucceeded = false;
                                         break;
@@ -3620,6 +3575,11 @@ private:
                 fail(RuntimeErrorCode::TypeError, callSite);
                 return false;
             }
+            bool objectArray = false;
+            if (!context_.isArrayObject(objectId, objectArray)) {
+                fail(RuntimeErrorCode::TypeError, callSite);
+                return false;
+            }
             if (parentDepth >= maximumDepth) {
                 fail(RuntimeErrorCode::JsonNestingLimitExceeded, callSite);
                 return false;
@@ -3638,8 +3598,13 @@ private:
             const std::size_t childDepth = parentDepth + 1u;
 
             bool succeeded = true;
-            if (object->array) {
-                const std::size_t length = object->arrayLength;
+            if (objectArray) {
+                std::size_t length = 0u;
+                if (!context_.getArrayLength(objectId, length)) {
+                    fail(RuntimeErrorCode::TypeError, callSite);
+                    --activeObjectCount;
+                    return false;
+                }
                 if (length > maximumSupportedArrayLength(context_.limits_)) {
                     fail(RuntimeErrorCode::ArrayLimitExceeded, callSite);
                     succeeded = false;
@@ -3696,10 +3661,18 @@ private:
                 }
             } else {
                 std::vector<std::string> keys;
+                std::vector<RuntimeContext::RuntimeProperty> properties;
+                RuntimeErrorCode snapshotError = RuntimeErrorCode::None;
+                if (!context_.snapshotOwnProperties(objectId, properties,
+                        snapshotError)) {
+                    fail(snapshotError, callSite);
+                    --activeObjectCount;
+                    return false;
+                }
                 try {
-                    keys.reserve(object->properties.size());
+                    keys.reserve(properties.size());
                     for (const RuntimeContext::RuntimeProperty& property :
-                            object->properties) {
+                            properties) {
                         if (property.symbolKey != WellKnownSymbol::None)
                             continue;
                         if (!property.attributes.isValid() ||
@@ -3883,14 +3856,21 @@ private:
             break;
         }
         case RuntimeContext::NativeFunctionId::ArrayPush: {
-            RuntimeContext::RuntimeObject* object = receiver.isObject()
-                ? context_.objectAt(receiver.objectId()) : nullptr;
-            if (object == nullptr || !object->array) {
+            const RuntimeObjectId arrayId = receiver.isObject()
+                ? receiver.objectId() : kInvalidRuntimeObjectId;
+            bool isArray = false;
+            if (context_.objectAt(arrayId) == nullptr ||
+                !context_.isArrayObject(arrayId, isArray) || !isArray) {
                 fail(RuntimeErrorCode::InvalidReceiver, callSite);
                 succeeded = false;
                 break;
             }
-            const std::size_t oldLength = object->arrayLength;
+            std::size_t oldLength = 0u;
+            if (!context_.getArrayLength(arrayId, oldLength)) {
+                fail(RuntimeErrorCode::InvalidReceiver, callSite);
+                succeeded = false;
+                break;
+            }
             const std::size_t maximumLength =
                 maximumSupportedArrayLength(context_.limits_);
             if (oldLength > maximumLength ||
@@ -3901,8 +3881,25 @@ private:
                 succeeded = false;
                 break;
             }
+            std::vector<RuntimeContext::RuntimeArrayElement> oldElements;
+            RuntimeErrorCode snapshotError = RuntimeErrorCode::None;
+            if (!context_.snapshotArrayElements(arrayId, oldElements,
+                    snapshotError)) {
+                fail(snapshotError, callSite);
+                succeeded = false;
+                break;
+            }
+            if (arguments.size() > context_.limits_.maxArrayElements ||
+                oldElements.size() > context_.limits_.maxArrayElements -
+                    arguments.size()) {
+                GXOS_JS84_DIAGNOSTIC(
+                    ++context_.diagnostics_.failedArraySlotAllocations);
+                fail(RuntimeErrorCode::ArrayLimitExceeded, callSite);
+                succeeded = false;
+                break;
+            }
             if (arguments.size() > context_.limits_.maxTotalArrayElements ||
-                context_.totalArrayElements_ >
+                context_.objectStore_.arrayElementCount() >
                     context_.limits_.maxTotalArrayElements - arguments.size()) {
                 GXOS_JS84_DIAGNOSTIC(
                     ++context_.diagnostics_.failedArraySlotAllocations);
@@ -3917,58 +3914,75 @@ private:
                 }
             }
             if (!succeeded) break;
-            try {
-                object->elements.reserve(object->elements.size() +
-                    arguments.size());
-                for (std::size_t index = 0; index < arguments.size(); ++index) {
-                    object->elements.push_back({oldLength + index,
-                        arguments[index]});
-                }
-            } catch (const std::bad_alloc&) {
+            PortableObjectError objectError;
+            for (std::size_t index = 0u; index < arguments.size(); ++index) {
+                if (context_.objectStore_.setArrayElement(arrayId,
+                        oldLength + index, arguments[index], objectError,
+                        RuntimeContext::PropertyAttributes::ordinaryData().bits))
+                    continue;
+                RuntimeErrorCode rollbackError = RuntimeErrorCode::None;
+                (void)context_.setArrayLength(arrayId,
+                    Value::number(static_cast<double>(oldLength)),
+                    rollbackError);
                 GXOS_JS84_DIAGNOSTIC(
                     ++context_.diagnostics_.failedArraySlotAllocations);
-                fail(RuntimeErrorCode::AllocationFailure, callSite);
+                fail(context_.mapPortableObjectError(objectError.code),
+                    callSite);
                 succeeded = false;
                 break;
             }
-            context_.totalArrayElements_ += arguments.size();
-            object->arrayLength = oldLength + arguments.size();
+            if (!succeeded) break;
             GXOS_JS84_DIAGNOSTIC({
                 context_.diagnostics_.arraySlotsAllocated += arguments.size();
                 if (context_.diagnostics_.arraySlotHighWater <
-                    context_.totalArrayElements_) {
+                    context_.objectStore_.arrayElementCount()) {
                     context_.diagnostics_.arraySlotHighWater =
-                        context_.totalArrayElements_;
+                        context_.objectStore_.arrayElementCount();
                 }
             });
-            result = Value::number(static_cast<double>(object->arrayLength));
+            result = Value::number(static_cast<double>(oldLength +
+                arguments.size()));
             break;
         }
         case RuntimeContext::NativeFunctionId::ArrayPop: {
-            RuntimeContext::RuntimeObject* object = receiver.isObject()
-                ? context_.objectAt(receiver.objectId()) : nullptr;
-            if (object == nullptr || !object->array) {
+            const RuntimeObjectId arrayId = receiver.isObject()
+                ? receiver.objectId() : kInvalidRuntimeObjectId;
+            bool isArray = false;
+            if (context_.objectAt(arrayId) == nullptr ||
+                !context_.isArrayObject(arrayId, isArray) || !isArray) {
                 fail(RuntimeErrorCode::InvalidReceiver, callSite);
                 succeeded = false;
                 break;
             }
-            if (object->arrayLength == 0u) {
+            std::size_t oldLength = 0u;
+            if (!context_.getArrayLength(arrayId, oldLength)) {
+                fail(RuntimeErrorCode::InvalidReceiver, callSite);
+                succeeded = false;
+                break;
+            }
+            if (oldLength == 0u) {
                 result = Value::undefined();
                 break;
             }
-            const std::size_t removedIndex = object->arrayLength - 1u;
-            const std::size_t position =
-                RuntimeContext::findArrayElementPosition(*object, removedIndex);
-            if (position < object->elements.size() &&
-                object->elements[position].index == removedIndex) {
-                result = object->elements[position].value;
-                object->elements.erase(object->elements.begin() +
-                    static_cast<std::ptrdiff_t>(position));
-                --context_.totalArrayElements_;
-            } else {
-                result = Value::undefined();
+            const std::size_t removedIndex = oldLength - 1u;
+            RuntimeErrorCode readError = RuntimeErrorCode::None;
+            if (!context_.readArrayIndex(arrayId, removedIndex, result,
+                    readError, callSite)) {
+                fail(readError, callSite);
+                succeeded = false;
+                break;
             }
-            object->arrayLength = removedIndex;
+            bool deleted = false;
+            RuntimeErrorCode deleteError = RuntimeErrorCode::None;
+            if (!context_.deleteOwnProperty(arrayId,
+                    std::to_string(removedIndex), deleted, deleteError) ||
+                !context_.setArrayLength(arrayId,
+                    Value::number(static_cast<double>(removedIndex)),
+                    deleteError)) {
+                fail(deleteError, callSite);
+                succeeded = false;
+                break;
+            }
             break;
         }
         case RuntimeContext::NativeFunctionId::ArrayForEach:
@@ -4049,7 +4063,10 @@ private:
                 ? receiver.objectId() : kInvalidRuntimeObjectId;
             const RuntimeContext::RuntimeObject* array =
                 context_.objectAt(arrayId);
-            if (array == nullptr || !array->array) {
+            bool arrayIsArray = false;
+            if (array == nullptr ||
+                !context_.isArrayObject(arrayId, arrayIsArray) ||
+                !arrayIsArray) {
                 fail(RuntimeErrorCode::InvalidReceiver, callSite);
                 succeeded = false;
                 break;
@@ -4057,11 +4074,8 @@ private:
             const std::vector<Value> noElements;
             RuntimeObjectId iteratorId = kInvalidRuntimeObjectId;
             RuntimeErrorCode error = RuntimeErrorCode::None;
-            const std::size_t objectCountBefore = context_.objects_.size();
-            const std::size_t propertyCountBefore =
-                context_.totalPropertyCount_;
-            const std::size_t propertyKeyBytesBefore =
-                context_.totalPropertyKeyBytes_;
+            const std::size_t objectCountBefore =
+                context_.objectStore_.objectCount();
             if (!context_.createObject(false, noElements, iteratorId, error,
                     context_.objectPrototype_)) {
                 fail(error, callSite);
@@ -4078,9 +4092,9 @@ private:
                     Value::function(context_.arrayIteratorSelfFunction_),
                     error,
                     RuntimeContext::PropertyAttributes::writableOnly(true))) {
-                context_.objects_.resize(objectCountBefore);
-                context_.totalPropertyCount_ = propertyCountBefore;
-                context_.totalPropertyKeyBytes_ = propertyKeyBytesBefore;
+                RuntimeErrorCode rollbackError = RuntimeErrorCode::None;
+                (void)context_.rollbackObjects(objectCountBefore,
+                    rollbackError);
                 fail(error, callSite);
                 succeeded = false;
                 break;
@@ -4126,12 +4140,21 @@ private:
             if (!wasExhausted) {
                 const RuntimeContext::RuntimeObject* array =
                     context_.objectAt(arrayId);
-                if (array == nullptr || !array->array) {
+                bool arrayIsArray = false;
+                if (array == nullptr ||
+                    !context_.isArrayObject(arrayId, arrayIsArray) ||
+                    !arrayIsArray) {
                     fail(RuntimeErrorCode::InvalidAstState, callSite);
                     succeeded = false;
                     break;
                 }
-                if (index < array->arrayLength) {
+                std::size_t arrayLength = 0u;
+                if (!context_.getArrayLength(arrayId, arrayLength)) {
+                    fail(RuntimeErrorCode::InvalidAstState, callSite);
+                    succeeded = false;
+                    break;
+                }
+                if (index < arrayLength) {
                     if (mode ==
                         RuntimeContext::ArrayIteratorMode::Keys) {
                         yielded = Value::number(static_cast<double>(index));
@@ -5406,11 +5429,9 @@ void RuntimeContext::clearRuntimeState()
     functions_.clear();
     portableFunctions_.reset(kInvalidRuntimeGeneration);
     stringStore_.reset(kInvalidRuntimeGeneration);
-    objects_.clear();
+    objectStore_ = PortableObjectStore();
+    objectAdapters_.clear();
     totalStringBytes_ = 0;
-    totalPropertyCount_ = 0;
-    totalPropertyKeyBytes_ = 0;
-    totalArrayElements_ = 0;
     userFunctionCount_ = 0;
     nativeFunctionCount_ = 0;
     hostMethodCount_ = 0;
@@ -5500,6 +5521,42 @@ void RuntimeContext::reset()
     }
 }
 
+RuntimeErrorCode RuntimeContext::mapPortableObjectError(
+    PortableObjectErrorCode code) const
+{
+    switch (code) {
+    case PortableObjectErrorCode::None: return RuntimeErrorCode::None;
+    case PortableObjectErrorCode::InvalidStorage:
+        return RuntimeErrorCode::PortableCapacityExceeded;
+    case PortableObjectErrorCode::InvalidObject:
+    case PortableObjectErrorCode::InvalidArray:
+    case PortableObjectErrorCode::InvalidProperty:
+    case PortableObjectErrorCode::InvalidPrototype:
+    case PortableObjectErrorCode::PrototypeCycle:
+    case PortableObjectErrorCode::ArithmeticOverflow:
+    case PortableObjectErrorCode::InternalInvariantFailure:
+        return RuntimeErrorCode::InvalidAstState;
+    case PortableObjectErrorCode::StaleGeneration:
+        return RuntimeErrorCode::StaleObjectReference;
+    case PortableObjectErrorCode::InvalidIndex:
+        return RuntimeErrorCode::ArrayIndexOutOfRange;
+    case PortableObjectErrorCode::InvalidLength:
+        return RuntimeErrorCode::InvalidArrayLength;
+    case PortableObjectErrorCode::PrototypeDepthExceeded:
+        return RuntimeErrorCode::PrototypeChainExceeded;
+    case PortableObjectErrorCode::NameTooLong:
+        return RuntimeErrorCode::PropertyNameTooLong;
+    case PortableObjectErrorCode::ObjectCapacityExceeded:
+        return RuntimeErrorCode::ObjectLimitExceeded;
+    case PortableObjectErrorCode::PropertyCapacityExceeded:
+    case PortableObjectErrorCode::NameStorageExhausted:
+        return RuntimeErrorCode::PropertyLimitExceeded;
+    case PortableObjectErrorCode::ArrayCapacityExceeded:
+        return RuntimeErrorCode::ArrayLimitExceeded;
+    }
+    return RuntimeErrorCode::InvalidAstState;
+}
+
 bool RuntimeContext::initializePortableStorage(RuntimeErrorCode& error)
 {
     error = RuntimeErrorCode::None;
@@ -5523,7 +5580,12 @@ bool RuntimeContext::initializePortableStorage(RuntimeErrorCode& error)
         bindingNameStorage_.resize(limits_.maxEnvironmentBindingNameBytes);
         runtimeStringRecordStorage_.resize(limits_.maxRuntimeStringValues);
         runtimeStringStorage_.resize(limits_.maxTotalRuntimeStringBytes);
+        objectRecordStorage_.resize(limits_.maxObjects);
+        objectPropertyStorage_.resize(limits_.maxTotalProperties);
+        arrayElementStorage_.resize(limits_.maxTotalArrayElements);
+        propertyNameStorage_.resize(limits_.maxTotalPropertyKeyBytes);
         environments_.reserve(limits_.maxEnvironments - 1u);
+        objectAdapters_.reserve(limits_.maxObjects);
     } catch (const std::bad_alloc&) {
         error = RuntimeErrorCode::AllocationFailure;
         return false;
@@ -5552,6 +5614,31 @@ bool RuntimeContext::initializePortableStorage(RuntimeErrorCode& error)
     if (!stringStore_.configure(stringStorage, runtimeGeneration_,
             stringError)) {
         error = RuntimeErrorCode::AllocationFailure;
+        return false;
+    }
+    const PortableObjectStorageView objectStorage{
+        objectRecordStorage_.data(), objectRecordStorage_.size(),
+        objectPropertyStorage_.data(), objectPropertyStorage_.size(),
+        arrayElementStorage_.data(), arrayElementStorage_.size(),
+        propertyNameStorage_.data(), propertyNameStorage_.size()};
+    const PortableObjectLimits objectLimits{
+        limits_.maxObjects,
+        limits_.maxTotalProperties,
+        limits_.maxPropertiesPerObject,
+        limits_.maxPropertyNameLength,
+        limits_.maxTotalPropertyKeyBytes,
+        limits_.maxArrayElements < limits_.maxTotalArrayElements
+            ? limits_.maxArrayElements : limits_.maxTotalArrayElements,
+        limits_.maxTotalArrayElements,
+        limits_.maxArrayIndex,
+        maximumSupportedArrayLength(limits_),
+        limits_.maxPrototypeDepth};
+    PortableObjectError objectError;
+    if (!objectStore_.configure(objectStorage, objectLimits,
+            runtimeGeneration_, objectError)) {
+        error = objectError.code == PortableObjectErrorCode::InvalidStorage
+            ? RuntimeErrorCode::PortableCapacityExceeded
+            : mapPortableObjectError(objectError.code);
         return false;
     }
     EnvironmentId global = kInvalidEnvironmentId;
@@ -5968,12 +6055,7 @@ bool RuntimeContext::createObject(bool array,
     RuntimeErrorCode& error, RuntimeObjectId prototype)
 {
     error = RuntimeErrorCode::None;
-    if (objects_.size() >= limits_.maxObjects ||
-        objects_.size() >= kRuntimeHandleInvalidPart) {
-        GXOS_JS84_DIAGNOSTIC(++diagnostics_.failedObjectAllocations);
-        error = RuntimeErrorCode::ObjectLimitExceeded;
-        return false;
-    }
+    result = kInvalidRuntimeObjectId;
     if (!array && !initialElements.empty()) {
         error = RuntimeErrorCode::InvalidAstState;
         return false;
@@ -5981,7 +6063,8 @@ bool RuntimeContext::createObject(bool array,
     if (array) {
         if (initialElements.size() > maximumSupportedArrayLength(limits_) ||
             initialElements.size() > limits_.maxTotalArrayElements ||
-            totalArrayElements_ > limits_.maxTotalArrayElements -
+            objectStore_.arrayElementCount() >
+                limits_.maxTotalArrayElements -
                 initialElements.size()) {
             GXOS_JS84_DIAGNOSTIC(
                 ++diagnostics_.failedArraySlotAllocations);
@@ -6006,30 +6089,36 @@ bool RuntimeContext::createObject(bool array,
         return createArray(initialElements.size(),
             std::move(indexedElements), result, error, prototype);
     }
+    if (prototype == kInvalidRuntimeObjectId && builtInsInitialized_)
+        prototype = objectPrototype_;
+    PortableObjectError objectError;
+    if (!objectStore_.createObject(prototype, result, objectError)) {
+        GXOS_JS84_DIAGNOSTIC({
+            if (objectError.code ==
+                PortableObjectErrorCode::ObjectCapacityExceeded)
+                ++diagnostics_.failedObjectAllocations;
+        });
+        error = mapPortableObjectError(objectError.code);
+        return false;
+    }
     try {
-        RuntimeObject object;
-        object.prototype = prototype;
-        if (object.prototype == kInvalidRuntimeObjectId &&
-            builtInsInitialized_) {
-            object.prototype = objectPrototype_;
-        }
-        objects_.push_back(std::move(object));
+        objectAdapters_.emplace_back();
     } catch (const std::bad_alloc&) {
+        PortableObjectError rollbackError;
+        (void)objectStore_.rollbackObjects(objectStore_.objectCount() - 1u,
+            rollbackError);
+        result = kInvalidRuntimeObjectId;
         GXOS_JS84_DIAGNOSTIC({
             ++diagnostics_.failedObjectAllocations;
-            if (array && !initialElements.empty())
-                ++diagnostics_.failedArraySlotAllocations;
         });
         error = RuntimeErrorCode::AllocationFailure;
         return false;
     }
     GXOS_JS84_DIAGNOSTIC({
         ++diagnostics_.runtimeObjectsAllocated;
-        if (diagnostics_.objectPoolHighWater < objects_.size())
-            diagnostics_.objectPoolHighWater = objects_.size();
+        if (diagnostics_.objectPoolHighWater < objectStore_.objectCount())
+            diagnostics_.objectPoolHighWater = objectStore_.objectCount();
     });
-    result = makeRuntimeHandle(runtimeGeneration_,
-        static_cast<std::uint32_t>(objects_.size() - 1u));
     return true;
 }
 
@@ -6039,16 +6128,12 @@ bool RuntimeContext::createArray(std::size_t logicalLength,
     RuntimeObjectId prototype)
 {
     error = RuntimeErrorCode::None;
-    if (objects_.size() >= limits_.maxObjects ||
-        objects_.size() >= kRuntimeHandleInvalidPart) {
-        GXOS_JS84_DIAGNOSTIC(++diagnostics_.failedObjectAllocations);
-        error = RuntimeErrorCode::ObjectLimitExceeded;
-        return false;
-    }
+    result = kInvalidRuntimeObjectId;
     if (logicalLength > maximumSupportedArrayLength(limits_) ||
         initialElements.size() > limits_.maxArrayElements ||
         initialElements.size() > limits_.maxTotalArrayElements ||
-        totalArrayElements_ > limits_.maxTotalArrayElements -
+        objectStore_.arrayElementCount() >
+            limits_.maxTotalArrayElements -
             initialElements.size()) {
         GXOS_JS84_DIAGNOSTIC(++diagnostics_.failedArraySlotAllocations);
         error = RuntimeErrorCode::ArrayLimitExceeded;
@@ -6080,18 +6165,45 @@ bool RuntimeContext::createArray(std::size_t logicalLength,
         return false;
     }
 #endif
-    try {
-        RuntimeObject object;
-        object.array = true;
-        object.arrayLength = logicalLength;
-        object.prototype = prototype;
-        if (object.prototype == kInvalidRuntimeObjectId &&
-            builtInsInitialized_) {
-            object.prototype = arrayPrototype_;
+    if (prototype == kInvalidRuntimeObjectId && builtInsInitialized_)
+        prototype = arrayPrototype_;
+    PortableObjectError objectError;
+    if (!objectStore_.createArray(logicalLength, prototype, result,
+            objectError)) {
+        GXOS_JS84_DIAGNOSTIC({
+            if (objectError.code ==
+                PortableObjectErrorCode::ObjectCapacityExceeded)
+                ++diagnostics_.failedObjectAllocations;
+            if (objectError.code ==
+                PortableObjectErrorCode::ArrayCapacityExceeded)
+                ++diagnostics_.failedArraySlotAllocations;
+        });
+        error = mapPortableObjectError(objectError.code);
+        return false;
+    }
+    for (const RuntimeArrayElement& element : initialElements) {
+        if (!objectStore_.setArrayElement(result, element.index,
+                element.value, objectError, element.attributes.bits)) {
+            const RuntimeErrorCode mapped =
+                mapPortableObjectError(objectError.code);
+            PortableObjectError rollbackError;
+            (void)objectStore_.rollbackObjects(
+                objectStore_.objectCount() - 1u, rollbackError);
+            result = kInvalidRuntimeObjectId;
+            GXOS_JS84_DIAGNOSTIC({
+                ++diagnostics_.failedArraySlotAllocations;
+            });
+            error = mapped;
+            return false;
         }
-        object.elements = std::move(initialElements);
-        objects_.push_back(std::move(object));
+    }
+    try {
+        objectAdapters_.emplace_back();
     } catch (const std::bad_alloc&) {
+        PortableObjectError rollbackError;
+        (void)objectStore_.rollbackObjects(objectStore_.objectCount() - 1u,
+            rollbackError);
+        result = kInvalidRuntimeObjectId;
         GXOS_JS84_DIAGNOSTIC({
             ++diagnostics_.failedObjectAllocations;
             ++diagnostics_.failedArraySlotAllocations;
@@ -6101,28 +6213,17 @@ bool RuntimeContext::createArray(std::size_t logicalLength,
     }
     GXOS_JS84_DIAGNOSTIC({
         ++diagnostics_.runtimeObjectsAllocated;
-        if (diagnostics_.objectPoolHighWater < objects_.size())
-            diagnostics_.objectPoolHighWater = objects_.size();
+        if (diagnostics_.objectPoolHighWater < objectStore_.objectCount())
+            diagnostics_.objectPoolHighWater = objectStore_.objectCount();
     });
-    result = makeRuntimeHandle(runtimeGeneration_,
-        static_cast<std::uint32_t>(objects_.size() - 1u));
-    totalArrayElements_ += objects_.back().elements.size();
     GXOS_JS84_DIAGNOSTIC({
-        diagnostics_.arraySlotsAllocated += objects_.back().elements.size();
-        if (diagnostics_.arraySlotHighWater < totalArrayElements_)
-            diagnostics_.arraySlotHighWater = totalArrayElements_;
+        diagnostics_.arraySlotsAllocated += initialElements.size();
+        if (diagnostics_.arraySlotHighWater <
+            objectStore_.arrayElementCount())
+            diagnostics_.arraySlotHighWater =
+                objectStore_.arrayElementCount();
     });
     return true;
-}
-
-std::size_t RuntimeContext::findArrayElementPosition(
-    const RuntimeObject& object, std::size_t index)
-{
-    for (std::size_t position = 0u; position < object.elements.size();
-        ++position) {
-        if (object.elements[position].index >= index) return position;
-    }
-    return object.elements.size();
 }
 
 bool RuntimeContext::readArrayIndex(RuntimeObjectId objectId,
@@ -6136,32 +6237,30 @@ bool RuntimeContext::readArrayIndex(RuntimeObjectId objectId,
             error = RuntimeErrorCode::ExecutionBudgetExceeded;
             return false;
         }
-        const RuntimeObject* object = objectAt(current);
-        if (object == nullptr) {
+        if (objectAt(current) == nullptr) {
             error = RuntimeErrorCode::CannotReadProperty;
             return false;
         }
-        if (object->array && index < object->arrayLength) {
-            const std::size_t position =
-                findArrayElementPosition(*object, index);
-            if (position < object->elements.size() &&
-                object->elements[position].index == index) {
-                value = object->elements[position].value;
-                return true;
-            }
+        const std::string key = std::to_string(index);
+        bool found = false;
+        PortableObjectError objectError;
+        if (!objectStore_.getOwnProperty(current,
+                SourceView(key.data(), key.size()), value, found,
+                objectError)) {
+            error = mapPortableObjectError(objectError.code);
+            return false;
         }
-        for (const RuntimeProperty& property : object->properties) {
-            if (property.symbolKey == WellKnownSymbol::None &&
-                propertyKeyMatchesArrayIndex(property.key, index)) {
-                value = property.value;
-                return true;
-            }
+        if (found) return true;
+        RuntimeObjectId prototype = kInvalidRuntimeObjectId;
+        if (!objectStore_.prototypeOf(current, prototype, objectError)) {
+            error = mapPortableObjectError(objectError.code);
+            return false;
         }
-        if (object->prototype == kInvalidRuntimeObjectId) {
+        if (prototype == kInvalidRuntimeObjectId) {
             value = Value::undefined();
             return true;
         }
-        current = object->prototype;
+        current = prototype;
     }
     error = RuntimeErrorCode::PrototypeChainExceeded;
     return false;
@@ -6171,8 +6270,8 @@ bool RuntimeContext::setArrayLength(RuntimeObjectId objectId,
     const Value& value, RuntimeErrorCode& error)
 {
     error = RuntimeErrorCode::None;
-    RuntimeObject* object = objectAt(objectId);
-    if (object == nullptr || !object->array) {
+    bool isArray = false;
+    if (!isArrayObject(objectId, isArray) || !isArray) {
         error = RuntimeErrorCode::CannotWriteProperty;
         return false;
     }
@@ -6204,24 +6303,11 @@ bool RuntimeContext::setArrayLength(RuntimeObjectId objectId,
         return false;
     }
     const std::size_t newLength = static_cast<std::size_t>(requestedLength);
-    if (newLength < object->arrayLength) {
-        std::size_t firstRemoved = object->elements.size();
-        for (std::size_t position = 0u;
-            position < object->elements.size(); ++position) {
-            if (object->elements[position].index >= newLength) {
-                firstRemoved = position;
-                break;
-            }
-        }
-        const std::size_t removed = object->elements.size() - firstRemoved;
-        if (removed > totalArrayElements_) {
-            error = RuntimeErrorCode::InvalidAstState;
-            return false;
-        }
-        object->elements.resize(firstRemoved);
-        totalArrayElements_ -= removed;
+    PortableObjectError objectError;
+    if (!objectStore_.setArrayLength(objectId, newLength, objectError)) {
+        error = mapPortableObjectError(objectError.code);
+        return false;
     }
-    object->arrayLength = newLength;
     return true;
 }
 
@@ -6338,12 +6424,15 @@ bool RuntimeContext::initializeBuiltIns(RuntimeErrorCode& error)
         sizeof("NONE") - 1u + sizeof("CAPTURING_PHASE") - 1u +
         sizeof("AT_TARGET") - 1u + sizeof("BUBBLING_PHASE") - 1u;
     const bool canInstallEventConstants =
-        limits_.maxObjects > objects_.size() &&
+        objectStore_.objectCount() < limits_.maxObjects &&
         limits_.maxPropertiesPerObject >= 4u &&
-        limits_.maxTotalProperties >= totalPropertyCount_ + 4u &&
+        objectStore_.propertyCount() <= limits_.maxTotalProperties &&
+        limits_.maxTotalProperties - objectStore_.propertyCount() >= 4u &&
         limits_.maxPropertyNameLength >= sizeof("CAPTURING_PHASE") - 1u &&
-        limits_.maxTotalPropertyKeyBytes >=
-            totalPropertyKeyBytes_ + eventConstantKeyBytes &&
+        objectStore_.propertyNameBytesUsed() <=
+            limits_.maxTotalPropertyKeyBytes &&
+        limits_.maxTotalPropertyKeyBytes -
+            objectStore_.propertyNameBytesUsed() >= eventConstantKeyBytes &&
         limits_.maxBindings >= 2u &&
         limits_.maxBindingNameLength >= sizeof(eventName) - 1u;
     if (canInstallEventConstants) {
@@ -6374,35 +6463,173 @@ bool RuntimeContext::initializeBuiltIns(RuntimeErrorCode& error)
 
 RuntimeContext::RuntimeObject* RuntimeContext::objectAt(RuntimeObjectId id)
 {
-    if (!runtimeHandleIsValid(id, runtimeGeneration_)) return nullptr;
+    PortableObjectError objectError;
+    if (!objectStore_.validObject(id, objectError)) return nullptr;
     const std::size_t slot = runtimeHandleSlot(id);
-    return slot < objects_.size() ? &objects_[slot] : nullptr;
+    return slot < objectAdapters_.size() ? &objectAdapters_[slot] : nullptr;
 }
 
 const RuntimeContext::RuntimeObject* RuntimeContext::objectAt(
     RuntimeObjectId id) const
 {
-    if (!runtimeHandleIsValid(id, runtimeGeneration_)) return nullptr;
+    PortableObjectError objectError;
+    if (!objectStore_.validObject(id, objectError)) return nullptr;
     const std::size_t slot = runtimeHandleSlot(id);
-    return slot < objects_.size() ? &objects_[slot] : nullptr;
+    return slot < objectAdapters_.size() ? &objectAdapters_[slot] : nullptr;
 }
 
 RuntimeObjectId RuntimeContext::prototypeOf(RuntimeObjectId object) const
 {
-    const RuntimeObject* record = objectAt(object);
-    return record == nullptr ? kInvalidRuntimeObjectId : record->prototype;
+    RuntimeObjectId result = kInvalidRuntimeObjectId;
+    PortableObjectError objectError;
+    return objectStore_.prototypeOf(object, result, objectError)
+        ? result : kInvalidRuntimeObjectId;
 }
 
 bool RuntimeContext::setPrototypeForTesting(RuntimeObjectId object,
     RuntimeObjectId prototype)
 {
-    RuntimeObject* record = objectAt(object);
-    if (record == nullptr) return false;
-    if (prototype != kInvalidRuntimeObjectId && objectAt(prototype) == nullptr) {
+    PortableObjectError objectError;
+    if (objectStore_.setPrototype(object, prototype, objectError)) return true;
+    if (objectError.code != PortableObjectErrorCode::PrototypeCycle ||
+        !runtimeHandleIsValid(object, objectStore_.generation()) ||
+        !runtimeHandleIsValid(prototype, objectStore_.generation())) return false;
+    const std::size_t slot = runtimeHandleSlot(object);
+    if (slot >= objectRecordStorage_.size() ||
+        slot >= objectStore_.objectCount()) return false;
+    objectRecordStorage_[slot].prototype = prototype;
+    return true;
+}
+
+bool RuntimeContext::rollbackObjects(std::size_t retainedCount,
+    RuntimeErrorCode& error)
+{
+    PortableObjectError objectError;
+    if (!objectStore_.rollbackObjects(retainedCount, objectError)) {
+        error = mapPortableObjectError(objectError.code);
         return false;
     }
-    record->prototype = prototype;
+    if (objectAdapters_.size() > retainedCount)
+        objectAdapters_.resize(retainedCount);
     return true;
+}
+
+bool RuntimeContext::isArrayObject(RuntimeObjectId object,
+    bool& result) const
+{
+    PortableObjectError objectError;
+    return objectStore_.isArray(object, result, objectError);
+}
+
+bool RuntimeContext::getArrayLength(RuntimeObjectId object,
+    std::size_t& result) const
+{
+    PortableObjectError objectError;
+    return objectStore_.arrayLength(object, result, objectError);
+}
+
+bool RuntimeContext::getOwnPropertyEntry(RuntimeObjectId object,
+    const PropertyKey& key, PortablePropertyEntry& result, bool& found,
+    RuntimeErrorCode& error) const
+{
+    PortableObjectError objectError;
+    const bool success = key.isSymbol()
+        ? objectStore_.getOwnPropertyEntry(object, key.symbol, result, found,
+            objectError)
+        : objectStore_.getOwnPropertyEntry(object,
+            SourceView(key.string.data(), key.string.size()), result, found,
+            objectError);
+    error = success ? RuntimeErrorCode::None
+        : mapPortableObjectError(objectError.code);
+    if (success && found && result.isArrayLength)
+        result.attributes = PropertyAttributes::arrayLength().bits;
+    return success;
+}
+
+bool RuntimeContext::hasOwnStoredProperty(RuntimeObjectId object,
+    const PropertyKey& key, bool& found, RuntimeErrorCode& error) const
+{
+    PortableObjectError objectError;
+    const bool success = key.isSymbol()
+        ? objectStore_.hasOwnProperty(object, key.symbol, found, objectError)
+        : objectStore_.hasOwnProperty(object,
+            SourceView(key.string.data(), key.string.size()), found,
+            objectError);
+    error = success ? RuntimeErrorCode::None
+        : mapPortableObjectError(objectError.code);
+    return success;
+}
+
+bool RuntimeContext::snapshotOwnProperties(RuntimeObjectId object,
+    std::vector<RuntimeProperty>& result, RuntimeErrorCode& error) const
+{
+    result.clear();
+    error = RuntimeErrorCode::None;
+    const std::size_t maximumEntries = limits_.maxTotalProperties +
+        limits_.maxTotalArrayElements + 1u;
+    try {
+        result.reserve(limits_.maxPropertiesPerObject);
+        for (std::size_t ordinal = 0u; ordinal < maximumEntries; ++ordinal) {
+            PortablePropertyEntry entry;
+            bool found = false;
+            PortableObjectError objectError;
+            if (!objectStore_.getOwnPropertyAt(object, ordinal, entry, found,
+                    objectError)) {
+                error = mapPortableObjectError(objectError.code);
+                return false;
+            }
+            if (!found) return true;
+            if (entry.isArrayElement || entry.isArrayLength) continue;
+            RuntimeProperty property;
+            if (entry.key.data != nullptr && entry.key.length != 0u)
+                property.key.assign(entry.key.data, entry.key.length);
+            property.symbolKey = entry.symbol;
+            property.value = entry.value;
+            property.attributes.bits = entry.attributes;
+            result.push_back(std::move(property));
+        }
+    } catch (const std::bad_alloc&) {
+        error = RuntimeErrorCode::AllocationFailure;
+        return false;
+    } catch (const std::length_error&) {
+        error = RuntimeErrorCode::AllocationFailure;
+        return false;
+    }
+    error = RuntimeErrorCode::InvalidAstState;
+    return false;
+}
+
+bool RuntimeContext::snapshotArrayElements(RuntimeObjectId object,
+    std::vector<RuntimeArrayElement>& result, RuntimeErrorCode& error) const
+{
+    result.clear();
+    error = RuntimeErrorCode::None;
+    try {
+        result.reserve(limits_.maxArrayElements);
+        for (std::size_t ordinal = 0u;
+            ordinal <= limits_.maxTotalArrayElements; ++ordinal) {
+            PortableArrayEntry entry;
+            bool found = false;
+            PortableObjectError objectError;
+            if (!objectStore_.getArrayElementAt(object, ordinal, entry,
+                    found, objectError)) {
+                error = mapPortableObjectError(objectError.code);
+                return false;
+            }
+            if (!found) return true;
+            RuntimeArrayElement element(entry.index, entry.value);
+            element.attributes.bits = entry.attributes;
+            result.push_back(element);
+        }
+    } catch (const std::bad_alloc&) {
+        error = RuntimeErrorCode::AllocationFailure;
+        return false;
+    } catch (const std::length_error&) {
+        error = RuntimeErrorCode::AllocationFailure;
+        return false;
+    }
+    error = RuntimeErrorCode::InvalidAstState;
+    return false;
 }
 
 bool RuntimeContext::readPropertyForTesting(RuntimeObjectId object,
@@ -6422,22 +6649,16 @@ bool RuntimeContext::createCollectionIteratorResult(const HostValue& value,
 {
     error = RuntimeErrorCode::None;
     result = Value::undefined();
-    const std::size_t objectCountBefore = objects_.size();
-    const std::size_t propertyCountBefore = totalPropertyCount_;
-    const std::size_t propertyKeyBytesBefore = totalPropertyKeyBytes_;
-    const std::size_t arrayElementCountBefore = totalArrayElements_;
+    const std::size_t objectCountBefore = objectStore_.objectCount();
     const std::vector<Value> noElements;
     RuntimeObjectId object = kInvalidRuntimeObjectId;
     if (!createObject(false, noElements, object, error)) return false;
     GXOS_JS84_DIAGNOSTIC(++diagnostics_.iteratorResultObjectsAllocated);
 
-    const auto rollback = [this, objectCountBefore, propertyCountBefore,
-        propertyKeyBytesBefore, arrayElementCountBefore]() {
+    const auto rollback = [this, objectCountBefore]() {
         GXOS_JS84_DIAGNOSTIC(++diagnostics_.collectionResultRollbacks);
-        objects_.resize(objectCountBefore);
-        totalPropertyCount_ = propertyCountBefore;
-        totalPropertyKeyBytes_ = propertyKeyBytesBefore;
-        totalArrayElements_ = arrayElementCountBefore;
+        RuntimeErrorCode ignored = RuntimeErrorCode::None;
+        (void)rollbackObjects(objectCountBefore, ignored);
     };
 
     // Allocate the complete outer shape before converting a possible host
@@ -6455,17 +6676,21 @@ bool RuntimeContext::createCollectionIteratorResult(const HostValue& value,
         rollback();
         return false;
     }
-    RuntimeObject* record = objectAt(object);
-    if (record == nullptr || record->properties.size() != 2u ||
-        record->properties[0].symbolKey != WellKnownSymbol::None ||
-        record->properties[0].key != "value" ||
-        record->properties[1].symbolKey != WellKnownSymbol::None ||
-        record->properties[1].key != "done") {
+    std::vector<RuntimeProperty> resultProperties;
+    if (!snapshotOwnProperties(object, resultProperties, error) ||
+        resultProperties.size() != 2u ||
+        resultProperties[0].symbolKey != WellKnownSymbol::None ||
+        resultProperties[0].key != "value" ||
+        resultProperties[1].symbolKey != WellKnownSymbol::None ||
+        resultProperties[1].key != "done") {
         error = RuntimeErrorCode::InvalidAstState;
         rollback();
         return false;
     }
-    record->properties[0].value = convertedValue;
+    if (!updateExistingProperty(object, "value", convertedValue, error)) {
+        rollback();
+        return false;
+    }
     result = Value::object(object);
     GXOS_JS84_DIAGNOSTIC(++diagnostics_.iteratorResultObjectsPublished);
     return true;
@@ -6476,22 +6701,16 @@ bool RuntimeContext::createArrayIteratorResult(const Value& value, bool done,
 {
     error = RuntimeErrorCode::None;
     result = Value::undefined();
-    const std::size_t objectCountBefore = objects_.size();
-    const std::size_t propertyCountBefore = totalPropertyCount_;
-    const std::size_t propertyKeyBytesBefore = totalPropertyKeyBytes_;
-    const std::size_t arrayElementCountBefore = totalArrayElements_;
+    const std::size_t objectCountBefore = objectStore_.objectCount();
     const std::vector<Value> noElements;
     RuntimeObjectId object = kInvalidRuntimeObjectId;
     if (!createObject(false, noElements, object, error)) return false;
     GXOS_JS84_DIAGNOSTIC(++diagnostics_.iteratorResultObjectsAllocated);
 
-    const auto rollback = [this, objectCountBefore, propertyCountBefore,
-        propertyKeyBytesBefore, arrayElementCountBefore]() {
+    const auto rollback = [this, objectCountBefore]() {
         GXOS_JS84_DIAGNOSTIC(++diagnostics_.arrayIteratorResultRollbacks);
-        objects_.resize(objectCountBefore);
-        totalPropertyCount_ = propertyCountBefore;
-        totalPropertyKeyBytes_ = propertyKeyBytesBefore;
-        totalArrayElements_ = arrayElementCountBefore;
+        RuntimeErrorCode ignored = RuntimeErrorCode::None;
+        (void)rollbackObjects(objectCountBefore, ignored);
     };
 
     if (!writeProperty(object, "value", Value::undefined(), error) ||
@@ -6499,17 +6718,21 @@ bool RuntimeContext::createArrayIteratorResult(const Value& value, bool done,
         rollback();
         return false;
     }
-    RuntimeObject* record = objectAt(object);
-    if (record == nullptr || record->properties.size() != 2u ||
-        record->properties[0].symbolKey != WellKnownSymbol::None ||
-        record->properties[0].key != "value" ||
-        record->properties[1].symbolKey != WellKnownSymbol::None ||
-        record->properties[1].key != "done") {
+    std::vector<RuntimeProperty> resultProperties;
+    if (!snapshotOwnProperties(object, resultProperties, error) ||
+        resultProperties.size() != 2u ||
+        resultProperties[0].symbolKey != WellKnownSymbol::None ||
+        resultProperties[0].key != "value" ||
+        resultProperties[1].symbolKey != WellKnownSymbol::None ||
+        resultProperties[1].key != "done") {
         error = RuntimeErrorCode::InvalidAstState;
         rollback();
         return false;
     }
-    record->properties[0].value = value;
+    if (!updateExistingProperty(object, "value", value, error)) {
+        rollback();
+        return false;
+    }
     result = Value::object(object);
     GXOS_JS84_DIAGNOSTIC(++diagnostics_.iteratorResultObjectsPublished);
     return true;
@@ -6520,18 +6743,12 @@ bool RuntimeContext::createArrayIteratorEntryResult(std::size_t index,
 {
     error = RuntimeErrorCode::None;
     result = Value::undefined();
-    const std::size_t objectCountBefore = objects_.size();
-    const std::size_t propertyCountBefore = totalPropertyCount_;
-    const std::size_t propertyKeyBytesBefore = totalPropertyKeyBytes_;
-    const std::size_t arrayElementCountBefore = totalArrayElements_;
+    const std::size_t objectCountBefore = objectStore_.objectCount();
 
-    const auto rollback = [this, objectCountBefore, propertyCountBefore,
-        propertyKeyBytesBefore, arrayElementCountBefore]() {
+    const auto rollback = [this, objectCountBefore]() {
         GXOS_JS84_DIAGNOSTIC(++diagnostics_.arrayIteratorEntryRollbacks);
-        objects_.resize(objectCountBefore);
-        totalPropertyCount_ = propertyCountBefore;
-        totalPropertyKeyBytes_ = propertyKeyBytesBefore;
-        totalArrayElements_ = arrayElementCountBefore;
+        RuntimeErrorCode ignored = RuntimeErrorCode::None;
+        (void)rollbackObjects(objectCountBefore, ignored);
     };
 
     std::vector<RuntimeArrayElement> noElements;
@@ -6562,10 +6779,7 @@ bool RuntimeContext::createCollectionIteratorEntryResult(
     error = RuntimeErrorCode::None;
     result = Value::undefined();
 
-    const std::size_t objectCountBefore = objects_.size();
-    const std::size_t propertyCountBefore = totalPropertyCount_;
-    const std::size_t propertyKeyBytesBefore = totalPropertyKeyBytes_;
-    const std::size_t arrayElementCountBefore = totalArrayElements_;
+    const std::size_t objectCountBefore = objectStore_.objectCount();
     const std::size_t hostObjectCountBefore = hostObjects_.size();
     const std::size_t liveHostObjectCountBefore = liveHostObjectCount_;
 
@@ -6586,15 +6800,12 @@ bool RuntimeContext::createCollectionIteratorEntryResult(
         }
     }
 
-    const auto rollback = [this, objectCountBefore, propertyCountBefore,
-        propertyKeyBytesBefore, arrayElementCountBefore, hostObjectCountBefore,
+    const auto rollback = [this, objectCountBefore, hostObjectCountBefore,
         liveHostObjectCountBefore, reusableHostObjectSlot,
         reusableHostObjectBefore, elementAlreadyRegistered]() {
         GXOS_JS84_DIAGNOSTIC(++diagnostics_.collectionEntryRollbacks);
-        objects_.resize(objectCountBefore);
-        totalPropertyCount_ = propertyCountBefore;
-        totalPropertyKeyBytes_ = propertyKeyBytesBefore;
-        totalArrayElements_ = arrayElementCountBefore;
+        RuntimeErrorCode ignored = RuntimeErrorCode::None;
+        (void)rollbackObjects(objectCountBefore, ignored);
         if (!elementAlreadyRegistered) {
             if (reusableHostObjectSlot < hostObjectCountBefore) {
                 hostObjects_[reusableHostObjectSlot] =
@@ -6699,49 +6910,30 @@ bool RuntimeContext::readProperty(RuntimeObjectId objectId,
             error = RuntimeErrorCode::ExecutionBudgetExceeded;
             return false;
         }
-        const RuntimeObject* object = objectAt(current);
-        if (object == nullptr) {
-            error = RuntimeErrorCode::CannotReadProperty;
+        PortablePropertyEntry entry;
+        bool found = false;
+        if (!getOwnPropertyEntry(current, key, entry, found, error)) {
+            if (error == RuntimeErrorCode::InvalidAstState)
+                error = RuntimeErrorCode::CannotReadProperty;
             return false;
         }
-        if (!key.isSymbol() && object->array && key.string == "length") {
-            value = Value::number(static_cast<double>(object->arrayLength));
+        if (found) {
+            value = entry.value;
             return true;
         }
-        std::uint32_t standardIndex = 0u;
-        if (!key.isSymbol() && object->array &&
-            parseEcmaArrayIndex(key.string, standardIndex)) {
-            const std::size_t index =
-                static_cast<std::size_t>(standardIndex);
-            if (index > limits_.maxArrayIndex) {
-                error = RuntimeErrorCode::ArrayIndexOutOfRange;
-                return false;
-            }
-            if (index < object->arrayLength) {
-                const std::size_t position =
-                    findArrayElementPosition(*object, index);
-                if (position < object->elements.size() &&
-                    object->elements[position].index == index) {
-                    value = object->elements[position].value;
-                    return true;
-                }
-            }
+        RuntimeObjectId prototype = kInvalidRuntimeObjectId;
+        PortableObjectError objectError;
+        if (!objectStore_.prototypeOf(current, prototype, objectError)) {
+            error = mapPortableObjectError(objectError.code);
+            if (error == RuntimeErrorCode::InvalidAstState)
+                error = RuntimeErrorCode::CannotReadProperty;
+            return false;
         }
-        for (const RuntimeProperty& property : object->properties) {
-            const bool matches = key.isSymbol()
-                ? property.symbolKey == key.symbol
-                : property.symbolKey == WellKnownSymbol::None &&
-                    property.key == key.string;
-            if (matches) {
-                value = property.value;
-                return true;
-            }
-        }
-        if (object->prototype == kInvalidRuntimeObjectId) {
+        if (prototype == kInvalidRuntimeObjectId) {
             value = Value::undefined();
             return true;
         }
-        current = object->prototype;
+        current = prototype;
     }
     error = RuntimeErrorCode::PrototypeChainExceeded;
     return false;
@@ -6789,8 +6981,7 @@ bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
         error = RuntimeErrorCode::InvalidPropertyKey;
         return false;
     }
-    RuntimeObject* object = objectAt(objectId);
-    if (object == nullptr) {
+    if (objectAt(objectId) == nullptr) {
         error = RuntimeErrorCode::CannotWriteProperty;
         return false;
     }
@@ -6798,18 +6989,23 @@ bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
         error = RuntimeErrorCode::PropertyNameTooLong;
         return false;
     }
-    if (!key.isSymbol() && object->array && key.string == "length") {
+    bool isArray = false;
+    if (!isArrayObject(objectId, isArray)) {
+        error = RuntimeErrorCode::CannotWriteProperty;
+        return false;
+    }
+    if (!key.isSymbol() && isArray && key.string == "length") {
         return setArrayLength(objectId, value, error);
     }
     std::uint32_t standardIndex = 0u;
-    if (!key.isSymbol() && object->array &&
-        parseEcmaArrayIndex(key.string, standardIndex)) {
+    const bool isArrayIndex = !key.isSymbol() && isArray &&
+        parseEcmaArrayIndex(key.string, standardIndex);
+    if (isArrayIndex) {
         if (attributes.bits != PropertyAttributes::ordinaryData().bits) {
             error = RuntimeErrorCode::InvalidAstState;
             return false;
         }
-        const std::size_t index =
-            static_cast<std::size_t>(standardIndex);
+        const std::size_t index = static_cast<std::size_t>(standardIndex);
         if (index > limits_.maxArrayIndex) {
             error = RuntimeErrorCode::ArrayIndexOutOfRange;
             return false;
@@ -6818,184 +7014,141 @@ bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
             error = RuntimeErrorCode::ArrayLimitExceeded;
             return false;
         }
-        const std::size_t position =
-            findArrayElementPosition(*object, index);
-        if (position < object->elements.size() &&
-            object->elements[position].index == index) {
-            object->elements[position].value = value;
-        } else {
-            if (object->elements.size() >= limits_.maxArrayElements ||
-                totalArrayElements_ >= limits_.maxTotalArrayElements) {
-                GXOS_JS84_DIAGNOSTIC(
-                    ++diagnostics_.failedArraySlotAllocations);
-                error = RuntimeErrorCode::ArrayLimitExceeded;
-                return false;
-            }
-            try {
+    }
+    PortablePropertyEntry existingEntry;
+    bool alreadyPresent = false;
+    if (!getOwnPropertyEntry(objectId, key, existingEntry, alreadyPresent,
+            error)) return false;
+    if (isArrayIndex && !alreadyPresent) {
+        const std::size_t countBefore = objectStore_.arrayElementCount();
+        (void)countBefore;
 #if defined(GXOS_JAVASCRIPT_TEST_FAILURE_INJECTION)
-                if (failNextArraySlotInsertionForTesting_) {
-                    failNextArraySlotInsertionForTesting_ = false;
-                    throw std::bad_alloc();
-                }
-                if (failArraySlotInsertionAfterCountForTesting_) {
-                    if (arraySlotInsertionsBeforeFailureForTesting_ == 0u) {
-                        failArraySlotInsertionAfterCountForTesting_ = false;
-                        throw std::bad_alloc();
-                    }
-                    --arraySlotInsertionsBeforeFailureForTesting_;
-                }
-#endif
-                object->elements.push_back({index, value});
-            } catch (const std::bad_alloc&) {
-                GXOS_JS84_DIAGNOSTIC(
-                    ++diagnostics_.failedArraySlotAllocations);
+        if (failNextArraySlotInsertionForTesting_) {
+            failNextArraySlotInsertionForTesting_ = false;
+            GXOS_JS84_DIAGNOSTIC(++diagnostics_.failedArraySlotAllocations);
+            error = RuntimeErrorCode::AllocationFailure;
+            return false;
+        }
+        if (failArraySlotInsertionAfterCountForTesting_) {
+            if (arraySlotInsertionsBeforeFailureForTesting_ == 0u) {
+                failArraySlotInsertionAfterCountForTesting_ = false;
+                GXOS_JS84_DIAGNOSTIC(++diagnostics_.failedArraySlotAllocations);
                 error = RuntimeErrorCode::AllocationFailure;
                 return false;
             }
-            for (std::size_t cursor = object->elements.size() - 1u;
-                cursor > position; --cursor) {
-                object->elements[cursor] = object->elements[cursor - 1u];
-            }
-            object->elements[position] = {index, value};
-            ++totalArrayElements_;
-            GXOS_JS84_DIAGNOSTIC({
-                ++diagnostics_.arraySlotsAllocated;
-                if (diagnostics_.arraySlotHighWater < totalArrayElements_)
-                    diagnostics_.arraySlotHighWater = totalArrayElements_;
-            });
+            --arraySlotInsertionsBeforeFailureForTesting_;
         }
-        const std::size_t newLength = index + 1u;
-        if (newLength > object->arrayLength) object->arrayLength = newLength;
+#endif
+        PortableObjectError objectError;
+        if (!objectStore_.setOwnProperty(objectId,
+                SourceView(key.string.data(), key.string.size()), value,
+                objectError, attributes.bits)) {
+            GXOS_JS84_DIAGNOSTIC({
+                if (objectError.code ==
+                    PortableObjectErrorCode::ArrayCapacityExceeded)
+                    ++diagnostics_.failedArraySlotAllocations;
+            });
+            error = mapPortableObjectError(objectError.code);
+            return false;
+        }
+        GXOS_JS84_DIAGNOSTIC({
+            if (objectStore_.arrayElementCount() > countBefore) {
+                ++diagnostics_.arraySlotsAllocated;
+                if (diagnostics_.arraySlotHighWater <
+                    objectStore_.arrayElementCount())
+                    diagnostics_.arraySlotHighWater =
+                        objectStore_.arrayElementCount();
+            }
+        });
         return true;
     }
-
-    for (RuntimeProperty& property : object->properties) {
-        const bool matches = key.isSymbol()
-            ? property.symbolKey == key.symbol
-            : property.symbolKey == WellKnownSymbol::None &&
-                property.key == key.string;
-        if (matches) {
-            if (!property.attributes.isValid() ||
-                !property.attributes.hasWritable()) {
-                error = RuntimeErrorCode::InvalidAstState;
-                return false;
-            }
-            // Non-writable properties retain the established deterministic
-            // no-op assignment behavior. Host event refreshes use the
-            // dedicated updateExistingProperty path below.
-            if (!property.attributes.writable()) return true;
-            property.value = value;
-            return true;
-        }
-    }
-    if (object->properties.size() >= limits_.maxPropertiesPerObject ||
-        totalPropertyCount_ >= limits_.maxTotalProperties) {
-        GXOS_JS84_DIAGNOSTIC(++diagnostics_.failedPropertyAllocations);
-        error = RuntimeErrorCode::PropertyLimitExceeded;
-        return false;
-    }
-    const std::size_t keyBytes = key.isSymbol() ? 0u : key.string.size();
-    if (keyBytes > limits_.maxTotalPropertyKeyBytes ||
-        totalPropertyKeyBytes_ > limits_.maxTotalPropertyKeyBytes - keyBytes) {
-        GXOS_JS84_DIAGNOSTIC(++diagnostics_.failedPropertyAllocations);
-        error = RuntimeErrorCode::PropertyLimitExceeded;
-        return false;
-    }
-    try {
-        RuntimeProperty property;
-        if (!key.isSymbol()) property.key = key.string;
-        property.symbolKey = key.symbol;
-        property.value = value;
-        property.attributes = attributes;
+    const std::size_t propertiesBefore = objectStore_.propertyCount();
+    (void)propertiesBefore;
 #if defined(GXOS_JAVASCRIPT_TEST_FAILURE_INJECTION)
+    if (!alreadyPresent && !isArrayIndex) {
         if (failNextPropertyInsertionForTesting_) {
             failNextPropertyInsertionForTesting_ = false;
-            throw std::bad_alloc();
+            GXOS_JS84_DIAGNOSTIC(++diagnostics_.failedPropertyAllocations);
+            error = RuntimeErrorCode::AllocationFailure;
+            return false;
         }
         if (failPropertyInsertionAfterCountForTesting_) {
             if (propertyInsertionsBeforeFailureForTesting_ == 0u) {
                 failPropertyInsertionAfterCountForTesting_ = false;
-                throw std::bad_alloc();
+                GXOS_JS84_DIAGNOSTIC(++diagnostics_.failedPropertyAllocations);
+                error = RuntimeErrorCode::AllocationFailure;
+                return false;
             }
             --propertyInsertionsBeforeFailureForTesting_;
         }
+    }
 #endif
-        object->properties.push_back(std::move(property));
-    } catch (const std::bad_alloc&) {
-        GXOS_JS84_DIAGNOSTIC(++diagnostics_.failedPropertyAllocations);
-        error = RuntimeErrorCode::AllocationFailure;
+    PortableObjectError objectError;
+    const bool stored = key.isSymbol()
+        ? objectStore_.setOwnProperty(objectId, key.symbol, value,
+            objectError, attributes.bits)
+        : objectStore_.setOwnProperty(objectId,
+            SourceView(key.string.data(), key.string.size()), value,
+            objectError, attributes.bits);
+    if (!stored) {
+        GXOS_JS84_DIAGNOSTIC({
+            if (objectError.code ==
+                PortableObjectErrorCode::PropertyCapacityExceeded ||
+                objectError.code ==
+                PortableObjectErrorCode::NameStorageExhausted)
+                ++diagnostics_.failedPropertyAllocations;
+        });
+        error = mapPortableObjectError(objectError.code);
         return false;
     }
-    ++totalPropertyCount_;
-    totalPropertyKeyBytes_ += keyBytes;
     GXOS_JS84_DIAGNOSTIC({
-        ++diagnostics_.runtimePropertiesAllocated;
-        if (diagnostics_.propertyPoolHighWater < totalPropertyCount_)
-            diagnostics_.propertyPoolHighWater = totalPropertyCount_;
+        if (objectStore_.propertyCount() > propertiesBefore) {
+            ++diagnostics_.runtimePropertiesAllocated;
+            if (diagnostics_.propertyPoolHighWater <
+                objectStore_.propertyCount())
+                diagnostics_.propertyPoolHighWater =
+                    objectStore_.propertyCount();
+        }
     });
     return true;
 }
+
+
 
 bool RuntimeContext::deleteOwnProperty(RuntimeObjectId objectId,
     const std::string& key, bool& deleted, RuntimeErrorCode& error)
 {
     error = RuntimeErrorCode::None;
     deleted = false;
-    RuntimeObject* object = objectAt(objectId);
-    if (object == nullptr) {
+    if (objectAt(objectId) == nullptr) {
         error = RuntimeErrorCode::CannotWriteProperty;
         return false;
     }
-    if (object->array && key == "length") return true;
-
-    std::uint32_t standardIndex = 0u;
-    if (object->array && parseEcmaArrayIndex(key, standardIndex)) {
-        const std::size_t index = static_cast<std::size_t>(standardIndex);
-        if (index > limits_.maxArrayIndex) return true;
-        const std::size_t position = findArrayElementPosition(*object, index);
-        if (position >= object->elements.size() ||
-            object->elements[position].index != index) return true;
-        if (index >= object->arrayLength ||
-            !object->elements[position].attributes.isValid() ||
-            !object->elements[position].attributes.hasConfigurable()) {
-            error = RuntimeErrorCode::InvalidAstState;
-            return false;
-        }
-        if (!object->elements[position].attributes.configurable()) return true;
-        if (totalArrayElements_ == 0u) {
-            error = RuntimeErrorCode::InvalidAstState;
-            return false;
-        }
-        object->elements.erase(object->elements.begin() +
-            static_cast<std::ptrdiff_t>(position));
-        --totalArrayElements_;
-        deleted = true;
-        return true;
+    PropertyKey propertyKey;
+    propertyKey.string = key;
+    bool isArray = false;
+    if (!isArrayObject(objectId, isArray)) {
+        error = RuntimeErrorCode::CannotWriteProperty;
+        return false;
     }
-
-    for (std::size_t position = 0u; position < object->properties.size();
-        ++position) {
-        RuntimeProperty& property = object->properties[position];
-        if (property.symbolKey != WellKnownSymbol::None ||
-            property.key != key) continue;
-        if (!property.attributes.isValid() ||
-            !property.attributes.hasConfigurable()) {
-            error = RuntimeErrorCode::InvalidAstState;
-            return false;
-        }
-        if (!property.attributes.configurable()) return true;
-        const std::size_t keyBytes = property.key.size();
-        if (totalPropertyCount_ == 0u ||
-            keyBytes > totalPropertyKeyBytes_) {
-            error = RuntimeErrorCode::InvalidAstState;
-            return false;
-        }
-        object->properties.erase(object->properties.begin() +
-            static_cast<std::ptrdiff_t>(position));
-        --totalPropertyCount_;
-        totalPropertyKeyBytes_ -= keyBytes;
-        deleted = true;
-        return true;
+    if (isArray && key == "length") return true;
+    PortablePropertyEntry entry;
+    bool found = false;
+    if (!getOwnPropertyEntry(objectId, propertyKey, entry, found, error))
+        return false;
+    if (!found) return true;
+    PropertyAttributes attributes;
+    attributes.bits = entry.attributes;
+    if (!attributes.isValid() || !attributes.hasConfigurable()) {
+        error = RuntimeErrorCode::InvalidAstState;
+        return false;
+    }
+    if (!attributes.configurable()) return true;
+    PortableObjectError objectError;
+    if (!objectStore_.deleteOwnProperty(objectId,
+            SourceView(key.data(), key.size()), deleted, objectError)) {
+        error = mapPortableObjectError(objectError.code);
+        return false;
     }
     return true;
 }
@@ -7004,20 +7157,28 @@ bool RuntimeContext::updateExistingProperty(RuntimeObjectId objectId,
     const std::string& key, Value value, RuntimeErrorCode& error)
 {
     error = RuntimeErrorCode::None;
-    RuntimeObject* object = objectAt(objectId);
-    if (object == nullptr) {
+    if (objectAt(objectId) == nullptr) {
         error = RuntimeErrorCode::CannotWriteProperty;
         return false;
     }
-    for (RuntimeProperty& property : object->properties) {
-        if (property.symbolKey == WellKnownSymbol::None &&
-            property.key == key) {
-            property.value = value;
-            return true;
-        }
+    PropertyKey propertyKey;
+    propertyKey.string = key;
+    PortablePropertyEntry entry;
+    bool found = false;
+    if (!getOwnPropertyEntry(objectId, propertyKey, entry, found, error))
+        return false;
+    if (!found) {
+        error = RuntimeErrorCode::CannotWriteProperty;
+        return false;
     }
-    error = RuntimeErrorCode::CannotWriteProperty;
-    return false;
+    PortableObjectError objectError;
+    if (!objectStore_.updateOwnProperty(objectId,
+            SourceView(key.data(), key.size()), value, entry.attributes,
+            objectError)) {
+        error = mapPortableObjectError(objectError.code);
+        return false;
+    }
+    return true;
 }
 
 RuntimeErrorCode RuntimeContext::mapHostResult(HostResultCode code) const

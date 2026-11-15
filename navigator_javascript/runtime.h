@@ -5,6 +5,7 @@
 #include "execution_core.h"
 #include "function_storage.h"
 #include "host.h"
+#include "object_storage.h"
 #include "parser.h"
 #include "runtime_string_storage.h"
 #include "value.h"
@@ -288,9 +289,12 @@ public:
     }
     std::size_t userFunctionCount() const { return userFunctionCount_; }
     std::size_t nativeFunctionCount() const { return nativeFunctionCount_; }
-    std::size_t objectCount() const { return objects_.size(); }
-    std::size_t propertyCount() const { return totalPropertyCount_; }
-    std::size_t arrayElementCount() const { return totalArrayElements_; }
+    std::size_t objectCount() const { return objectStore_.objectCount(); }
+    std::size_t propertyCount() const { return objectStore_.propertyCount(); }
+    std::size_t arrayElementCount() const
+    {
+        return objectStore_.arrayElementCount();
+    }
     std::size_t activeCallFrameCount() const { return activeCallFrames_; }
 
     RuntimeObjectId objectPrototypeId() const { return objectPrototype_; }
@@ -536,16 +540,9 @@ private:
     };
 
     struct RuntimeObject {
-        bool array = false;
-        std::size_t arrayLength = 0u;
-        RuntimeObjectId prototype = kInvalidRuntimeObjectId;
-        std::vector<RuntimeProperty> properties;
-        // Only present indexed properties have records. The sorted index is
-        // also the occupancy metadata, so holes consume no element storage.
-        std::vector<RuntimeArrayElement> elements;
-        // Array iterator state lives in its ordinary, retained runtime object.
-        // IDs are stable vector indices; no RuntimeObject pointer survives an
-        // allocation that can grow objects_.
+        // Host-only iterator state is the sole object sidecar. Ordinary
+        // properties, prototypes, Array kind/length, and indexed slots live
+        // exclusively in PortableObjectStore.
         bool arrayIterator = false;
         bool arrayIteratorExhausted = false;
         ArrayIteratorMode arrayIteratorMode = ArrayIteratorMode::Values;
@@ -584,6 +581,8 @@ private:
     bool stringView(const Value& value, SourceView& view,
         RuntimeErrorCode& error) const;
     bool initializePortableStorage(RuntimeErrorCode& error);
+    RuntimeErrorCode mapPortableObjectError(
+        PortableObjectErrorCode code) const;
     bool configurePortableExecutionStorage(RuntimeErrorCode& error);
     bool appendFunctionRecord(const FunctionRecord& function,
         RuntimeFunctionId& result, RuntimeErrorCode& error);
@@ -611,8 +610,20 @@ private:
         std::vector<RuntimeArrayElement>&& initialElements,
         RuntimeObjectId& result, RuntimeErrorCode& error,
         RuntimeObjectId prototype = kInvalidRuntimeObjectId);
-    static std::size_t findArrayElementPosition(const RuntimeObject& object,
-        std::size_t index);
+    bool rollbackObjects(std::size_t retainedCount,
+        RuntimeErrorCode& error);
+    bool isArrayObject(RuntimeObjectId object, bool& result) const;
+    bool getArrayLength(RuntimeObjectId object, std::size_t& result) const;
+    bool getOwnPropertyEntry(RuntimeObjectId object, const PropertyKey& key,
+        PortablePropertyEntry& result, bool& found,
+        RuntimeErrorCode& error) const;
+    bool hasOwnStoredProperty(RuntimeObjectId object,
+        const PropertyKey& key, bool& found, RuntimeErrorCode& error) const;
+    bool snapshotOwnProperties(RuntimeObjectId object,
+        std::vector<RuntimeProperty>& result, RuntimeErrorCode& error) const;
+    bool snapshotArrayElements(RuntimeObjectId object,
+        std::vector<RuntimeArrayElement>& result,
+        RuntimeErrorCode& error) const;
     bool readArrayIndex(RuntimeObjectId object, std::size_t index,
         Value& value, RuntimeErrorCode& error, SourceLocation location);
     bool setArrayLength(RuntimeObjectId object, const Value& value,
@@ -697,11 +708,13 @@ private:
     std::vector<RuntimeStringRecord> runtimeStringRecordStorage_;
     std::vector<char> runtimeStringStorage_;
     RuntimeStringStore stringStore_;
-    std::vector<RuntimeObject> objects_;
+    PortableObjectStore objectStore_;
+    std::vector<PortableObjectRecord> objectRecordStorage_;
+    std::vector<PortablePropertyRecord> objectPropertyStorage_;
+    std::vector<PortableArrayElementRecord> arrayElementStorage_;
+    std::vector<char> propertyNameStorage_;
+    std::vector<RuntimeObject> objectAdapters_;
     std::size_t totalStringBytes_ = 0;
-    std::size_t totalPropertyCount_ = 0;
-    std::size_t totalPropertyKeyBytes_ = 0;
-    std::size_t totalArrayElements_ = 0;
 #if defined(GXOS_JAVASCRIPT_TEST_FAILURE_INJECTION)
     bool failNextArrayCreationForTesting_ = false;
     bool failNextArraySlotInsertionForTesting_ = false;

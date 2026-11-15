@@ -26,34 +26,32 @@ struct NavigatorScriptRuntimeTestAccess {
     {
         const Object* object = runtime.objectAt(runtime.arrayPrototype_);
         if (object == nullptr) return false;
-        for (const RuntimeContext::RuntimeProperty& property :
-            object->properties) {
-            if (property.symbolKey == WellKnownSymbol::None &&
-                property.key == name) {
-                return property.value.isFunction() &&
-                    property.attributes.isValid() &&
-                    property.attributes.hasWritable() &&
-                    property.attributes.writable() &&
-                    !property.attributes.hasEnumerable() &&
-                    !property.attributes.hasConfigurable();
-            }
-        }
-        return false;
+        PortablePropertyEntry property;
+        bool found = false;
+        PortableObjectError error;
+        const SourceView key(name, std::char_traits<char>::length(name));
+        if (!runtime.objectStore_.getOwnPropertyEntry(
+                runtime.arrayPrototype_, key, property, found, error) ||
+            error.code != PortableObjectErrorCode::None || !found) return false;
+        const RuntimeContext::PropertyAttributes attributes{property.attributes};
+        return property.value.isFunction() && attributes.isValid() &&
+            attributes.hasWritable() && attributes.writable() &&
+            !attributes.hasEnumerable() && !attributes.hasConfigurable();
     }
 
     static std::size_t runtimeObjectCount(const RuntimeContext& runtime)
     {
-        return runtime.objects_.size();
+        return runtime.objectStore_.objectCount();
     }
 
     static std::size_t runtimeObjectSize()
     {
-        return sizeof(RuntimeContext::RuntimeObject);
+        return sizeof(PortableObjectRecord);
     }
 
     static std::size_t arrayElementSize()
     {
-        return sizeof(RuntimeContext::RuntimeArrayElement);
+        return sizeof(PortableArrayElementRecord);
     }
 };
 
@@ -595,9 +593,9 @@ void testPersistentStorageAndLayout()
         NavigatorScriptRuntimeTestAccess::runtimeObjectCount(runtime) ==
             objectsBefore && runtime.arrayElementCount() == slotsBefore,
         "successful reduce retains no result object, Array, or persistent staging slots");
-    expect(NavigatorScriptRuntimeTestAccess::runtimeObjectSize() == 88u &&
-        NavigatorScriptRuntimeTestAccess::arrayElementSize() == 24u,
-        "reduce preserves RuntimeObject and portable RuntimeArrayElement layouts");
+    expect(NavigatorScriptRuntimeTestAccess::runtimeObjectSize() == 28u &&
+        NavigatorScriptRuntimeTestAccess::arrayElementSize() == 32u,
+        "reduce uses the shared object and Array-element record layouts");
 }
 
 std::string denseArraySource(std::size_t length)

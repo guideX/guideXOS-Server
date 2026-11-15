@@ -17,11 +17,11 @@ struct NavigatorScriptRuntimeTestAccess {
     using Object = RuntimeContext::RuntimeObject;
     using Mode = RuntimeContext::ArrayIteratorMode;
 
-    static std::size_t objectBytes() { return sizeof(Object); }
+    static std::size_t objectBytes() { return sizeof(PortableObjectRecord); }
     static std::size_t valueBytes() { return sizeof(Value); }
     static std::size_t arrayElementBytes()
     {
-        return sizeof(RuntimeContext::RuntimeArrayElement);
+        return sizeof(PortableArrayElementRecord);
     }
 
     static bool cursorState(const RuntimeContext& runtime, RuntimeObjectId id,
@@ -40,12 +40,11 @@ struct NavigatorScriptRuntimeTestAccess {
     static bool hasOwnIndex(const RuntimeContext& runtime, RuntimeObjectId id,
         std::size_t index)
     {
-        const Object* object = runtime.objectAt(id);
-        if (object == nullptr || !object->array) return false;
-        const std::size_t position =
-            RuntimeContext::findArrayElementPosition(*object, index);
-        return position < object->elements.size() &&
-            object->elements[position].index == index;
+        bool found = false;
+        PortableObjectError error;
+        return runtime.objectStore_.hasOwnArrayElement(id, index, found,
+                error) && error.code == PortableObjectErrorCode::None &&
+            found;
     }
 
     static bool setArrayPrototypeIndex(RuntimeContext& runtime,
@@ -60,21 +59,17 @@ struct NavigatorScriptRuntimeTestAccess {
     static bool methodAttributes(const RuntimeContext& runtime,
         const char* name)
     {
-        const Object* prototype = runtime.objectAt(runtime.arrayPrototype_);
-        if (prototype == nullptr) return false;
-        for (const RuntimeContext::RuntimeProperty& property :
-            prototype->properties) {
-            if (property.symbolKey == WellKnownSymbol::None &&
-                property.key == name) {
-                return property.value.isFunction() &&
-                    property.attributes.isValid() &&
-                    property.attributes.hasWritable() &&
-                    property.attributes.writable() &&
-                    !property.attributes.hasEnumerable() &&
-                    !property.attributes.hasConfigurable();
-            }
-        }
-        return false;
+        PortablePropertyEntry property;
+        bool found = false;
+        PortableObjectError error;
+        const SourceView key(name, std::char_traits<char>::length(name));
+        if (!runtime.objectStore_.getOwnPropertyEntry(
+                runtime.arrayPrototype_, key, property, found, error) ||
+            error.code != PortableObjectErrorCode::None || !found) return false;
+        const RuntimeContext::PropertyAttributes attributes{property.attributes};
+        return property.value.isFunction() && attributes.isValid() &&
+            attributes.hasWritable() && attributes.writable() &&
+            !attributes.hasEnumerable() && !attributes.hasConfigurable();
     }
 
     static void failNextArrayCreation(RuntimeContext& runtime)
@@ -106,22 +101,25 @@ struct NavigatorScriptRuntimeTestAccess {
     static void setObjectLimit(RuntimeContext& runtime, std::size_t limit)
     {
         runtime.limits_.maxObjects = limit;
+        runtime.objectStore_.limits_.maxObjects = limit;
     }
 
     static void setPropertyLimit(RuntimeContext& runtime, std::size_t limit)
     {
         runtime.limits_.maxTotalProperties = limit;
+        runtime.objectStore_.limits_.maxProperties = limit;
     }
 
     static void setArraySlotLimit(RuntimeContext& runtime, std::size_t limit)
     {
         runtime.limits_.maxTotalArrayElements = limit;
+        runtime.objectStore_.limits_.maxTotalArrayElements = limit;
     }
 
     static std::size_t iteratorCursorCount(const RuntimeContext& runtime)
     {
         std::size_t count = 0u;
-        for (const Object& object : runtime.objects_)
+        for (const Object& object : runtime.objectAdapters_)
             if (object.arrayIterator) ++count;
         return count;
     }

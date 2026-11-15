@@ -14248,3 +14248,32 @@ model now serves both hosted and freestanding execution. See the
 [JS120 portable objects and Arrays report](NAVIGATOR_JAVASCRIPT_JS120_PORTABLE_OBJECTS_ARRAYS.md)
 for final regression results, memory/stack analysis, gate status, and the
 recommended JS121 hosted adapter work.
+
+### JS121 unified hosted and portable object model — verified
+
+JS121 makes `PortableObjectStore` the sole authoritative store for hosted
+ordinary objects and Arrays as well as the portable execution slice. The
+`RuntimeContext` object vector now holds only the bounded iterator sidecar;
+property reads/writes, descriptors, symbols, prototypes, sparse Array slots,
+JSON traversal, callbacks, and built-ins all use the shared store. Host DOM
+objects and their lifecycle remain in the existing hosted adapter.
+
+The dedicated hosted integration suite passes **32/32**. The full JavaScript
+matrix passes **113/113 lanes** and **17,797/17,797 assertions** across 72
+assertion-reporting lanes. The strict C++17 build and production build passed;
+the separately saved production candidate is 9,296,043 B with SHA-256
+`ACA9FE50A084FC0734557E8373C6883FF3EE2F31B12AE506EB26983BF88F47A0`. JS109
+and JS110 hosted pages returned HTTP 200 with no JavaScript errors.
+
+The hosted Navigator aggregate recorded **767/774** checks. Its seven failures
+are the established CSS checks in phases 3C, 3G, 6A, three checks in 6B, and
+6C; the final candidate run had no JavaScript failures. The protected
+8,398,274-byte executable was restored and verified at SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`. All 42
+generated fixtures (458,372 B) match the saved JS120 manifest, and `.phase`
+remains absent. No QEMU, QAC, guest execution, or kernel admission was run.
+
+The shared object-store backing is 585,728 B, plus 16,384 B of hosted iterator
+sidecars. The detailed architecture, capacity accounting, stack measurements,
+and follow-up boundaries are in the
+[JS121 shared object model report](NAVIGATOR_JAVASCRIPT_JS121_SHARED_OBJECT_MODEL.md).

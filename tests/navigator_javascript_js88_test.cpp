@@ -14,8 +14,8 @@
 namespace gxos::javascript {
 
 struct NavigatorScriptRuntimeTestAccess {
-    using Object = RuntimeContext::RuntimeObject;
-    using ArrayElement = RuntimeContext::RuntimeArrayElement;
+    using Object = PortableObjectRecord;
+    using ArrayElement = PortableArrayElementRecord;
 
     static std::size_t objectBytes() { return sizeof(Object); }
     static std::size_t arrayElementBytes() { return sizeof(ArrayElement); }
@@ -23,24 +23,27 @@ struct NavigatorScriptRuntimeTestAccess {
     static bool arrayMetrics(const RuntimeContext& runtime, RuntimeObjectId id,
         std::size_t& length, std::size_t& occupied, std::size_t& capacity)
     {
-        const Object* object = runtime.objectAt(id);
-        if (object == nullptr || !object->array) return false;
-        length = object->arrayLength;
-        occupied = object->elements.size();
-        capacity = object->elements.capacity();
+        PortableObjectError error;
+        bool isArray = false;
+        if (!runtime.objectStore_.isArray(id, isArray, error) || !isArray ||
+            error.code != PortableObjectErrorCode::None) return false;
+        if (!runtime.objectStore_.arrayLength(id, length, error) ||
+            error.code != PortableObjectErrorCode::None) return false;
+        const std::size_t slot = runtimeHandleSlot(id);
+        if (slot >= runtime.objectRecordStorage_.size()) return false;
+        occupied = runtime.objectRecordStorage_[slot].arrayElementCount;
+        capacity = occupied; // Shared pool records retained by this Array.
         return true;
     }
 
     static bool hasOwnArrayElement(const RuntimeContext& runtime,
         RuntimeObjectId id, std::size_t index)
     {
-        const Object* object = runtime.objectAt(id);
-        if (object == nullptr || !object->array) return false;
-        const std::size_t position =
-            RuntimeContext::findArrayElementPosition(*object, index);
-        return index < object->arrayLength &&
-            position < object->elements.size() &&
-            object->elements[position].index == index;
+        bool found = false;
+        PortableObjectError error;
+        return runtime.objectStore_.hasOwnArrayElement(id, index, found,
+                error) && error.code == PortableObjectErrorCode::None &&
+            found;
     }
 
     static void failNextArrayCreation(RuntimeContext& runtime)

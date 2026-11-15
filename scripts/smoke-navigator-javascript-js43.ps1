@@ -15,6 +15,7 @@ $compileOutput = & g++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic `
     navigator_javascript/host.cpp `
     navigator_javascript/environment.cpp `
     navigator_javascript/runtime.cpp `
+    navigator_javascript/object_storage.cpp `
     navigator_javascript/ast.cpp `
     navigator_javascript/lexer.cpp `
     navigator_javascript/parser.cpp `
@@ -33,6 +34,7 @@ $strict = & g++ -std=c++17 -Wall -Wextra -Werror -pedantic -iquote . `
     navigator_javascript/host.cpp `
     navigator_javascript/environment.cpp `
     navigator_javascript/runtime.cpp `
+    navigator_javascript/object_storage.cpp `
     navigator_javascript/ast.cpp `
     navigator_javascript/lexer.cpp `
     navigator_javascript/parser.cpp `

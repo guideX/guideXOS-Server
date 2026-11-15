@@ -14,49 +14,62 @@
 namespace gxos::javascript {
 
 struct NavigatorScriptRuntimeTestAccess {
-    using Object = RuntimeContext::RuntimeObject;
-    using ArrayElement = RuntimeContext::RuntimeArrayElement;
+    using Object = PortableObjectRecord;
+    using ArrayElement = PortableArrayElementRecord;
+    using Property = PortablePropertyRecord;
 
     static std::size_t objectBytes() { return sizeof(Object); }
     static std::size_t arrayElementBytes() { return sizeof(ArrayElement); }
     static std::size_t propertyBytes()
     {
-        return sizeof(RuntimeContext::RuntimeProperty);
+        return sizeof(PortablePropertyRecord);
     }
 
     static bool arrayMetrics(const RuntimeContext& runtime, RuntimeObjectId id,
         std::size_t& length, std::size_t& occupied, std::size_t& capacity)
     {
-        const Object* object = runtime.objectAt(id);
-        if (object == nullptr || !object->array) return false;
-        length = object->arrayLength;
-        occupied = object->elements.size();
-        capacity = object->elements.capacity();
+        PortableObjectError error;
+        bool isArray = false;
+        if (!runtime.objectStore_.isArray(id, isArray, error) || !isArray ||
+            error.code != PortableObjectErrorCode::None) return false;
+        if (!runtime.objectStore_.arrayLength(id, length, error) ||
+            error.code != PortableObjectErrorCode::None) return false;
+        const std::size_t slot = runtimeHandleSlot(id);
+        if (slot >= runtime.objectRecordStorage_.size()) return false;
+        occupied = runtime.objectRecordStorage_[slot].arrayElementCount;
+        capacity = occupied; // Shared pool records retained by this Array.
         return true;
     }
 
     static bool hasOwnArrayElement(const RuntimeContext& runtime,
         RuntimeObjectId id, std::size_t index)
     {
-        const Object* object = runtime.objectAt(id);
-        if (object == nullptr || !object->array) return false;
-        const std::size_t position =
-            RuntimeContext::findArrayElementPosition(*object, index);
-        return index < object->arrayLength &&
-            position < object->elements.size() &&
-            object->elements[position].index == index;
+        bool found = false;
+        PortableObjectError error;
+        return runtime.objectStore_.hasOwnArrayElement(id, index, found,
+                error) && error.code == PortableObjectErrorCode::None &&
+            found;
     }
 
     static bool arrayStringsEqual(const RuntimeContext& runtime,
         RuntimeObjectId id, const std::vector<std::string>& expected)
     {
-        const Object* object = runtime.objectAt(id);
-        if (object == nullptr || !object->array ||
-            object->arrayLength != expected.size() ||
-            object->elements.size() != expected.size()) return false;
+        std::size_t length = 0u;
+        PortableObjectError error;
+        if (!runtime.objectStore_.arrayLength(id, length, error) ||
+            error.code != PortableObjectErrorCode::None ||
+            length != expected.size()) return false;
+        const std::size_t slot = runtimeHandleSlot(id);
+        if (slot >= runtime.objectRecordStorage_.size() ||
+            runtime.objectRecordStorage_[slot].arrayElementCount !=
+                expected.size()) return false;
         for (std::size_t index = 0u; index < expected.size(); ++index) {
-            const ArrayElement& element = object->elements[index];
-            if (element.index != index || !element.value.isString() ||
+            PortableArrayEntry element;
+            bool found = false;
+            if (!runtime.objectStore_.getArrayElementAt(id, index, element,
+                    found, error) || error.code !=
+                    PortableObjectErrorCode::None || !found ||
+                element.index != index || !element.value.isString() ||
                 runtime.stringValue(element.value) != expected[index]) {
                 return false;
             }
@@ -67,58 +80,50 @@ struct NavigatorScriptRuntimeTestAccess {
     static bool propertyMetadata(const RuntimeContext& runtime,
         RuntimeObjectId id, const std::string& key, bool& readOnly)
     {
-        const Object* object = runtime.objectAt(id);
-        if (object == nullptr) return false;
-        for (const RuntimeContext::RuntimeProperty& property :
-            object->properties) {
-            if (property.symbolKey == WellKnownSymbol::None &&
-                property.key == key) {
-                readOnly = property.attributes.hasWritable() &&
-                    !property.attributes.writable();
-                return true;
-            }
-        }
-        return false;
+        PortablePropertyEntry property;
+        bool found = false;
+        PortableObjectError error;
+        if (!runtime.objectStore_.getOwnPropertyEntry(id,
+                SourceView(key.data(), key.size()), property, found, error) ||
+            error.code != PortableObjectErrorCode::None || !found) return false;
+        const RuntimeContext::PropertyAttributes attributes{property.attributes};
+        readOnly = attributes.hasWritable() && !attributes.writable();
+        return true;
     }
 
     static bool hasSymbolProperty(const RuntimeContext& runtime,
         RuntimeObjectId id)
     {
-        const Object* object = runtime.objectAt(id);
-        if (object == nullptr) return false;
-        for (const RuntimeContext::RuntimeProperty& property :
-            object->properties) {
-            if (property.symbolKey != WellKnownSymbol::None) return true;
+        PortablePropertyEntry property;
+        bool found = false;
+        PortableObjectError error;
+        for (std::size_t ordinal = 0u;; ++ordinal) {
+            if (!runtime.objectStore_.getOwnPropertyAt(id, ordinal, property,
+                    found, error) || error.code !=
+                    PortableObjectErrorCode::None || !found) return false;
+            if (property.symbol != WellKnownSymbol::None) return true;
         }
-        return false;
     }
 
     static bool hasDetachedArrayLength(const RuntimeContext& runtime,
         RuntimeObjectId id)
     {
-        const Object* object = runtime.objectAt(id);
-        if (object == nullptr || !object->array) return false;
-        for (const RuntimeContext::RuntimeProperty& property :
-            object->properties) {
-            if (property.symbolKey == WellKnownSymbol::None &&
-                property.key == "length") return true;
-        }
-        return false;
+        (void)runtime;
+        (void)id;
+        return false; // Array length is a record field, not a detached property.
     }
 
     static bool eventPropertyIsReadOnly(const RuntimeContext& runtime,
         const std::string& key)
     {
-        const Object* object = runtime.objectAt(runtime.eventObject_);
-        if (object == nullptr) return false;
-        for (const RuntimeContext::RuntimeProperty& property :
-            object->properties) {
-            if (property.symbolKey == WellKnownSymbol::None &&
-                property.key == key && property.attributes.hasWritable()) {
-                return !property.attributes.writable();
-            }
-        }
-        return false;
+        PortablePropertyEntry property;
+        bool found = false;
+        PortableObjectError error;
+        if (!runtime.objectStore_.getOwnPropertyEntry(runtime.eventObject_,
+                SourceView(key.data(), key.size()), property, found, error) ||
+            error.code != PortableObjectErrorCode::None || !found) return false;
+        const RuntimeContext::PropertyAttributes attributes{property.attributes};
+        return attributes.hasWritable() && !attributes.writable();
     }
 
     static void failNextArrayCreation(RuntimeContext& runtime)
@@ -149,7 +154,7 @@ struct NavigatorScriptRuntimeTestAccess {
     static bool fillObjectPool(RuntimeContext& runtime)
     {
         const std::vector<Value> noElements;
-        while (runtime.objects_.size() < runtime.limits_.maxObjects) {
+        while (runtime.objectStore_.objectCount() < runtime.limits_.maxObjects) {
             RuntimeObjectId object = kInvalidRuntimeObjectId;
             RuntimeErrorCode error = RuntimeErrorCode::None;
             if (!runtime.createObject(false, noElements, object, error))

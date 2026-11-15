@@ -21,6 +21,11 @@ the one-authoritative-model requirement. Keeping that boundary avoids changing
 hosted property descriptors, built-ins, Array callbacks, JSON, and DOM behavior
 without a complete adapter and parity proof.
 
+This report records the JS120 state at its accepted commit. JS121 subsequently
+routes the hosted `RuntimeContext` through `PortableObjectStore`; see the
+[JS121 shared object model report](NAVIGATOR_JAVASCRIPT_JS121_SHARED_OBJECT_MODEL.md)
+for the migrated architecture and its separate qualification results.
+
 The portable evaluator is a specialization of the JS119 evaluator, not a
 separate test evaluator. `PortableExecutionCore` keeps object operations
 disabled for the existing hosted dispatch. `PortableObjectExecutionCore`
@@ -283,3 +288,9 @@ error behavior. Add hosted/portable interoperability tests for object identity,
 Array mutation/enumeration, and retained closures before removing the legacy
 vector model. Qualify aggregate stack and memory after that adapter exists;
 then bring the JSON pipeline into the portable dependency closure.
+
+**Current status:** JS121 completed this hosted adapter and removed the second
+authoritative ordinary-object/Array store. See the
+[JS121 shared object model report](NAVIGATOR_JAVASCRIPT_JS121_SHARED_OBJECT_MODEL.md)
+for the verified unified result; this document remains the historical JS120
+qualification record.

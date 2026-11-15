@@ -60,9 +60,9 @@ struct NavigatorScriptIteratorTestAccess {
 };
 
 struct NavigatorScriptRuntimeTestAccess {
-    using Object = RuntimeContext::RuntimeObject;
-    using ArrayElement = RuntimeContext::RuntimeArrayElement;
-    using Property = RuntimeContext::RuntimeProperty;
+    using Object = PortableObjectRecord;
+    using ArrayElement = PortableArrayElementRecord;
+    using Property = PortablePropertyRecord;
     using HostObject = RuntimeContext::HostObjectRecord;
     using HostMethod = RuntimeContext::HostMethodRecord;
 
@@ -71,7 +71,26 @@ struct NavigatorScriptRuntimeTestAccess {
     static std::size_t objectVectorCapacityBytes(
         const RuntimeContext& runtime)
     {
-        return runtime.objects_.capacity() * sizeof(Object);
+        return runtime.objectRecordStorage_.capacity() * sizeof(Object);
+    }
+    static bool propertyNamed(const RuntimeContext& runtime,
+        std::size_t objectIndex, const char* name)
+    {
+        if (objectIndex >= runtime.objectStore_.objectCount()) return false;
+        const Object& object = runtime.objectRecordStorage_[objectIndex];
+        std::uint32_t slot = object.firstProperty;
+        const std::size_t nameLength = std::char_traits<char>::length(name);
+        while (slot != kInvalidPortablePropertySlot) {
+            if (slot >= runtime.objectPropertyStorage_.size()) return false;
+            const Property& property = runtime.objectPropertyStorage_[slot];
+            if (property.active && property.symbol == WellKnownSymbol::None &&
+                property.keyLength == nameLength &&
+                std::char_traits<char>::compare(
+                    runtime.propertyNameStorage_.data() + property.keyOffset,
+                    name, nameLength) == 0) return true;
+            slot = property.next;
+        }
+        return false;
     }
     static std::size_t hostObjectBytes() { return sizeof(HostObject); }
     static std::size_t hostObjectVectorCapacityBytes(
@@ -92,62 +111,50 @@ struct NavigatorScriptRuntimeTestAccess {
     static std::size_t resultObjectCount(const RuntimeContext& runtime)
     {
         std::size_t count = 0u;
-        for (const Object& object : runtime.objects_) {
-            bool hasValue = false;
-            bool hasDone = false;
-            for (const Property& property : object.properties) {
-                hasValue = hasValue || property.key == "value";
-                hasDone = hasDone || property.key == "done";
-            }
-            if (hasValue && hasDone) ++count;
-        }
+        for (std::size_t index = 0u;
+            index < runtime.objectStore_.objectCount(); ++index)
+            if (propertyNamed(runtime, index, "value") &&
+                propertyNamed(runtime, index, "done")) ++count;
         return count;
     }
     static std::size_t twoElementArrayCount(const RuntimeContext& runtime)
     {
         std::size_t count = 0u;
-        for (const Object& object : runtime.objects_)
-            if (object.array && object.elements.size() == 2u) ++count;
+        for (std::size_t index = 0u;
+            index < runtime.objectStore_.objectCount(); ++index) {
+            const Object& object = runtime.objectRecordStorage_[index];
+            if (object.array && object.arrayElementCount == 2u) ++count;
+        }
         return count;
     }
     static std::size_t twoElementArrayPayloadBytes(
         const RuntimeContext& runtime)
     {
         std::size_t bytes = 0u;
-        for (const Object& object : runtime.objects_)
-            if (object.array && object.elements.size() == 2u)
-                bytes += object.elements.capacity() * sizeof(ArrayElement);
+        for (std::size_t index = 0u;
+            index < runtime.objectStore_.objectCount(); ++index) {
+            const Object& object = runtime.objectRecordStorage_[index];
+            if (object.array && object.arrayElementCount == 2u)
+                bytes += 2u * sizeof(ArrayElement);
+        }
         return bytes;
     }
     static bool isArray(const RuntimeContext& runtime, RuntimeObjectId id)
     {
-        const Object* object = runtime.objectAt(id);
-        return object != nullptr && object->array;
+        bool result = false;
+        PortableObjectError error;
+        return runtime.objectStore_.isArray(id, result, error) && result &&
+            error.code == PortableObjectErrorCode::None;
     }
     static std::size_t arrayElementCapacityBytes(
         const RuntimeContext& runtime)
     {
-        std::size_t bytes = 0u;
-        for (const Object& object : runtime.objects_)
-            if (object.array)
-                bytes += object.elements.capacity() * sizeof(ArrayElement);
-        return bytes;
+        return runtime.arrayElementStorage_.capacity() * sizeof(ArrayElement);
     }
     static std::size_t iteratorResultPropertyCapacityBytes(
         const RuntimeContext& runtime)
     {
-        std::size_t bytes = 0u;
-        for (const Object& object : runtime.objects_) {
-            bool hasValue = false;
-            bool hasDone = false;
-            for (const Property& property : object.properties) {
-                hasValue = hasValue || property.key == "value";
-                hasDone = hasDone || property.key == "done";
-            }
-            if (hasValue && hasDone)
-                bytes += object.properties.capacity() * sizeof(Property);
-        }
-        return bytes;
+        return resultObjectCount(runtime) * 2u * sizeof(Property);
     }
 };
 

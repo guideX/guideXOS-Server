@@ -119,6 +119,11 @@ public:
         PortableObjectLimits limits, RuntimeGeneration generation,
         PortableObjectError& error);
     bool reset(RuntimeGeneration generation, PortableObjectError& error);
+    // Removes only an unpublished tail of object records and its properties
+    // and Array elements. Existing records that refer into the removed tail
+    // make the rollback fail without changing the store.
+    bool rollbackObjects(std::size_t retainedCount,
+        PortableObjectError& error);
 
     bool configured() const { return configured_; }
     RuntimeGeneration generation() const { return generation_; }
@@ -144,13 +149,34 @@ public:
 
     bool hasOwnProperty(RuntimeObjectId object, SourceView key, bool& found,
         PortableObjectError& error) const;
+    bool hasOwnProperty(RuntimeObjectId object, WellKnownSymbol symbol,
+        bool& found, PortableObjectError& error) const;
     bool getOwnProperty(RuntimeObjectId object, SourceView key, Value& value,
         bool& found, PortableObjectError& error) const;
+    bool getOwnProperty(RuntimeObjectId object, WellKnownSymbol symbol,
+        Value& value, bool& found, PortableObjectError& error) const;
+    bool getOwnPropertyEntry(RuntimeObjectId object, SourceView key,
+        PortablePropertyEntry& result, bool& found,
+        PortableObjectError& error) const;
+    bool getOwnPropertyEntry(RuntimeObjectId object, WellKnownSymbol symbol,
+        PortablePropertyEntry& result, bool& found,
+        PortableObjectError& error) const;
     bool getProperty(RuntimeObjectId object, SourceView key, Value& value,
         bool& found, PortableObjectError& error) const;
+    bool getProperty(RuntimeObjectId object, WellKnownSymbol symbol,
+        Value& value, bool& found, PortableObjectError& error) const;
     bool setOwnProperty(RuntimeObjectId object, SourceView key, Value value,
         PortableObjectError& error, std::uint8_t attributes = 0x07u);
+    bool setOwnProperty(RuntimeObjectId object, WellKnownSymbol symbol,
+        Value value, PortableObjectError& error,
+        std::uint8_t attributes = 0x07u);
+    bool updateOwnProperty(RuntimeObjectId object, SourceView key,
+        Value value, std::uint8_t attributes, PortableObjectError& error);
+    bool updateOwnProperty(RuntimeObjectId object, WellKnownSymbol symbol,
+        Value value, std::uint8_t attributes, PortableObjectError& error);
     bool deleteOwnProperty(RuntimeObjectId object, SourceView key,
+        bool& deleted, PortableObjectError& error);
+    bool deleteOwnProperty(RuntimeObjectId object, WellKnownSymbol symbol,
         bool& deleted, PortableObjectError& error);
     bool getOwnPropertyAt(RuntimeObjectId object, std::size_t ordinal,
         PortablePropertyEntry& result, bool& found,
@@ -172,12 +198,18 @@ public:
         PortableObjectError& error);
 
 private:
+    friend struct NavigatorScriptRuntimeTestAccess;
+
     bool objectRecord(RuntimeObjectId object, PortableObjectRecord*& record,
         PortableObjectError& error) const;
     bool propertyKeyMatches(const PortablePropertyRecord& property,
         SourceView key) const;
+    bool propertyKeyMatches(const PortablePropertyRecord& property,
+        SourceView key, WellKnownSymbol symbol) const;
     bool findProperty(const PortableObjectRecord& object, SourceView key,
         std::uint32_t& slot) const;
+    bool findProperty(const PortableObjectRecord& object, SourceView key,
+        WellKnownSymbol symbol, std::uint32_t& slot) const;
     bool findArrayElement(const PortableObjectRecord& object,
         std::size_t index, std::uint32_t& slot,
         std::uint32_t& previous) const;
@@ -187,6 +219,17 @@ private:
     bool allocateProperty(std::uint32_t& slot, PortableObjectError& error);
     bool allocateArrayElement(std::uint32_t& slot,
         PortableObjectError& error);
+    bool setOwnPropertyImpl(RuntimeObjectId object, SourceView key,
+        WellKnownSymbol symbol, Value value, PortableObjectError& error,
+        std::uint8_t attributes);
+    bool getOwnPropertyEntry(RuntimeObjectId object, SourceView key,
+        WellKnownSymbol symbol, PortablePropertyEntry& result, bool& found,
+        PortableObjectError& error) const;
+    bool updateOwnPropertyImpl(RuntimeObjectId object, SourceView key,
+        WellKnownSymbol symbol, Value value, std::uint8_t attributes,
+        PortableObjectError& error);
+    bool deleteOwnPropertyImpl(RuntimeObjectId object, SourceView key,
+        WellKnownSymbol symbol, bool& deleted, PortableObjectError& error);
     bool compactPropertyNames(std::uint32_t removedOffset,
         std::uint32_t removedLength, PortableObjectError& error);
     bool releaseProperty(std::uint32_t slot, PortableObjectError& error);
