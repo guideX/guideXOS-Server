@@ -54,6 +54,11 @@
 .equ R_PFS_B_AFTER, 312
 .equ R_FP_B_FIRST, 320
 .equ R_A_FINAL_COUNT, 336
+.equ R_FP_A_FIRST_RESUME, 352
+.equ R_FP_A_FINAL_RESUME, 672
+.equ R_FP_B_FIRST_ENTRY, 992
+.equ R_FP_B_RESUME, 1312
+.equ B_TEST_BSP_FRAME_BYTES, 96
 
 .equ CTX_PROFILE_MAGIC, 0x3541434f4f505631
 .equ CTX_A_ID, 0xA
@@ -153,6 +158,43 @@
 (p7) br.cond.sptk ia64_coop_test_fail ;;
 .endm
 
+.macro CHECK_CONTEXT_GP context
+    movl r14 = \context ;;
+    adds r28 = C_GP, r14 ;;
+    ld8 r15 = [r28] ;;
+    cmp.eq p6, p7 = r1, r15 ;;
+(p7) br.cond.sptk ia64_coop_test_fail ;;
+.endm
+
+.macro STORE_FP_AT offset, freg
+    adds r28 = \offset, r14 ;;
+    stf.spill [r28] = \freg ;;
+.endm
+
+.macro CAPTURE_FP_SET offset
+    movl r14 = ia64_coop_probe_record + \offset ;;
+    STORE_FP_AT 0, f2
+    STORE_FP_AT 16, f3
+    STORE_FP_AT 32, f4
+    STORE_FP_AT 48, f5
+    STORE_FP_AT 64, f16
+    STORE_FP_AT 80, f17
+    STORE_FP_AT 96, f18
+    STORE_FP_AT 112, f19
+    STORE_FP_AT 128, f20
+    STORE_FP_AT 144, f21
+    STORE_FP_AT 160, f22
+    STORE_FP_AT 176, f23
+    STORE_FP_AT 192, f24
+    STORE_FP_AT 208, f25
+    STORE_FP_AT 224, f26
+    STORE_FP_AT 240, f27
+    STORE_FP_AT 256, f28
+    STORE_FP_AT 272, f29
+    STORE_FP_AT 288, f30
+    STORE_FP_AT 304, f31
+.endm
+
 .macro SET64 base, offset, value
     adds r28 = \offset, \base ;;
     st8 [r28] = \value ;;
@@ -189,11 +231,47 @@ ia64_coop_nat_target:
 .section .data.ia64_coop_fp_seed, "aw"
 .align 16
 ia64_coop_fp_seed_a:
-    .8byte FP_A_LOW
-    .8byte FP_A_HIGH
+    .8byte FP_A_LOW, FP_A_HIGH
+    .8byte FP_A_LOW + 0x100, FP_A_HIGH
+    .8byte FP_A_LOW + 0x200, FP_A_HIGH
+    .8byte FP_A_LOW + 0x300, FP_A_HIGH
+    .8byte FP_A_LOW + 0x400, FP_A_HIGH
+    .8byte FP_A_LOW + 0x500, FP_A_HIGH
+    .8byte FP_A_LOW + 0x600, FP_A_HIGH
+    .8byte FP_A_LOW + 0x700, FP_A_HIGH
+    .8byte FP_A_LOW + 0x800, FP_A_HIGH
+    .8byte FP_A_LOW + 0x900, FP_A_HIGH
+    .8byte FP_A_LOW + 0xa00, FP_A_HIGH
+    .8byte FP_A_LOW + 0xb00, FP_A_HIGH
+    .8byte FP_A_LOW + 0xc00, FP_A_HIGH
+    .8byte FP_A_LOW + 0xd00, FP_A_HIGH
+    .8byte FP_A_LOW + 0xe00, FP_A_HIGH
+    .8byte FP_A_LOW + 0xf00, FP_A_HIGH
+    .8byte FP_A_LOW + 0x1000, FP_A_HIGH
+    .8byte FP_A_LOW + 0x1100, FP_A_HIGH
+    .8byte FP_A_LOW + 0x1200, FP_A_HIGH
+    .8byte FP_A_LOW + 0x1300, FP_A_HIGH
 ia64_coop_fp_seed_b:
-    .8byte FP_B_LOW
-    .8byte FP_B_HIGH
+    .8byte FP_B_LOW, FP_B_HIGH
+    .8byte FP_B_LOW + 0x100, FP_B_HIGH
+    .8byte FP_B_LOW + 0x200, FP_B_HIGH
+    .8byte FP_B_LOW + 0x300, FP_B_HIGH
+    .8byte FP_B_LOW + 0x400, FP_B_HIGH
+    .8byte FP_B_LOW + 0x500, FP_B_HIGH
+    .8byte FP_B_LOW + 0x600, FP_B_HIGH
+    .8byte FP_B_LOW + 0x700, FP_B_HIGH
+    .8byte FP_B_LOW + 0x800, FP_B_HIGH
+    .8byte FP_B_LOW + 0x900, FP_B_HIGH
+    .8byte FP_B_LOW + 0xa00, FP_B_HIGH
+    .8byte FP_B_LOW + 0xb00, FP_B_HIGH
+    .8byte FP_B_LOW + 0xc00, FP_B_HIGH
+    .8byte FP_B_LOW + 0xd00, FP_B_HIGH
+    .8byte FP_B_LOW + 0xe00, FP_B_HIGH
+    .8byte FP_B_LOW + 0xf00, FP_B_HIGH
+    .8byte FP_B_LOW + 0x1000, FP_B_HIGH
+    .8byte FP_B_LOW + 0x1100, FP_B_HIGH
+    .8byte FP_B_LOW + 0x1200, FP_B_HIGH
+    .8byte FP_B_LOW + 0x1300, FP_B_HIGH
 
 .section .bss.ia64_coop_helper, "aw", @nobits
 .align 8
@@ -330,13 +408,18 @@ ia64_coop_setup_nested_return:
     movl r15 = 0x4252344242423032 ;;
     SET64 r14, 192, r15
 
-    /* Seed only f2; the other 19 preserved images remain zero from BSS. */
+    /* Seed every ABI-preserved FP image for the first Context B entry. */
     movl r28 = ia64_coop_fp_seed_b ;;
     adds r29 = C_FP2, r14 ;;
+    mov r30 = 20 ;;
+1:
     ld8 r15 = [r28], 8 ;;
     st8 [r29] = r15, 8 ;;
-    ld8 r15 = [r28] ;;
-    st8 [r29] = r15 ;;
+    ld8 r15 = [r28], 8 ;;
+    st8 [r29] = r15, 8 ;;
+    adds r30 = -1, r30 ;;
+    cmp.ne p6, p7 = r30, r0 ;;
+(p6) br.cond.sptk 1b ;;
 
     /* B begins with a separate ordinary GR8 sentinel and clear NaT state. */
     mov r20 = ar.unat ;;
@@ -530,7 +613,26 @@ ia64_coop_a_test:
     movl r14 = PR_TEST ;;
     mov pr = r14, -1 ;;
     movl r14 = ia64_coop_fp_seed_a ;;
-    ldf.fill f2 = [r14] ;;
+    ldf.fill f2 = [r14], 16 ;;
+    ldf.fill f3 = [r14], 16 ;;
+    ldf.fill f4 = [r14], 16 ;;
+    ldf.fill f5 = [r14], 16 ;;
+    ldf.fill f16 = [r14], 16 ;;
+    ldf.fill f17 = [r14], 16 ;;
+    ldf.fill f18 = [r14], 16 ;;
+    ldf.fill f19 = [r14], 16 ;;
+    ldf.fill f20 = [r14], 16 ;;
+    ldf.fill f21 = [r14], 16 ;;
+    ldf.fill f22 = [r14], 16 ;;
+    ldf.fill f23 = [r14], 16 ;;
+    ldf.fill f24 = [r14], 16 ;;
+    ldf.fill f25 = [r14], 16 ;;
+    ldf.fill f26 = [r14], 16 ;;
+    ldf.fill f27 = [r14], 16 ;;
+    ldf.fill f28 = [r14], 16 ;;
+    ldf.fill f29 = [r14], 16 ;;
+    ldf.fill f30 = [r14], 16 ;;
+    ldf.fill f31 = [r14] ;;
     movl r14 = LC_A ;;
     mov ar.lc = r14 ;;
     movl r14 = EC_A ;;
@@ -571,10 +673,13 @@ ia64_coop_a_resumed_first:
     mov r15 = ar.pfs ;;
     adds r28 = R_PFS_A_AFTER, r14 ;;
     st8 [r28] = r15 ;;
+    CHECK_CONTEXT_GP ia64_coop_context_a
+    CAPTURE_FP_SET R_FP_A_FIRST_RESUME
     movl r14 = ia64_coop_probe_record + R_FP_A ;;
     stf.spill [r14] = f2 ;;
     CHECK_PRESERVED_REGS GR4_A, GR5_A, GR6_A, GR7_A, BR1_A, BR2_A, BR3_A, BR4_A, BR5_A
     CHECK_APP_STATE LC_A, EC_A, CCV_A
+    CHECK_CONTEXT_GP ia64_coop_context_a
     mov r14 = r32 ;;
     ASSERT_EQ r14, SENTINEL_A
     ld8 r14 = [r12] ;;
@@ -623,6 +728,7 @@ ia64_coop_a_resumed_final:
     ld8 r14 = [r28] ;;
     cmp.eq p6, p7 = r15, r14 ;;
 (p7) br.cond.sptk ia64_coop_test_fail ;;
+    CAPTURE_FP_SET R_FP_A_FINAL_RESUME
     movl r14 = ia64_coop_probe_record + R_FP_A ;;
     stf.spill [r14] = f2 ;;
     movl r14 = ia64_coop_context_a ;;
@@ -690,7 +796,9 @@ ia64_coop_b_test:
     movl r15 = ia64_coop_stack_b_top ;;
     cmp.leu p6, p7 = r14, r15 ;;
 (p7) br.cond.sptk ia64_coop_test_fail ;;
-    /* BSPSTORE is mode-restricted; BSP is readable with Context B's RSC.mode=3. */
+    /* alloc leaves BSP unchanged; the 12-register frame occupies 96 bytes from this base. */
+.global ia64_coop_b_bsp_check
+ia64_coop_b_bsp_check:
     mov r14 = ar.bsp ;;
     movl r15 = ia64_coop_rbs_b_base ;;
     cmp.geu p6, p7 = r14, r15 ;;
@@ -698,6 +806,11 @@ ia64_coop_b_test:
     movl r15 = ia64_coop_rbs_b_limit ;;
     cmp.ltu p6, p7 = r14, r15 ;;
 (p7) br.cond.sptk ia64_coop_test_fail ;;
+    movl r15 = ia64_coop_rbs_b_base ;;
+    cmp.eq p6, p7 = r14, r15 ;;
+(p7) br.cond.sptk ia64_coop_test_fail ;;
+.global ia64_coop_b_bsp_bounds_valid
+ia64_coop_b_bsp_bounds_valid:
     CHECK_PRESERVED_REGS GR4_B, GR5_B, GR6_B, GR7_B, BR1_B, BR2_B, BR3_B, BR4_B, BR5_B
     CHECK_APP_STATE LC_B, EC_B, CCV_B
     mov r14 = r32 ;;
@@ -719,6 +832,8 @@ ia64_coop_b_test:
     st8 [r28] = r15 ;;
     movl r14 = ia64_coop_probe_record + R_FP_B_FIRST ;;
     stf.spill [r14] = f2 ;;
+    CHECK_CONTEXT_GP ia64_coop_context_b
+    CAPTURE_FP_SET R_FP_B_FIRST_ENTRY
     RECORD_EVENT EVENT_B_FIRST_ENTRY, CTX_B_ID
 
     movl r14 = ia64_coop_context_b ;;
@@ -733,6 +848,7 @@ ia64_coop_b_resumed:
     RECORD_EVENT EVENT_B_RESUMED, CTX_B_ID
     CHECK_PRESERVED_REGS GR4_B, GR5_B, GR6_B, GR7_B, BR1_B, BR2_B, BR3_B, BR4_B, BR5_B
     CHECK_APP_STATE LC_B, EC_B, CCV_B
+    CHECK_CONTEXT_GP ia64_coop_context_b
     mov r14 = r32 ;;
     ASSERT_EQ r14, SENTINEL_B
     ld8 r14 = [r12] ;;
@@ -757,6 +873,7 @@ ia64_coop_b_resumed:
     ld8 r14 = [r28] ;;
     cmp.eq p6, p7 = r15, r14 ;;
 (p7) br.cond.sptk ia64_coop_test_fail ;;
+    CAPTURE_FP_SET R_FP_B_RESUME
     movl r14 = ia64_coop_probe_record + R_FP_B ;;
     stf.spill [r14] = f2 ;;
     movl r14 = ia64_coop_context_b ;;

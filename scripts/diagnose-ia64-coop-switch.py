@@ -17,19 +17,19 @@ from typing import Any
 sys.dont_write_bytecode = True
 
 ROOT = Path(__file__).resolve().parents[1]
-PROBE = Path("/home/guidex/src/ia64-5ar5-coop-probe-20261114-r1/ia64-cooperative-context-probe.elf")
+PROBE = Path("/home/guidex/src/ia64-5ar8-coop-probe-20261115-r2-static/ia64-cooperative-context-probe.elf")
 MANIFEST = PROBE.with_name("ia64-cooperative-context-probe.manifest.json")
 KERNEL = Path("/home/guidex/src/ia64-4g-stacked-nat-rse-kernel-20261111-r3/bin/kernel.elf")
 SKI_PREFIX = Path("/home/guidex/opt/ski-dfc2902")
 OBJDUMP = Path("/home/guidex/src/ia64-2-toolchain-shim/ia64-linux-objdump")
-CAPTURE = Path("/home/guidex/src/ia64-5ar6-coop-breakpoint-safe-qualification-20261114-r1")
+CAPTURE = Path("/home/guidex/src/ia64-5ar8-cooperative-qualification-20261115-r2")
 
-EXPECTED_PROBE_SHA256 = "ae0fc8fc49e576f37d8d6bf7d9846d0b293603ca7b9d15467afc81730992c74f"
-EXPECTED_MANIFEST_SHA256 = "1dbebf04c3be50909316024fec69e67b1410d55c33a0cf9f17dac3b1c8475585"
+EXPECTED_PROBE_SHA256 = "dec92c95c500bd70b058540fcbf44e490629c31c451906f8acba9af86fc469f3"
+EXPECTED_MANIFEST_SHA256 = "4addffab0102076d74ae23704bcea46f87517e18abf45f50cbdffeba666254b1"
 EXPECTED_KERNEL_SHA256 = "ab13fabb6a92ebe039afa2afd9729f6f6ceb2529b63be2b47b0c87cf264d960c"
 EXPECTED_SKI_SHA256 = "ff6b19cb87dbf2db39cda4478d0e49995c9a5ec9ddd05aac83191f4ba1e40b45"
 
-MAX_SIMULTANEOUS_PROGRAM_BREAKPOINTS = 8
+MAX_SIMULTANEOUS_PROGRAM_BREAKPOINTS = 6
 SKI_PROGRAM_BREAKPOINT_CAPACITY = 10
 INITIAL_STEP_BUDGET = 64
 INITIAL_FOLLOWUP_STEP_BUDGET = 1
@@ -83,6 +83,14 @@ def sha256(path: Path) -> str:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def disassembly_instruction_at(disassembly_text: str, address: int) -> str | None:
+    for line in disassembly_text.splitlines():
+        match = re.match(r"\s*([0-9a-fA-F]+):", line)
+        if match is not None and int(match.group(1), 16) == address:
+            return line.strip()
+    return None
 
 
 def validate_instruction_budget(value: int) -> int:
@@ -145,8 +153,9 @@ def parse_progress_samples(stderr_text: str,
 
 
 def parse_eval_register_samples(stderr_text: str) -> list[dict[str, Any]]:
-    requested = ("psr", "rsc", "bsp", "bspst", "rnat", "unat", "pfs", "sp",
-                 "gp", "b0", "r32", "r33", "r42", "r43")
+    requested = ("iva", "psr", "rsc", "bsp", "bspst", "rnat", "unat", "pfs", "sp",
+                 "gp", "b0", "r14", "r15", "r32", "r33", "r42", "r43",
+                 "iip", "ipsr", "isr", "ifs", "iipa")
     count_matches = list(re.finditer(r"(?m)^\s*\$insts\$\s*=\s*(\d+)\s*$", stderr_text))
     observations: list[dict[str, Any]] = []
     for index, match in enumerate(count_matches):
@@ -156,7 +165,8 @@ def parse_eval_register_samples(stderr_text: str) -> list[dict[str, Any]]:
         segment = re.split(r"(?m)^\s*Hex:", segment, maxsplit=1)[0]
         state: dict[str, int] = {}
         for alias, raw in re.findall(
-                r"(?mi)^\s*(psr|rsc|bsp|bspst|rnat|unat|pfs|sp|gp|b0|r32|r33|r42|r43)"
+                r"(?mi)^\s*(iva|psr|rsc|bsp|bspst|rnat|unat|pfs|sp|gp|b0|r14|r15|"
+                r"r32|r33|r42|r43|iip|ipsr|isr|ifs|iipa)"
                 r"\s*=\s*(?:0x)?([0-9a-f]+)\s*$", segment):
             key = alias.lower()
             if key in state:
@@ -294,9 +304,14 @@ def validate_context_words(words: list[int], expected_id: int) -> dict[str, int]
     }
 
 
-def validate_probe_record_words(words: list[int]) -> dict[str, Any]:
-    if len(words) not in (43, 44):
-        raise DiagnosticError(f"probe record has {len(words)} qwords; expected 43 plus at most one dump pad")
+def validate_probe_record_words(words: list[int],
+                                expected_qwords: int | None = None) -> dict[str, Any]:
+    valid_length = len(words) in (43, 44) if expected_qwords is None else \
+        len(words) == expected_qwords and expected_qwords >= 43
+    if not valid_length:
+        raise DiagnosticError(
+            f"probe record has {len(words)} qwords; expected "
+            f"{expected_qwords if expected_qwords is not None else '43 or 44'}")
     words = words[:43]
     count = words[0]
     if count > len(EVENT_NAMES):
@@ -329,7 +344,8 @@ def validate_fresh_records(paths: list[Path], run_started_ns: int,
 
 def analyze_snapshot_files(root: Path, samples: list[dict[str, int]], run_started_ns: int,
                            context_a: int, context_b: int,
-                           probe_record: int) -> dict[str, Any]:
+                           probe_record: int,
+                           probe_record_size: int = 352) -> dict[str, Any]:
     states: list[dict[str, Any]] = []
     freshness_errors: list[str] = []
     for index, sample in enumerate(samples):
@@ -355,7 +371,7 @@ def analyze_snapshot_files(root: Path, samples: list[dict[str, int]], run_starte
                                context_b, 1024), 0xB)
             state["probe_record"] = validate_probe_record_words(
                 parse_dd_words(record_files[0].read_text(encoding="utf-8", errors="replace"),
-                               probe_record, 352))
+                               probe_record, probe_record_size), probe_record_size // 8)
         except (DiagnosticError, OSError) as exc:
             freshness_errors.append(f"sample {index}: {exc}")
             state["snapshot_error"] = str(exc)
@@ -525,6 +541,175 @@ def analyze_runtime_frontiers(samples: list[dict[str, int]],
     }
 
 
+def analyze_cooperative_switch_frontiers(
+        samples: list[dict[str, int]], register_states: list[dict[str, Any]],
+        snapshots: list[dict[str, Any]], breakpoints: tuple[tuple[int, str], ...],
+        expected_bsp: int, ivt_range: tuple[int, int],
+        context_pointers: tuple[int, int] | None = None) -> dict[str, Any]:
+    """Match the six runtime frontiers to saved register and event evidence."""
+    observations = {
+        label: [sample for sample in samples if sample["ip"] == address]
+        for address, label in breakpoints
+    }
+    registers_by_count = {item["instructions"]: item.get("registers", {})
+                          for item in register_states}
+    snapshots_by_sample = {item.get("sample"): item for item in snapshots}
+
+    def state(sample: dict[str, int] | None) -> dict[str, int]:
+        if sample is None:
+            return {}
+        return registers_by_count.get(sample["instructions"], {})
+
+    def event_count(sample: dict[str, int]) -> int | None:
+        snapshot = snapshots_by_sample.get(sample.get("sample"), {})
+        return (snapshot.get("probe_record") or {}).get("event_count")
+
+    def one(label: str) -> dict[str, int] | None:
+        hits = observations.get(label, [])
+        return hits[0] if hits else None
+
+    b_entry = one("Context B first-entry bootstrap")
+    b_bounds = one("Context B BSP bounds passed")
+    a_resume_first = one("Context A first resumption")
+    b_resume_second = one("Context B second resumption")
+    a_resume_final = one("Context A final resumption")
+    flushrs = observations.get("context-switch flushrs", [])
+    bsp_registers = state(b_bounds)
+    bsp_check_valid = bool(
+        b_bounds and bsp_registers.get("r14") == expected_bsp and
+        bsp_registers.get("r15") == expected_bsp and
+        bsp_registers.get("bsp") == expected_bsp and
+        (bsp_registers.get("rsc", -1) & 0x3) == 0x3
+    )
+    ordered_flushrs = len(flushrs) >= 4 and all(
+        left["instructions"] < right["instructions"]
+        for left, right in zip(flushrs[:3], flushrs[1:4], strict=True))
+    ordered_frontiers = bool(
+        b_entry and b_bounds and a_resume_first and b_resume_second and a_resume_final and
+        len(flushrs) >= 4 and
+        flushrs[0]["instructions"] < b_entry["instructions"] < b_bounds["instructions"] <
+        flushrs[1]["instructions"] < a_resume_first["instructions"] <
+        flushrs[2]["instructions"] < b_resume_second["instructions"] <
+        flushrs[3]["instructions"] < a_resume_final["instructions"]
+    )
+    flushrs_event_counts = [event_count(sample) for sample in flushrs[:4]]
+    switch_events_match = flushrs_event_counts == [1, 3, 5, 7]
+    context_b_to_a_first_observed = bool(
+        bsp_check_valid and len(flushrs) >= 2 and
+        flushrs[1]["instructions"] > (b_bounds or {}).get("instructions", -1) and
+        event_count(flushrs[1]) == 3
+    )
+    named_frontiers = (
+        ("Context B first-entry bootstrap", b_entry),
+        ("Context B BSP bounds passed", b_bounds if bsp_check_valid else None),
+        ("context-switch flushrs", flushrs[-1] if flushrs else None),
+        ("Context A first resumption", a_resume_first),
+        ("Context B second resumption", b_resume_second),
+        ("Context A final resumption", a_resume_final),
+    )
+    furthest = max(
+        ((label, sample["instructions"]) for label, sample in named_frontiers if sample),
+        key=lambda item: item[1], default=None)
+
+    first_exception = None
+    for sample in samples:
+        if not ivt_range[0] <= sample["iip"] < ivt_range[1]:
+            continue
+        registers = state(sample)
+        saved_iip = registers.get("iip")
+        saved_ipsr = registers.get("ipsr")
+        saved_isr = registers.get("isr")
+        saved_ifs = registers.get("ifs")
+        saved_slot = ((saved_ipsr >> 41) & 0x3) if saved_ipsr is not None else None
+        fault_address = (saved_iip + saved_slot * 6
+                         if saved_iip is not None and saved_slot in (0, 1, 2) else None)
+        iva = registers.get("iva")
+        vector_offset = sample["iip"] - iva if iva is not None else None
+        isr_code = saved_isr & 0xFFFF if saved_isr is not None else None
+        if vector_offset == 0x5400 and isr_code == 0:
+            isr_classification = "illegal-operation"
+        else:
+            isr_classification = "unclassified"
+        snapshot = snapshots_by_sample.get(sample.get("sample"), {})
+        snapshot_a = snapshot.get("context_a") or {}
+        snapshot_b = snapshot.get("context_b") or {}
+        first_exception = {
+            "current_vector_ip": sample["ip"],
+            "current_vector_bundle": sample["iip"],
+            "current_vector_slot": sample["slot"],
+            "vector_offset": vector_offset,
+            "instructions": sample["instructions"],
+            "saved_iip": saved_iip,
+            "saved_ipsr": saved_ipsr,
+            "saved_slot": saved_slot,
+            "faulting_instruction_address": fault_address,
+            "isr": saved_isr,
+            "isr_code": isr_code,
+            "isr_classification": isr_classification,
+            "ifs": saved_ifs,
+            "ifs_valid": bool(saved_ifs is not None and saved_ifs & (1 << 63)),
+            "iipa": registers.get("iipa"),
+            "iva": iva,
+            "rsc": registers.get("rsc"),
+            "rsc_mode": ((registers["rsc"] & 0x3)
+                         if registers.get("rsc") is not None else None),
+            "bsp": registers.get("bsp"),
+            "bspstore_debugger_value": registers.get("bspst"),
+            "rnat": registers.get("rnat"),
+            "sp": registers.get("sp"),
+            "gp": registers.get("gp"),
+            "pfs": registers.get("pfs"),
+            "r32": registers.get("r32"),
+            "r33": registers.get("r33"),
+            "r42": registers.get("r42"),
+            "r43": registers.get("r43"),
+            "r14": registers.get("r14"),
+            "r15": registers.get("r15"),
+            "context_a_pointer": context_pointers[0] if context_pointers else None,
+            "context_b_pointer": context_pointers[1] if context_pointers else None,
+            "context_a_snapshot": snapshot_a,
+            "context_b_snapshot": snapshot_b,
+            "event_snapshot": snapshot.get("probe_record"),
+            "source": (
+                "first checkpoint whose current IP is in the IVT; raw saved CR values "
+                "come from the register dump before the halted IVT loop changes them"
+            ),
+        }
+        break
+
+    full_sequence = bool(
+        bsp_check_valid and ordered_flushrs and ordered_frontiers and switch_events_match and
+        len(flushrs) == 4 and
+        len(observations.get("Context B first-entry bootstrap", [])) == 1 and
+        len(observations.get("Context A first resumption", [])) == 1 and
+        len(observations.get("Context B second resumption", [])) == 1 and
+        len(observations.get("Context A final resumption", [])) == 1
+    )
+    return {
+        "breakpoint_observations": observations,
+        "context_b_bounds_registers": bsp_registers,
+        "expected_context_b_bsp": expected_bsp,
+        "context_b_bsp_check_valid": bsp_check_valid,
+        "context_b_to_a_first_observed": context_b_to_a_first_observed,
+        "flushrs_event_counts": flushrs_event_counts,
+        "flushrs_event_sequence_valid": switch_events_match,
+        "frontier_order_valid": ordered_frontiers,
+        "full_switch_sequence_verified": full_sequence,
+        "first_unexpected_exception": first_exception,
+        "furthest_proven_frontier": furthest[0] if furthest else None,
+        "furthest_proven_instruction_count": furthest[1] if furthest else None,
+        "context_switch_flushrs_hits": len(flushrs),
+        "context_b_first_entry_hits": len(observations.get(
+            "Context B first-entry bootstrap", [])),
+        "context_a_first_resume_hits": len(observations.get(
+            "Context A first resumption", [])),
+        "context_b_second_resume_hits": len(observations.get(
+            "Context B second resumption", [])),
+        "context_a_final_resume_hits": len(observations.get(
+            "Context A final resumption", [])),
+    }
+
+
 def analyze_debugger_initialization(stderr_text: str, command_text: str,
                                    samples: list[dict[str, int]],
                                    elf_entry: int) -> dict[str, Any] | None:
@@ -551,9 +736,10 @@ def analyze_debugger_initialization(stderr_text: str, command_text: str,
 
 def _format_eval_and_snapshot(lines: list[str], index: int, label: str,
                               root: Path, context_a: int, context_b: int,
-                              probe_record: int) -> None:
+                              probe_record: int, probe_record_size: int) -> None:
     lines.append("eval ip+0 $insts$")
-    lines.append("eval psr rsc bsp bspst rnat unat pfs sp gp b0 r32 r33 r42 r43")
+    lines.append("eval iva psr rsc bsp bspst rnat unat pfs sp gp b0 r14 r15 "
+                 "r32 r33 r42 r43 iip ipsr isr ifs iipa")
     register_path = root / "registers" / f"{index:04d}-{label}.txt"
     context_a_path = root / "contexts" / f"{index:04d}-{label}-a.txt"
     context_b_path = root / "contexts" / f"{index:04d}-{label}-b.txt"
@@ -561,20 +747,19 @@ def _format_eval_and_snapshot(lines: list[str], index: int, label: str,
     lines.append(f"rd {register_path}")
     lines.append(f"dd 0x{context_a:x} 0x{context_a + 1023:x} {context_a_path}")
     lines.append(f"dd 0x{context_b:x} 0x{context_b + 1023:x} {context_b_path}")
-    lines.append(f"dd 0x{probe_record:x} 0x{probe_record + 343:x} {record_path}")
+    lines.append(f"dd 0x{probe_record:x} "
+                 f"0x{probe_record + probe_record_size - 1:x} {record_path}")
     lines.append("if $exited$ quit")
 
 
 def cooperative_breakpoints(frontiers: dict[str, int]) -> tuple[tuple[int, str], ...]:
     return (
-        (frontiers["setup_entry"], "ia64_coop_probe_setup entry"),
-        (frontiers["setup_nested_return"], "return from ia64_coop_set_nat8"),
-        (frontiers["setup_exit"], "setup final br.ret"),
-        (frontiers["setup_caller_return"], "setup caller continuation"),
-        (frontiers["switch_entry"], "first switch entry"),
-        (frontiers["rbs_handoff"], "incoming ar.bspstore handoff"),
         (frontiers["context_b_first"], "Context B first-entry bootstrap"),
-        (frontiers["context_a_resume_first"], "return to Context A"),
+        (frontiers["bsp_bounds_valid"], "Context B BSP bounds passed"),
+        (frontiers["context_a_save"], "context-switch flushrs"),
+        (frontiers["context_a_resume_first"], "Context A first resumption"),
+        (frontiers["context_b_resume_second"], "Context B second resumption"),
+        (frontiers["context_a_resume_final"], "Context A final resumption"),
     )
 
 
@@ -594,16 +779,16 @@ def make_command_file(root: Path, symbols: dict[str, Any],
     lines.append(f"step {INITIAL_STEP_BUDGET}")
     _format_eval_and_snapshot(lines, 1, "startup-frontier", root,
                               symbols["context_a"], symbols["context_b"],
-                              symbols["probe_record"])
+                              symbols["probe_record"], symbols["probe_record_size"])
     lines.append(f"step {INITIAL_FOLLOWUP_STEP_BUDGET}")
     _format_eval_and_snapshot(lines, 2, "startup-followup", root,
                               symbols["context_a"], symbols["context_b"],
-                              symbols["probe_record"])
+                              symbols["probe_record"], symbols["probe_record_size"])
     for quantum in range(1, STEP_QUANTA + 1):
         lines.append(f"step {STEP_QUANTUM}")
         _format_eval_and_snapshot(lines, quantum + 2, f"q{quantum:03d}", root,
                                   symbols["context_a"], symbols["context_b"],
-                                  symbols["probe_record"])
+                                  symbols["probe_record"], symbols["probe_record_size"])
     lines.append("quit")
     validate_command_file(
         "\n".join(lines) + "\n",
@@ -681,7 +866,8 @@ def validate_command_file(command_text: str,
 
     allowed_eval = {
         "eval ip+0 $insts$",
-        "eval psr rsc bsp bspst rnat unat pfs sp gp b0 r32 r33 r42 r43",
+        "eval iva psr rsc bsp bspst rnat unat pfs sp gp b0 r14 r15 "
+        "r32 r33 r42 r43 iip ipsr isr ifs iipa",
     }
     steps: list[str] = []
     breakpoint_addresses: list[int] = []
@@ -785,7 +971,7 @@ def preflight(args: argparse.Namespace) -> tuple[Any, Path, dict[str, Any], dict
     args.capture_dir = args.capture_dir.resolve()
     for path, expected, label in (
         (args.artifact, args.expected_sha256, "cooperative probe ELF"),
-        (args.manifest, EXPECTED_MANIFEST_SHA256, "cooperative probe manifest"),
+        (args.manifest, args.expected_manifest_sha256, "cooperative probe manifest"),
         (args.kernel_artifact, EXPECTED_KERNEL_SHA256, "accepted kernel ELF"),
     ):
         if not path.is_file():
@@ -794,10 +980,12 @@ def preflight(args: argparse.Namespace) -> tuple[Any, Path, dict[str, Any], dict
         if actual != expected:
             raise DiagnosticError(f"{label} identity mismatch: {actual}")
     if args.expected_sha256 != EXPECTED_PROBE_SHA256:
-        raise DiagnosticError("this diagnostic is pinned to the repaired IA64-5AR5 probe")
+        raise DiagnosticError("this diagnostic is pinned to the corrected IA64-5AR8 probe")
+    if args.expected_manifest_sha256 != EXPECTED_MANIFEST_SHA256:
+        raise DiagnosticError("this diagnostic is pinned to the corrected IA64-5AR8 manifest")
     if args.simulator_sha256 != EXPECTED_SKI_SHA256:
         raise DiagnosticError("this diagnostic is pinned to the qualified Ski 1.5.1 executable")
-    if sha256(args.manifest) != EXPECTED_MANIFEST_SHA256:
+    if sha256(args.manifest) != args.expected_manifest_sha256:
         raise DiagnosticError("matching manifest identity changed")
     symbols = runner.validate_cooperative_context_probe_static(
         args.artifact.resolve(), args.manifest.resolve(), args.expected_sha256, str(args.objdump))
@@ -822,6 +1010,7 @@ def preflight(args: argparse.Namespace) -> tuple[Any, Path, dict[str, Any], dict
         "context_a_save": ski_breakpoint_ip(symbols["switch_flushrs"]),
         "rbs_handoff": ski_breakpoint_ip(symbols["switch_bspstore"]),
         "context_b_first": ski_breakpoint_ip(symbols["context_b_first_entry"]),
+        "bsp_bounds_valid": ski_breakpoint_ip(symbols["bsp_bounds_valid"]),
         "context_a_resume_first": ski_breakpoint_ip(symbols["a_resume_first"]),
         "context_b_resume_second": ski_breakpoint_ip(symbols["b_resume_second"]),
         "context_a_resume_final": ski_breakpoint_ip(symbols["a_resume_final"]),
@@ -851,7 +1040,8 @@ def run_no_guest_parser_smoke(runner: Any, simulator: Path, root: Path) -> dict[
     register_file = smoke_root / "registers.txt"
     commands = "\n".join((
         "eval ip+0 $insts$",
-        "eval psr rsc bsp bspst rnat unat pfs sp gp b0 r32 r33 r42 r43",
+        "eval iva psr rsc bsp bspst rnat unat pfs sp gp b0 r14 r15 "
+        "r32 r33 r42 r43 iip ipsr isr ifs iipa",
         "bs 0x108000",
         f"rd {register_file}",
         f"dd 0x0 0xf {memory_file}",
@@ -880,8 +1070,9 @@ def run_no_guest_parser_smoke(runner: Any, simulator: Path, root: Path) -> dict[
     # separate smoke validates command syntax and output formatting only.
     progress = parse_progress_samples(stderr_text, ((0, 1),), 0)
     register_states = parse_eval_register_samples(stderr_text)
-    required_registers = {"psr", "rsc", "bsp", "bspst", "rnat", "unat", "pfs",
-                          "sp", "gp", "b0", "r32", "r33", "r42", "r43"}
+    required_registers = {"iva", "psr", "rsc", "bsp", "bspst", "rnat", "unat", "pfs",
+                          "sp", "gp", "b0", "r14", "r15", "r32", "r33", "r42",
+                          "r43", "iip", "ipsr", "isr", "ifs", "iipa"}
     if len(progress) != 1 or len(register_states) != 1 or \
             not required_registers <= register_states[0]["registers"].keys():
         raise DiagnosticError("pinned bskinc eval syntax did not return the required raw registers")
@@ -902,7 +1093,7 @@ def run_no_guest_breakpoint_smokes(runner: Any, simulator: Path,
     management_file = management_root / "commands.txt"
     management_commands = ["bl", "bs 0x108000", "bs 0x108001"]
     management_commands.extend(f"bs 0x{0x108000 + index * 0x10:x}"
-                               for index in range(1, SKI_PROGRAM_BREAKPOINT_CAPACITY))
+                               for index in range(1, MAX_SIMULTANEOUS_PROGRAM_BREAKPOINTS))
     management_commands.extend(("bl", "bd 4", "bs 0x1080a0", "bl", "bD", "bl", "quit"))
     management_text = "\n".join(management_commands) + "\n"
     management_file.write_text(management_text, encoding="ascii", newline="\n")
@@ -933,39 +1124,9 @@ def run_no_guest_breakpoint_smokes(runner: Any, simulator: Path,
         raise DiagnosticError(
             "pinned Ski no-guest breakpoint listing, duplicate, delete, or reuse smoke failed")
     rows = re.findall(r"(?m)^\s*(\d+)\s+[PV]\s+.*?IA-64", management_log)
-    if len(rows) < 20 or set(map(int, rows[:10])) != set(range(10)):
+    if len(rows) < 12 or set(map(int, rows[:6])) != set(range(6)):
         raise DiagnosticError(
-            "pinned Ski breakpoint list did not show slots 0 through 9 before and after reuse")
-
-    capacity_root = smoke_root / "breakpoint-capacity"
-    capacity_root.mkdir()
-    capacity_file = capacity_root / "commands.txt"
-    capacity_text = "\n".join(
-        [f"bs 0x{0x108000 + index * 0x10:x}"
-         for index in range(SKI_PROGRAM_BREAKPOINT_CAPACITY + 1)]
-    ) + "\n"
-    capacity_file.write_text(capacity_text, encoding="ascii", newline="\n")
-    if re.search(r"(?im)^\s*(run|cont(?:inue)?|go|step)(?:\s|$)", capacity_text):
-        raise DiagnosticError("breakpoint capacity smoke must not execute a guest")
-    capacity_capture = capacity_root / "simulator"
-    runner.run_simulator(
-        [str(simulator), "-noconsole", "-forcesystem", "-i", str(capacity_file)],
-        8, capacity_capture, "ia64-coop-breakpoint-capacity-no-guest-smoke",
-        resource_limits={"address_space_bytes": ADDRESS_SPACE_BYTES,
-                         "cpu_soft_seconds": 5, "cpu_hard_seconds": 6},
-        stdin_pty=True,
-    )
-    capacity_result = runner.read_json(
-        capacity_capture / "run-result.json", "breakpoint capacity smoke result")
-    capacity_log = "\n".join(
-        (capacity_capture / name).read_text(encoding="utf-8", errors="replace")
-        for name in ("stdout.log", "stderr.log"))
-    if "All breakpoints in use" not in capacity_log or \
-            capacity_result.get("exit_code") == 0 or capacity_result.get("timed_out") or \
-            capacity_result.get("cleanup_complete") is not True or \
-            capacity_result.get("process_group_cleanup_complete") is not True:
-        raise DiagnosticError(
-            "pinned Ski did not reject the 11th distinct program breakpoint before execution")
+            "pinned Ski breakpoint list did not show slots 0 through 5 before and after reuse")
 
     slot_root = smoke_root / "breakpoint-slot-validation"
     slot_root.mkdir()
@@ -992,6 +1153,7 @@ def run_no_guest_breakpoint_smokes(runner: Any, simulator: Path,
 
     return {
         "program_breakpoint_capacity": SKI_PROGRAM_BREAKPOINT_CAPACITY,
+        "maximum_simultaneous_programmed": MAX_SIMULTANEOUS_PROGRAM_BREAKPOINTS,
         "management_command_sha256": sha256(management_file),
         "management_capture": str(management_capture),
         "management_exit_code": management_result.get("exit_code"),
@@ -1000,10 +1162,6 @@ def run_no_guest_breakpoint_smokes(runner: Any, simulator: Path,
         "duplicate_alias_warning_observed": True,
         "bd_delete_and_lowest_slot_reuse_observed": True,
         "bD_delete_all_observed": True,
-        "capacity_command_sha256": sha256(capacity_file),
-        "capacity_capture": str(capacity_capture),
-        "capacity_exit_code": capacity_result.get("exit_code"),
-        "eleventh_unique_breakpoint_rejected": True,
         "invalid_slot_command_sha256": sha256(slot_file),
         "invalid_slot_capture": str(slot_capture),
         "slot_three_rejected": True,
@@ -1013,8 +1171,8 @@ def run_no_guest_breakpoint_smokes(runner: Any, simulator: Path,
 
 
 def validate_smoke_command_file(command_text: str) -> None:
-    required = ("eval ip+0 $insts$", "eval psr rsc bsp bspst rnat unat pfs sp gp b0 "
-                "r32 r33 r42 r43", "bs 0x108000", "rd ",
+    required = ("eval ip+0 $insts$", "eval iva psr rsc bsp bspst rnat unat pfs sp gp b0 "
+                "r14 r15 r32 r33 r42 r43 iip ipsr isr ifs iipa", "bs 0x108000", "rd ",
                 "dd 0x0 0xf ", "if 1 quit", "quit")
     if any(command not in command_text for command in required):
         raise DiagnosticError("no-guest parser smoke is missing a required pinned command")
@@ -1031,6 +1189,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--objdump", type=Path, default=OBJDUMP)
     parser.add_argument("--capture-dir", type=Path, default=CAPTURE)
     parser.add_argument("--expected-sha256", default=EXPECTED_PROBE_SHA256)
+    parser.add_argument("--expected-manifest-sha256", default=EXPECTED_MANIFEST_SHA256)
     parser.add_argument("--simulator-sha256", default=EXPECTED_SKI_SHA256)
     parser.add_argument("--instruction-budget", type=int, default=SUPPORTED_INSTRUCTION_BUDGET)
     modes = parser.add_mutually_exclusive_group()
@@ -1054,7 +1213,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"preflight": "PASS", "simulator": str(simulator),
                               "simulator_sha256": args.simulator_sha256,
                               "probe_sha256": args.expected_sha256,
-                              "manifest_sha256": EXPECTED_MANIFEST_SHA256,
+                              "manifest_sha256": args.expected_manifest_sha256,
                               "kernel_sha256": EXPECTED_KERNEL_SHA256,
                               "elf_entry": elf_facts["elf_entry"],
                               "text": symbols["text"],
@@ -1092,7 +1251,7 @@ def main(argv: list[str] | None = None) -> int:
             "authorized_launch_count": 1,
             "status": "CONSUMED_BEFORE_SINGLE_GUEST_LAUNCH",
             "probe_sha256": args.expected_sha256,
-            "manifest_sha256": EXPECTED_MANIFEST_SHA256,
+            "manifest_sha256": args.expected_manifest_sha256,
             "simulator_sha256": args.simulator_sha256,
             "command_file_sha256": sha256(command_file),
             "breakpoint_plan": debugger_plan,
@@ -1164,18 +1323,30 @@ def main(argv: list[str] | None = None) -> int:
             freshness_error = str(exc)
         memory_analysis = analyze_snapshot_files(
             args.capture_dir, samples, run_started_ns,
-            symbols["context_a"], symbols["context_b"], symbols["probe_record"])
+            symbols["context_a"], symbols["context_b"], symbols["probe_record"],
+            symbols["probe_record_size"])
         breakpoints = cooperative_breakpoints(symbols["frontiers"])
-        runtime_frontiers = analyze_runtime_frontiers(
-            samples, register_states, breakpoints,
-            symbols["probe_after_setup"],
-            symbols["frontiers"]["setup_nested_return"])
+        runtime_frontiers = analyze_cooperative_switch_frontiers(
+            samples, register_states, memory_analysis["snapshots"], breakpoints,
+            symbols["bsp_expected_value"], (symbols["ivt"], 0x108000),
+            (symbols["context_a"], symbols["context_b"]))
+        first_exception = runtime_frontiers["first_unexpected_exception"]
+        disassembly_path = args.artifact.with_name(
+            f"{args.artifact.stem}.disassembly.txt")
+        if first_exception is not None and disassembly_path.is_file():
+            disassembly_text = disassembly_path.read_text(encoding="utf-8", errors="replace")
+            fault_address = first_exception.get("faulting_instruction_address")
+            first_exception["faulting_instruction"] = (
+                disassembly_instruction_at(disassembly_text, fault_address)
+                if fault_address is not None else None)
+            first_exception["disassembly_path"] = str(disassembly_path)
+            first_exception["disassembly_sha256"] = sha256(disassembly_path)
         debugger_initialization = analyze_debugger_initialization(
             stderr_text, command_text, samples, elf_facts["elf_entry"])
         analysis = {
             "outcome": "IA64_COOPERATIVE_DEBUGGER_BLOCKED",
             "probe_sha256": args.expected_sha256,
-            "manifest_sha256": EXPECTED_MANIFEST_SHA256,
+            "manifest_sha256": args.expected_manifest_sha256,
             "simulator_sha256": args.simulator_sha256,
             "kernel_sha256": EXPECTED_KERNEL_SHA256,
             "run_status": status,
@@ -1215,6 +1386,8 @@ def main(argv: list[str] | None = None) -> int:
                      "switch_flushrs"),
                     ("context_b_first_entry", symbols["frontiers"]["context_b_first"],
                      "context_b_first_entry"),
+                    ("context_b_bsp_bounds_valid", symbols["frontiers"]["bsp_bounds_valid"],
+                     "bsp_bounds_valid"),
                     ("return_to_context_a", symbols["frontiers"]["context_a_resume_first"],
                      "a_resume_first"),
                     ("second_context_b_resumption",
@@ -1256,16 +1429,17 @@ def main(argv: list[str] | None = None) -> int:
             result.get("process_group_cleanup_complete") is True and
             (result.get("pty_stdin_observation") or {}).get("passed") is True
         )
-        analysis["setup_return_evidence"] = runtime_frontiers["setup_return"]
         analysis["intentional_exit_verified"] = intentional_exit
+        analysis["first_unexpected_exception"] = first_exception
         analysis["furthest_proven_frontier"] = (
             debugger_initialization["failure_frontier"]
             if debugger_initialization is not None else
             runtime_frontiers["furthest_proven_frontier"])
-        if output_valid and intentional_exit and installed_breakpoints_match_plan:
+        if output_valid and intentional_exit and installed_breakpoints_match_plan and \
+                runtime_frontiers["full_switch_sequence_verified"]:
             analysis["outcome"] = "IA64_COOPERATIVE_PROBE_QUALIFIED"
-        elif runtime_frontiers["setup_return"]["verified"] or any(
-                sample["instructions"] > 0 for sample in samples):
+        elif runtime_frontiers["context_b_bsp_check_valid"] and \
+                runtime_frontiers["context_b_to_a_first_observed"]:
             analysis["outcome"] = "IA64_COOPERATIVE_FRONTIER_ADVANCED"
         else:
             analysis["outcome"] = "IA64_COOPERATIVE_DEBUGGER_BLOCKED"

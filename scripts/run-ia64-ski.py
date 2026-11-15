@@ -1721,6 +1721,90 @@ def validate_cooperative_probe_setup_disassembly(disassembly: str) -> None:
         raise GateError("target setup disassembly has unexpected call/return control flow")
 
 
+def validate_cooperative_bsp_bounds_source(sequence_source: str) -> None:
+    """Require a mode-safe BSP read and exact current-frame start check for B."""
+    start = sequence_source.find("ia64_coop_b_first_entry:")
+    end = sequence_source.find(".global ia64_coop_a_test", start)
+    b_start = sequence_source.find("ia64_coop_b_test:")
+    b_end = sequence_source.find(".endp ia64_coop_b_test", b_start)
+    if min(start, end, b_start, b_end) < 0:
+        raise GateError("Context B first-entry or test procedure is missing")
+    first_entry = sequence_source[start:end]
+    body = sequence_source[b_start:b_end]
+    body = re.sub(r"/\*.*?\*/|//[^\n]*", "", body, flags=re.DOTALL)
+    compact = re.sub(r"\s+", "", body).lower()
+    check_start = compact.find("ia64_coop_b_bsp_check:")
+    check_end = compact.find("ia64_coop_b_bsp_bounds_valid:", check_start)
+    check = compact[check_start:check_end] if check_start >= 0 and check_end >= 0 else ""
+    required = (
+        "movr14=ar.bsp;;",
+        "movlr15=ia64_coop_rbs_b_base;;",
+        "cmp.geup6,p7=r14,r15;;(p7)br.cond.sptkia64_coop_test_fail;;",
+        "movlr15=ia64_coop_rbs_b_limit;;",
+        "cmp.ltup6,p7=r14,r15;;(p7)br.cond.sptkia64_coop_test_fail;;",
+        "movlr15=ia64_coop_rbs_b_base;;",
+        "cmp.eqp6,p7=r14,r15;;(p7)br.cond.sptkia64_coop_test_fail;;",
+    )
+    positions: list[int] = []
+    cursor = 0
+    for instruction in required:
+        found = check.find(instruction, cursor)
+        positions.append(found)
+        if found >= 0:
+            cursor = found + len(instruction)
+    if not check or min(positions) < 0 or positions != sorted(positions):
+        raise GateError(
+            "Context B must validate mode-independent BSP against its RBS bounds and "
+            "the expected current-frame start"
+        )
+    if re.search(r"\.equ\s+B_TEST_BSP_FRAME_BYTES\s*,\s*96\b", sequence_source,
+                 re.IGNORECASE) is None:
+        raise GateError("Context B's twelve-register frame must occupy 96 backing-store bytes")
+    if "ar.bspstore" in body.lower() or "ar.rnat" in body.lower() or \
+            re.search(r"\b(loadrs|flushrs)\b", body, re.IGNORECASE):
+        raise GateError("Context B diagnostics contain an RSE mode-sensitive access")
+    frame_allocations = re.findall(
+        r"\balloc\s+r16\s*=\s*ar\.pfs\s*,\s*6\s*,\s*4\s*,\s*2\s*,\s*0\b",
+        body, re.IGNORECASE)
+    if len(frame_allocations) != 1 or len(re.findall(r"\balloc\b", body, re.IGNORECASE)) != 1:
+        raise GateError("Context B first test frame must remain 12 stacked registers")
+    if re.search(r"\balloc\b", first_entry, re.IGNORECASE):
+        raise GateError("Context B bootstrap must not add an unaccounted stacked frame")
+
+
+def validate_cooperative_rse_mode_accesses(entry_source: str, sequence_source: str,
+                                            switch_source: str) -> None:
+    """Verify all guest BSPSTORE/RNAT/loadrs accesses follow an RSC.mode=0 handoff."""
+    entry = re.sub(r"/\*.*?\*/|//[^\n]*", "", entry_source, flags=re.DOTALL)
+    sequence = re.sub(r"/\*.*?\*/|//[^\n]*", "", sequence_source, flags=re.DOTALL)
+    switch = re.sub(r"/\*.*?\*/|//[^\n]*", "", switch_source, flags=re.DOTALL)
+    entry_compact = re.sub(r"\s+", "", entry).lower()
+    entry_order = (
+        "movr14=r0;;movar.rsc=r14;;loadrs;;movlr14=ia64_coop_rbs_a_base;;"
+        "movar.bspstore=r14;;movar.rsc=3;;"
+    )
+    if entry_order not in entry_compact:
+        raise GateError("entry loadrs/BSPSTORE initialization must remain in enforced lazy mode")
+    b_body_start = sequence.find("ia64_coop_b_test:")
+    b_body_end = sequence.find(".endp ia64_coop_b_test", b_body_start)
+    b_body = sequence[b_body_start:b_body_end] if b_body_start >= 0 and b_body_end >= 0 else ""
+    if re.search(r"\bmov(?:\.m)?\s+(?:r\d+\s*=\s*ar\.(?:bspstore|rnat)|"
+                 r"ar\.(?:bspstore|rnat)\s*=)", sequence + b_body, re.IGNORECASE) or \
+            re.search(r"\b(loadrs|flushrs)\b", sequence + b_body, re.IGNORECASE):
+        raise GateError("ordinary probe diagnostics must not access BSPSTORE, RNAT, loadrs, or flushrs")
+
+    compact = re.sub(r"\s+", "", switch).lower()
+    required = (
+        "flushrs;;mf;;mov.mar.rsc=r0;;srlz.d;;movr24=ar.rnat;;movr23=ar.bspstore;;",
+        "invala;;mov.mar.rsc=r0;;srlz.d;;load64c_bspstore,r28,r20",
+        "movar.bspstore=r20;;srlz.d;;load64c_rnat,r28,r21movar.rnat=r21;;",
+        "mov.mar.rsc=r20;;srlz.d;;br.ret.sptk.manyb0;;",
+    )
+    positions = [compact.find(item) for item in required]
+    if min(positions) < 0 or positions != sorted(positions):
+        raise GateError("switch BSPSTORE/RNAT accesses are not ordered under RSC.mode=0")
+
+
 def cooperative_disassembly_instruction_address(disassembly: str, pattern: str,
                                                 label: str) -> int:
     for line in disassembly.splitlines():
@@ -1728,6 +1812,65 @@ def cooperative_disassembly_instruction_address(disassembly: str, pattern: str,
         if match is not None and re.search(pattern, line, re.IGNORECASE):
             return int(match.group(1), 16)
     raise GateError(f"target switch disassembly lacks the {label} instruction")
+
+
+def validate_cooperative_bsp_bounds_disassembly(disassembly: str, bsp_base: int,
+                                                bsp_limit: int, expected_bsp_offset: int,
+                                                expected_check: int,
+                                                expected_valid: int) -> int:
+    """Validate the linked BSP read, bounds, and exact current-frame start comparison."""
+    start = disassembly.find("<ia64_coop_b_test>:")
+    end = disassembly.find("<ia64_coop_b_unexpected_resume>:", start)
+    body = disassembly[start:end if end >= 0 else None] if start >= 0 else ""
+    if not body or re.search(r"\bar\.bspstore\b", body, re.IGNORECASE):
+        raise GateError("Context B target diagnostics contain a BSPSTORE access")
+    instructions: list[tuple[int, str]] = []
+    for line in body.splitlines():
+        address_match = re.match(r"\s*([0-9a-fA-F]+):\s+", line)
+        if address_match is None:
+            continue
+        pieces = line.split("\t")
+        if len(pieces) < 3:
+            continue
+        text = re.sub(r"^\[[A-Z]+\]\s*", "", pieces[-1].strip())
+        instructions.append((int(address_match.group(1), 16), text))
+
+    alloc_indices = [index for index, (_, instruction) in enumerate(instructions)
+                     if re.search(r"\balloc\s+r16\s*=\s*ar\.pfs,12,10,0\b",
+                                  instruction, re.IGNORECASE)]
+
+    base = f"0x{bsp_base:x}"
+    limit = f"0x{bsp_limit:x}"
+    expected_bsp = f"0x{bsp_base + expected_bsp_offset:x}"
+    patterns = (
+        r"\bmov\.m\s+r14\s*=\s*ar\.bsp\b",
+        rf"\bmovl\s+r15\s*=\s*{base}\b",
+        r"\bcmp\.ltu\s+p7,p6\s*=\s*r14,r15\b",
+        r"\(p0?7\)\s+br\.cond[^\s]*\s+[^\n]*<ia64_coop_test_fail>",
+        rf"\bmovl\s+r15\s*=\s*{limit}\b",
+        r"\bcmp\.ltu\s+p6,p7\s*=\s*r14,r15\b",
+        r"\(p0?7\)\s+br\.cond[^\s]*\s+[^\n]*<ia64_coop_test_fail>",
+        rf"\bmovl\s+r15\s*=\s*{expected_bsp}\b",
+        r"\bcmp\.eq\s+p6,p7\s*=\s*r14,r15\b",
+        r"\(p0?7\)\s+br\.cond[^\s]*\s+[^\n]*<ia64_coop_test_fail>",
+    )
+    positions: list[int] = []
+    for pattern in patterns:
+        found = next((index for index, (_, instruction) in enumerate(instructions)
+                      if index >= (positions[-1] + 1 if positions else 0) and
+                      re.search(pattern, instruction, re.IGNORECASE)), None)
+        if found is None:
+            raise GateError("target Context B BSP check does not match its source contract")
+        positions.append(found)
+    read_address = instructions[positions[0]][0]
+    if len(alloc_indices) != 1 or alloc_indices[0] >= positions[0]:
+        raise GateError("target Context B BSP check is not preceded by its sole 12-register frame")
+    labels = {int(match.group(1), 16): match.group(2) for match in re.finditer(
+        r"(?m)^\s*([0-9a-fA-F]+)\s+<([^>]+)>:", body)}
+    if read_address != expected_check or labels.get(expected_valid) != \
+            "ia64_coop_b_bsp_bounds_valid":
+        raise GateError("Context B BSP symbols do not match the linked check frontiers")
+    return read_address
 
 
 def validate_cooperative_context_switch_source(switch_source: str) -> None:
@@ -1794,7 +1937,8 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
         "ia64_coop_a_test", "ia64_coop_a_resumed_first",
         "ia64_coop_a_resumed_final", "ia64_coop_a_final_exit",
         "ia64_coop_b_first_entry", "ia64_coop_b_test", "ia64_coop_b_resumed",
-        "ia64_coop_b_unexpected_resume",
+        "ia64_coop_b_unexpected_resume", "ia64_coop_b_bsp_check",
+        "ia64_coop_b_bsp_bounds_valid",
         "__text_start", "__text_end",
         "ia64_coop_context_a", "ia64_coop_context_b", "ia64_coop_probe_record",
         "ia64_coop_stack_a_guard_low", "ia64_coop_stack_a_bottom",
@@ -1804,7 +1948,7 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
         "ia64_coop_rbs_a_guard_low", "ia64_coop_rbs_a_base",
         "ia64_coop_rbs_a_limit", "ia64_coop_rbs_a_guard_high",
         "ia64_coop_rbs_b_guard_low", "ia64_coop_rbs_b_base",
-        "ia64_coop_rbs_b_limit", "ia64_coop_rbs_b_guard_high",
+        "ia64_coop_rbs_b_limit", "ia64_coop_rbs_b_guard_high", "__gp",
     )
     missing = [name for name in names if name not in elf.symbols]
     if missing:
@@ -1812,7 +1956,7 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
     symbol = lambda name: elf.symbols[name]["value"]
     size = lambda name: elf.symbols[name]["size"]
     if size("ia64_coop_context_a") != 1024 or size("ia64_coop_context_b") != 1024 or \
-            size("ia64_coop_probe_record") != 344:
+            size("ia64_coop_probe_record") != 1632:
         raise GateError("cooperative context or event-record geometry changed")
 
     ranges: dict[str, tuple[int, int]] = {}
@@ -1863,6 +2007,22 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
                         ", ".join(missing_terms))
     validate_cooperative_context_switch_source(switch_source)
     validate_cooperative_probe_setup_source(sequence_source)
+    validate_cooperative_bsp_bounds_source(sequence_source)
+    validate_cooperative_rse_mode_accesses(entry_source, sequence_source, switch_source)
+    fp_slots = re.findall(r"(?m)^\s*STORE_FP_AT\s+[0-9]+,\s*f([0-9]+)\s*$",
+                          sequence_source)
+    if sorted(map(int, fp_slots)) != [2, 3, 4, 5, *range(16, 32)]:
+        raise GateError("FP image capture must cover f2-f5 and every ABI-preserved f16-f31")
+    required_fp_captures = (
+        "CAPTURE_FP_SET R_FP_A_FIRST_RESUME",
+        "CAPTURE_FP_SET R_FP_A_FINAL_RESUME",
+        "CAPTURE_FP_SET R_FP_B_FIRST_ENTRY",
+        "CAPTURE_FP_SET R_FP_B_RESUME",
+    )
+    if any(sequence_source.count(capture) != 1 for capture in required_fp_captures) or \
+            sequence_source.count("CHECK_CONTEXT_GP ia64_coop_context_a") != 2 or \
+            sequence_source.count("CHECK_CONTEXT_GP ia64_coop_context_b") != 2:
+        raise GateError("probe must check each context GP and capture its FP state at both resumes")
     source_order = (
         "flushrs", "mf", "mov.m ar.rsc = r0", "mov r24 = ar.rnat", "invala",
         "mov ar.bspstore = r20", "mov ar.rnat = r21", "mov ar.pfs = r22",
@@ -1914,6 +2074,28 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
         disassembly, r"\bmov\.m\s+ar\.bspstore\s*=\s*r20\b", "incoming BSPSTORE handoff")
     switch_return = cooperative_disassembly_instruction_address(
         disassembly, r"\bbr\.ret\.sptk\.many\s+b0\b", "switch return")
+    bsp_base = symbol("ia64_coop_rbs_b_base")
+    bsp_limit = symbol("ia64_coop_rbs_b_limit")
+    # alloc updates CFM but leaves AR[BSP] unchanged. BSP identifies where
+    # current GR32 would be stored; the twelve-register frame spans 96 bytes
+    # starting at that address.
+    bsp_expected_offset = 0
+    bsp_frame_bytes = 12 * 8
+    bsp_base_collection_index = (bsp_base >> 3) & 0x3F
+    bsp_nat_collection_slots = (bsp_base_collection_index + 12) // 63
+    if bsp_base_collection_index != 0 or bsp_nat_collection_slots != 0 or \
+            bsp_expected_offset != 0 or bsp_frame_bytes != 96 or \
+            bsp_base + bsp_frame_bytes > bsp_limit:
+        raise GateError("Context B frame start/span violates RBS/NaT geometry")
+    try:
+        b_test_result = subprocess.run(
+            [str(objdump_path), "-dr", "--disassemble=ia64_coop_b_test", str(artifact)],
+            check=True, capture_output=True, text=True)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise GateError(f"cannot inspect target Context B BSP disassembly: {exc}") from exc
+    bsp_read_instruction = validate_cooperative_bsp_bounds_disassembly(
+        b_test_result.stdout, bsp_base, bsp_limit, bsp_expected_offset,
+        symbol("ia64_coop_b_bsp_check"), symbol("ia64_coop_b_bsp_bounds_valid"))
     try:
         setup_result = subprocess.run(
             [str(objdump_path), "-dr", "--disassemble=ia64_coop_probe_setup", str(artifact)],
@@ -1946,6 +2128,12 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
             "probe_after_a_test": symbol("ia64_coop_probe_after_a_test"),
             "a_resume_first": symbol("ia64_coop_a_resumed_first"),
             "b_resume_second": symbol("ia64_coop_b_resumed"),
+            "bsp_check_instruction": bsp_read_instruction,
+            "bsp_bounds_valid": symbol("ia64_coop_b_bsp_bounds_valid"),
+            "bsp_current_frame_offset": bsp_expected_offset,
+            "bsp_expected_value": bsp_base + bsp_expected_offset,
+            "bsp_frame_bytes": bsp_frame_bytes,
+            "probe_record_size": size("ia64_coop_probe_record"),
             "a_resume_final": symbol("ia64_coop_a_resumed_final"),
             "a_final_exit": symbol("ia64_coop_a_final_exit"),
             "b_unexpected_resume": symbol("ia64_coop_b_unexpected_resume"),
@@ -1994,7 +2182,7 @@ def validate_cooperative_context_probe_output(stdout_text: str) -> dict[str, Any
     required_context_fields = {
         "stack_base", "stack_limit", "sp", "rp", "code_base", "code_limit",
         "rbs_base", "rbs_limit", "switches", "first_entries", "resumes", "bsp",
-        "bspstore", "rnat_defined", "rnat_valid_mask", "observed_psr",
+        "bspstore", "rnat_defined", "rnat_valid_mask", "observed_psr", "gp",
     }
     for identity, values in context_records.items():
         missing = required_context_fields - values.keys()
@@ -2022,6 +2210,8 @@ def validate_cooperative_context_probe_output(stdout_text: str) -> dict[str, Any
     if (context_records["A"]["first_entries"], context_records["A"]["resumes"]) != (0, 2) or \
             (context_records["B"]["first_entries"], context_records["B"]["resumes"]) != (1, 1):
         raise GateError("cooperative probe restarted a context or missed a resumed entry")
+    if context_records["A"]["gp"] == 0 or context_records["B"]["gp"] != 0:
+        raise GateError("cooperative probe GP context identities are invalid")
 
     ranges = {
         "stack A": (context_records["A"]["stack_base"], context_records["A"]["stack_limit"]),
@@ -2038,6 +2228,11 @@ def validate_cooperative_context_probe_output(stdout_text: str) -> dict[str, Any
     validation = re.search(r"IA64_COOP_CONTEXT_VALIDATION errors=0x0\b([^\r\n]*)", stdout_text)
     if validation is None:
         raise GateError("cooperative probe context validation did not report zero errors")
+    fp_validation = re.search(
+        r"^IA64_COOP_FP_VALIDATION images=0x50 registers_per_context=0x14 valid=0x1$",
+        stdout_text, re.MULTILINE)
+    if fp_validation is None:
+        raise GateError("cooperative probe did not validate all 20 preserved FP images per context")
     state = validation.group(1)
     values = parse_hex_fields(state, "architectural state")
     required_state = {
@@ -2067,7 +2262,8 @@ def validate_cooperative_context_probe_output(stdout_text: str) -> dict[str, Any
             "IA64_COOP_CONTEXT_PROBE_RESULT=FAIL" in stdout_text:
         raise GateError("cooperative probe success marker is absent or contradictory")
     return {"events": events, "context_state_lines": context_lines,
-            "architectural_state": state.strip()}
+            "architectural_state": state.strip(),
+            "fp_image_validation": fp_validation.group(0)}
 
 
 def run_cooperative_context_probe(args: argparse.Namespace) -> int:

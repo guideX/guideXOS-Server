@@ -84,6 +84,10 @@ struct ProbeRecord {
     uint64_t fp_b_first_low;
     uint64_t fp_b_first_high;
     uint64_t a_final_count;
+    FpImage fp_a_first_resume[20];
+    FpImage fp_a_final_resume[20];
+    FpImage fp_b_first_entry[20];
+    FpImage fp_b_resume[20];
 };
 
 static const uint64_t kProfileMagic = 0x3541434f4f505631ULL; // "1VPOCA5"
@@ -100,6 +104,7 @@ static const uint64_t kFpALow = 0x415f46505f303031ULL;
 static const uint64_t kFpAHigh = 0x3fff800000000000ULL;
 static const uint64_t kFpBLow = 0x425f46505f303032ULL;
 static const uint64_t kFpBHigh = 0x3fff800000000000ULL;
+static const uint64_t kFpImageStride = 0x100;
 static const uint64_t kStackCanaryLow = 0x535441434b4c4f57ULL;
 static const uint64_t kStackCanaryHigh = 0x535441434b484947ULL;
 static const uint64_t kRbsCanaryLow = 0x5242534c4f574341ULL;
@@ -142,6 +147,15 @@ static_assert(offsetof(ProbeRecord, fp_a_low) == 256, "FP record offset changed"
 static_assert(offsetof(ProbeRecord, pfs_a_before) == 288, "PFS record offset changed");
 static_assert(offsetof(ProbeRecord, fp_b_first_low) == 320, "B first FP offset changed");
 static_assert(offsetof(ProbeRecord, a_final_count) == 336, "final count offset changed");
+static_assert(offsetof(ProbeRecord, fp_a_first_resume) == 352,
+              "A first-resume FP offset changed");
+static_assert(offsetof(ProbeRecord, fp_a_final_resume) == 672,
+              "A final-resume FP offset changed");
+static_assert(offsetof(ProbeRecord, fp_b_first_entry) == 992,
+              "B first-entry FP offset changed");
+static_assert(offsetof(ProbeRecord, fp_b_resume) == 1312,
+              "B resume FP offset changed");
+static_assert(sizeof(ProbeRecord) == 1632, "probe record size changed");
 static_assert(sizeof(Event) == 24, "event record geometry changed");
 
 extern "C" Context ia64_coop_context_a;

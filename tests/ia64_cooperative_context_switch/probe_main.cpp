@@ -18,7 +18,15 @@ static_assert(offsetof(ProbeRecord, fp_a_low) == 256, "A FP record offset change
 static_assert(offsetof(ProbeRecord, pfs_a_before) == 288, "A PFS offset changed");
 static_assert(offsetof(ProbeRecord, fp_b_first_low) == 320, "B first FP offset changed");
 static_assert(offsetof(ProbeRecord, a_final_count) == 336, "final count offset changed");
-static_assert(sizeof(ProbeRecord) == 344, "probe record size changed");
+static_assert(offsetof(ProbeRecord, fp_a_first_resume) == 352,
+              "A first-resume FP offset changed");
+static_assert(offsetof(ProbeRecord, fp_a_final_resume) == 672,
+              "A final-resume FP offset changed");
+static_assert(offsetof(ProbeRecord, fp_b_first_entry) == 992,
+              "B first-entry FP offset changed");
+static_assert(offsetof(ProbeRecord, fp_b_resume) == 1312,
+              "B resume FP offset changed");
+static_assert(sizeof(ProbeRecord) == 1632, "probe record size changed");
 
 } // namespace ia64_coop_probe
 
@@ -38,6 +46,7 @@ extern "C" uint64_t ia64_coop_rbs_b_guard_low;
 extern "C" uint64_t ia64_coop_rbs_b_base;
 extern "C" uint64_t ia64_coop_rbs_b_limit;
 extern "C" uint64_t ia64_coop_rbs_b_guard_high;
+extern "C" uint64_t __gp;
 
 namespace {
 
@@ -107,6 +116,15 @@ bool rnat_ok(const Context& context)
            (context.rnat_defined_bits & ~context.rnat_valid_mask) == 0;
 }
 
+bool fp_images_match(const FpImage* images, uint64_t low_base, uint64_t high)
+{
+    for (uint64_t index = 0; index < 20; ++index) {
+        if (images[index].low != low_base + index * kFpImageStride ||
+            images[index].high != high) return false;
+    }
+    return true;
+}
+
 uint64_t validate(const ProbeRecord& record, const Context& a, const Context& b)
 {
     uint64_t errors = record.errors;
@@ -127,6 +145,7 @@ uint64_t validate(const ProbeRecord& record, const Context& a, const Context& b)
         a.first_entry != 0 || b.first_entry != 0) ++errors;
     if (a.context_id != kContextA || b.context_id != kContextB ||
         a.profile_magic != kProfileMagic || b.profile_magic != kProfileMagic) ++errors;
+    if (a.gp != address(&__gp) || b.gp != 0) ++errors;
 
     const uint64_t stack_a0 = address(&ia64_coop_stack_a_bottom);
     const uint64_t stack_a1 = address(&ia64_coop_stack_a_top);
@@ -168,6 +187,10 @@ uint64_t validate(const ProbeRecord& record, const Context& a, const Context& b)
     if (record.fp_a_low != kFpALow || record.fp_a_high != kFpAHigh ||
         record.fp_b_low != kFpBLow || record.fp_b_high != kFpBHigh ||
         record.fp_b_first_low != kFpBLow || record.fp_b_first_high != kFpBHigh) ++errors;
+    if (!fp_images_match(record.fp_a_first_resume, kFpALow, kFpAHigh) ||
+        !fp_images_match(record.fp_a_final_resume, kFpALow, kFpAHigh) ||
+        !fp_images_match(record.fp_b_first_entry, kFpBLow, kFpBHigh) ||
+        !fp_images_match(record.fp_b_resume, kFpBLow, kFpBHigh)) ++errors;
     if ((record.psr_a_after_resume & kPsrInterruptEnable) != 0 ||
         (record.psr_b_after_resume & kPsrInterruptEnable) != 0) ++errors;
 
@@ -209,6 +232,8 @@ void report_context(const char* name, const Context& context)
     put_hex(context.rbs_base);
     puts(" rbs_limit=");
     put_hex(context.rbs_limit);
+    puts(" gp=");
+    put_hex(context.gp);
     puts(" switches=");
     put_hex(context.switch_count);
     puts(" first_entries=");
@@ -247,6 +272,14 @@ extern "C" void ia64_coop_probe_main()
     report_context("B", ia64_coop_context_b);
     const uint64_t errors = validate(ia64_coop_probe_record,
                                      ia64_coop_context_a, ia64_coop_context_b);
+    const bool fp_images_ok =
+        fp_images_match(ia64_coop_probe_record.fp_a_first_resume, kFpALow, kFpAHigh) &&
+        fp_images_match(ia64_coop_probe_record.fp_a_final_resume, kFpALow, kFpAHigh) &&
+        fp_images_match(ia64_coop_probe_record.fp_b_first_entry, kFpBLow, kFpBHigh) &&
+        fp_images_match(ia64_coop_probe_record.fp_b_resume, kFpBLow, kFpBHigh);
+    puts("IA64_COOP_FP_VALIDATION images=0x50 registers_per_context=0x14 valid=");
+    put_hex(fp_images_ok ? 1 : 0);
+    puts("\r\n");
     puts("IA64_COOP_CONTEXT_VALIDATION errors=");
     put_hex(errors);
     puts(" nat_a_before=");

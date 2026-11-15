@@ -45,12 +45,12 @@ def valid_output() -> str:
     lines.extend((
         "IA64_COOP_CONTEXT_STATE id=A stack_base=0x100000 stack_limit=0x110000 "
         "sp=0x10f000 rp=0x200100 code_base=0x200000 code_limit=0x210000 "
-        "rbs_base=0x140000 rbs_limit=0x150000 switches=0x2 first_entries=0x0 "
+        "rbs_base=0x140000 rbs_limit=0x150000 gp=0x200000 switches=0x2 first_entries=0x0 "
         "resumes=0x2 bsp=0x140000 bspstore=0x140000 rnat_defined=0x0 "
         "rnat_valid_mask=0x1 observed_psr=0x0",
         "IA64_COOP_CONTEXT_STATE id=B stack_base=0x120000 stack_limit=0x130000 "
         "sp=0x12f000 rp=0x200200 code_base=0x200000 code_limit=0x210000 "
-        "rbs_base=0x160000 rbs_limit=0x170000 switches=0x2 first_entries=0x1 "
+        "rbs_base=0x160000 rbs_limit=0x170000 gp=0x0 switches=0x2 first_entries=0x1 "
         "resumes=0x1 bsp=0x160000 bspstore=0x160000 rnat_defined=0x0 "
         "rnat_valid_mask=0x1 observed_psr=0x0",
         "IA64_COOP_CONTEXT_VALIDATION errors=0x0 nat_a_before=0x1 nat_a_after=0x1 "
@@ -59,6 +59,7 @@ def valid_output() -> str:
         "fp_a_low=0x415f46505f303031 fp_a_high=0x3fff800000000000 "
         "fp_b_first_low=0x425f46505f303032 fp_b_first_high=0x3fff800000000000 "
         "fp_b_resume_low=0x425f46505f303032 fp_b_resume_high=0x3fff800000000000",
+        "IA64_COOP_FP_VALIDATION images=0x50 registers_per_context=0x14 valid=0x1",
         "IA64_COOP_CONTEXT_PROBE_RESULT=PASS",
     ))
     return "\n".join(lines)
@@ -175,6 +176,12 @@ class CooperativeContextOutputTests(unittest.TestCase):
         resumed_psr = replace_once(valid_output(), "psr_b=0x0", "psr_b=0x4000")
         self.assert_rejected(resumed_psr)
 
+    def test_gp_identity_and_all_preserved_fp_images_are_required(self) -> None:
+        self.assert_rejected(replace_once(valid_output(), "gp=0x200000", "gp=0x0"))
+        self.assert_rejected(replace_once(valid_output(), "gp=0x0 switches=0x2 first_entries=0x1",
+                                          "gp=0x200000 switches=0x2 first_entries=0x1"))
+        self.assert_rejected(replace_once(valid_output(), "valid=0x1", "valid=0x0"))
+
     def test_unsupported_switch_profile_is_rejected(self) -> None:
         manifest = {
             "guest_execution_authorized": "probe-only",
@@ -261,14 +268,48 @@ class CooperativeContextSwitchCallerTests(unittest.TestCase):
 
 
 class CooperativeContextRseModeTests(unittest.TestCase):
-    def test_context_b_uses_mode_independent_bsp_for_rbs_bounds(self) -> None:
-        source = (ROOT / "tests" / "ia64_cooperative_context_switch" /
-                  "probe_sequence.s").read_text(encoding="utf-8")
-        body = source.split(".global ia64_coop_b_test", 1)[1].split(
+    def setUp(self) -> None:
+        self.script_dir = ROOT / "tests" / "ia64_cooperative_context_switch"
+        self.sequence = (self.script_dir / "probe_sequence.s").read_text(encoding="utf-8")
+        self.entry = (self.script_dir / "entry.s").read_text(encoding="utf-8")
+        self.switch = (self.script_dir / "context_switch.s").read_text(encoding="utf-8")
+
+    def test_context_b_uses_exact_mode_independent_bsp_frame_start_check(self) -> None:
+        runner.validate_cooperative_bsp_bounds_source(self.sequence)
+        body = self.sequence.split(".global ia64_coop_b_test", 1)[1].split(
             ".endp ia64_coop_b_test", 1)[0]
-        self.assertIn("Context B's RSC.mode=3", body)
         self.assertIn("mov r14 = ar.bsp ;;", body)
+        self.assertIn("cmp.eq p6, p7 = r14, r15 ;;", body)
         self.assertNotRegex(body, r"\bar\.bspstore\b")
+        self.assertIn(".equ B_TEST_BSP_FRAME_BYTES, 96", self.sequence)
+        self.assertNotIn("B_TEST_BSP_FRAME_ADVANCE", self.sequence)
+
+    def test_bsp_check_rejects_eager_store_pointer_and_wrong_frame_span(self) -> None:
+        bad_pointer = self.sequence.replace("mov r14 = ar.bsp ;;", "mov r14 = ar.bspstore ;;", 1)
+        with self.assertRaises(runner.GateError):
+            runner.validate_cooperative_bsp_bounds_source(bad_pointer)
+        bad_span = self.sequence.replace("B_TEST_BSP_FRAME_BYTES, 96",
+                                         "B_TEST_BSP_FRAME_BYTES, 104", 1)
+        with self.assertRaises(runner.GateError):
+            runner.validate_cooperative_bsp_bounds_source(bad_span)
+
+    def test_mode_sensitive_accesses_keep_the_qualified_freeze_and_handoff_order(self) -> None:
+        runner.validate_cooperative_rse_mode_accesses(self.entry, self.sequence, self.switch)
+        bad_entry = self.entry.replace("mov ar.rsc = r14 ;;", "mov ar.rsc = 3 ;;", 1)
+        with self.assertRaises(runner.GateError):
+            runner.validate_cooperative_rse_mode_accesses(bad_entry, self.sequence, self.switch)
+        bad_switch = self.switch.replace("mov.m ar.rsc = r0 ;;", "mov.m ar.rsc = r3 ;;", 1)
+        with self.assertRaises(runner.GateError):
+            runner.validate_cooperative_rse_mode_accesses(self.entry, self.sequence, bad_switch)
+
+    def test_all_four_contexts_check_gp_and_capture_twenty_fp_registers(self) -> None:
+        self.assertGreaterEqual(self.sequence.count("CHECK_CONTEXT_GP ia64_coop_context_a"), 2)
+        self.assertEqual(self.sequence.count("CHECK_CONTEXT_GP ia64_coop_context_b"), 2)
+        self.assertEqual(self.sequence.count("CAPTURE_FP_SET R_FP_A_FIRST_RESUME"), 1)
+        self.assertEqual(self.sequence.count("CAPTURE_FP_SET R_FP_A_FINAL_RESUME"), 1)
+        self.assertEqual(self.sequence.count("CAPTURE_FP_SET R_FP_B_FIRST_ENTRY"), 1)
+        self.assertEqual(self.sequence.count("CAPTURE_FP_SET R_FP_B_RESUME"), 1)
+        self.assertEqual(self.sequence.count("STORE_FP_AT"), 21)
 
 
 class CooperativeSetupReturnLinkTests(unittest.TestCase):
