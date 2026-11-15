@@ -138,19 +138,26 @@ class R29RecordTests(unittest.TestCase):
         symbols = [
             ("guideXosNativeAotR25CaptureCallerReturnAddress", 0x1000, "f runtime-pack/platform.obj"),
             ("guideXosFailFastImpl", 0x1008, "f runtime-pack/platform.obj"),
-            ("RhpNewArray", 0x1018, "f runtime-pack/platform.obj"),
-            ("guidexos_nativeaot_gc_read_state_r29", 0x1040, "f runtime-pack/gcprobe.obj"),
-            ("guideXosNativeAotR29FailFastPreallocationGcState", 0x1050, "f runtime-pack/platform.obj"),
-            ("guideXosStockRhpNewArray", 0x1060, "f runtime/allocfast.obj"),
-            ("guidexos_nativeaot_gc_read_state", 0x1070, "f runtime-pack/gcprobe.obj"),
-            ("guideXosNativeAotR28FailFastGcStateGuard", 0x1080, "f runtime-pack/platform.obj"),
+            ("guidexos_nativeaot_gc_read_state_r29", 0x1010, "f runtime-pack/gcprobe.obj"),
+            ("guideXosNativeAotR29FailFastPreallocationGcState", 0x1014, "f runtime-pack/platform.obj"),
+            ("guidexos_nativeaot_gc_read_state", 0x1018, "f runtime-pack/gcprobe.obj"),
+            ("guideXosNativeAotR28FailFastGcStateGuard", 0x101C, "f runtime-pack/platform.obj"),
+            ("RhpNewArray", 0x1020, "f runtime-pack/platform.obj"),
+            ("guideXosStockRhpNewArray", 0x1090, "f runtime/allocfast.obj"),
+            ("RhpNewArrayRare", 0x10A0, "f runtime/allocfast.obj"),
         ]
-        call_targets = {0x1020: 0x1000, 0x1026: 0x1040, 0x102B: 0x1050,
-                        0x1030: 0x1060, 0x1035: 0x1080}
+        call_targets = {0x1024: 0x1010, 0x1030: 0x1090, 0x1035: 0x1018,
+                        0x103A: 0x101C, 0x1040: 0x1000, 0x1045: 0x1014}
         for va, target in call_targets.items():
             offset = 0x100 + va - 0x1000
             elf[offset] = 0xE8
             struct.pack_into("<i", elf, offset + 1, target - (va + 5))
+        test_offset = 0x100 + 0x1029 - 0x1000
+        elf[test_offset:test_offset + 2] = b"\x85\xC0"
+        branch_offset = 0x100 + 0x102B - 0x1000
+        elf[branch_offset:branch_offset + 2] = b"\x75\x13"
+        elf[0x100 + 0x103F - 0x1000] = 0xC3
+        elf[0x100 + 0x104A - 0x1000] = 0xCC
         elf_path = candidate / "managed.elf"
         elf_path.write_bytes(elf)
         map_path = candidate / "managed.map"
@@ -185,9 +192,26 @@ class R29RecordTests(unittest.TestCase):
             self.assertEqual(result["recordBytes"], 192)
             self.assertEqual(result["recordSchema"], 3)
             self.assertLess(result["preallocationReaderCallOffset"],
-                            result["preallocationFailureCallOffset"])
-            self.assertLess(result["preallocationFailureCallOffset"],
                             result["stockAllocatorCallOffset"])
+            self.assertGreater(result["preallocationFailureCallOffset"],
+                               result["stockAllocatorCallOffset"])
+            self.assertLess(result["preallocationFailureBranchOffset"],
+                            result["stockAllocatorCallOffset"])
+            self.assertGreater(result["preallocationFailureBlockOffset"],
+                               result["stockAllocatorCallOffset"])
+        finally:
+            temporary.cleanup()
+
+    def test_linked_candidate_rejects_postallocation_only_failure_edge(self) -> None:
+        temporary, candidate = self._make_candidate()
+        try:
+            elf_path = candidate / "managed.elf"
+            elf = bytearray(elf_path.read_bytes())
+            branch_offset = 0x100 + 0x102B - 0x1000
+            elf[branch_offset + 1] = 0x08  # Point JNE at the post-allocation block.
+            elf_path.write_bytes(elf)
+            with self.assertRaisesRegex(ValueError, "pre-stock conditional edge"):
+                ANALYZER.verify_candidate(candidate)
         finally:
             temporary.cleanup()
 

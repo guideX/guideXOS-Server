@@ -416,15 +416,13 @@ def has_direct_call_to_function(
     return False
 
 
-def direct_call_offsets(
+def linked_function_code(
     elf: bytes,
     segments: list[tuple[int, int, int, int, int]],
     map_text: str,
     source_fragment: str,
-    target_fragment: str,
-) -> list[int]:
+) -> tuple[int, bytes]:
     source = map_function_address(map_text, source_fragment)
-    target = map_function_address(map_text, target_fragment)
     later_functions = []
     for line in map_text.splitlines():
         match = re.match(r"\s*\S+\s+\S+\s+([0-9A-Fa-f]{16})\s+f\s+", line)
@@ -434,19 +432,89 @@ def direct_call_offsets(
                 later_functions.append(address)
     end = min(later_functions, default=source + 0x4000)
     size = min(end - source, 0x4000)
-    if size < 5:
-        return []
+    if size <= 0:
+        return source, b""
     try:
-        code = read_va(elf, segments, source, size)
+        return source, read_va(elf, segments, source, size)
     except ValueError:
+        return source, b""
+
+
+def direct_call_offsets(
+    elf: bytes,
+    segments: list[tuple[int, int, int, int, int]],
+    map_text: str,
+    source_fragment: str,
+    target_fragment: str,
+) -> list[int]:
+    source = map_function_address(map_text, source_fragment)
+    target = map_function_address(map_text, target_fragment)
+    _source, code = linked_function_code(elf, segments, map_text, source_fragment)
+    if len(code) < 5:
         return []
     offsets = []
-    for offset in range(size - 4):
+    for offset in range(len(code) - 4):
         if code[offset] == 0xE8:
             displacement = struct.unpack_from("<i", code, offset + 1)[0]
             if source + offset + 5 + displacement == target:
                 offsets.append(offset)
     return offsets
+
+
+def conditional_branch_edges(
+    elf: bytes,
+    segments: list[tuple[int, int, int, int, int]],
+    map_text: str,
+    source_fragment: str,
+) -> list[tuple[int, int, int, bool]]:
+    _source, code = linked_function_code(elf, segments, map_text, source_fragment)
+    if len(code) < 2:
+        return []
+    edges: list[tuple[int, int, int, bool]] = []
+
+    def nonzero_test_precedes(offset: int) -> bool:
+        for length in (2, 3):
+            start = offset - length
+            if start < 0:
+                continue
+            instruction = code[start:offset]
+            rex = 0
+            if len(instruction) == 3 and 0x40 <= instruction[0] <= 0x4F:
+                rex = instruction[0]
+                opcode, modrm = instruction[1:]
+            elif len(instruction) == 2:
+                opcode, modrm = instruction
+            else:
+                continue
+            if opcode != 0x85 or modrm & 0xC0 != 0xC0:
+                continue
+            reg = ((modrm >> 3) & 7) | (((rex >> 2) & 1) << 3)
+            rm = (modrm & 7) | ((rex & 1) << 3)
+            if reg == rm:
+                return True
+        return False
+
+    for offset in range(len(code) - 1):
+        opcode = code[offset]
+        if 0x70 <= opcode <= 0x7F:
+            target = offset + 2 + struct.unpack_from("<b", code, offset + 1)[0]
+            condition = opcode & 0x0F
+            edges.append((offset, target, condition, condition == 5 and nonzero_test_precedes(offset)))
+        elif opcode == 0x0F and 0x80 <= code[offset + 1] <= 0x8F and offset + 6 <= len(code):
+            target = offset + 6 + struct.unpack_from("<i", code, offset + 2)[0]
+            condition = code[offset + 1] & 0x0F
+            edges.append((offset, target, condition, condition == 5 and nonzero_test_precedes(offset)))
+    return edges
+
+
+def failure_block_falls_through(code: bytes, start: int, call: int,
+                               branch_edges: list[tuple[int, int, int, bool]]) -> bool:
+    if start < 0 or call <= start or call > len(code):
+        return False
+    if any(start <= branch_offset < call and nonzero_test
+           for branch_offset, _target, _condition, nonzero_test in branch_edges):
+        return False
+    return not any(byte in (0xC2, 0xC3, 0xE9, 0xEB) for byte in code[start:call])
 
 
 def resolve_caller(candidate: Path, caller_pc: int) -> dict[str, object]:
@@ -554,10 +622,24 @@ def verify_candidate(candidate: Path) -> dict[str, object]:
                 elf, segments, map_text, "RhpNewArray", "guideXosNativeAotR29FailFastPreallocationGcState")
             stock_calls = direct_call_offsets(
                 elf, segments, map_text, "RhpNewArray", "guideXosStockRhpNewArray")
+            guard_edges = conditional_branch_edges(elf, segments, map_text, "RhpNewArray")
+            _wrapper, wrapper_code = linked_function_code(elf, segments, map_text, "RhpNewArray")
+            preallocation_failure_edges = [
+                (branch_offset, target_offset)
+                for branch_offset, target_offset, condition, nonzero_test in guard_edges
+                if reader_calls and failure_calls and stock_calls and
+                condition == 5 and nonzero_test and
+                min(reader_calls) < branch_offset < min(stock_calls) and
+                min(stock_calls) < target_offset <= min(failure_calls) and
+                min(failure_calls) - target_offset <= 0x100 and
+                failure_block_falls_through(wrapper_code, target_offset,
+                                            min(failure_calls), guard_edges)
+            ]
             if (not reader_calls or not failure_calls or not stock_calls or
-                    min(reader_calls) >= min(failure_calls) or
-                    min(failure_calls) >= min(stock_calls)):
-                raise ValueError("R29 reader and failure discriminator are not linked before stock RhpNewArray")
+                    min(reader_calls) >= min(stock_calls) or
+                    not preallocation_failure_edges):
+                raise ValueError(
+                    "R29 linked RhpNewArray lacks a pre-stock conditional edge to its fail-fast block")
             if not all(any(start <= address < start + memsz and flags & 1
                            for start, _off, _filesz, memsz, flags in segments)
                        for address in (reader_address, preallocation_helper)):
@@ -567,6 +649,8 @@ def verify_candidate(candidate: Path) -> dict[str, object]:
                 "preallocationFailureHelperAddress": f"0x{preallocation_helper:016X}",
                 "preallocationReaderCallOffset": min(reader_calls),
                 "preallocationFailureCallOffset": min(failure_calls),
+                "preallocationFailureBranchOffset": preallocation_failure_edges[0][0],
+                "preallocationFailureBlockOffset": preallocation_failure_edges[0][1],
                 "stockAllocatorCallOffset": min(stock_calls),
             })
     return {
