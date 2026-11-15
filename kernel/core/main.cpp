@@ -35,6 +35,7 @@
 #include "display_configuration_service.h"
 #include "include/kernel/file_clipboard.h"
 #include "include/kernel/native_elf_baremetal.h"
+#include "include/kernel/native_scheduler.h"
 
 #if defined(GXOS_SECURITY2_AUTH_SMOKE_TEST)
 namespace kernel {
@@ -665,6 +666,27 @@ static void log_framebuffer_summary(
     kernel::serial::puts("\n");
 }
 
+#if defined(ARCH_AMD64)
+static kernel::native_scheduler::Handle s_nativeSystemIoHandle = {};
+static bool s_nativeSchedulerIoActive = false;
+
+static int32_t native_system_io_task(void*)
+{
+    kernel::serial::puts("[NATIVE-SCHEDULER] desktop service context entered\n");
+    for (;;) {
+        // These bounded polling services previously ran inline in the desktop
+        // loop. They remain single-owner and cooperative: each poll finishes
+        // before this context yields back to desktop/input/compositor work.
+        kernel::system_service_bridge::poll();
+        kernel::ipv4::poll_network();
+        if (kernel::native_scheduler::runtime().yieldCurrent() !=
+            kernel::native_scheduler::Result::Ok) {
+            return -1;
+        }
+    }
+}
+#endif
+
 } // namespace
 #endif
 
@@ -1208,6 +1230,38 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::qemu_network_configuration_proof::run();
 #endif
         kernel::system_service_bridge::init();
+
+#if defined(ARCH_AMD64)
+        kernel::native_scheduler::Runtime& nativeScheduler =
+            kernel::native_scheduler::runtime();
+        const kernel::native_scheduler::Result schedulerInit =
+            nativeScheduler.initialize();
+        kernel::serial::puts("[NATIVE-SCHEDULER] initialize result=");
+        kernel::serial::puts(kernel::native_scheduler::resultName(schedulerInit));
+        kernel::serial::puts(" contexts=8 stackBytes=65536 policy=cooperative owner=kernel-system\n");
+        bool schedulerCanRun = schedulerInit == kernel::native_scheduler::Result::Ok;
+
+#if defined(GXOS_NATIVE_SCHEDULER_SELFTEST_ACTIVE)
+        const bool schedulerSelfTestPassed =
+            schedulerCanRun &&
+            kernel::native_scheduler::runSelfTest();
+        schedulerCanRun = schedulerCanRun && schedulerSelfTestPassed;
+        if (!schedulerSelfTestPassed) {
+            kernel::serial::puts("[NATIVE-SCHEDULER-SELFTEST] boot qualification failed; scheduler-backed polling disabled\n");
+        }
+#endif
+
+        if (schedulerCanRun) {
+            const kernel::native_scheduler::Result ioTaskResult =
+                nativeScheduler.createKernelTask(
+                    native_system_io_task, nullptr, &s_nativeSystemIoHandle);
+            s_nativeSchedulerIoActive = ioTaskResult ==
+                kernel::native_scheduler::Result::Ok;
+            kernel::serial::puts("[NATIVE-SCHEDULER] desktop service context result=");
+            kernel::serial::puts(kernel::native_scheduler::resultName(ioTaskResult));
+            kernel::serial::puts(" task=network-and-system-bridge\n");
+        }
+#endif
         
         // ============================================================
         
@@ -1326,12 +1380,32 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             // Poll input manager for updates (handles USB HID polling)
             kernel::input::poll();
 
-            // Service bounded host-runtime requests on the dedicated COM2
-            // channel. This reads current kernel providers per request.
+#if defined(ARCH_AMD64)
+            if (s_nativeSchedulerIoActive) {
+                bool contextDispatched = false;
+                const kernel::native_scheduler::Result dispatchResult =
+                    kernel::native_scheduler::runtime().dispatchOne(&contextDispatched);
+                kernel::native_scheduler::Snapshot ioSnapshot{};
+                if (dispatchResult != kernel::native_scheduler::Result::Ok ||
+                    !kernel::native_scheduler::runtime().query(
+                        s_nativeSystemIoHandle, &ioSnapshot) ||
+                    ioSnapshot.state == kernel::native_scheduler::State::Completed ||
+                    ioSnapshot.state == kernel::native_scheduler::State::Faulted) {
+                    s_nativeSchedulerIoActive = false;
+                    kernel::serial::puts("[NATIVE-SCHEDULER] service context stopped result=");
+                    kernel::serial::puts(kernel::native_scheduler::resultName(dispatchResult));
+                    kernel::serial::puts("; reverting to desktop-loop polling\n");
+                }
+            }
+            if (!s_nativeSchedulerIoActive) {
+                kernel::system_service_bridge::poll();
+                kernel::ipv4::poll_network();
+            }
+#else
+            // Non-AMD64 targets retain their existing direct polling path.
             kernel::system_service_bridge::poll();
-            
-            // Poll network for received packets
             kernel::ipv4::poll_network();
+#endif
 
             int8_t wheelDelta = kernel::input::mouse_scroll_y();
             
