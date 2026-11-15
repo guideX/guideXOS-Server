@@ -187,6 +187,8 @@ class ReverseEntrySourceTests(unittest.TestCase):
         self.assertIn("$C188R12R4R5R4ThreadStoreReadiness -or", guard)
         self.assertIn("$C188R12R4R5R2R3InitializeModulesAttribution", guard)
         self.assertIn("C188R30_THREAD_ATTACHMENT_TRACE", runtime_pack)
+        self.assertIn("$C188R12R4R5R4ThreadStoreReadiness -or $C188R30ThreadAttachmentTrace", runtime_pack)
+        self.assertIn("$threadStoreCoreclrRoot 'gc\\env')", runtime_pack)
 
     def test_readiness_profile_verifies_stock_attachment_and_publication(self) -> None:
         readiness = self.entry.index(

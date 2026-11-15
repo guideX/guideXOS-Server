@@ -359,7 +359,7 @@ if ($ThreadStaticLifecycleDiagnostics) {
 $threadStoreSourceRoot = $null
 $threadStoreDefines = ""
 $threadStoreIncludes = ""
-if ($C188R12R4R5R4ThreadStoreReadiness) {
+if ($C188R12R4R5R4ThreadStoreReadiness -or $C188R30ThreadAttachmentTrace) {
     $threadStoreCoreclrRoot = Join-Path $lockedExternalRuntimeRoot 'src\coreclr'
     $threadStoreRuntimeRoot = Join-Path $threadStoreCoreclrRoot 'nativeaot\Runtime'
     $threadStoreSourceRoot = Join-Path $lockedExternalRuntimeRoot 'src'
@@ -376,7 +376,12 @@ if ($C188R12R4R5R4ThreadStoreReadiness) {
             throw "Pinned NativeAOT ThreadStore source input is missing: $path"
         }
     }
-    $threadStoreDefines = '/DWIN32 /D_WIN32 /D_WIN64 /DHOST_WINDOWS /DTARGET_WINDOWS /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /D_LIB /DUSE_GC_INFO_DECODER /DGUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS'
+    $threadStoreProfileDefine = if ($C188R12R4R5R4ThreadStoreReadiness) {
+        '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS'
+    } else {
+        ''
+    }
+    $threadStoreDefines = "/DWIN32 /D_WIN32 /D_WIN64 /DHOST_WINDOWS /DTARGET_WINDOWS /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /D_LIB /DUSE_GC_INFO_DECODER $threadStoreProfileDefine"
     $threadStoreIncludes = "/I`"$threadStoreRuntimeRoot`" /I`"$(Join-Path $threadStoreRuntimeRoot 'windows')`" /I`"$threadStoreCoreclrRoot`" /I`"$(Join-Path $threadStoreCoreclrRoot 'native')`" /I`"$(Join-Path $threadStoreCoreclrRoot 'gc')`" /I`"$(Join-Path $threadStoreCoreclrRoot 'gc\env')`" /I`"$(Join-Path $threadStoreRuntimeRoot 'inc')`" /I`"$(Join-Path $threadStoreRuntimeRoot 'eventpipe')`" /I`"$(Join-Path $threadStoreCoreclrRoot 'inc')`" /I`"$(Join-Path $threadStoreCoreclrRoot 'pal\inc')`" /I`"$(Join-Path $threadStoreSourceRoot 'native')`" /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /FI`"$(Join-Path $threadStoreCoreclrRoot 'gc\env\common.h')`""
 }
 
