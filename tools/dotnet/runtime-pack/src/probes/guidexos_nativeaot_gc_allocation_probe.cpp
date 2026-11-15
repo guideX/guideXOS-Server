@@ -34,7 +34,7 @@ namespace WKS {
 
 #include <stdint.h>
 #if defined(_MSC_VER)
-#include <excpt.h>
+extern "C" unsigned long __cdecl _exception_code(void);
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD)
 #include "guidexos_nativeaot_r29_preallocation_guard.h"
@@ -192,7 +192,7 @@ extern "C" int32_t guidexos_nativeaot_gc_read_state_r29(
             evidence->safeReadResult = kGuideXosR29SafeReadCompleted;
         }
         return 0;
-    } __except (GetExceptionCode() == 0xC0000005u
+    } __except (_exception_code() == 0xC0000005u
             ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
         if (evidence != nullptr) {
             evidence->safeReadResult = kGuideXosR29SafeReadFailed;

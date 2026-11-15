@@ -204,12 +204,19 @@ class SourceContractTests(unittest.TestCase):
             "context->alloc_ptr", "heap->GetGcCount()",
         )]
         self.assertEqual(positions, sorted(positions))
-        self.assertIn("GetExceptionCode() == 0xC0000005u", probe)
+        self.assertIn("_exception_code() == 0xC0000005u", probe)
+        self.assertNotIn("#include <excpt.h>", source)
         self.assertIn("kGuideXosR29SafeReadFailed", probe)
         self.assertNotIn("EXCEPTION_EXECUTE_HANDLER : EXCEPTION_EXECUTE_HANDLER", probe)
         self.assertNotRegex(probe, r"\b(?:new|malloc|calloc|realloc)\s*\(")
         self.assertNotRegex(probe, r"\b(?:Collect|GarbageCollect|EnterCriticalSection|AcquireLock)\s*\(")
         self.assertNotRegex(probe, r"thread->\w+\s*=")
+
+        builder = (ROOT / "scripts/dotnet/build-managed-hostlog-proof.ps1").read_text(encoding="utf-8")
+        r29_probe_flags = builder[builder.index("if ($C188R29PreallocationGcStateGuard) {"):]
+        r29_probe_flags = r29_probe_flags[:r29_probe_flags.index("$gcProbeIncludes =")]
+        self.assertIn("/DGUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR", r29_probe_flags)
+        self.assertIn("/DGUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD", r29_probe_flags)
 
     def test_preallocation_diagnostic_fails_before_stock_and_postallocation_check_is_retained(self) -> None:
         source = PLATFORM.read_text(encoding="utf-8")

@@ -928,6 +928,7 @@ try {
         }
         $gcProbeDefines = '/DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DHOST_64BIT /DTARGET_64BIT /DHOST_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /D_LIB'
         if ($C188R29PreallocationGcStateGuard) {
+            $gcProbeDefines += ' /DGUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR'
             $gcProbeDefines += ' /DGUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD'
         }
         $gcProbeIncludes = "/I`"$gcProbeRuntimeRoot`" /I`"$(Join-Path $gcProbeRuntimeRoot 'windows')`" /I`"$gcProbeCoreclrRoot`" /I`"$gcProbeNativeRoot`" /I`"$(Join-Path $gcProbeCoreclrRoot 'native')`" /I`"$(Join-Path $gcProbeCoreclrRoot 'gc')`" /I`"$(Join-Path $gcProbeCoreclrRoot 'gc\env')`" /I`"$(Join-Path $gcProbeRuntimeRoot 'inc')`" /I`"$(Join-Path $gcProbeRuntimeRoot 'eventpipe')`" /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /I`"$(Join-Path $gcProbeCoreclrRoot 'pal\src\include')`" /FI`"$gcProbeCommonHeader`""
