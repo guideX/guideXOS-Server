@@ -12,7 +12,8 @@ param(
     [string]$ArtifactPath,
     [switch]$DisableSecureEntropy,
     [switch]$GuestDnsQualification,
-    [switch]$Navhttps17Qualification
+    [switch]$Navhttps17Qualification,
+    [switch]$Navhttps19NameConstraintsQualification
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,14 +34,37 @@ $requiredHttpsCaseNames = @(
 $httpsQualificationRequested =
     ($ScenarioFilter -contains 'production_validated') -or
     (($ScenarioFilter.Count -eq 0) -and ($ScenarioGroup -ne 'PublicPilot'))
+$navhttps19GuestScenarioNames = @(
+    'production_navhttps19_original_violation',
+    'production_navhttps19_unsupported_uri'
+)
 if ($Navhttps17Qualification) {
+    $navhttps17AllowedScenarioNames = @('production_validated')
+    if ($Navhttps19NameConstraintsQualification) {
+        $navhttps17AllowedScenarioNames = $navhttps19GuestScenarioNames
+    } elseif ($ScenarioFilter -contains 'production_name_constraints_allowed') {
+        $navhttps17AllowedScenarioNames += 'production_name_constraints_allowed'
+    }
     if ($ScenarioFilter -and $ScenarioFilter.Count -gt 0 -and
-        @($ScenarioFilter | Where-Object { $_ -ne 'production_validated' }).Count -gt 0) {
-        throw 'NAVHTTPS17 controlled TLS qualification supports only the production_validated fixture profile.'
+        @($ScenarioFilter | Where-Object { $navhttps17AllowedScenarioNames -notcontains $_ }).Count -gt 0) {
+        throw 'NAVHTTPS17 clock-lease qualification supports the validated HTTPS control or the explicitly listed NAVHTTPS19 controlled certificate fixtures.'
     }
     if (-not $ScenarioFilter -or $ScenarioFilter.Count -eq 0) {
-        $ScenarioFilter = @('production_validated')
+        $ScenarioFilter = if ($Navhttps19NameConstraintsQualification) {
+            $navhttps19GuestScenarioNames
+        } else {
+            @('production_validated')
+        }
     }
+}
+if ($Navhttps19NameConstraintsQualification) {
+    if (-not $ScenarioFilter -or $ScenarioFilter.Count -eq 0) {
+        $ScenarioFilter = $navhttps19GuestScenarioNames
+    } elseif (@($ScenarioFilter | Where-Object { $navhttps19GuestScenarioNames -notcontains $_ }).Count -gt 0) {
+        throw 'NAVHTTPS19 guest qualification accepts only production_navhttps19_original_violation and production_navhttps19_unsupported_uri.'
+    }
+} elseif ($ScenarioFilter -and @($ScenarioFilter | Where-Object { $navhttps19GuestScenarioNames -contains $_ }).Count -gt 0) {
+    throw 'Use -Navhttps19NameConstraintsQualification for the original-host NAVHTTPS19 guest scenarios.'
 }
 
 function Write-NavigatorHttpsQualificationBlocked {
@@ -131,6 +155,9 @@ function Invoke-KernelBuildForSmoke {
     if ($GuestDnsQualification) { $flags += ' -DGXOS_NAVIGATOR_GUEST_DNS_QUALIFICATION_ACTIVE' }
     if ($Navhttps17Qualification) {
         $flags += ' -DGXOS_NAVHTTPS13_GUEST_QUALIFICATION_ACTIVE -DGXOS_NAVHTTPS15_GUEST_QUALIFICATION_ACTIVE -DGXOS_NAVHTTPS16_GUEST_QUALIFICATION_ACTIVE -DGXOS_NAVHTTPS17_GUEST_QUALIFICATION_ACTIVE'
+    }
+    if ($Navhttps19NameConstraintsQualification) {
+        $flags += ' -DGXOS_NAVHTTPS19_GUEST_QUALIFICATION_ACTIVE'
     }
     $oldBuildErrorActionPreference = $ErrorActionPreference
     try {
@@ -324,6 +351,29 @@ $expiredPolicyProdHttpsCert = Join-Path $Root "scripts\fixtures\navigator-fault-
 $expiredPolicyProdHttpsKey = Join-Path $Root "scripts\fixtures\navigator-fault-expired-prod.guidexos.test.key"
 $futureHttpsCert = Join-Path $Root "scripts\fixtures\navigator-fault-future-guidexos.test.crt"
 $futureHttpsKey = Join-Path $Root "scripts\fixtures\navigator-fault-future-guidexos.test.key"
+$navhttps19GuestFixtureDir = Join-Path $artifactRoot 'navhttps19-name-constraints'
+$navhttps19AllowedRoot = Join-Path $navhttps19GuestFixtureDir 'allowed-root.pem'
+$navhttps19AllowedServerCert = Join-Path $navhttps19GuestFixtureDir 'allowed-server-chain.pem'
+$navhttps19AllowedServerKey = Join-Path $navhttps19GuestFixtureDir 'allowed-server.key'
+$navhttps19ViolationRoot = Join-Path $navhttps19GuestFixtureDir 'navhttps18-prohibited-root.pem'
+$navhttps19ViolationServerCert = Join-Path $navhttps19GuestFixtureDir 'navhttps18-prohibited-server-chain.pem'
+$navhttps19ViolationServerKey = Join-Path $navhttps19GuestFixtureDir 'navhttps18-prohibited-server.key'
+$navhttps19UnsupportedRoot = Join-Path $navhttps19GuestFixtureDir 'unsupported-uri-root.pem'
+$navhttps19UnsupportedServerCert = Join-Path $navhttps19GuestFixtureDir 'unsupported-uri-server-chain.pem'
+$navhttps19UnsupportedServerKey = Join-Path $navhttps19GuestFixtureDir 'unsupported-uri-server.key'
+$navhttps19GuestScenarioRequested = $Navhttps19NameConstraintsQualification -or
+    ($ScenarioFilter -and @($ScenarioFilter | Where-Object { $_ -eq 'production_name_constraints_allowed' }).Count -gt 0)
+if ($navhttps19GuestScenarioRequested) {
+    if ($ReuseActiveBuild) {
+        throw 'NAVHTTPS19 guest certificate scenarios require a fresh isolated artifact directory.'
+    }
+    if (Test-Path -LiteralPath $navhttps19GuestFixtureDir) {
+        throw "Refusing to overwrite existing NAVHTTPS19 guest fixture artifacts: $navhttps19GuestFixtureDir"
+    }
+    $navhttps19GuestFixtureGenerator = Join-Path $Root 'tests\navhttps19\generate_guest_fixtures.py'
+    & $python $navhttps19GuestFixtureGenerator --output-dir $navhttps19GuestFixtureDir
+    if ($LASTEXITCODE -ne 0) { throw 'NAVHTTPS19 controlled guest certificate fixture generation failed.' }
+}
 foreach ($path in @(
     $defaultHttpsCert, $defaultHttpsKey, $untrustedHttpsCert, $untrustedHttpsKey, $expiredHttpsCert, $expiredHttpsKey,
     $policyDevHttpsCert, $policyDevHttpsKey, $policyProdHttpsCert, $policyProdHttpsKey,
@@ -429,7 +479,7 @@ function Start-NavigatorKernelSmokeServers {
     $dnsFixture = Join-Path $Root 'scripts\navigator_controlled_dns_fixture.py'
     $dnsArgs = @(
         "`"$dnsFixture`"", '--bind', $dnsBind, '--port', [string]$dnsPort,
-        '--hostname', 'prod.guidexos.test', '--address', '10.0.2.2',
+        '--hostname', $PolicyHost, '--address', '10.0.2.2',
         '--stop-file', "`"$dnsStopFile`""
     )
     $dnsProc = Start-Process -FilePath $python -ArgumentList $dnsArgs -PassThru -WindowStyle Hidden -RedirectStandardOutput $dnsLog -RedirectStandardError $dnsErrLog
@@ -488,7 +538,7 @@ function Start-NavigatorKernelSmokeServers {
                 try {
                     $dnsEntry = $line | ConvertFrom-Json -ErrorAction Stop
                     if ($dnsEntry.event -eq 'ready' -and [int]$dnsEntry.pid -eq $dnsProc.Id -and
-                        [string]$dnsEntry.hostname -eq 'prod.guidexos.test' -and
+                        [string]$dnsEntry.hostname -eq $PolicyHost -and
                         [string]$dnsEntry.address -eq '10.0.2.2') {
                         $dnsReady = $true
                         break
@@ -534,7 +584,8 @@ function Start-NavigatorKernelSmokeServers {
     if (-not $httpsReady) { throw "local HTTPS smoke server did not listen on port 8443; see $httpsLog" }
     if (-not $dnsReady) { throw "controlled DNS fixture did not own 127.0.0.1:55353 and report ready; see $dnsLog and $dnsErrLog" }
     if (-not $roughtimeReady) { throw "NAVHTTPS17 multi-source Roughtime fixture did not bind UDP ports 5319-5321; see $roughtimeLog and $roughtimeErrLog" }
-    Write-Host '[NAVIGATOR-GUEST-DNS-CONFIG] qemu_backend=user guest=10.0.2.15 gateway=10.0.2.2 test_a_resolver=10.0.2.3:53 controlled_resolver=10.0.2.2:55353 host_fixture=127.0.0.1:55353 controlled_host=prod.guidexos.test controlled_a=10.0.2.2 static_mapping=disabled_for_controlled_host'
+    $staticMapping = if ($Navhttps19NameConstraintsQualification) { 'enabled_for_navhttps19_test_host' } else { 'disabled_for_controlled_host' }
+    Write-Host "[NAVIGATOR-GUEST-DNS-CONFIG] qemu_backend=user guest=10.0.2.15 gateway=10.0.2.2 test_a_resolver=10.0.2.3:53 controlled_resolver=10.0.2.2:55353 host_fixture=127.0.0.1:55353 controlled_host=$PolicyHost controlled_a=10.0.2.2 static_mapping=$staticMapping"
 
     return [pscustomobject]@{
         HttpProcess = $httpProc
@@ -1240,6 +1291,10 @@ function Get-NavigatorKernelSmokePolicyHost {
 function Get-NavigatorKernelSmokePolicyCertPair {
     param($Scenario)
 
+    if ($Scenario.PolicyTlsCert -and $Scenario.PolicyTlsKey) {
+        return @([string]$Scenario.PolicyTlsCert, [string]$Scenario.PolicyTlsKey)
+    }
+
     $policyHost = Get-NavigatorKernelSmokePolicyHost -Scenario $Scenario
     if ($policyHost -eq "prod.guidexos.test") {
         if ($Scenario.HttpsFaultMode -eq "untrusted-root") {
@@ -1839,6 +1894,134 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] https.case.policy_validated.result=PASS"
         )
         RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsSelectedBlockedRegexChecks
+    },
+    [pscustomobject]@{
+        Name = 'production_name_constraints_allowed'
+        HttpsPolicy = 'controlled-qualification'
+        HttpsFaultMode = $null
+        UseSmokeFixture = $false
+        UserCaSource = $null
+        ProductionCaSource = $navhttps19AllowedRoot
+        TlsCert = $defaultHttpsCert
+        TlsKey = $defaultHttpsKey
+        PolicyHost = 'prod.guidexos.test'
+        PolicyTlsCert = $navhttps19AllowedServerCert
+        PolicyTlsKey = $navhttps19AllowedServerKey
+        Checks = $commonChecks + @(
+            '[NAVIGATOR-SMOKE] tls_prereq.root_ca_status=Loaded',
+            '[NAVIGATOR-SMOKE] tls_prereq.root_ca_parse_status=Parsed',
+            '[NAVIGATOR-SMOKE] tls_prereq.root_ca_pem_blocks=1',
+            '[NAVIGATOR-SMOKE] tls_prereq.root_ca_parsed_certs=1',
+            '[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_status=Loaded',
+            '[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_hash_match=yes',
+            '[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=ProductionRootStore',
+            '[NAVIGATOR-SMOKE] tls_prereq.trust_store_public_ready=no',
+            '[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=ControlledQualification',
+            '[NAVIGATOR-SMOKE] tls_prereq.https_policy_validated_navigation_enabled=yes',
+            '[NAVIGATOR-SMOKE] tls_readiness=yes',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.enabled=yes',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.transport_selection=PolicyValidatedTlsHttps',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.tls_status=Success',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.http_status=200',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.certificate_validated=yes',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.hostname_validated=yes',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.verify_flags=0',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.body_bounded=yes',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.expected_content=yes',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.result=PASS',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.plain_tcp_connect_attempts=0',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.result=PASS'
+        )
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra @{
+            '\[NAVIGATOR-SMOKE\] tls_prereq\.root_ca_bytes=[1-9][0-9]*' = '[NAVIGATOR-SMOKE] tls_prereq.root_ca_bytes=<positive bytes>'
+            '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated\.body_bytes=[1-9][0-9]*' = '[NAVIGATOR-SMOKE] https.case.policy_validated.body_bytes=<positive bounded byte count>'
+        }
+    },
+    [pscustomobject]@{
+        Name = 'production_navhttps19_original_violation'
+        HttpsPolicy = 'controlled-qualification'
+        HttpsFaultMode = 'name-constraints'
+        UseSmokeFixture = $false
+        UserCaSource = $null
+        ProductionCaSource = $navhttps19ViolationRoot
+        TlsCert = $defaultHttpsCert
+        TlsKey = $defaultHttpsKey
+        PolicyHost = 'www.outside.example'
+        PolicyTlsCert = $navhttps19ViolationServerCert
+        PolicyTlsKey = $navhttps19ViolationServerKey
+        Checks = $commonChecks + @(
+            '[NAVIGATOR-SMOKE] tls_prereq.root_ca_status=Loaded',
+            '[NAVIGATOR-SMOKE] tls_prereq.root_ca_parse_status=Parsed',
+            '[NAVIGATOR-SMOKE] tls_prereq.root_ca_pem_blocks=1',
+            '[NAVIGATOR-SMOKE] tls_prereq.root_ca_parsed_certs=1',
+            '[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_status=Loaded',
+            '[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_hash_match=yes',
+            '[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=ProductionRootStore',
+            '[NAVIGATOR-SMOKE] tls_prereq.trust_store_public_ready=no',
+            '[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=ControlledQualification',
+            '[NAVIGATOR-SMOKE] tls_prereq.https_policy_validated_navigation_enabled=yes',
+            '[NAVIGATOR-SMOKE] tls_readiness=yes',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.enabled=yes',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.fault_mode=NameConstraints',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.dns_used=yes',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.dns_hostname=www.outside.example',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.dns_resolution_source=controlled-smoke-gateway-map',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.transport_selection=PolicyValidatedTlsHttps',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.tls_status=CertificateVerifyFailed',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.verify_flags=1048576',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.plain_tcp_connect_attempts=0',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.tls_tcp_connect_attempts=1',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.result=PASS',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.plain_tcp_connect_attempts=0',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.tls_status=CertificateVerifyFailed',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.result=PASS'
+        )
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra @{
+            '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated\.dns_resolved_ip=(?:[0-9]{1,3}\.){3}[0-9]{1,3}' = '[NAVIGATOR-SMOKE] https.case.policy_validated.dns_resolved_ip=<IPv4 address>'
+        }
+    },
+    [pscustomobject]@{
+        Name = 'production_navhttps19_unsupported_uri'
+        HttpsPolicy = 'controlled-qualification'
+        HttpsFaultMode = 'name-constraints'
+        UseSmokeFixture = $false
+        UserCaSource = $null
+        ProductionCaSource = $navhttps19UnsupportedRoot
+        TlsCert = $defaultHttpsCert
+        TlsKey = $defaultHttpsKey
+        PolicyHost = 'www.outside.example'
+        PolicyTlsCert = $navhttps19UnsupportedServerCert
+        PolicyTlsKey = $navhttps19UnsupportedServerKey
+        Checks = $commonChecks + @(
+            '[NAVIGATOR-SMOKE] tls_prereq.root_ca_status=Loaded',
+            '[NAVIGATOR-SMOKE] tls_prereq.root_ca_parse_status=Parsed',
+            '[NAVIGATOR-SMOKE] tls_prereq.root_ca_pem_blocks=1',
+            '[NAVIGATOR-SMOKE] tls_prereq.root_ca_parsed_certs=1',
+            '[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_status=Loaded',
+            '[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_hash_match=yes',
+            '[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=ProductionRootStore',
+            '[NAVIGATOR-SMOKE] tls_prereq.trust_store_public_ready=no',
+            '[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=ControlledQualification',
+            '[NAVIGATOR-SMOKE] tls_prereq.https_policy_validated_navigation_enabled=yes',
+            '[NAVIGATOR-SMOKE] tls_readiness=yes',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.enabled=yes',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.fault_mode=NameConstraints',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.dns_used=yes',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.dns_hostname=www.outside.example',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.dns_resolution_source=controlled-smoke-gateway-map',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.transport_selection=PolicyValidatedTlsHttps',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.tls_status=CertificateVerifyFailed',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.verify_flags=1048576',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.plain_tcp_connect_attempts=0',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.tls_tcp_connect_attempts=1',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated.result=PASS',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.plain_tcp_connect_attempts=0',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.tls_status=CertificateVerifyFailed',
+            '[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.result=PASS'
+        )
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra @{
+            '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated\.dns_resolved_ip=(?:[0-9]{1,3}\.){3}[0-9]{1,3}' = '[NAVIGATOR-SMOKE] https.case.policy_validated.dns_resolved_ip=<IPv4 address>'
+        }
     },
     [pscustomobject]@{
         Name = "production_validated"
@@ -2850,6 +3033,36 @@ try {
                     -not $roughtimeOutput.Contains('result=PASS operators=3 simulated_independence=yes')) {
                     throw "NAVHTTPS17 multi-source fixture did not complete its signed acquisition exchanges successfully: $($activeServers.RoughtimeLog)"
                 }
+            } elseif ($Navhttps17Qualification) {
+                $scenarioChecks += @(
+                    '[NAVHTTPS13-GUEST-A] hook_result=PASS',
+                    '[NAVHTTPS13-GUEST-B] result=success',
+                    '[NAVHTTPS15-GUEST] result=PASS',
+                    '[NAVHTTPS16-GUEST] acceptance=accepted-fixture-only',
+                    '[NAVHTTPS16-GUEST] advance=PASS',
+                    '[NAVHTTPS17-GUEST] missing_evidence=PASS',
+                    '[NAVHTTPS17-GUEST] tls_time_lease=PASS',
+                    '[NAVHTTPS17-GUEST] result=PASS',
+                    '[NAVHTTPS17-GUEST] post_tls_invalidation=PASS',
+                    '[NAVIGATOR-SMOKE] https.case.policy_validated.time_assurance_required=yes',
+                    '[NAVIGATOR-SMOKE] https.case.policy_validated.time_assurance_accepted=yes',
+                    '[NAVIGATOR-SMOKE] https.case.policy_validated.time_assurance_failed=no',
+                    '[NAVIGATOR-SMOKE] https.case.policy_validated.time_source_policy_identity=5377',
+                    '[NAVIGATOR-SMOKE] https.case.policy_validated.time_trust_scope_identity=5889'
+                )
+                if (-not (Test-Path -LiteralPath $activeServers.RoughtimeLog -PathType Leaf)) {
+                    throw 'NAVHTTPS17 guest evidence acquisition fixture evidence is missing.'
+                }
+                if ($activeServers.RoughtimeProcess -and -not $activeServers.RoughtimeProcess.HasExited) {
+                    [void]$activeServers.RoughtimeProcess.WaitForExit(5000)
+                }
+                $roughtimeOutput = Get-Content -LiteralPath $activeServers.RoughtimeLog -Raw
+                if (($activeServers.RoughtimeProcess -and
+                        (-not $activeServers.RoughtimeProcess.HasExited -or
+                         $activeServers.RoughtimeProcess.ExitCode -ne 0)) -or
+                    -not $roughtimeOutput.Contains('result=PASS operators=3 simulated_independence=yes')) {
+                    throw "NAVHTTPS17 multi-source fixture did not complete its signed acquisition exchanges successfully: $($activeServers.RoughtimeLog)"
+                }
             }
             if ($GuestDnsQualification -and $scenario.Name -eq 'production_validated') {
                 $scenarioChecks = @($scenarioChecks | Where-Object {
@@ -2861,6 +3074,14 @@ try {
                 $scenarioChecks = @($scenarioChecks | Where-Object { $_ -ne "[NAVIGATOR-SMOKE] result=PASS" })
             }
             $missing = Test-NavigatorKernelSmokeOutput -Output $runOutput -Contains $scenarioChecks -RegexChecks $scenario.RegexChecks
+            if ($scenario.Name -in @('production_navhttps19_original_violation', 'production_navhttps19_unsupported_uri')) {
+                $httpsFixtureLog = if (Test-Path -LiteralPath $activeServers.HttpsLog -PathType Leaf) {
+                    Get-Content -LiteralPath $activeServers.HttpsLog -Raw
+                } else { '' }
+                if ($httpsFixtureLog -match '"GET /navigator-policy/ok\.html HTTP/1\.1" 200') {
+                    $missing += 'Rejected Name Constraints chain unexpectedly delivered the controlled HTTPS response.'
+                }
+            }
             if ($GuestDnsQualification -and $scenario.Name -eq 'production_validated') {
                 $dnsFields = @{}
                 foreach ($match in [regex]::Matches($runOutput, '(?m)^\[NAVIGATOR-SMOKE\] guest_dns\.([a-z_]+)=([^\r\n]+)')) {

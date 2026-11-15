@@ -157,9 +157,10 @@ static int parse_file(const char *path, mbedtls_x509_crt *certificate)
     return result;
 }
 
-static int verify_case(const char *name, const char *chain_path,
-                       const char *bundle_path, const char *hostname,
-                       int64_t test_time, int expect_success)
+static int verify_case_flags(const char *name, const char *chain_path,
+                             const char *bundle_path, const char *hostname,
+                             int64_t test_time, int expect_success,
+                             uint32_t required_failure_flags)
 {
     mbedtls_x509_crt chain;
     mbedtls_x509_crt trust;
@@ -176,7 +177,8 @@ static int verify_case(const char *name, const char *chain_path,
     chain_parse = parse_file(chain_path, &chain);
     trust_parse = parse_file(bundle_path, &trust);
     if (chain_parse != 0 || trust_parse != 0) {
-        passed = !expect_success && (chain_parse != 0 || trust_parse != 0);
+        passed = !expect_success && required_failure_flags == 0 &&
+                 (chain_parse != 0 || trust_parse != 0);
         printf("MBEDTLS_CASE name=%s result=%s disposition=parse-rejected "
                "chain_parse=%d trust_parse=%d\n",
                name, passed ? "PASS" : "FAIL", chain_parse, trust_parse);
@@ -190,14 +192,26 @@ static int verify_case(const char *name, const char *chain_path,
         hostname, &flags, NULL, NULL);
     passed = expect_success ? (verify_result == 0 && flags == 0)
                             : (verify_result != 0 || flags != 0);
+    if (!expect_success && required_failure_flags != 0 &&
+        (flags & required_failure_flags) != required_failure_flags) {
+        passed = 0;
+    }
     printf("MBEDTLS_CASE name=%s result=%s verify=%d flags=0x%08" PRIx32
-           " chain_parse=%d trust_parse=%d\n",
+           " required_flags=0x%08" PRIx32 " chain_parse=%d trust_parse=%d\n",
            name, passed ? "PASS" : "FAIL", verify_result, flags,
-           chain_parse, trust_parse);
+           required_failure_flags, chain_parse, trust_parse);
 
     mbedtls_x509_crt_free(&chain);
     mbedtls_x509_crt_free(&trust);
     return passed;
+}
+
+static int verify_case(const char *name, const char *chain_path,
+                       const char *bundle_path, const char *hostname,
+                       int64_t test_time, int expect_success)
+{
+    return verify_case_flags(name, chain_path, bundle_path, hostname,
+                             test_time, expect_success, 0);
 }
 
 static int verify_case_without_trust(const char *name, const char *chain_path,
@@ -307,8 +321,9 @@ int main(int argc, char **argv)
                           "wrong.test.dextercd.com", valid_check_time, 0);
     result &= verify_case("invalid-intermediate-signature", argv[4], argv[2],
                           "test.dextercd.com", valid_check_time, 0);
-    result &= verify_case("noncritical-name-constraints-ignored", argv[5], argv[6],
-                          "www.outside.example", valid_check_time, 1);
+    result &= verify_case_flags("noncritical-name-constraints-rejected", argv[5], argv[6],
+                                "www.outside.example", valid_check_time, 0,
+                                MBEDTLS_X509_BADCERT_NAME_CONSTRAINTS);
     result &= verify_case("unsupported-critical-extension-rejected", argv[7], argv[8],
                           "www.outside.example", valid_check_time, 0);
     result &= verify_case("critical-name-constraints-rejected", argv[9], argv[10],

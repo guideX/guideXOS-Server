@@ -15,13 +15,14 @@
   "patchSeries": [
     "patches/mbedtls/0001-guidexos-phase8f.patch",
     "patches/mbedtls/0002-guidexos-phase8i-crypto-trace.patch",
-    "patches/mbedtls/0003-guidexos-phase8j-crypto-diagnostics.patch"
+    "patches/mbedtls/0003-guidexos-phase8j-crypto-diagnostics.patch",
+    "patches/mbedtls/0004-navhttps19-name-constraints.patch"
   ],
   "sourceSha256": {
     "library/ssl_tls.c": "8d6838cf9b1cd84e75849c803fbb1fcb972b2d1f1281982db1421f42db0e2499",
     "library/ssl_tls12_client.c": "f5512dd091b2721b2577c89971d0737a842e79fff8c9d2c266b695aa75587978",
     "library/ssl_msg.c": "22dbb08234e925f9b9f6ea2867f6d434991ecc68368cdd569ace5e69cced5c82",
-    "library/x509_crt.c": "235a80c070573ecdfc20f3888a2c606c81992cfd423ebda637c58e19717f23be",
+    "library/x509_crt.c": "101864b5b5dbec8a847108db5c0404390a5009d21b0f219847ccb24a5c3dfac8",
     "tf-psa-crypto/platform/memory_buffer_alloc.c": "399b3c9aa7a6ccb7e7d3cf071545ad2f2f262a94438e6acad93d34570ebf327f",
     "tf-psa-crypto/core/psa_crypto.c": "8298ceed2ee30f069ae4c4800fc967eef6e428539f7b4ca6d2fb776554b0c87f",
     "tf-psa-crypto/extras/pkparse.c": "f127971963f303aed6a442e21b45bea915b7d2667e7882000328bf256904bbd6",
@@ -34,7 +35,12 @@
     "tf-psa-crypto/drivers/builtin/src/psa_crypto_ecp.c": "9254609d9e79911d7f1d962aec3aaa58314c893700b8bbe227ac4adc6777f02e",
     "tf-psa-crypto/drivers/p256-m/p256-m_driver_entrypoints.c": "c695163e4af5f0747d9b9275ed82ffec996a69381882379eacaeec9f3e54e5b6",
     "tf-psa-crypto/drivers/builtin/src/psa_crypto_rsa.c": "cddd40fcd5d4ac2c73e7b2353e6d5ec97e05fa003d4bbe0229442dfebb8b7248",
-    "tf-psa-crypto/drivers/builtin/src/rsa.c": "753b86f7d886794b36c3ca9aa7906f6e3dc796adfe9aa79f0f7d0d9b3601725b"
+    "tf-psa-crypto/drivers/builtin/src/rsa.c": "753b86f7d886794b36c3ca9aa7906f6e3dc796adfe9aa79f0f7d0d9b3601725b",
+    "include/mbedtls/oid.h": "55d723b7d0d283de0ae184440bd80eee24027f6967b2a0b6ab26f3ec199dda56",
+    "include/mbedtls/x509.h": "5622f24b334ad9d51c1729b8e4a0176633206d8e3c5a830147a4b6ff0ea73659",
+    "include/mbedtls/x509_crt.h": "11418d399019b9a0d02aea7bbeb9b939768936b2a38f1a7bd4bfcabee081dcde",
+    "library/x509.c": "c0eec191a5b65892b9c4eb03c83467a23389220225fa2e02a5126c21aef4debe",
+    "library/x509_oid.c": "169be4a3f962de27a0d984cda16eb79271786faa44535cfafc66f2e03203dc98"
   },
   "overlaySha256": {
     "guidexos/mbedtls_config.h": "cbc1a7b06e86e06aae0e976aceb4455b9d7fa8b59e161b90c0b776e4c7244b46",

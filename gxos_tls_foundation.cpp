@@ -3076,6 +3076,12 @@ bool tls_monotonic_now_ns(uint64_t* output)
 bool tls_controlled_fixture_host(const char* hostname)
 {
     if (!hostname) return false;
+#if defined(GXOS_NAVHTTPS19_GUEST_QUALIFICATION_ACTIVE)
+    // This exact prohibited-name fixture is permitted to reach the verifier
+    // only in the NAVHTTPS19 qualification image. No runtime policy or
+    // production build accepts it as a controlled fixture host.
+    if (text_equals(hostname, "www.outside.example")) return true;
+#endif
     if (text_equals(hostname, "guidexos.test")) return true;
     size_t length = 0;
     while (hostname[length] != '\0' && length < 254u) ++length;

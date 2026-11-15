@@ -10533,7 +10533,11 @@ static const char* kNavigatorControlledHttpsHost = "guidexos.test";
 static const uint16_t kNavigatorControlledHttpsPort = 8443;
 static const char* kNavigatorControlledHttpsPathPrefix = "/navigator-smoke/";
 static const char* kNavigatorPolicyDevHttpsHost = "dev.guidexos.test";
+#if defined(GXOS_NAVHTTPS19_GUEST_QUALIFICATION_ACTIVE)
+static const char* kNavigatorPolicyProdHttpsHost = "www.outside.example";
+#else
 static const char* kNavigatorPolicyProdHttpsHost = "prod.guidexos.test";
+#endif
 #if defined(GXOS_NAVIGATOR_GUEST_DNS_QUALIFICATION_ACTIVE)
 static const uint16_t kNavigatorQualificationDnsPort = 55353;
 #endif
@@ -10564,6 +10568,7 @@ enum class NavigatorHttpsSmokeFaultMode {
     UntrustedRoot,
     ExpiredCertificate,
     FutureCertificate,
+    NameConstraints,
 };
 
 struct KernelHttpUrl {
@@ -11209,9 +11214,17 @@ static bool kernel_https_allowlist_match(const KernelHttpUrl& parsed)
 
 static bool kernel_https_policy_fixture_match(const KernelHttpUrl& parsed)
 {
+    bool allowedFixtureHost = nav_ends_with(parsed.host, ".guidexos.test");
+#if defined(GXOS_NAVHTTPS19_GUEST_QUALIFICATION_ACTIVE)
+    // The original NAVHTTPS18 prohibited DNS name is routed to a local
+    // controlled fixture only in this qualification build. Production images
+    // continue to classify it as an arbitrary public origin.
+    allowedFixtureHost = allowedFixtureHost ||
+        streq_local(parsed.host, "www.outside.example");
+#endif
     return !parsed.hostIsNumeric &&
         parsed.port == kNavigatorControlledHttpsPort &&
-        nav_ends_with(parsed.host, ".guidexos.test") &&
+        allowedFixtureHost &&
         nav_starts_with(parsed.path, kNavigatorPolicyValidatedPathPrefix);
 }
 
@@ -11960,7 +11973,11 @@ static bool kernel_http_resolve_host(KernelHttpUrl* parsed, KernelHttpResponse* 
 #endif
     if (!forceQualificationDns &&
         (streq_local(parsed->host, kNavigatorControlledHttpsHost) ||
-         nav_ends_with(parsed->host, ".guidexos.test"))) {
+         nav_ends_with(parsed->host, ".guidexos.test")
+#if defined(GXOS_NAVHTTPS19_GUEST_QUALIFICATION_ACTIVE)
+         || streq_local(parsed->host, kNavigatorPolicyProdHttpsHost)
+#endif
+        )) {
         parsed->ip = kernel::ipv4::make_ip(10, 0, 2, 2);
         kernel::ipv4::ip_to_string(parsed->ip, response->dnsResolvedIp);
         strcopy(s_kernelLastDnsResolvedIp, response->dnsResolvedIp, sizeof(s_kernelLastDnsResolvedIp));
@@ -16718,6 +16735,9 @@ static NavigatorHttpsSmokeFaultMode navigator_https_smoke_fault_mode()
                nav_smoke_text_equals_insensitive(token, "futurecertificate") ||
                nav_smoke_text_equals_insensitive(token, "not-yet-valid")) {
         mode = NavigatorHttpsSmokeFaultMode::FutureCertificate;
+    } else if (nav_smoke_text_equals_insensitive(token, "name-constraints") ||
+               nav_smoke_text_equals_insensitive(token, "nameconstraints")) {
+        mode = NavigatorHttpsSmokeFaultMode::NameConstraints;
     }
     return mode;
 }
@@ -16728,6 +16748,7 @@ static const char* navigator_https_smoke_fault_mode_name(NavigatorHttpsSmokeFaul
     case NavigatorHttpsSmokeFaultMode::UntrustedRoot: return "UntrustedRoot";
     case NavigatorHttpsSmokeFaultMode::ExpiredCertificate: return "ExpiredCertificate";
     case NavigatorHttpsSmokeFaultMode::FutureCertificate: return "FutureCertificate";
+    case NavigatorHttpsSmokeFaultMode::NameConstraints: return "NameConstraints";
     case NavigatorHttpsSmokeFaultMode::None:
     default:
         return "None";
@@ -17059,7 +17080,8 @@ static bool navigator_https_cert_fault_expected(NavigatorHttpsSmokeFaultMode mod
 {
     return mode == NavigatorHttpsSmokeFaultMode::UntrustedRoot ||
         mode == NavigatorHttpsSmokeFaultMode::ExpiredCertificate ||
-        mode == NavigatorHttpsSmokeFaultMode::FutureCertificate;
+        mode == NavigatorHttpsSmokeFaultMode::FutureCertificate ||
+        mode == NavigatorHttpsSmokeFaultMode::NameConstraints;
 }
 
 static const char* navigator_https_policy_host_for_info(const gxos::GxosValidatedHttpsPolicyInfo& info)
