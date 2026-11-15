@@ -245,6 +245,7 @@ class SourceContractTests(unittest.TestCase):
     def test_preallocation_diagnostic_fails_before_stock_and_postallocation_check_is_retained(self) -> None:
         source = PLATFORM.read_text(encoding="utf-8")
         candidate_builder = (ROOT / "scripts/dotnet/build-c188r29-preallocation-gc-state-guard-candidate.ps1").read_text(encoding="utf-8")
+        runner = (ROOT / "scripts/dotnet/run-c188r29-preallocation-gc-state-guard.ps1").read_text(encoding="utf-8")
         wrapper = source[source.index('extern "C" __declspec(noinline) void* __cdecl RhpNewArray('):]
         reader = wrapper.index("guidexos_nativeaot_gc_read_state_r29(")
         failure = wrapper.index("guideXosFailFastR29PreallocationGcState(r29GuardEvidence)")
@@ -255,6 +256,10 @@ class SourceContractTests(unittest.TestCase):
         self.assertIn("record.r29GuardLocation = kGuideXosR29GuardLocationPreallocation", source)
         self.assertIn("record.r29GuardLocation = kGuideXosR29GuardLocationPostallocation", source)
         self.assertIn("nativeAotVersion=[string]$runtimeManifest.runtimeIdentity.nativeAot", candidate_builder)
+        self.assertIn("M3=$preallocationGuardEntered", runner)
+        self.assertIn("M4=$predicateEvidencePresent", runner)
+        self.assertIn("M5=($specificSubcondition -or $postallocationGuard)", runner)
+        self.assertIn("r25Milestones=$r25Milestones", runner)
         self.assertIn("_InterlockedExchange64(", source)
         self.assertRegex(source, r"record\.r29SafeReadResult = evidence\.safeReadResult;[\s\S]*?record\.published")
         failure_helper = source[source.index("guideXosNativeAotR29FailFastPreallocationGcState("):]

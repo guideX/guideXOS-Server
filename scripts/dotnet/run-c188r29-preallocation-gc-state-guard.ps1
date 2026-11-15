@@ -236,9 +236,6 @@ $callerIsGuard = $null -ne $analysis -and [bool]$analysis.recordValid -and
     [string]$analysis.originalReason -eq '0x0000000000000008' -and
     $null -ne $analysis.caller -and [bool]$analysis.caller.resolved -and
     [string]$analysis.caller.enclosingSymbol -match 'RhpNewArray'
-$factorySuccess = $null -ne $runEvidence -and
-    [string]$runEvidence.outcome -eq 'REAL_SETTINGS_FACTORY_NATIVE_VERIFIED' -and
-    $null -ne $runEvidence.milestones -and [bool]$runEvidence.milestones.M10
 $preallocationFailure = $callerIsGuard -and $null -ne $guardEvidence -and
     [string]$guardEvidence.guardLocation -eq 'PREALLOCATION'
 $stockAllocatorReached = $callerIsGuard -and $null -ne $guardEvidence -and
@@ -249,6 +246,38 @@ $specificSubcondition = $preallocationFailure -and
         'GC_HEAP_POINTER_UNAVAILABLE','GC_STATE_READ_FAILED_AFTER_PREREQUISITES',
         'CURRENT_THREAD_OUTPUT_NULL','GC_HEAP_OUTPUT_NULL','GC_STATE_SAFE_READ_FAILED',
         'GC_STATE_READ_INCOMPLETE')
+$initializationStage = 0
+if ($null -ne $analysis -and [bool]$analysis.recordValid -and
+    @($analysis.recordWords).Count -gt 7) {
+    try { $initializationStage = [int][Convert]::ToUInt64(([string]$analysis.recordWords[7]).Substring(2),16) }
+    catch { $initializationStage = 0 }
+}
+$r25Milestones = if ($null -ne $runEvidence -and $null -ne $runEvidence.milestones) {
+    $runEvidence.milestones
+} else { $null }
+$postallocationGuard = $null -ne $guardEvidence -and
+    [string]$guardEvidence.guardLocation -eq 'POSTALLOCATION'
+$preallocationGuardEntered = $null -ne $guardEvidence -and
+    [string]$guardEvidence.guardLocation -in @('PREALLOCATION','POSTALLOCATION')
+$predicateEvidencePresent = $null -ne $guardEvidence -and
+    ([uint64]$guardEvidence.prerequisiteEvaluationMask -ne 0 -or $postallocationGuard)
+$r29Milestones = [ordered]@{
+    M1=($null -ne $r25Milestones -and [bool]$r25Milestones.M1)
+    M2=($initializationStage -ge 2)
+    M3=$preallocationGuardEntered
+    M4=$predicateEvidencePresent
+    M5=($specificSubcondition -or $postallocationGuard)
+    M6=$postallocationGuard
+    M7=$postallocationGuard
+    M8=($null -ne $r25Milestones -and [bool]$r25Milestones.M6)
+    M9=($initializationStage -ge 3 -or
+        ($null -ne $r25Milestones -and [bool]$r25Milestones.M7))
+    M10=($null -ne $r25Milestones -and [bool]$r25Milestones.M9)
+    M11=($null -ne $r25Milestones -and [bool]$r25Milestones.M10 -and
+        [bool]$r25Milestones.M11)
+    M12=($null -ne $runEvidence -and [bool]$runEvidence.qacReleaseVerified)
+}
+$factorySuccess = [bool]$r29Milestones.M10 -and [bool]$r29Milestones.M11
 $outcomeName = if ($factorySuccess) { 'REAL_SETTINGS_FACTORY_NATIVE_VERIFIED' }
     elseif ($specificSubcondition) { 'PREALLOCATION_SUBCONDITION_ATTRIBUTED' }
     elseif ($null -ne $runEvidence -and [string]$runEvidence.qacPreflight -eq 'NOT_CLEAR') { 'PREALLOCATION_GUEST_DEFERRED' }
@@ -273,12 +302,13 @@ $nativeOutcome = [ordered]@{
     callerSymbol=if ($null -ne $analysis -and $null -ne $analysis.caller) { [string]$analysis.caller.enclosingSymbol } else { '' }
     guardSubcondition=$subcondition
     guardEvidence=$guardEvidence
-    preallocationGuardEntered=($null -ne $guardEvidence -and
-        [string]$guardEvidence.guardLocation -in @('PREALLOCATION','POSTALLOCATION'))
+    preallocationGuardEntered=$preallocationGuardEntered
     preallocationGuardPassed=$stockAllocatorReached
     stockAllocatorReached=$stockAllocatorReached
-    settingsFactoryEntered=$factorySuccess
-    milestones=if ($null -ne $runEvidence) { $runEvidence.milestones } else { $null }
+    settingsFactoryEntered=[bool]$r29Milestones.M10
+    initializationStage=$initializationStage
+    milestones=$r29Milestones
+    r25Milestones=$r25Milestones
     qacPreflightReport=$reportPath
     qacReservationId=if ($null -ne $runEvidence) { $runEvidence.qacReservationId } else { $null }
     qacReleaseVerified=if ($null -ne $runEvidence) { [bool]$runEvidence.qacReleaseVerified } else { $false }
