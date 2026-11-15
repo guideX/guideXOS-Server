@@ -1,9 +1,11 @@
 [CmdletBinding()]
 param(
-    [ValidateRange(20, 300)]
+    [ValidateRange(20, 1800)]
     [int]$TimeoutSeconds = 120,
     [ValidateRange(5, 60)]
     [int]$LaneAcquireTimeoutSeconds = 20,
+    [ValidateSet('none', 'gtk')]
+    [string]$DisplayBackend = 'gtk',
     [string]$ArtifactRoot = '',
     [string]$CandidateEspPath = 'E:\bkup\artifacts\SN10R2_20261020\qemu\20261020T042331758\esp',
     [string]$CandidateVerificationPath = 'E:\bkup\artifacts\SN10R2_20261020\staged-candidate-verification.json',
@@ -395,7 +397,7 @@ function Join-WindowsCommandLineArguments([string[]]$Arguments) {
     [SN10R3ManagedProcess]::BuildCommandLine($Arguments)
 }
 
-function New-QemuArguments([string]$DiskPath, [int]$SerialPort, [int]$MonitorPort, [string]$FirmwarePath = $Ovmf) {
+function New-QemuArguments([string]$DiskPath, [int]$SerialPort, [int]$MonitorPort, [string]$FirmwarePath = $Ovmf, [ValidateSet('none', 'gtk')][string]$Display = 'none') {
     $firmware = ConvertTo-QemuOptionValue ([IO.Path]::GetFullPath($FirmwarePath))
     $disk = ConvertTo-QemuOptionValue ([IO.Path]::GetFullPath($DiskPath))
     @(
@@ -404,7 +406,7 @@ function New-QemuArguments([string]$DiskPath, [int]$SerialPort, [int]$MonitorPor
         '-drive', "file=$disk,format=raw,if=ide,index=0",
         '-m', '1024M',
         '-vga', 'std',
-        '-display', 'none',
+        '-display', $Display,
         '-chardev', "socket,id=sn10serial,host=127.0.0.1,port=$SerialPort,server=off,ipv4=on,reconnect-ms=0",
         '-serial', 'chardev:sn10serial',
         '-monitor', "tcp:127.0.0.1:$MonitorPort,server,nowait",
@@ -670,7 +672,7 @@ function Get-LoopbackPort {
 }
 
 function Start-TestProducer {
-    param([int]$Port, [ValidateSet('Markers', 'Partial', 'PartialHold', 'Fatal', 'Silent')][string]$Scenario, [int]$ExitCode = 23)
+    param([int]$Port, [ValidateSet('Markers', 'BootLaunch', 'Partial', 'PartialHold', 'Fatal', 'Silent')][string]$Scenario, [int]$ExitCode = 23)
     $producerPath = Join-Path $script:RunRoot ("producer-$Scenario.ps1")
     $producer = @'
 param([int]$Port, [string]$Scenario, [int]$ExitCode)
@@ -680,6 +682,7 @@ try {
     $stream = $client.GetStream()
     $lines = switch ($Scenario) {
         'Markers' { @('[TEST] boot-ready', '[TEST] app-visible', '[TEST] first-ephemeris-evaluated', '[TEST] first-close-requested', '[TEST] first-shutdown-complete', '[TEST] first-appmodel-return', '[TEST] reopen-command-dispatched', '[TEST] second-window-created', '[TEST] second-ephemeris-evaluated', '[TEST] second-close-requested', '[TEST] second-shutdown-complete', '[TEST] second-cleanup-complete', 'partial-after-nonzero-exit') }
+        'BootLaunch' { @('[KERNEL] VFS layer initialized', '[NATIVE-ELF] App Model package discovered package=StellarNavigator id=com.guidexos.stellarnavigator displayName=Stellar Navigator', '[SN10-GUEST] appmodel-launch begin id=com.guidexos.stellarnavigator', 'STELLAR_NAVIGATOR_UI status=window-created', 'STELLAR_NAVIGATOR_EPHEMERIS status=available body=earth target_naif=399 et_tdb_s=0.000000 frame=J2000_SSB units=km position_km=(-27566740.483,132361381.154,57418653.286) sha256=fixture', 'STELLAR_NAVIGATOR_UI status=initial-content-drawn', 'STELLAR_NAVIGATOR_LIFECYCLE status=initialized-evaluated-shutdown', 'lifecycle PASS window/resource cleanup complete', '[SN10-GUEST] appmodel-launch result=success', '[KERNEL] Entering main loop (waiting for input)...') }
         'Partial' { @('[TEST] partial-progress') }
         'PartialHold' { @('[TEST] partial-progress') }
         'Fatal' { @('[KERNEL-PANIC] assertion=offline-fixture halted=1') }
@@ -929,7 +932,7 @@ function Invoke-SelfTest {
         checks = [ordered]@{}
         logs = [ordered]@{}
     }
-    $capture1 = $null; $capture2 = $null; $capture3 = $null; $capture4 = $null; $capture5 = $null; $capture6 = $null
+    $capture1 = $null; $capture2 = $null; $capture3 = $null; $capture4 = $null; $capture5 = $null; $capture6 = $null; $bootCapture = $null
     $managedExitTest = $null; $managedTimeoutTest = $null
     try {
         $tokens = $null
@@ -956,12 +959,13 @@ function Invoke-SelfTest {
         $runnerResult.checks.qacLaneFailFast = [ordered]@{ passed = $true; emptyLaneAdmitted = $freeLane.available; occupiedLaneRejected = (-not $busyLane.available); incompleteCensusRejected = (-not $unknownLane.countsKnown); reservationRequestedBySelfTest = $false }
 
         $argCheck = Test-StructuredArgumentPassing
-        $driveArgs = New-QemuArguments 'C:\SN10 R3 & (candidate), rev 2\stellar-navigator.raw' 40001 40002 'C:\SN10 R3 & (firmware), rev 2\OVMF.fd'
+        $driveArgs = New-QemuArguments 'C:\SN10 R3 & (candidate), rev 2\stellar-navigator.raw' 40001 40002 'C:\SN10 R3 & (firmware), rev 2\OVMF.fd' $DisplayBackend
         $firmwareArg = $driveArgs[3]
         $diskArg = $driveArgs[5]
+        $displayIndex = [Array]::IndexOf($driveArgs, '-display')
         $expectedFirmwareArg = 'if=pflash,format=raw,readonly=on,file=' + ('C:\SN10 R3 & (firmware), rev 2\OVMF.fd'.Replace(', ', ',, '))
-        if ($firmwareArg -cne $expectedFirmwareArg -or $diskArg -notmatch '^file=(?!fat:).+\.raw,format=raw,if=ide,index=0$' -or $driveArgs[0] -ne '-machine') {
-            throw 'Disposable writable raw MBR/FAT32 disk argument construction failed.'
+        if ($firmwareArg -cne $expectedFirmwareArg -or $diskArg -notmatch '^file=(?!fat:).+\.raw,format=raw,if=ide,index=0$' -or $driveArgs[0] -ne '-machine' -or $displayIndex -lt 0 -or $driveArgs[$displayIndex + 1] -cne $DisplayBackend) {
+            throw 'Disposable writable raw MBR/FAT32 disk or selected display backend argument construction failed.'
         }
         if ($firmwareArg.Contains('"') -or $diskArg.Contains('"') -or $diskArg -notmatch ',, rev 2') { throw 'QEMU drive path escaping or structured quoting is invalid.' }
         $runnerResult.checks.commandConstruction = [ordered]@{
@@ -972,6 +976,7 @@ function Invoke-SelfTest {
             firmwareAttachment = $firmwareArg
             diskAttachment = $diskArg
             diskInterface = 'ide index 0, raw MBR disk with a FAT32 0x0C root partition and FAT32 0xEF EFI partition, writable disposable copy'
+            displayBackend = $DisplayBackend
             isolation = 'QEMU receives one per-run copy; the verified candidate disk and source ESP remain unchanged'
             argumentVector = $driveArgs
             processArgumentRoundTrip = $argCheck
@@ -1019,7 +1024,7 @@ function Invoke-SelfTest {
         $candidateCopyPath = Join-Path $script:RunRoot 'selftest-candidate-writable-copy.raw'
         $candidateCopyEvidence = New-DisposableQemuDiskCopy $CandidateDiskPath $candidateCopyPath
         if ($candidateCopyEvidence.sourceSha256 -cne $Expected.Disk -or $candidateCopyEvidence.initialSha256 -cne $Expected.Disk -or $candidateCopyEvidence.sourceSha256AfterCopy -cne $Expected.Disk -or -not $candidateCopyEvidence.writeAccess.writeOpenSucceeded) { throw 'Actual SN10R8 candidate disposable-copy verification failed.' }
-        $candidateQemuArguments = @(New-QemuArguments $candidateCopyPath 40003 40004)
+        $candidateQemuArguments = @(New-QemuArguments $candidateCopyPath 40003 40004 $Ovmf $DisplayBackend)
         $candidateIdeArguments = @()
         for ($i = 0; $i -lt $candidateQemuArguments.Count - 1; $i++) {
             if ($candidateQemuArguments[$i] -ceq '-drive' -and $candidateQemuArguments[$i + 1] -match '(^|,)if=ide(,|$)') { $candidateIdeArguments += [string]$candidateQemuArguments[$i + 1] }
@@ -1035,15 +1040,12 @@ function Invoke-SelfTest {
         if ($reopenKeys.Count -ne ($reopenCommand.Length + 1) -or $reopenKeys[0] -cne 'sendkey d' -or $reopenKeys -notcontains 'sendkey dot' -or $reopenKeys -notcontains 'sendkey spc' -or $reopenKeys[-1] -cne 'sendkey ret') {
             throw 'Supported shell command was not converted into bounded guest keyboard input.'
         }
-        $initialLaunchCommand = 'desktop.launch com.guidexos.stellarnavigator'
-        $initialLaunchKeys = @(Get-QemuTextKeyCommands $initialLaunchCommand)
-        if ($initialLaunchKeys.Count -ne $reopenKeys.Count -or $initialLaunchKeys[-1] -cne 'sendkey ret') { throw 'Initial production AppModel launch command was not converted into bounded guest keyboard input.' }
         $unsupportedKeyInputRejected = $false
         try { [void](Get-QemuTextKeyCommands 'desktop.launch unsupported/character') }
         catch { $unsupportedKeyInputRejected = $true }
         if (-not $unsupportedKeyInputRejected) { throw 'Guest shell input accepted a character without an explicit QEMU key mapping.' }
         $runnerResult.checks.reopenInput = [ordered]@{ passed = $true; method = 'backtick opens shell; desktop.launch com.guidexos.stellarnavigator uses desktop::launch_app'; keyCommandCount = $reopenKeys.Count; spaceAndPeriodMapped = $true; unsupportedCharactersRejected = $true; serialStartIndexSupported = $true }
-        $runnerResult.checks.initialLaunchInput = [ordered]@{ passed = $true; method = 'backtick opens the production guest shell; desktop.launch com.guidexos.stellarnavigator dispatches through desktop::launch_app'; keyCommandCount = $initialLaunchKeys.Count; testOnlyKernelLaunchHookRequired = $false }
+        $runnerResult.checks.initialLaunch = [ordered]@{ passed = $true; method = 'SN10 guest-proof boot driver dispatches the first instance through desktop::launch_app'; noShellCommandRequired = $true; desktopLoopWaitDeferredUntilFirstAppShutdown = $true }
 
         $elfLayout = Get-NativeElfLayout
         $fixtureBase = [UInt64]0x60C000
@@ -1092,6 +1094,22 @@ function Invoke-SelfTest {
         $portReleased = $false
         try { $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, $port1); $listener.Start(); $listener.Stop(); $portReleased = $true } catch { }
         if (-not $portReleased) { throw 'Serial capture port was not released after completion.' }
+
+        $bootCapturePath = Join-Path $script:RunRoot 'selftest-boot-launch-order.serial.log'
+        $bootCapture = [SN10R3SerialCapture]::new($bootCapturePath)
+        $bootProducer = Start-TestProducer -Port $bootCapture.Port -Scenario BootLaunch -ExitCode 0
+        [void](Wait-SerialPattern -Capture $bootCapture -Pattern '\[KERNEL\] VFS layer initialized' -Seconds 5 -Description 'boot-launch VFS marker')
+        [void](Wait-SerialPattern -Capture $bootCapture -Pattern 'App Model package discovered.*Stellar Navigator' -Seconds 5 -Description 'boot-launch AppModel discovery marker')
+        $bootAppText = Wait-SerialPattern -Capture $bootCapture -Pattern 'STELLAR_NAVIGATOR_UI status=initial-content-drawn' -Seconds 5 -Description 'boot-time native app content before desktop input readiness'
+        if ($bootAppText -notmatch 'STELLAR_NAVIGATOR_UI status=window-created' -or $bootCapture.Snapshot() -match '\[KERNEL\] Entering main loop \(waiting for input\)') { throw 'Boot-time AppModel launch fixture did not draw the app before the desktop input loop.' }
+        [void](Wait-SerialPattern -Capture $bootCapture -Pattern 'STELLAR_NAVIGATOR_LIFECYCLE status=initialized-evaluated-shutdown' -Seconds 5 -Description 'boot-launch normal shutdown')
+        [void](Wait-SerialPattern -Capture $bootCapture -Pattern 'lifecycle PASS window/resource cleanup complete' -Seconds 5 -Description 'boot-launch resource cleanup')
+        [void](Wait-SerialPattern -Capture $bootCapture -Pattern '\[KERNEL\] Entering main loop \(waiting for input\)' -Seconds 5 -Description 'desktop input readiness after boot-launch shutdown')
+        if (-not $bootProducer.WaitForExit(5000)) { $bootProducer.Kill(); throw 'Boot-launch serial producer did not exit.' }
+        [void]$bootCapture.WaitForCompletion(3000)
+        if ($bootProducer.ExitCode -ne 0 -or $bootCapture.Snapshot() -notmatch '\[SN10-GUEST\] appmodel-launch result=success') { throw 'Boot-launch fixture did not return to the desktop loop after normal application cleanup.' }
+        $runnerResult.checks.bootLaunchOrdering = [ordered]@{ passed = $true; firstAppContentPrecedesDesktopInputLoop = $true; normalClosePrecedesDesktopInputLoop = $true; serialStartIndexCoversBootLaunch = $true; logPath = $bootCapturePath }
+        $bootCapture.Dispose(); $bootCapture = $null
 
         $capture2Path = Join-Path $script:RunRoot 'selftest-missing-marker.serial.log'
         $capture2 = [SN10R3SerialCapture]::new($capture2Path)
@@ -1157,7 +1175,7 @@ function Invoke-SelfTest {
             $logStream.Dispose()
         }
         $runnerResult.checks.resourcesReleased = [ordered]@{ passed = $true; listenerStopped = $true; ephemeralPortRebindSucceeded = $true; captureLogFilesCanBeExclusivelyReopened = $logWritable }
-        $runnerResult.logs = [ordered]@{ live = $capture1Path; missingMarker = $capture2Path; noOutput = $capture3Path; streamDisconnect = $capture5Path; guestFailure = $capture6Path }
+        $runnerResult.logs = [ordered]@{ live = $capture1Path; bootLaunchOrder = $bootCapturePath; missingMarker = $capture2Path; noOutput = $capture3Path; streamDisconnect = $capture5Path; guestFailure = $capture6Path }
         $runnerResult.finishedAtLocal = (Get-Date).ToString('o')
         $runnerResult.resultPath = Join-Path $script:RunRoot 'runner-selftest.json'
         $runnerResult | ConvertTo-Json -Depth 14 | Set-Content -LiteralPath $runnerResult.resultPath -Encoding utf8
@@ -1170,6 +1188,7 @@ function Invoke-SelfTest {
         if ($capture4) { $capture4.Dispose() }
         if ($capture5) { $capture5.Dispose() }
         if ($capture6) { $capture6.Dispose() }
+        if ($bootCapture) { $bootCapture.Dispose() }
         $runnerResult.classification = 'FAIL'
         $runnerResult.error = $_.Exception.Message
         $runnerResult.finishedAtLocal = (Get-Date).ToString('o')
@@ -1271,7 +1290,7 @@ try {
     $monitorProbe.Stop()
     $serialLog = Join-Path $script:RunRoot 'guest-serial.log'
     $capture = [SN10R3SerialCapture]::new($serialLog)
-    $qemuArguments = @(New-QemuArguments $runtimeDiskPath $capture.Port $script:MonitorPort)
+    $qemuArguments = @(New-QemuArguments $runtimeDiskPath $capture.Port $script:MonitorPort $Ovmf $DisplayBackend)
     $ideDriveArguments = @()
     for ($i = 0; $i -lt $qemuArguments.Count - 1; $i++) {
         if ($qemuArguments[$i] -ceq '-drive' -and $qemuArguments[$i + 1] -match '(^|,)if=ide(,|$)') { $ideDriveArguments += [string]$qemuArguments[$i + 1] }
@@ -1388,22 +1407,19 @@ try {
     $remaining = [Math]::Max(1, [int][Math]::Ceiling(($script:RunDeadline - [DateTimeOffset]::UtcNow).TotalSeconds))
     $discoveryText = Wait-SerialPattern -Capture $capture -Pattern 'App Model package discovered.*Stellar Navigator|displayName=Stellar Navigator' -Seconds $remaining -Description 'Stellar Navigator AppModel discovery'
     $overall.checks.appModelDiscovery = [ordered]@{ passed = $true; marker = ($discoveryText -split "`r?`n" | Where-Object { $_ -match 'App Model package discovered.*Stellar Navigator|displayName=Stellar Navigator' } | Select-Object -Last 1) }
+    # The SN10 guest-proof kernel dispatches the first instance through the real
+    # AppModel during boot. That call is synchronous, so the desktop input loop
+    # cannot start until the app is closed. Observe and qualify the boot launch
+    # before waiting for the desktop loop; otherwise the runner deadlocks itself.
+    $bootLaunchStartIndex = 0
     $remaining = [Math]::Max(1, [int][Math]::Ceiling(($script:RunDeadline - [DateTimeOffset]::UtcNow).TotalSeconds))
-    [void](Wait-SerialPattern -Capture $capture -Pattern '\[KERNEL\] Entering main loop \(waiting for input\)' -Seconds $remaining -Description 'desktop keyboard input loop readiness')
-    $overall.checks.desktopInputReady = [ordered]@{ passed = $true; marker = '[KERNEL] Entering main loop (waiting for input)'; firstLaunchKeyboardInputSentAfterReady = $true }
-    $initialLaunchStartIndex = $capture.Snapshot().Length
-    [void](Send-OwnedMonitorCommand 'sendkey grave_accent')
-    Start-Sleep -Milliseconds 500
-    $overall.checks.shellBeforeFirstLaunch = Save-Screenshot 'shell-before-first-launch.ppm'
-    $overall.checks.initialLaunchInput = Send-OwnedGuestText 'desktop.launch com.guidexos.stellarnavigator'
-    $remaining = [Math]::Max(1, [int][Math]::Ceiling(($script:RunDeadline - [DateTimeOffset]::UtcNow).TotalSeconds))
-    $appText = Wait-SerialPattern -Capture $capture -Pattern 'STELLAR_NAVIGATOR_UI status=initial-content-drawn' -Seconds $remaining -Description 'native application initial content draw' -StartIndex $initialLaunchStartIndex
-    if ($appText -notmatch 'STELLAR_NAVIGATOR_UI status=window-created') { throw 'Guest did not report native Stellar Navigator window creation after the production AppModel launch command.' }
+    $appText = Wait-SerialPattern -Capture $capture -Pattern 'STELLAR_NAVIGATOR_UI status=initial-content-drawn' -Seconds $remaining -Description 'boot-time native AppModel launch and initial content draw' -StartIndex $bootLaunchStartIndex
+    if ($appText -notmatch 'STELLAR_NAVIGATOR_UI status=window-created') { throw 'Guest did not report native Stellar Navigator window creation after its boot-time production AppModel launch.' }
     $nativeElfLayout = Get-NativeElfLayout
     $firstLoadPlacement = Get-VerifiedGuestLoadPlacement $appText $nativeElfLayout
     $firstWindowTitle = Get-VerifiedGuestWindowTitle $appText
     $firstEphemeris = Get-VerifiedGuestEphemeris $appText
-    $overall.checks.nativeApplication = [ordered]@{ productionAppModelLaunchCommandSubmitted = $true; nativeWindowCreated = $true; windowTitle = $firstWindowTitle; initialContentDrawn = $true; runtimeLoadPlacement = $firstLoadPlacement; guestEphemerisEvaluatorObserved = $true; serialRecordIntegrity = [ordered]@{ recordLengthBytes = $firstEphemeris.recordLengthBytes; maximumBytes = 512; printableAscii = $firstEphemeris.recordPrintableAscii; bounded = $firstEphemeris.recordWithin512ByteBound }; ephemerisLine = $firstEphemeris.line; coordinateFrame = $firstEphemeris.frame; units = $firstEphemeris.units; epochEtTdbSeconds = $firstEphemeris.epochEtTdbSeconds; numericalComparison = $firstEphemeris.comparison; passed = $true }
+    $overall.checks.nativeApplication = [ordered]@{ productionAppModelStartupLaunchObserved = $true; launchMethod = 'SN10 guest-proof boot driver calls desktop::launch_app with the Stellar Navigator package ID'; nativeWindowCreated = $true; windowTitle = $firstWindowTitle; initialContentDrawn = $true; runtimeLoadPlacement = $firstLoadPlacement; guestEphemerisEvaluatorObserved = $true; serialRecordIntegrity = [ordered]@{ recordLengthBytes = $firstEphemeris.recordLengthBytes; maximumBytes = 512; printableAscii = $firstEphemeris.recordPrintableAscii; bounded = $firstEphemeris.recordWithin512ByteBound }; ephemerisLine = $firstEphemeris.line; coordinateFrame = $firstEphemeris.frame; units = $firstEphemeris.units; epochEtTdbSeconds = $firstEphemeris.epochEtTdbSeconds; numericalComparison = $firstEphemeris.comparison; passed = $true }
     $overall.checks.screenshotWhileOpen = Save-Screenshot 'stellar-navigator-open.ppm'
 
     $firstCloseStartIndex = $capture.Snapshot().Length
@@ -1415,6 +1431,9 @@ try {
     $firstCloseText = $capture.Snapshot().Substring($firstCloseStartIndex)
     $overall.checks.normalClose = [ordered]@{ passed = $true; lifecycleMarker = ($firstCloseText -match 'STELLAR_NAVIGATOR_LIFECYCLE status=initialized-evaluated-shutdown'); loaderCleanupMarker = ($firstCloseText -match 'lifecycle PASS window/resource cleanup complete'); productionLaunchReturnedAfterCleanup = $true; applicationInstanceExited = ($firstCloseText -match 'lifecycle PASS window/resource cleanup complete') }
     if (-not $overall.checks.normalClose.loaderCleanupMarker) { throw 'Native loader did not report complete window/resource cleanup.' }
+    $remaining = [Math]::Max(1, [int][Math]::Ceiling(($script:RunDeadline - [DateTimeOffset]::UtcNow).TotalSeconds))
+    [void](Wait-SerialPattern -Capture $capture -Pattern '\[KERNEL\] Entering main loop \(waiting for input\)' -Seconds $remaining -Description 'desktop keyboard input loop readiness after first native app shutdown' -StartIndex $firstCloseStartIndex)
+    $overall.checks.desktopInputReady = [ordered]@{ passed = $true; marker = '[KERNEL] Entering main loop (waiting for input)'; firstLaunchObservedAndClosedBeforeDesktopInput = $true }
     $overall.checks.screenshotAfterClose = Save-Screenshot 'desktop-after-close.ppm'
 
     # Use the existing desktop backtick shortcut and guest shell command, which
