@@ -275,6 +275,9 @@ public:
                             gxos::gui::TaskbarProgressState progress, uint8_t percent, bool attention);
     static bool clearActivity(const char* appId, uint32_t windowId);
     static void acknowledgeActivity(const char* appId, uint32_t windowId);
+    static bool beginFileOperationActivity(uint32_t ownerWindowId);
+    static bool updateFileOperationActivity(gxos::gui::TaskbarProgressState progress, uint8_t percent);
+    static void endFileOperationActivity(uint32_t ownerWindowId);
     static bool menuVisible();
     static bool menuContainsPoint(int32_t mx, int32_t my);
     static bool isTaskbarButtonAt(int32_t mx, int32_t my);
@@ -308,6 +311,7 @@ private:
     static TaskbarPinPersistenceState s_pinPersistence;
     static bool s_pinStoreCorrupt;
     static gxos::gui::TaskbarActivityStore s_activityStore;
+    static uint32_t s_fileOperationOwnerWindowId;
     static int s_visibleButtonCount;
     static int s_overflowFirstIndex;
     static int s_previewButtonIndex;

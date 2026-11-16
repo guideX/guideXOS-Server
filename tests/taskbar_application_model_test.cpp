@@ -93,6 +93,64 @@ int main() {
     check(hideState.state == TaskbarAutoHideState::Visible,
         "disabling auto-hide restores permanent visibility");
 
+    const TaskbarDock autoHideDocks[] = {
+        TaskbarDock::Bottom, TaskbarDock::Top, TaskbarDock::Left, TaskbarDock::Right
+    };
+    bool allDockRevealEdgesWork = true;
+    bool allDockRevealDwellStatesWork = true;
+    for (TaskbarDock dock : autoHideDocks) {
+        const TaskbarRect dockedTaskbar = TaskbarGeometryForViewport(
+            -800, 100, 800, 600, dock, TaskbarSizeMode::Standard);
+        const TaskbarRect revealEdge = TaskbarRevealRect(dockedTaskbar, dock);
+        const int edgeX = revealEdge.left + revealEdge.width() / 2;
+        const int edgeY = revealEdge.top + revealEdge.height() / 2;
+        TaskbarAutoHideController dockController;
+        dockController.advance(true, false, false, 2000);
+        dockController.advance(true, false, false, 2500);
+        const bool beganReveal = AdvanceTaskbarAutoHideForPointer(dockController,
+            true, dockedTaskbar, dock, true, edgeX, edgeY, false, 2510);
+        allDockRevealDwellStatesWork = allDockRevealDwellStatesWork && beganReveal &&
+            dockController.state == TaskbarAutoHideState::WaitingToReveal;
+        AdvanceTaskbarAutoHideForPointer(dockController,
+            true, dockedTaskbar, dock, true, edgeX, edgeY, false, 2590);
+        allDockRevealEdgesWork = allDockRevealEdgesWork && beganReveal &&
+            dockController.state == TaskbarAutoHideState::Visible;
+    }
+    check(allDockRevealDwellStatesWork,
+        "hidden reveal strips wait for the configured dwell before showing all four docks");
+    check(allDockRevealEdgesWork,
+        "production auto-hide pointer hit-testing reveals all four docks at negative virtual origins");
+
+    const TaskbarRect bottomViewportTaskbar = TaskbarGeometryForViewport(
+        -800, 100, 800, 600, TaskbarDock::Bottom, TaskbarSizeMode::Standard);
+    const TaskbarRect bottomRevealEdge = TaskbarRevealRect(bottomViewportTaskbar, TaskbarDock::Bottom);
+    TaskbarAutoHideController viewportController;
+    viewportController.advance(true, false, false, 3000);
+    viewportController.advance(true, false, false, 3500);
+    AdvanceTaskbarAutoHideForPointer(viewportController, true, bottomViewportTaskbar,
+        TaskbarDock::Bottom, false, bottomRevealEdge.left + 1, bottomRevealEdge.top + 1,
+        false, 3510);
+    check(viewportController.state == TaskbarAutoHideState::Hidden,
+        "unknown pointer input ignores stale viewport coordinates while hidden");
+    AdvanceTaskbarAutoHideForPointer(viewportController, true, bottomViewportTaskbar,
+        TaskbarDock::Bottom, true, -799, 699, false, 3520);
+    check(viewportController.state == TaskbarAutoHideState::WaitingToReveal,
+        "physical viewport edge input maps to the negative-origin taskbar reveal strip");
+    AdvanceTaskbarAutoHideForPointer(viewportController, true, bottomViewportTaskbar,
+        TaskbarDock::Bottom, true, 0, 0, true, 3530);
+    check(viewportController.state == TaskbarAutoHideState::Visible,
+        "an active taskbar popup keeps the bar visible while the pointer enters its popup");
+
+    TaskbarAutoHideController popupHideController;
+    popupHideController.advance(true, false, false, 4000);
+    popupHideController.advance(true, false, false, 4500);
+    check(popupHideController.state == TaskbarAutoHideState::Hidden,
+        "auto-hide test setup reaches the hidden state before popup ownership");
+    AdvanceTaskbarAutoHideForPointer(popupHideController, true, bottomViewportTaskbar,
+        TaskbarDock::Bottom, true, 20, 20, true, 4510);
+    check(popupHideController.state == TaskbarAutoHideState::Visible,
+        "context-menu ownership reveals and holds the taskbar independently of pointer coordinates");
+
     check(gxos::gui::HasCanonicalTaskbarAppIdentity("org.guide.test"), "shared canonical identity accepts app IDs");
     check(!gxos::gui::HasCanonicalTaskbarAppIdentity(""), "shared canonical identity rejects empty IDs");
     check(gxos::gui::SameCanonicalTaskbarAppIdentity("org.guide.test", "org.guide.test"), "shared identity comparison groups exact IDs");
@@ -308,6 +366,40 @@ int main() {
     check(!activityEntries.front().activity.attention &&
           activityEntries.front().activity.progress == TaskbarProgressState::Determinate,
         "acknowledging an application clears attention and preserves its live operation progress");
+    check(TaskbarProgressPercentFromCounts(0, 0) == 0 &&
+          TaskbarProgressPercentFromCounts(UINT64_MAX, UINT64_MAX) == 100 &&
+          TaskbarProgressPercentFromCounts(UINT64_MAX - UINT64_MAX / 2, UINT64_MAX) == 50,
+        "file operation percentages remain exact without overflowing large byte counts");
+    const TaskbarActivity fileCopyProgress = TaskbarProgressForOperation(
+        TaskbarOperationPhase::Active, true,
+        UINT64_MAX - UINT64_MAX / 2, UINT64_MAX);
+    check(fileCopyProgress.progress == TaskbarProgressState::Determinate &&
+          fileCopyProgress.percent == 50,
+        "real byte-count snapshots map to determinate taskbar progress");
+    const TaskbarActivity unknownFileCopyProgress = TaskbarProgressForOperation(
+        TaskbarOperationPhase::Active, false, 8192, 0);
+    const TaskbarActivity failedFileCopy = TaskbarProgressForOperation(
+        TaskbarOperationPhase::Failed, true, 7, 10);
+    const TaskbarActivity completedFileCopy = TaskbarProgressForOperation(
+        TaskbarOperationPhase::Completed, true, 10, 10);
+    check(unknownFileCopyProgress.progress == TaskbarProgressState::Indeterminate &&
+          failedFileCopy.progress == TaskbarProgressState::Failed && failedFileCopy.percent == 70 &&
+          completedFileCopy.progress == TaskbarProgressState::Completed && completedFileCopy.percent == 100,
+        "file operation mapping preserves unknown, failed, and completed states");
+    TaskbarActivityStore fileOperationStore;
+    const uint64_t fileOperationWindowIds[] = {73, 74};
+    check(fileOperationStore.set(nullptr, 73, fileCopyProgress.progress,
+                                 fileCopyProgress.percent, false) &&
+          fileOperationStore.resolve("app.preview", fileOperationWindowIds, 2).percent == 50,
+        "window-owned file operation progress resolves only through the live taskbar group");
+    fileOperationStore.set(nullptr, 73, failedFileCopy.progress, failedFileCopy.percent, false);
+    check(fileOperationStore.resolve("app.preview", fileOperationWindowIds, 2).progress ==
+              TaskbarProgressState::Failed,
+        "a real file operation failure replaces its active progress state");
+    fileOperationStore.removeWindow(73);
+    check(fileOperationStore.resolve("app.preview", fileOperationWindowIds + 1, 1).progress ==
+              TaskbarProgressState::None,
+        "closing the owning window removes its file operation status");
     check(!activityStore.set("app.preview", 0, TaskbarProgressState::Determinate, 101, false),
         "taskbar progress rejects values above one hundred percent");
     check(!activityStore.set("app.preview", 73, TaskbarProgressState::Determinate, 40, false),

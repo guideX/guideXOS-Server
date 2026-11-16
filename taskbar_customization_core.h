@@ -178,4 +178,24 @@ struct TaskbarAutoHideController {
     }
 };
 
+inline bool AdvanceTaskbarAutoHideForPointer(
+    TaskbarAutoHideController& controller,
+    bool enabled,
+    const TaskbarRect& taskbar,
+    TaskbarDock dock,
+    bool pointerKnown,
+    int pointerX,
+    int pointerY,
+    bool popupActive,
+    uint64_t nowMs,
+    uint32_t hideDelayMs = 500,
+    uint32_t revealDelayMs = 80) {
+    const TaskbarRect reveal = TaskbarRevealRect(taskbar, dock);
+    const bool pointerAtRevealEdge = pointerKnown && reveal.contains(pointerX, pointerY);
+    const bool pointerOverTaskbarOrPopup = popupActive ||
+        (controller.visible() && pointerKnown && taskbar.contains(pointerX, pointerY));
+    return controller.advance(enabled, pointerAtRevealEdge, pointerOverTaskbarOrPopup,
+        nowMs, hideDelayMs, revealDelayMs);
+}
+
 } }

@@ -1514,17 +1514,17 @@ static void apply_taskbar_layout()
     kTaskbarBtnH = kTaskbarH > 12u ? kTaskbarH - 12u : kTaskbarH;
 
     const DesktopRect fullTaskbar = get_taskbar_rect(screenW, screenH, s_taskbarDockPosition);
-    const gxos::gui::TaskbarRect reveal = gxos::gui::TaskbarRevealRect(
-        {static_cast<int>(fullTaskbar.x), static_cast<int>(fullTaskbar.y),
-         static_cast<int>(fullTaskbar.x + fullTaskbar.w), static_cast<int>(fullTaskbar.y + fullTaskbar.h)},
-        static_cast<gxos::gui::TaskbarDock>(s_taskbarDockPosition));
+    const gxos::gui::TaskbarRect taskbarAutoHideRect{
+        static_cast<int>(fullTaskbar.x), static_cast<int>(fullTaskbar.y),
+        static_cast<int>(fullTaskbar.x + fullTaskbar.w),
+        static_cast<int>(fullTaskbar.y + fullTaskbar.h)};
     const bool taskbarPopupOpen = s_taskbarSettingsOpen || s_startMenuOpen || s_rightClickMenuOpen ||
         s_shutdownDialogOpen || s_appModelDialogOpen || s_controlPanelOpen || s_deviceManagerOpen ||
         s_networkAdaptersOpen || s_networkConfigOpen || compositor::TaskbarManager::menuVisible();
-    const bool pointerOverTaskbar = point_in_rect(s_mouseX, s_mouseY, fullTaskbar);
-    s_taskbarAutoHideController.advance(s_taskbarAutoHide,
-        reveal.contains(s_mouseX, s_mouseY), pointerOverTaskbar || taskbarPopupOpen,
-        pit::ticks() * 10u);
+    gxos::gui::AdvanceTaskbarAutoHideForPointer(s_taskbarAutoHideController,
+        s_taskbarAutoHide, taskbarAutoHideRect,
+        static_cast<gxos::gui::TaskbarDock>(s_taskbarDockPosition),
+        true, s_mouseX, s_mouseY, taskbarPopupOpen, pit::ticks() * 10u);
 
     DesktopRect work = get_current_work_area();
     DesktopRect tb = get_current_taskbar_rect();
@@ -2202,6 +2202,19 @@ static const uint64_t kFileOperationProgressVisibilityThreshold = 128u * 1024u;
 
 static void desktop_file_operation_progress(const file_clipboard::FileOperationProgress& progress)
 {
+    gxos::gui::TaskbarOperationPhase taskbarPhase = gxos::gui::TaskbarOperationPhase::Active;
+    if (progress.state == file_clipboard::OperationState::Completed) {
+        taskbarPhase = gxos::gui::TaskbarOperationPhase::Completed;
+    } else if (progress.state == file_clipboard::OperationState::Failed) {
+        taskbarPhase = gxos::gui::TaskbarOperationPhase::Failed;
+    } else if (progress.state == file_clipboard::OperationState::Idle) {
+        taskbarPhase = gxos::gui::TaskbarOperationPhase::Inactive;
+    }
+    const gxos::gui::TaskbarActivity taskbarActivity = gxos::gui::TaskbarProgressForOperation(
+        taskbarPhase, progress.totalKnown, progress.bytesCompleted, progress.totalBytes);
+    compositor::TaskbarManager::updateFileOperationActivity(
+        taskbarActivity.progress, taskbarActivity.percent);
+
     if (progress.state == file_clipboard::OperationState::Preparing &&
         progress.phase == file_clipboard::PasteStage::SourceValidation &&
         progress.bytesCompleted == 0) {
@@ -2244,7 +2257,8 @@ static void desktop_file_operation_progress(const file_clipboard::FileOperationP
         if (progress.totalKnown && progress.totalBytes > 0) {
             uint64_t completed = progress.bytesCompleted > progress.totalBytes
                 ? progress.totalBytes : progress.bytesCompleted;
-            int percent = static_cast<int>((completed * 100u) / progress.totalBytes);
+            int percent = static_cast<int>(gxos::gui::TaskbarProgressPercentFromCounts(
+                completed, progress.totalBytes));
             desktop_append_int(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage), percent);
             desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage), "%");
         } else {

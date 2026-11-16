@@ -1005,16 +1005,12 @@ namespace gxos {
             int mx, int my, const DisplayVirtualDesktop& desktop, const DisplayViewport& viewport)
         {
             const TaskbarRect taskbar = hostedTaskbarAutoHideRect(desktop, viewport);
-            const TaskbarRect reveal = TaskbarRevealRect(taskbar,
-                static_cast<TaskbarDock>(g_taskbarPosition));
             const bool popupActive = g_taskbarMenuVisible || g_startMenuVisible ||
                 g_taskbarSettingsVisible || RightClickMenu::IsVisible() ||
                 !g_taskbarPreviewAppId.empty() || g_taskbarPreviewWindowId != 0 || g_modalWindow != 0;
-            const bool pointerAtRevealEdge = g_taskbarPointerKnown && reveal.contains(mx, my);
-            const bool pointerOverTaskbarOrPopup = popupActive ||
-                (g_taskbarPointerKnown && taskbar.contains(mx, my));
-            return g_taskbarAutoHideController.advance(g_taskbarAutoHide,
-                pointerAtRevealEdge, pointerOverTaskbarOrPopup, nowMs());
+            return AdvanceTaskbarAutoHideForPointer(g_taskbarAutoHideController,
+                g_taskbarAutoHide, taskbar, static_cast<TaskbarDock>(g_taskbarPosition),
+                g_taskbarPointerKnown, mx, my, popupActive, nowMs());
         }
 
         static DisplayRect desktopBoundsRect(const DisplayVirtualDesktop& desktop)

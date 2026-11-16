@@ -278,6 +278,7 @@ void KernelCompositor::unregisterWindow(app::KernelWindow* window) {
     
     for (int i = 0; i < MAX_WINDOWS; i++) {
         if (s_windows[i].valid && s_windows[i].window == window) {
+            TaskbarManager::endFileOperationActivity(window->id);
             TaskbarManager::clearActivity(nullptr, window->id);
             s_windows[i].valid = false;
             s_windows[i].window = nullptr;
@@ -1295,6 +1296,7 @@ int TaskbarManager::s_pinCount = 0;
 TaskbarPinPersistenceState TaskbarManager::s_pinPersistence = TaskbarPinPersistenceState::Unsupported;
 bool TaskbarManager::s_pinStoreCorrupt = false;
 gxos::gui::TaskbarActivityStore TaskbarManager::s_activityStore;
+uint32_t TaskbarManager::s_fileOperationOwnerWindowId = 0;
 TaskbarManager::MenuItem TaskbarManager::s_menuItems[MAX_TASKBAR_MENU_ITEMS];
 int TaskbarManager::s_menuItemCount = 0;
 int TaskbarManager::s_menuHover = -1;
@@ -1323,6 +1325,7 @@ void TaskbarManager::init(uint32_t screenW, uint32_t screenH, uint32_t taskbarH,
     s_menuItemCount = 0;
     s_pinCount = 0;
     s_pinStoreCorrupt = false;
+    s_fileOperationOwnerWindowId = 0;
     loadPinnedApplications();
 }
 
@@ -1859,6 +1862,38 @@ bool TaskbarManager::clearActivity(const char* appId, uint32_t windowId) {
 
 void TaskbarManager::acknowledgeActivity(const char* appId, uint32_t windowId) {
     s_activityStore.acknowledgeWindow(appId, windowId);
+}
+
+bool TaskbarManager::beginFileOperationActivity(uint32_t ownerWindowId) {
+    app::KernelWindow* ownerWindow = KernelCompositor::getWindow(ownerWindowId);
+    if (!ownerWindow || !ownerWindow->owner ||
+        !gxos::gui::HasCanonicalTaskbarAppIdentity(ownerWindow->owner->getRuntimeAppId())) {
+        return false;
+    }
+    if (s_fileOperationOwnerWindowId != 0) {
+        s_activityStore.clear(nullptr, s_fileOperationOwnerWindowId);
+    }
+    s_fileOperationOwnerWindowId = ownerWindowId;
+    return true;
+}
+
+bool TaskbarManager::updateFileOperationActivity(
+    gxos::gui::TaskbarProgressState progress, uint8_t percent) {
+    const uint32_t ownerWindowId = s_fileOperationOwnerWindowId;
+    if (ownerWindowId == 0) return false;
+    app::KernelWindow* ownerWindow = KernelCompositor::getWindow(ownerWindowId);
+    if (!ownerWindow || !ownerWindow->owner ||
+        !gxos::gui::HasCanonicalTaskbarAppIdentity(ownerWindow->owner->getRuntimeAppId())) {
+        endFileOperationActivity(ownerWindowId);
+        return false;
+    }
+    return s_activityStore.set(nullptr, ownerWindowId, progress, percent, false);
+}
+
+void TaskbarManager::endFileOperationActivity(uint32_t ownerWindowId) {
+    if (ownerWindowId == 0 || s_fileOperationOwnerWindowId != ownerWindowId) return;
+    s_activityStore.clear(nullptr, ownerWindowId);
+    s_fileOperationOwnerWindowId = 0;
 }
 
 void TaskbarManager::closePreview() {

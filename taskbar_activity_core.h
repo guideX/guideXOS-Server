@@ -22,6 +22,59 @@ struct TaskbarActivity {
     uint8_t percent{0};
 };
 
+enum class TaskbarOperationPhase : uint8_t { Inactive, Active, Completed, Failed };
+
+inline uint8_t TaskbarProgressPercentFromCounts(uint64_t completed, uint64_t total) {
+    if (total == 0) return 0;
+    if (completed >= total) return 100;
+
+    // Find the largest percentage whose exact byte threshold has been met.
+    // Splitting total into quotient and remainder avoids overflowing
+    // completed * 100 for large files and volumes.
+    const uint64_t quotient = total / 100u;
+    const uint64_t remainder = total % 100u;
+    uint8_t low = 0;
+    uint8_t high = 99;
+    while (low < high) {
+        const uint8_t candidate = static_cast<uint8_t>(low + (high - low + 1u) / 2u);
+        const uint64_t threshold = quotient * candidate +
+            (remainder * candidate + 99u) / 100u;
+        if (completed >= threshold) low = candidate;
+        else high = static_cast<uint8_t>(candidate - 1u);
+    }
+    return low;
+}
+
+inline TaskbarActivity TaskbarProgressForOperation(TaskbarOperationPhase phase,
+                                                   bool totalKnown,
+                                                   uint64_t bytesCompleted,
+                                                   uint64_t totalBytes) {
+    TaskbarActivity activity{};
+    switch (phase) {
+    case TaskbarOperationPhase::Active:
+        if (totalKnown && totalBytes > 0) {
+            activity.progress = TaskbarProgressState::Determinate;
+            activity.percent = TaskbarProgressPercentFromCounts(bytesCompleted, totalBytes);
+        } else {
+            activity.progress = TaskbarProgressState::Indeterminate;
+        }
+        break;
+    case TaskbarOperationPhase::Completed:
+        activity.progress = TaskbarProgressState::Completed;
+        activity.percent = 100;
+        break;
+    case TaskbarOperationPhase::Failed:
+        activity.progress = TaskbarProgressState::Failed;
+        activity.percent = totalKnown && totalBytes > 0
+            ? TaskbarProgressPercentFromCounts(bytesCompleted, totalBytes) : 0;
+        break;
+    case TaskbarOperationPhase::Inactive:
+    default:
+        break;
+    }
+    return activity;
+}
+
 struct TaskbarActivityRecord {
     char appId[96]{};
     uint64_t windowId{0};
