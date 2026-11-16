@@ -269,10 +269,12 @@ if ($null -ne $analysis -and $null -ne $analysis.PSObject.Properties['gcStateGua
     $guardEvidence = $analysis.gcStateGuard
     $subcondition = [string]$analysis.gcStateGuard.firstFailedSubcondition
 }
+$callerEvidence = if ($null -ne $analysis -and
+    $null -ne $analysis.PSObject.Properties['caller']) { $analysis.caller } else { $null }
 $callerIsGuard = $null -ne $analysis -and [bool]$analysis.recordValid -and
     [string]$analysis.originalReason -eq '0x0000000000000008' -and
-    $null -ne $analysis.caller -and [bool]$analysis.caller.resolved -and
-    [string]$analysis.caller.enclosingSymbol -match 'RhpNewArray'
+    $null -ne $callerEvidence -and [bool]$callerEvidence.resolved -and
+    [string]$callerEvidence.enclosingSymbol -match 'RhpNewArray'
 $preallocationFailure = $callerIsGuard -and $null -ne $guardEvidence -and
     [string]$guardEvidence.guardLocation -eq 'PREALLOCATION'
 $stockAllocatorReached = $callerIsGuard -and $null -ne $guardEvidence -and
@@ -447,7 +449,7 @@ $nativeOutcome = [ordered]@{
     analysisPath=$analysisPath
     analysisSha256=if ($analysisPath -and (Test-Path -LiteralPath $analysisPath -PathType Leaf)) { (Get-FileHash -LiteralPath $analysisPath -Algorithm SHA256).Hash.ToUpperInvariant() } else { '' }
     originalReason=if ($null -ne $analysis) { [string]$analysis.originalReason } else { '' }
-    callerSymbol=if ($null -ne $analysis -and $null -ne $analysis.caller) { [string]$analysis.caller.enclosingSymbol } else { '' }
+    callerSymbol=if ($null -ne $callerEvidence) { [string]$callerEvidence.enclosingSymbol } else { '' }
     initializationStage=$initializationStage
     guardSubcondition=$subcondition
     guardEvidence=$guardEvidence

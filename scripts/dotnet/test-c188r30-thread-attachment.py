@@ -373,6 +373,16 @@ class R24HostedQualificationTests(unittest.TestCase):
         ))
 
 
+class RunnerEvidencePackagingTests(unittest.TestCase):
+    def test_runner_handles_origin_records_without_optional_caller(self) -> None:
+        runner = R30_RUNNER.read_text(encoding="utf-8")
+        self.assertIn("$null -ne $analysis.PSObject.Properties['caller']", runner)
+        self.assertIn("$null -ne $callerEvidence -and [bool]$callerEvidence.resolved", runner)
+        self.assertIn("callerSymbol=if ($null -ne $callerEvidence)", runner)
+        self.assertNotIn("$analysis.caller.resolved", runner)
+        self.assertNotIn("$analysis.caller.enclosingSymbol", runner)
+
+
 class LinkedCandidateTests(unittest.TestCase):
     def test_generated_initializer_and_stock_transition_are_linked_in_order(self) -> None:
         if LINKED_CANDIDATE is None:
