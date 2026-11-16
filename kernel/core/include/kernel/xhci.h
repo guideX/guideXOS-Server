@@ -771,6 +771,24 @@ inline bool xhci_device_dma_translation_verified(
     return evidence == XhciDeviceDmaTranslationEvidence::NoAcpiRemappingTable;
 }
 
+inline bool xhci_controller_state_change_allowed(bool dmaVerified,
+                                                  bool ownershipResolved,
+                                                  bool workspaceExclusive,
+                                                  bool selectedController)
+{
+    return dmaVerified && ownershipResolved && workspaceExclusive &&
+           selectedController;
+}
+
+// PCI bus mastering may be cleared after a failed Run transition only when
+// the controller's halt state is positively observed and Run/Stop is clear.
+inline bool xhci_pci_bus_master_disable_allowed(bool haltObservedWithinBound,
+                                                bool halted,
+                                                bool runStopClear)
+{
+    return haltObservedWithinBound && halted && runStopClear;
+}
+
 enum class XhciScratchpadPlanError : uint8_t {
     None = 0,
     CountExceedsCapacity,
@@ -1438,6 +1456,12 @@ void set_kernel_physical_base(uint64_t physicalBase);
 // addresses remain blocked when discovery is unknown or a remapping table is
 // present because no IOMMU domain/mapping implementation exists yet.
 void set_acpi_dma_remapping_state(bool scanValid, bool remappingTablePresent);
+
+// Pass the UEFI memory map captured immediately before ExitBootServices.
+// Direct DMA qualification uses its descriptor ownership to validate each
+// kernel-backed DMA region and preserve all DMAR RMRRs.
+void set_uefi_memory_map(const uint8_t* bytes, uint64_t entryCount,
+                         uint64_t descriptorSize);
 
 // Enumerate the first connected USB device (Section 5).
 bool enumerate_device(EnumeratedDevice* out);

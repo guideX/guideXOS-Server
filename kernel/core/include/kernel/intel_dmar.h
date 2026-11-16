@@ -5,6 +5,7 @@
 // Sections 8.1-8.6. Unsupported topology is always fail-closed for routing.
 
 #include <stdint.h>
+#include "kernel/dma_memory.h"
 
 namespace kernel {
 namespace intel_dmar {
@@ -171,7 +172,6 @@ struct RegisterSnapshot {
     uint8_t version;
     uint8_t maximumGuestAddressWidth;
     uint8_t supportedAdjustedGuestAddressWidths;
-    uint32_t globalCommand;
     uint32_t globalStatus;
     uint32_t faultStatus;
     uint64_t capability;
@@ -179,9 +179,56 @@ struct RegisterSnapshot {
     uint64_t rootTableAddress;
     bool capabilityValid;
     bool extendedCapabilityValid;
-    bool commandStatusValid;
+    bool translationStatusValid;
     bool rootTableValid;
     bool faultStatusValid;
+};
+
+enum class RmrrMemoryStatus : uint8_t {
+    Valid = 0,
+    InvalidDmar,
+    InvalidPath,
+    MemoryMapUnavailable,
+    ReservedMemoryUnproven,
+    WorkspaceOverlap,
+    InvalidWorkspace
+};
+
+struct RmrrMemorySummary {
+    RmrrMemoryStatus status;
+    uint32_t regionCount;
+    uint32_t relevantCount;
+    uint32_t unrelatedCount;
+};
+
+enum class DirectDmaDecision : uint8_t {
+    Verified = 0,
+    BlockedIdentity,
+    BlockedRoutingAmbiguous,
+    BlockedRoutingNotCovered,
+    BlockedRoutingUnsupported,
+    BlockedRoutingUnknown,
+    BlockedRegisters,
+    BlockedTranslationUnknown,
+    BlockedTranslationEnabled,
+    BlockedPhysicalBacking,
+    BlockedAddressability,
+    BlockedRmrr,
+    BlockedBusMaster,
+    BlockedWorkspaceOwnership
+};
+
+struct DirectDmaEvidence {
+    bool pciIdentityValidated;
+    RouteStatus route;
+    RegisterStatus registers;
+    TranslationState translation;
+    RootTableState rootTable;
+    bool physicalBackingValidated;
+    bool deviceAddressabilityValidated;
+    RmrrMemoryStatus rmrrMemory;
+    bool busMasterDisabled;
+    bool workspaceExclusive;
 };
 
 inline uint16_t read_u16(const uint8_t* p)
@@ -582,6 +629,81 @@ inline bool scope_matches_path(const DeviceScope& scope, const PciPath& path)
     return false;
 }
 
+inline RmrrMemorySummary validate_rmrr_memory(
+    const Table& table, const PciPath& path,
+    const dma_memory::MemoryMapView& memoryMap,
+    const dma_memory::PhysicalRange* dmaRanges, uint32_t dmaRangeCount)
+{
+    RmrrMemorySummary result{};
+    result.status = RmrrMemoryStatus::InvalidDmar;
+    if (table.status != ParseStatus::Valid || table.rmrrCount > MAX_RMRR_REGIONS) {
+        return result;
+    }
+    result.status = RmrrMemoryStatus::InvalidPath;
+    if (!path.valid || path.count == 0u || path.count > MAX_SCOPE_PATH) return result;
+    for (uint32_t i = 0u; i < path.count; ++i) {
+        if (path.entries[i].device > 31u || path.entries[i].function > 7u) {
+            return result;
+        }
+    }
+    result.regionCount = table.rmrrCount;
+    if (dmaRangeCount != 0u && dmaRanges == nullptr) {
+        result.status = RmrrMemoryStatus::InvalidWorkspace;
+        return result;
+    }
+    result.status = RmrrMemoryStatus::MemoryMapUnavailable;
+    if (!dma_memory::valid_view(memoryMap)) return result;
+
+    bool reservedMemoryUnproven = false;
+    bool workspaceOverlap = false;
+    bool invalidWorkspace = false;
+
+    for (uint32_t i = 0u; i < table.rmrrCount; ++i) {
+        const RmrrRegion& region = table.rmrr[i];
+        if (region.length == 0u || region.base > UINT64_MAX - region.length ||
+            region.limit != region.base + region.length - 1u ||
+            (region.base & 0xFFFu) != 0u ||
+            ((region.limit + 1u) & 0xFFFu) != 0u) {
+            result.status = RmrrMemoryStatus::InvalidDmar;
+            return result;
+        }
+        const dma_memory::MemoryMapCheck ownerCheck =
+            dma_memory::range_has_ownership(
+                memoryMap, region.base, region.length, true);
+        if (ownerCheck != dma_memory::MemoryMapCheck::Valid) {
+            reservedMemoryUnproven = true;
+        }
+        const dma_memory::PhysicalRange rmrrRange = {region.base, region.length};
+        for (uint32_t j = 0u; j < dmaRangeCount; ++j) {
+            if (dmaRanges[j].length == 0u ||
+                dmaRanges[j].base > UINT64_MAX - dmaRanges[j].length) {
+                invalidWorkspace = true;
+                continue;
+            }
+            if (dma_memory::ranges_overlap(rmrrRange, dmaRanges[j])) {
+                workspaceOverlap = true;
+            }
+        }
+        bool applies = false;
+        if (region.segment == path.segment) {
+            for (uint32_t j = 0u; j < region.scopeCount; ++j) {
+                if (scope_matches_path(region.scopes[j], path)) {
+                    applies = true;
+                    break;
+                }
+            }
+        }
+        if (applies) ++result.relevantCount;
+        else ++result.unrelatedCount;
+    }
+    result.status = invalidWorkspace ? RmrrMemoryStatus::InvalidWorkspace
+        : (workspaceOverlap ? RmrrMemoryStatus::WorkspaceOverlap
+            : (reservedMemoryUnproven
+                ? RmrrMemoryStatus::ReservedMemoryUnproven
+                : RmrrMemoryStatus::Valid));
+    return result;
+}
+
 inline bool path_valid(const PciPath& path)
 {
     if (!path.valid || path.count == 0u || path.count > MAX_SCOPE_PATH) return false;
@@ -694,8 +816,8 @@ inline RootTableState classify_root_table(bool valid, uint64_t rootTableAddress)
 
 inline RegisterSnapshot classify_registers(
     bool readsValid, uint32_t versionRegister, uint64_t capability,
-    uint64_t extendedCapability, uint32_t globalCommand,
-    uint32_t globalStatus, uint64_t rootTableAddress, uint32_t faultStatus)
+    uint64_t extendedCapability, uint32_t globalStatus,
+    uint64_t rootTableAddress, uint32_t faultStatus)
 {
     RegisterSnapshot result{};
     result.status = RegisterStatus::ReadUnavailable;
@@ -703,7 +825,7 @@ inline RegisterSnapshot classify_registers(
     result.rootTable = RootTableState::Unknown;
     if (!readsValid || versionRegister == 0u || versionRegister == UINT32_MAX ||
         capability == UINT64_MAX || extendedCapability == UINT64_MAX ||
-        globalCommand == UINT32_MAX || globalStatus == UINT32_MAX ||
+        globalStatus == UINT32_MAX ||
         rootTableAddress == UINT64_MAX || faultStatus == UINT32_MAX) return result;
     result.version = static_cast<uint8_t>(versionRegister & 0xFFu);
     if ((result.version >> 4u) != 1u) {
@@ -712,7 +834,6 @@ inline RegisterSnapshot classify_registers(
     }
     result.capability = capability;
     result.extendedCapability = extendedCapability;
-    result.globalCommand = globalCommand;
     result.globalStatus = globalStatus;
     result.rootTableAddress = rootTableAddress;
     result.faultStatus = faultStatus;
@@ -720,15 +841,15 @@ inline RegisterSnapshot classify_registers(
     result.supportedAdjustedGuestAddressWidths = static_cast<uint8_t>((capability >> 8u) & 0x1Fu);
     result.capabilityValid = true;
     result.extendedCapabilityValid = true;
-    result.commandStatusValid = true;
+    result.translationStatusValid = true;
     result.rootTableValid = true;
     result.faultStatusValid = true;
     result.rootTable = classify_root_table(true, rootTableAddress);
-    // GSTS.TES is bit 31. An enabled state is observed only; this snapshot
-    // does not establish which devices or buffers are mapped.
-    result.translation = (globalStatus & (1u << 31u)) != 0u
-        ? TranslationState::EnabledObserved
-        : TranslationState::DisabledObserved;
+    // GCMD.TE is write-only and reads as undefined. GSTS.TES is the
+    // specification-defined read-only translation state.
+    const bool statusEnabled = (globalStatus & (1u << 31u)) != 0u;
+    result.translation = statusEnabled ? TranslationState::EnabledObserved
+                                       : TranslationState::DisabledObserved;
     result.status = result.maximumGuestAddressWidth == 0u ||
                     result.supportedAdjustedGuestAddressWidths == 0u
         ? RegisterStatus::UnsupportedCapabilities
@@ -751,6 +872,74 @@ inline bool dma_eligibility_allowed(RouteStatus route, RegisterStatus registers,
         rootTable == RootTableState::Configured && bufferPhysicalValidated &&
         deviceMappingEstablished && rmrrSatisfied;
     return observedPreconditions && false;
+}
+
+inline DirectDmaDecision evaluate_direct_physical_dma(
+    const DirectDmaEvidence& evidence)
+{
+    if (!evidence.pciIdentityValidated) return DirectDmaDecision::BlockedIdentity;
+    if (evidence.route == RouteStatus::Ambiguous) {
+        return DirectDmaDecision::BlockedRoutingAmbiguous;
+    }
+    if (evidence.route == RouteStatus::NotCovered) {
+        return DirectDmaDecision::BlockedRoutingNotCovered;
+    }
+    if (evidence.route == RouteStatus::Unsupported) {
+        return DirectDmaDecision::BlockedRoutingUnsupported;
+    }
+    if (evidence.route != RouteStatus::Resolved) {
+        return DirectDmaDecision::BlockedRoutingUnknown;
+    }
+    if (evidence.registers != RegisterStatus::Readable) {
+        return DirectDmaDecision::BlockedRegisters;
+    }
+    if (evidence.rootTable == RootTableState::Unknown ||
+        evidence.rootTable == RootTableState::Invalid) {
+        return DirectDmaDecision::BlockedRegisters;
+    }
+    if (evidence.translation == TranslationState::Unknown) {
+        return DirectDmaDecision::BlockedTranslationUnknown;
+    }
+    if (evidence.translation != TranslationState::DisabledObserved) {
+        return DirectDmaDecision::BlockedTranslationEnabled;
+    }
+    if (!evidence.physicalBackingValidated) {
+        return DirectDmaDecision::BlockedPhysicalBacking;
+    }
+    if (!evidence.deviceAddressabilityValidated) {
+        return DirectDmaDecision::BlockedAddressability;
+    }
+    if (evidence.rmrrMemory != RmrrMemoryStatus::Valid) {
+        return DirectDmaDecision::BlockedRmrr;
+    }
+    if (!evidence.busMasterDisabled) {
+        return DirectDmaDecision::BlockedBusMaster;
+    }
+    if (!evidence.workspaceExclusive) {
+        return DirectDmaDecision::BlockedWorkspaceOwnership;
+    }
+    return DirectDmaDecision::Verified;
+}
+
+inline const char* direct_dma_decision_name(DirectDmaDecision decision)
+{
+    switch (decision) {
+        case DirectDmaDecision::Verified: return "DMA_VERIFIED_DIRECT_PHYSICAL";
+        case DirectDmaDecision::BlockedIdentity: return "DMA_BLOCKED_PCI_IDENTITY";
+        case DirectDmaDecision::BlockedRoutingAmbiguous: return "DMA_BLOCKED_ROUTING_AMBIGUOUS";
+        case DirectDmaDecision::BlockedRoutingNotCovered: return "DMA_BLOCKED_ROUTING_NOT_COVERED";
+        case DirectDmaDecision::BlockedRoutingUnsupported: return "DMA_BLOCKED_ROUTING_UNSUPPORTED";
+        case DirectDmaDecision::BlockedRoutingUnknown: return "DMA_BLOCKED_ROUTING_UNKNOWN";
+        case DirectDmaDecision::BlockedRegisters: return "DMA_BLOCKED_VTD_REGISTERS";
+        case DirectDmaDecision::BlockedTranslationUnknown: return "DMA_BLOCKED_IOMMU_UNKNOWN";
+        case DirectDmaDecision::BlockedTranslationEnabled: return "DMA_BLOCKED_TRANSLATION_ENABLED";
+        case DirectDmaDecision::BlockedPhysicalBacking: return "DMA_BLOCKED_PHYSICAL_MAPPING";
+        case DirectDmaDecision::BlockedAddressability: return "DMA_BLOCKED_DEVICE_ADDRESSABILITY";
+        case DirectDmaDecision::BlockedRmrr: return "DMA_BLOCKED_RESERVED_MEMORY";
+        case DirectDmaDecision::BlockedBusMaster: return "DMA_BLOCKED_BUS_MASTER_STATE";
+        case DirectDmaDecision::BlockedWorkspaceOwnership: return "DMA_BLOCKED_OWNERSHIP";
+        default: return "DMA_BLOCKED_UNKNOWN";
+    }
 }
 
 } // namespace intel_dmar

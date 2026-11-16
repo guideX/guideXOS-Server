@@ -9631,6 +9631,26 @@ static uint64_t draw_input3d_diagnostics_panel()
             snapshot.dmaMappingEstablished ? "VERIFIED" : "BLOCKED");
         input3d_panel_draw_line(&writer, line,
             snapshot.dmaMappingEstablished ? rgb(170, 225, 186) : rgb(255, 195, 145));
+        if (compactSelected != nullptr) {
+            line[0] = '\0';
+            compactPosition = input3d_panel_append(line, sizeof(line), 0u,
+                                                   "DMA memory backing=");
+            compactPosition = input3d_panel_append(line, sizeof(line), compactPosition,
+                modern_input_diagnostics::status_name(
+                    compactSelected->dmaPhysicalBackingStatus));
+            compactPosition = input3d_panel_append(line, sizeof(line), compactPosition,
+                                                   " reserved=");
+            input3d_panel_append(line, sizeof(line), compactPosition,
+                modern_input_diagnostics::status_name(
+                    compactSelected->dmaReservedMemoryStatus));
+            const bool memoryValidated =
+                compactSelected->dmaPhysicalBackingStatus ==
+                    modern_input_diagnostics::Status::Pass &&
+                compactSelected->dmaReservedMemoryStatus ==
+                    modern_input_diagnostics::Status::Pass;
+            input3d_panel_draw_line(&writer, line,
+                memoryValidated ? rgb(170, 225, 186) : rgb(255, 195, 145));
+        }
         line[0] = '\0';
         compactPosition = input3d_panel_append(line, sizeof(line), 0u, "Reason: ");
         input3d_panel_append(line, sizeof(line), compactPosition,
@@ -9992,6 +10012,32 @@ static uint64_t draw_input3d_diagnostics_panel()
             ? snapshot.dmaDecisionReason : "IOMMU_STATE_UNKNOWN");
     input3d_panel_draw_line(&writer, line,
         snapshot.dmaMappingEstablished ? rgb(170, 225, 186) : rgb(255, 195, 145));
+
+    line[0] = '\0';
+    position = input3d_panel_append(line, sizeof(line), 0u, "DMA memory backing=");
+    const modern_input_diagnostics::ControllerSnapshot* dmaController = nullptr;
+    if (snapshot.selectedControllerIndex >= 0 &&
+        static_cast<uint32_t>(snapshot.selectedControllerIndex) <
+            snapshot.storedControllerCount) {
+        dmaController = &snapshot.controllers[
+            static_cast<uint32_t>(snapshot.selectedControllerIndex)];
+    }
+    position = input3d_panel_append(line, sizeof(line), position,
+        modern_input_diagnostics::status_name(dmaController != nullptr
+            ? dmaController->dmaPhysicalBackingStatus
+            : modern_input_diagnostics::Status::NotAttempted));
+    position = input3d_panel_append(line, sizeof(line), position, " reserved=");
+    input3d_panel_append(line, sizeof(line), position,
+        modern_input_diagnostics::status_name(dmaController != nullptr
+            ? dmaController->dmaReservedMemoryStatus
+            : modern_input_diagnostics::Status::NotAttempted));
+    const bool dmaMemoryValidated = dmaController != nullptr &&
+        dmaController->dmaPhysicalBackingStatus ==
+            modern_input_diagnostics::Status::Pass &&
+        dmaController->dmaReservedMemoryStatus ==
+            modern_input_diagnostics::Status::Pass;
+    input3d_panel_draw_line(&writer, line,
+        dmaMemoryValidated ? rgb(170, 225, 186) : rgb(255, 195, 145));
 
     if (snapshot.pciScanFailure != nullptr) {
         line[0] = '\0';

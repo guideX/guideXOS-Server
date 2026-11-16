@@ -155,6 +155,18 @@ void repair_checksum(std::vector<uint8_t>& bytes)
     bytes[9u] = static_cast<uint8_t>(0u - sum);
 }
 
+void append_uefi_descriptor(std::vector<uint8_t>& bytes, uint32_t type,
+                            uint64_t base, uint64_t pages,
+                            uint64_t attributes = 0u)
+{
+    put32(bytes, type);
+    put32(bytes, 0u);
+    put64(bytes, base);
+    put64(bytes, 0u);
+    put64(bytes, pages);
+    put64(bytes, attributes);
+}
+
 std::vector<uint8_t> table_with_drhd(
     uint8_t flags, const std::vector<std::vector<uint8_t>>& scopes = {})
 {
@@ -444,27 +456,34 @@ void test_register_classification_and_dma_gate()
 
     const uint64_t capability = (1ULL << 16u) | (1ULL << 8u);
     RegisterSnapshot registers = classify_registers(
-        true, 0x10u, capability, 0u, 0u, 1u << 31u,
-        0x1000u, 0u);
+        true, 0x10u, capability, 0u, 1u << 31u, 0x1000u, 0u);
     expect(registers.status == RegisterStatus::Readable &&
            registers.translation == TranslationState::EnabledObserved &&
            registers.rootTable == RootTableState::Configured &&
            registers.capabilityValid && registers.extendedCapabilityValid &&
-           registers.commandStatusValid && registers.faultStatusValid,
+            registers.translationStatusValid && registers.faultStatusValid,
            "supported VT-d snapshot is classified as read-only observed state");
 
-    registers = classify_registers(true, 0x10u, capability, 0u, 0u, 0u, 0u, 0u);
+    registers = classify_registers(true, 0x10u, capability, 0u, 0u, 0u, 0u);
     expect(registers.status == RegisterStatus::Readable &&
            registers.translation == TranslationState::DisabledObserved &&
            registers.rootTable == RootTableState::NotConfigured,
            "translation-disabled and absent root table states are visible");
-    expect(classify_registers(true, 0x20u, capability, 0u, 0u, 0u, 0u, 0u).status ==
+    registers = classify_registers(true, 0x10u, capability, 0u,
+                                   1u << 31u, 0x1000u, 0u);
+    expect(registers.status == RegisterStatus::Readable &&
+           registers.translation == TranslationState::EnabledObserved,
+           "read-only GSTS.TES determines translation state");
+    expect(classify_registers(true, 0x10u, capability, 0u, UINT32_MAX,
+                              0u, 0u).status == RegisterStatus::ReadUnavailable,
+           "unreadable GSTS prevents a translation-state conclusion");
+    expect(classify_registers(true, 0x20u, capability, 0u, 0u, 0u, 0u).status ==
                RegisterStatus::UnsupportedVersion,
            "unsupported VT-d major version prevents further qualification");
-    expect(classify_registers(true, 0x10u, 0u, 0u, 0u, 0u, 0u, 0u).status ==
+    expect(classify_registers(true, 0x10u, 0u, 0u, 0u, 0u, 0u).status ==
                RegisterStatus::UnsupportedCapabilities,
            "missing MGAW or SAGAW support is reported as unsupported");
-    expect(classify_registers(false, 0x10u, capability, 0u, 0u, 0u, 0u, 0u).status ==
+    expect(classify_registers(false, 0x10u, capability, 0u, 0u, 0u, 0u).status ==
                RegisterStatus::ReadUnavailable,
            "incomplete read snapshot is never treated as valid");
     expect(classify_root_table(true, 0x1001u) == RootTableState::Invalid &&
@@ -491,6 +510,214 @@ void test_register_classification_and_dma_gate()
            "unsupported VT-d capabilities block DMA eligibility");
 }
 
+void test_rmrr_memory_ownership()
+{
+    using namespace kernel::intel_dmar;
+    const std::vector<uint8_t> selectedScope = scope(
+        SCOPE_ENDPOINT, 0u, {{20u, 0u}, {0u, 0u}});
+    const std::vector<uint8_t> unrelatedScope = scope(
+        SCOPE_ENDPOINT, 2u, {{4u, 0u}});
+    std::vector<uint8_t> bytes(DMAR_HEADER_BYTES, 0u);
+    append_drhd(bytes, 1u, 0u, 0u, 0xFEE00000u);
+    append_rmrr(bytes, 0u, 0x200000u, 0x20FFFFu, {selectedScope});
+    append_rmrr(bytes, 2u, 0x300000u, 0x30FFFFu, {unrelatedScope});
+    bytes = finish_table(bytes);
+    Table table = {};
+    expect(parse(bytes.data(), static_cast<uint32_t>(bytes.size()), &table) ==
+               ParseStatus::Valid && table.rmrrCount == 2u,
+           "valid selected and unrelated RMRRs parse together");
+
+    std::vector<uint8_t> memoryMap;
+    append_uefi_descriptor(memoryMap, kernel::dma_memory::UEFI_MEMORY_RESERVED,
+                           0x200000u, 16u);
+    append_uefi_descriptor(memoryMap, kernel::dma_memory::UEFI_MEMORY_RESERVED,
+                           0x300000u, 16u);
+    append_uefi_descriptor(memoryMap, kernel::dma_memory::UEFI_MEMORY_LOADER_DATA,
+                           0x400000u, 256u);
+    const kernel::dma_memory::MemoryMapView map = {
+        memoryMap.data(), 3u, 40u};
+    using kernel::dma_memory::MemoryMapCheck;
+    expect(kernel::dma_memory::range_has_ownership(
+               map, 0x400000u, 0x2000u, false, 64u) == MemoryMapCheck::Valid,
+           "DMA region receives complete loader-owned physical backing");
+    expect(kernel::dma_memory::range_has_ownership(
+               map, 0x400020u, 0x2000u, false, 64u) ==
+               MemoryMapCheck::InvalidAlignment,
+           "misaligned device-visible DMA base is rejected");
+    expect(kernel::dma_memory::range_has_ownership(
+               map, UINT64_MAX - 0xFFFu, 0x2000u, false, 64u) ==
+               MemoryMapCheck::RangeOverflow,
+           "device-visible physical range overflow is rejected");
+    expect(kernel::dma_memory::range_has_ownership(
+               map, 0x4FF000u, 0x2000u, false, 64u) ==
+               MemoryMapCheck::RangeUncovered,
+           "partially backed DMA allocation is rejected");
+    std::vector<uint8_t> invalidDescriptor;
+    append_uefi_descriptor(invalidDescriptor,
+                           kernel::dma_memory::UEFI_MEMORY_LOADER_DATA,
+                           0x600000u, 0u);
+    const kernel::dma_memory::MemoryMapView invalidDescriptorMap = {
+        invalidDescriptor.data(), 1u, 40u};
+    expect(kernel::dma_memory::range_has_ownership(
+               invalidDescriptorMap, 0x600000u, 0x1000u, false, 64u) ==
+               MemoryMapCheck::InvalidDescriptor,
+           "zero-sized UEFI backing descriptor is rejected");
+
+    const kernel::dma_memory::PhysicalRange dmaRanges[] = {
+        {0x400000u, 0x2000u}
+    };
+    const RmrrMemorySummary summary = validate_rmrr_memory(
+        table, endpoint_path(), map, dmaRanges, 1u);
+    expect(summary.status == RmrrMemoryStatus::Valid &&
+           summary.regionCount == 2u && summary.relevantCount == 1u &&
+           summary.unrelatedCount == 1u,
+           "RMRR applicability and retained firmware memory are verified per scope");
+
+    std::vector<uint8_t> runtimeMap;
+    append_uefi_descriptor(runtimeMap, kernel::dma_memory::UEFI_MEMORY_RUNTIME_CODE,
+                           0x200000u, 16u,
+                           kernel::dma_memory::UEFI_MEMORY_RUNTIME_ATTRIBUTE);
+    append_uefi_descriptor(runtimeMap, kernel::dma_memory::UEFI_MEMORY_RUNTIME_DATA,
+                           0x300000u, 16u,
+                           kernel::dma_memory::UEFI_MEMORY_RUNTIME_ATTRIBUTE);
+    append_uefi_descriptor(runtimeMap, kernel::dma_memory::UEFI_MEMORY_LOADER_DATA,
+                           0x400000u, 256u);
+    const kernel::dma_memory::MemoryMapView runtimeMemoryMap = {
+        runtimeMap.data(), 3u, 40u};
+    expect(validate_rmrr_memory(table, endpoint_path(), runtimeMemoryMap,
+                                dmaRanges, 1u).status == RmrrMemoryStatus::Valid,
+           "UEFI runtime descriptors satisfy Intel RMRR reserved-memory reporting");
+
+    std::vector<uint8_t> runtimeWithoutAttributeMap;
+    append_uefi_descriptor(runtimeWithoutAttributeMap,
+                           kernel::dma_memory::UEFI_MEMORY_RUNTIME_CODE,
+                           0x200000u, 16u);
+    append_uefi_descriptor(runtimeWithoutAttributeMap,
+                           kernel::dma_memory::UEFI_MEMORY_RESERVED,
+                           0x300000u, 16u);
+    append_uefi_descriptor(runtimeWithoutAttributeMap,
+                           kernel::dma_memory::UEFI_MEMORY_LOADER_DATA,
+                           0x400000u, 256u);
+    const kernel::dma_memory::MemoryMapView runtimeWithoutAttribute = {
+        runtimeWithoutAttributeMap.data(), 3u, 40u};
+    expect(validate_rmrr_memory(table, endpoint_path(), runtimeWithoutAttribute,
+                                dmaRanges, 1u).status ==
+               RmrrMemoryStatus::ReservedMemoryUnproven,
+           "runtime memory type without EFI_MEMORY_RUNTIME is not retained as RMRR");
+
+    std::vector<uint8_t> unsupportedRmrrMap;
+    append_uefi_descriptor(unsupportedRmrrMap,
+                           kernel::dma_memory::UEFI_MEMORY_ACPI_RECLAIM,
+                           0x200000u, 16u);
+    append_uefi_descriptor(unsupportedRmrrMap, kernel::dma_memory::UEFI_MEMORY_RESERVED,
+                           0x300000u, 16u);
+    append_uefi_descriptor(unsupportedRmrrMap,
+                           kernel::dma_memory::UEFI_MEMORY_LOADER_DATA,
+                           0x400000u, 256u);
+    const kernel::dma_memory::MemoryMapView unsupportedRmrrMemoryMap = {
+        unsupportedRmrrMap.data(), 3u, 40u};
+    expect(validate_rmrr_memory(table, endpoint_path(), unsupportedRmrrMemoryMap,
+                                dmaRanges, 1u).status ==
+               RmrrMemoryStatus::ReservedMemoryUnproven,
+           "ACPI reclaim memory does not satisfy Intel RMRR memory-map contract");
+
+    const kernel::dma_memory::PhysicalRange overlappingDma[] = {
+        {0x20F000u, 0x2000u}
+    };
+    expect(validate_rmrr_memory(table, endpoint_path(), map,
+                                overlappingDma, 1u).status ==
+               RmrrMemoryStatus::WorkspaceOverlap,
+           "RMRR overlap with a kernel DMA workspace blocks use");
+
+    std::vector<uint8_t> conventionalMap;
+    append_uefi_descriptor(conventionalMap, 7u, 0x200000u, 16u);
+    append_uefi_descriptor(conventionalMap, 0u, 0x300000u, 16u);
+    append_uefi_descriptor(conventionalMap, 2u, 0x400000u, 256u);
+    const kernel::dma_memory::MemoryMapView unreservedMap = {
+        conventionalMap.data(), 3u, 40u};
+    expect(validate_rmrr_memory(table, endpoint_path(), unreservedMap,
+                                dmaRanges, 1u).status ==
+               RmrrMemoryStatus::ReservedMemoryUnproven,
+           "conventional memory cannot satisfy firmware RMRR ownership");
+
+    const kernel::dma_memory::MemoryMapView missingMap = {nullptr, 0u, 0u};
+    expect(validate_rmrr_memory(table, endpoint_path(), missingMap,
+                                dmaRanges, 1u).status ==
+               RmrrMemoryStatus::MemoryMapUnavailable,
+           "missing UEFI ownership map blocks RMRR qualification");
+    const kernel::dma_memory::PhysicalRange overflowingWorkspace[] = {
+        {UINT64_MAX - 0xFu, 0x40u}
+    };
+    expect(validate_rmrr_memory(table, endpoint_path(), map,
+                                overflowingWorkspace, 1u).status ==
+                RmrrMemoryStatus::InvalidWorkspace,
+            "overflowing DMA workspace range is rejected before RMRR comparison");
+}
+
+void test_direct_physical_dma_contract()
+{
+    using namespace kernel::intel_dmar;
+    DirectDmaEvidence evidence{};
+    evidence.pciIdentityValidated = true;
+    evidence.route = RouteStatus::Resolved;
+    evidence.registers = RegisterStatus::Readable;
+    evidence.translation = TranslationState::DisabledObserved;
+    evidence.rootTable = RootTableState::NotConfigured;
+    evidence.physicalBackingValidated = true;
+    evidence.deviceAddressabilityValidated = true;
+    evidence.rmrrMemory = RmrrMemoryStatus::Valid;
+    evidence.busMasterDisabled = true;
+    evidence.workspaceExclusive = true;
+    expect(evaluate_direct_physical_dma(evidence) == DirectDmaDecision::Verified,
+           "direct physical DMA passes only with all independent proofs");
+
+    evidence.translation = TranslationState::EnabledObserved;
+    expect(evaluate_direct_physical_dma(evidence) ==
+               DirectDmaDecision::BlockedTranslationEnabled,
+           "enabled VT-d blocks direct physical DMA without mappings");
+    evidence.translation = TranslationState::Unknown;
+    expect(evaluate_direct_physical_dma(evidence) ==
+               DirectDmaDecision::BlockedTranslationUnknown,
+           "unknown or conflicting VT-d state blocks direct physical DMA");
+
+    evidence.translation = TranslationState::DisabledObserved;
+    evidence.route = RouteStatus::Ambiguous;
+    expect(evaluate_direct_physical_dma(evidence) ==
+               DirectDmaDecision::BlockedRoutingAmbiguous,
+           "ambiguous DRHD/requester routing blocks direct physical DMA");
+    evidence.route = RouteStatus::Resolved;
+    evidence.pciIdentityValidated = false;
+    expect(evaluate_direct_physical_dma(evidence) == DirectDmaDecision::BlockedIdentity,
+           "incorrect PCI requester identity blocks direct physical DMA");
+    evidence.pciIdentityValidated = true;
+    evidence.physicalBackingValidated = false;
+    expect(evaluate_direct_physical_dma(evidence) ==
+               DirectDmaDecision::BlockedPhysicalBacking,
+           "insufficient or unowned physical backing blocks direct DMA");
+    evidence.physicalBackingValidated = true;
+    evidence.deviceAddressabilityValidated = false;
+    expect(evaluate_direct_physical_dma(evidence) ==
+               DirectDmaDecision::BlockedAddressability,
+           "device address-width failure blocks direct DMA");
+    evidence.deviceAddressabilityValidated = true;
+    evidence.rmrrMemory = RmrrMemoryStatus::ReservedMemoryUnproven;
+    expect(evaluate_direct_physical_dma(evidence) == DirectDmaDecision::BlockedRmrr,
+           "RMRR memory without proven reservation blocks direct DMA");
+    evidence.rmrrMemory = RmrrMemoryStatus::Valid;
+    evidence.busMasterDisabled = false;
+    expect(evaluate_direct_physical_dma(evidence) == DirectDmaDecision::BlockedBusMaster,
+           "unowned preexisting PCI bus mastering blocks direct DMA");
+    evidence.busMasterDisabled = true;
+    evidence.workspaceExclusive = false;
+    expect(evaluate_direct_physical_dma(evidence) ==
+               DirectDmaDecision::BlockedWorkspaceOwnership,
+           "shared controller DMA workspace blocks direct DMA");
+    evidence.workspaceExclusive = true;
+    evidence.rootTable = RootTableState::Invalid;
+    expect(evaluate_direct_physical_dma(evidence) == DirectDmaDecision::BlockedRegisters,
+           "invalid VT-d root-table register state blocks direct DMA");
+}
+
 } // namespace
 
 int main()
@@ -499,6 +726,8 @@ int main()
     test_scope_routing_and_rmrr();
     test_atsr_rhsa_and_unknown_structures();
     test_register_classification_and_dma_gate();
+    test_rmrr_memory_ownership();
+    test_direct_physical_dma_contract();
     if (failures == 0) {
         std::cout << "Intel DMAR and VT-d tests PASS (" << assertions
                   << " assertions)\n";

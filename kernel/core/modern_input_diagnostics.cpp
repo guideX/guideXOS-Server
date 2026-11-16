@@ -224,13 +224,17 @@ static void initialize_controller(ControllerSnapshot* controller)
     controller->vtdUnitIndex = -1;
     controller->vtdRegisterBase = 0u;
     controller->vtdRmrrRequired = false;
+    controller->vtdRmrrRelevantCount = 0u;
+    controller->vtdRmrrUnrelatedCount = 0u;
+    controller->vtdRmrrMemoryStatus = intel_dmar::RmrrMemoryStatus::InvalidDmar;
+    controller->dmaPhysicalBackingStatus = Status::NotAttempted;
+    controller->dmaReservedMemoryStatus = Status::NotAttempted;
     controller->vtdRegisterStatus = intel_dmar::RegisterStatus::NotAttempted;
     controller->vtdTranslationState = intel_dmar::TranslationState::Unknown;
     controller->vtdRootTableState = intel_dmar::RootTableState::Unknown;
     controller->vtdVersion = 0u;
     controller->vtdMaximumGuestAddressWidth = 0u;
     controller->vtdSupportedAdjustedGuestAddressWidths = 0u;
-    controller->vtdGlobalCommand = 0u;
     controller->vtdGlobalStatus = 0u;
     controller->vtdFaultStatus = 0u;
     controller->vtdCapability = 0u;
@@ -238,7 +242,7 @@ static void initialize_controller(ControllerSnapshot* controller)
     controller->vtdRootTableAddress = 0u;
     controller->vtdCapabilityValid = false;
     controller->vtdExtendedCapabilityValid = false;
-    controller->vtdCommandStatusValid = false;
+    controller->vtdTranslationStatusValid = false;
     controller->vtdRootTableValid = false;
     controller->vtdFaultStatusValid = false;
     controller->ac64 = false;
@@ -629,7 +633,6 @@ void record_vtd_registers(int32_t controllerIndex,
         controller->vtdMaximumGuestAddressWidth = registers.maximumGuestAddressWidth;
         controller->vtdSupportedAdjustedGuestAddressWidths =
             registers.supportedAdjustedGuestAddressWidths;
-        controller->vtdGlobalCommand = registers.globalCommand;
         controller->vtdGlobalStatus = registers.globalStatus;
         controller->vtdFaultStatus = registers.faultStatus;
         controller->vtdCapability = registers.capability;
@@ -637,9 +640,37 @@ void record_vtd_registers(int32_t controllerIndex,
         controller->vtdRootTableAddress = registers.rootTableAddress;
         controller->vtdCapabilityValid = registers.capabilityValid;
         controller->vtdExtendedCapabilityValid = registers.extendedCapabilityValid;
-        controller->vtdCommandStatusValid = registers.commandStatusValid;
+        controller->vtdTranslationStatusValid = registers.translationStatusValid;
         controller->vtdRootTableValid = registers.rootTableValid;
         controller->vtdFaultStatusValid = registers.faultStatusValid;
+        publish_snapshot_change_locked();
+    }
+    unlock_snapshot();
+}
+
+void record_vtd_rmrr_memory(int32_t controllerIndex,
+                            const intel_dmar::RmrrMemorySummary& summary)
+{
+    lock_snapshot();
+    ControllerSnapshot* controller = controller_for_index(controllerIndex);
+    if (controller != nullptr) {
+        controller->vtdRmrrRelevantCount = summary.relevantCount;
+        controller->vtdRmrrUnrelatedCount = summary.unrelatedCount;
+        controller->vtdRmrrMemoryStatus = summary.status;
+        publish_snapshot_change_locked();
+    }
+    unlock_snapshot();
+}
+
+void record_dma_memory_validation(int32_t controllerIndex,
+                                  Status physicalBacking,
+                                  Status reservedMemory)
+{
+    lock_snapshot();
+    ControllerSnapshot* controller = controller_for_index(controllerIndex);
+    if (controller != nullptr) {
+        controller->dmaPhysicalBackingStatus = physicalBacking;
+        controller->dmaReservedMemoryStatus = reservedMemory;
         publish_snapshot_change_locked();
     }
     unlock_snapshot();
@@ -1248,6 +1279,20 @@ const char* vtd_root_table_state_name(intel_dmar::RootTableState state)
     }
 }
 
+const char* rmrr_memory_status_name(intel_dmar::RmrrMemoryStatus status)
+{
+    switch (status) {
+        case intel_dmar::RmrrMemoryStatus::Valid: return "VALID";
+        case intel_dmar::RmrrMemoryStatus::InvalidDmar: return "INVALID DMAR";
+        case intel_dmar::RmrrMemoryStatus::InvalidPath: return "INVALID PATH";
+        case intel_dmar::RmrrMemoryStatus::MemoryMapUnavailable: return "MAP UNKNOWN";
+        case intel_dmar::RmrrMemoryStatus::ReservedMemoryUnproven: return "OWNERSHIP UNKNOWN";
+        case intel_dmar::RmrrMemoryStatus::WorkspaceOverlap: return "WORKSPACE OVERLAP";
+        case intel_dmar::RmrrMemoryStatus::InvalidWorkspace: return "WORKSPACE INVALID";
+        default: return "UNKNOWN";
+    }
+}
+
 uint32_t format_ivrs_summary(const Snapshot& snapshot, char* out,
                              uint32_t capacity)
 {
@@ -1352,6 +1397,15 @@ uint32_t format_controller_vtd_route(const ControllerSnapshot& controller,
                                   static_cast<uint32_t>(controller.vtdUnitIndex));
         position = append_text(out, capacity, position,
                                controller.vtdRmrrRequired ? " RMRR=yes" : " RMRR=no");
+        position = append_text(out, capacity, position, " relevant=");
+        position = append_decimal(out, capacity, position,
+                                  controller.vtdRmrrRelevantCount);
+        position = append_text(out, capacity, position, " unrelated=");
+        position = append_decimal(out, capacity, position,
+                                  controller.vtdRmrrUnrelatedCount);
+        position = append_text(out, capacity, position, " memory=");
+        position = append_text(out, capacity, position,
+            rmrr_memory_status_name(controller.vtdRmrrMemoryStatus));
     }
     return position;
 }
@@ -1371,6 +1425,9 @@ uint32_t format_controller_vtd_registers(const ControllerSnapshot& controller,
         position = append_text(out, capacity, position, " TES=");
         position = append_text(out, capacity, position,
             vtd_translation_state_name(controller.vtdTranslationState));
+        position = append_text(out, capacity, position, " GSTS.TES=");
+        position = append_text(out, capacity, position,
+            (controller.vtdGlobalStatus & (1u << 31u)) != 0u ? "1" : "0");
         position = append_text(out, capacity, position, " root=");
         position = append_text(out, capacity, position,
             vtd_root_table_state_name(controller.vtdRootTableState));

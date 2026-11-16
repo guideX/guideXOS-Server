@@ -265,13 +265,17 @@ struct ControllerSnapshot {
     int32_t vtdUnitIndex;
     uint64_t vtdRegisterBase;
     bool vtdRmrrRequired;
+    uint32_t vtdRmrrRelevantCount;
+    uint32_t vtdRmrrUnrelatedCount;
+    intel_dmar::RmrrMemoryStatus vtdRmrrMemoryStatus;
+    Status dmaPhysicalBackingStatus;
+    Status dmaReservedMemoryStatus;
     intel_dmar::RegisterStatus vtdRegisterStatus;
     intel_dmar::TranslationState vtdTranslationState;
     intel_dmar::RootTableState vtdRootTableState;
     uint8_t vtdVersion;
     uint8_t vtdMaximumGuestAddressWidth;
     uint8_t vtdSupportedAdjustedGuestAddressWidths;
-    uint32_t vtdGlobalCommand;
     uint32_t vtdGlobalStatus;
     uint32_t vtdFaultStatus;
     uint64_t vtdCapability;
@@ -279,7 +283,7 @@ struct ControllerSnapshot {
     uint64_t vtdRootTableAddress;
     bool vtdCapabilityValid;
     bool vtdExtendedCapabilityValid;
-    bool vtdCommandStatusValid;
+    bool vtdTranslationStatusValid;
     bool vtdRootTableValid;
     bool vtdFaultStatusValid;
     bool ac64;
@@ -403,6 +407,11 @@ void record_vtd_route(int32_t controllerIndex, uint16_t segment,
                       uint64_t registerBase, bool rmrrRequired);
 void record_vtd_registers(int32_t controllerIndex,
                           const intel_dmar::RegisterSnapshot& registers);
+void record_vtd_rmrr_memory(int32_t controllerIndex,
+                            const intel_dmar::RmrrMemorySummary& summary);
+void record_dma_memory_validation(int32_t controllerIndex,
+                                  Status physicalBacking,
+                                  Status reservedMemory);
 void record_scratchpad_allocation(int32_t controllerIndex, uint32_t capacity,
                                   Status status, const char* reason);
 void record_iommu_route(int32_t controllerIndex, uint16_t segment,
@@ -478,6 +487,7 @@ const char* dmar_route_status_name(intel_dmar::RouteStatus status);
 const char* vtd_register_status_name(intel_dmar::RegisterStatus status);
 const char* vtd_translation_state_name(intel_dmar::TranslationState state);
 const char* vtd_root_table_state_name(intel_dmar::RootTableState state);
+const char* rmrr_memory_status_name(intel_dmar::RmrrMemoryStatus status);
 uint32_t format_ivrs_summary(const Snapshot& snapshot, char* out,
                              uint32_t capacity);
 uint32_t format_dmar_summary(const Snapshot& snapshot, char* out,

@@ -975,6 +975,33 @@ void test_control_request()
     }
 }
 
+void test_controller_state_change_preconditions()
+{
+    expect(!xhci_controller_state_change_allowed(
+               false, true, true, true),
+           "controller stays untouched when DMA is not verified");
+    expect(!xhci_controller_state_change_allowed(
+               true, false, true, true),
+           "firmware ownership must resolve before controller mutation");
+    expect(!xhci_controller_state_change_allowed(
+               true, true, false, true),
+           "controller mutation requires an exclusive DMA workspace");
+    expect(!xhci_controller_state_change_allowed(
+               true, true, true, false),
+           "unselected controller cannot be halted or reset");
+    expect(xhci_controller_state_change_allowed(
+               true, true, true, true),
+           "state changes are permitted after every controller precondition passes");
+    expect(!xhci_pci_bus_master_disable_allowed(false, true, true),
+           "bus mastering remains enabled when halt status cannot be observed");
+    expect(!xhci_pci_bus_master_disable_allowed(true, false, true),
+           "bus mastering remains enabled until the controller reports halted");
+    expect(!xhci_pci_bus_master_disable_allowed(true, true, false),
+           "bus mastering remains enabled while Run/Stop is still set");
+    expect(xhci_pci_bus_master_disable_allowed(true, true, true),
+           "bus mastering can be cleared after bounded halt is verified");
+}
+
 } // namespace
 
 int main()
@@ -997,6 +1024,7 @@ int main()
     test_scratchpad_dma_plan();
     test_scratchpad_array_validation();
     test_control_request();
+    test_controller_state_change_preconditions();
 
     if (g_failures == 0) {
         std::cout << "xHCI bring-up tests PASS (" << g_assertions

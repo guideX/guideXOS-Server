@@ -1005,6 +1005,13 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             kernel::usb::xhci::controller::set_acpi_dma_remapping_state(
                 (bootinfo->Flags & guideXOS::BOOTINFO_FLAG_ACPI_REMAP_SCAN_VALID) != 0u,
                 (bootinfo->Flags & guideXOS::BOOTINFO_FLAG_ACPI_REMAP_TABLE_PRESENT) != 0u);
+            kernel::usb::xhci::controller::set_uefi_memory_map(
+                (bootinfo->Flags & (1u << 0u)) != 0u
+                    ? reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(
+                          bootinfo->MemoryMap))
+                    : nullptr,
+                bootinfo->MemoryMapEntryCount,
+                bootinfo->MemoryMapDescriptorSize);
         }
         record_input3d_boot_milestone(
             kernel::modern_input_diagnostics::BootStage::PciDiscoveryEntered);

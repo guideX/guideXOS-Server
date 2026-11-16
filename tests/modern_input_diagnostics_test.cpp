@@ -820,11 +820,20 @@ void test_intel_diagnostic_publication_and_formatting()
     record_vtd_route(second, 0u, 0u, 21u, 0u,
                      kernel::intel_dmar::RouteStatus::NotCovered, -1,
                      0u, false);
+    kernel::intel_dmar::RmrrMemorySummary rmrrSummary = {};
+    rmrrSummary.status = kernel::intel_dmar::RmrrMemoryStatus::Valid;
+    rmrrSummary.regionCount = 3u;
+    rmrrSummary.relevantCount = 1u;
+    rmrrSummary.unrelatedCount = 2u;
+    record_vtd_rmrr_memory(intel, rmrrSummary);
+    record_dma_memory_validation(intel, Status::Pass, Status::Pass);
     const kernel::intel_dmar::RegisterSnapshot registers =
         kernel::intel_dmar::classify_registers(
             true, 0x10u, (1ULL << 16u) | (1ULL << 8u), 0u,
-            0u, 1u << 31u, 0x1000u, 0u);
+            1u << 31u, 0x1000u, 0u);
     record_vtd_registers(intel, registers);
+    require(registers.translationStatusValid,
+            "VT-d translation state comes from readable GSTS.TES");
     record_dma_safety("DEVICE_DMA_MAPPING_NOT_ESTABLISHED", false);
     record_stage(intel, Stage::DmaPrerequisites, Status::Blocked,
                  0u, false, 0u, false, 0u, 0u, 0u, 0u, false,
@@ -875,15 +884,22 @@ void test_intel_diagnostic_publication_and_formatting()
     format_controller_vtd_route(snapshot.controllers[intel], route, sizeof(route));
     require(std::strstr(route, "00:14.0") != nullptr &&
             std::strstr(route, "VT-d=RESOLVED") != nullptr &&
-            std::strstr(route, "unit=1") != nullptr,
-            "VT-d route formatting includes the Intel controller and unit");
+            std::strstr(route, "unit=1") != nullptr &&
+            std::strstr(route, "relevant=1") != nullptr &&
+            std::strstr(route, "unrelated=2") != nullptr &&
+            std::strstr(route, "memory=VALID") != nullptr,
+            "VT-d route formatting reports controller, unit, RMRR scopes, and ownership");
     char registerText[128];
     format_controller_vtd_registers(snapshot.controllers[intel], registerText,
                                     sizeof(registerText));
     require(std::strstr(registerText, "READABLE") != nullptr &&
             std::strstr(registerText, "TES=ENABLED OBSERVED") != nullptr &&
+            std::strstr(registerText, "GSTS.TES=1") != nullptr &&
             std::strstr(registerText, "root=CONFIGURED") != nullptr,
             "VT-d register formatter distinguishes state from DMA mapping");
+    require(snapshot.controllers[intel].dmaPhysicalBackingStatus == Status::Pass &&
+            snapshot.controllers[intel].dmaReservedMemoryStatus == Status::Pass,
+            "physical backing and reserved-memory outcomes remain separate diagnostics");
     char tiny[8];
     format_controller_vtd_registers(snapshot.controllers[intel], tiny, sizeof(tiny));
     require(tiny[sizeof(tiny) - 1u] == '\0',

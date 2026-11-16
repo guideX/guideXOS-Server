@@ -32,16 +32,16 @@ if ($SkipPciAudioForInput3D -and (-not $ModernInputDiagnostics -or $Arch -ne "am
 }
 
 $BuildIdentity = if ($SkipPciAudioForInput3D) {
-    "GXOS-INPUT3D-R7-AUDIO-BYPASS"
+    "GXOS-INPUT3D-R8-AUDIO-BYPASS"
 } elseif ($ModernInputDiagnostics) {
-    "GXOS-INPUT3D-R7"
+    "GXOS-INPUT3D-R8"
 } else {
     "GXOS-DEVELOPMENT"
 }
 $BuildProbeId = if ($SkipPciAudioForInput3D) {
-    "INPUT3D-R7-AUDIO-BYPASS-20261107-01"
+    "INPUT3D-R8-AUDIO-BYPASS-20261115-01"
 } elseif ($ModernInputDiagnostics) {
-    "INPUT3D-R7-20261107-01"
+    "INPUT3D-R8-20261115-01"
 } else {
     "GXOS-DEV"
 }

@@ -23,6 +23,8 @@
 #include "include/kernel/modern_input_diagnostics.h"
 #include "include/kernel/mmio.h"
 #include "include/kernel/serial_debug.h"
+#include "include/kernel/dma_memory.h"
+#include "include/kernel/intel_vtd.h"
 
 namespace kernel {
 namespace usb {
@@ -131,6 +133,7 @@ static void serial_puts(const char* s)
 // ================================================================
 
 static bool s_initialized = false;
+static bool s_initializationAttempted = false;
 static bool s_running = false;
 static XhciControllerState s_state = XhciControllerState::Idle;
 static XhciOwnershipState s_ownership = XhciOwnershipState::NoCapability;
@@ -144,11 +147,13 @@ static uint8_t s_dev = 0;
 static uint8_t s_func = 0;
 static int32_t s_diagnosticControllerIndex = -1;
 static bool s_dmaReady = false;
+static bool s_dmaWorkspaceExclusive = false;
 static uint8_t s_selectedPort = 0u;
 static XhciCapabilities s_caps = {};
 static uint8_t s_portCount = 0;
 static bool s_acpiDmaRemappingScanValid = false;
 static bool s_acpiDmaRemappingTablePresent = false;
+static dma_memory::MemoryMapView s_uefiMemoryMap = {};
 
 // DMA structures (statically allocated for INPUT2)
 static const uint32_t COMMAND_RING_SIZE = 64;
@@ -261,6 +266,18 @@ static void dma_read_barrier()
     asm volatile("lfence" ::: "memory");
 }
 
+static bool append_dma_range(dma_memory::PhysicalRange* ranges,
+                             uint32_t capacity, uint32_t* count,
+                             uint64_t base, uint64_t length)
+{
+    if (ranges == nullptr || count == nullptr || *count >= capacity ||
+        length == 0u || base > UINT64_MAX - length) return false;
+    ranges[*count].base = base;
+    ranges[*count].length = length;
+    ++(*count);
+    return true;
+}
+
 // ================================================================
 // DMA address translation (Section 12)
 //
@@ -317,7 +334,8 @@ static void diagnostic_stage(modern_input_diagnostics::Stage stage,
         const bool directDmaVerified = status == modern_input_diagnostics::Status::Pass;
         modern_input_diagnostics::record_dma_safety(
             directDmaVerified
-                ? "DIRECT_PHYSICAL_DMA_VERIFIED_NO_REMAP_TABLE"
+                ? (detail != nullptr && detail[0] != '\0'
+                    ? detail : "DMA_VERIFIED_DIRECT_PHYSICAL")
                 : (detail != nullptr && detail[0] != '\0'
                     ? detail : "DEVICE_DMA_MAPPING_NOT_ESTABLISHED"),
             directDmaVerified);
@@ -406,6 +424,9 @@ static bool validate_dma_prerequisites()
         s_scratchpadBufferAddresses[i] = 0u;
         s_scratchpadArray[i] = 0u;
     }
+    uint64_t scratchpadStoragePhysical = 0u;
+    uint32_t scratchpadStorageBytes = 0u;
+    uint32_t scratchpadArrayBytes = 0u;
 
     const uint32_t pageSizeBitmap = op_read32(XHCI_OP_PAGESIZE);
     XhciScratchpadPlan scratchpadPlan = {};
@@ -518,11 +539,10 @@ static bool validate_dma_prerequisites()
             return false;
         }
         uint8_t* storage = s_scratchpadStorage + storageOffset;
-        uint64_t storagePhysical = 0u;
         if (!dma_region_physical_alignment(storage,
                                            scratchpadPlan.storageBytes,
                                            s_scratchpadPageSize,
-                                           &storagePhysical)) {
+                                           &scratchpadStoragePhysical)) {
             modern_input_diagnostics::record_scratchpad_allocation(
                 s_diagnosticControllerIndex, XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
                 modern_input_diagnostics::Status::Blocked,
@@ -533,23 +553,24 @@ static bool validate_dma_prerequisites()
                              "SCRATCHPAD_BACKING_NOT_CONTIGUOUS_ALIGNED_OR_ADDRESSABLE");
             return false;
         }
+        scratchpadStorageBytes = scratchpadPlan.storageBytes;
         for (uint32_t byte = 0u; byte < scratchpadPlan.storageBytes; ++byte) {
             storage[byte] = 0u;
         }
         for (uint32_t i = 0u; i < s_scratchpadCount; ++i) {
-            s_scratchpadBufferAddresses[i] = storagePhysical +
+            s_scratchpadBufferAddresses[i] = scratchpadStoragePhysical +
                 static_cast<uint64_t>(i) * s_scratchpadPageSize;
         }
-        uint32_t arrayBytes = 0u;
         if (!build_xhci_scratchpad_array(
                 s_scratchpadCount, s_scratchpadPageSize,
                 s_scratchpadBufferAddresses, XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
                 s_caps.ac64, s_scratchpadArray,
                 XHCI_MAX_DMA_SCRATCHPAD_BUFFERS) ||
             !xhci_scratchpad_array_bytes(
-                s_scratchpadCount, XHCI_MAX_DMA_SCRATCHPAD_BUFFERS, &arrayBytes) ||
+                s_scratchpadCount, XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
+                &scratchpadArrayBytes) ||
             !dma_region_address(s_scratchpadArray,
-                                arrayBytes, 64u,
+                                scratchpadArrayBytes, 64u,
                                 &s_dmaAddresses.scratchpadArray)) {
             for (uint32_t i = 0u; i < XHCI_MAX_DMA_SCRATCHPAD_BUFFERS; ++i) {
                 s_scratchpadArray[i] = 0u;
@@ -586,6 +607,109 @@ static bool validate_dma_prerequisites()
         return false;
     }
 
+    dma_memory::PhysicalRange workspace[10] = {};
+    uint32_t workspaceCount = 0u;
+    bool workspaceRangesValid =
+        append_dma_range(workspace, 10u, &workspaceCount,
+                         s_dmaAddresses.commandRing, sizeof(s_commandRing)) &&
+        append_dma_range(workspace, 10u, &workspaceCount,
+                         s_dmaAddresses.eventRing, sizeof(s_eventRing)) &&
+        append_dma_range(workspace, 10u, &workspaceCount,
+                         s_dmaAddresses.erst, sizeof(s_erst)) &&
+        append_dma_range(workspace, 10u, &workspaceCount,
+                         s_dmaAddresses.dcbaa, sizeof(s_dcbaa)) &&
+        append_dma_range(workspace, 10u, &workspaceCount,
+                         s_dmaAddresses.inputCtx, sizeof(s_inputCtx)) &&
+        append_dma_range(workspace, 10u, &workspaceCount,
+                         s_dmaAddresses.deviceCtx, sizeof(s_deviceCtx)) &&
+        append_dma_range(workspace, 10u, &workspaceCount,
+                         s_dmaAddresses.ep0Ring, sizeof(s_ep0Ring)) &&
+        append_dma_range(workspace, 10u, &workspaceCount,
+                         s_dmaAddresses.controlBuf, sizeof(s_controlBuf));
+    if (workspaceRangesValid && s_scratchpadCount != 0u) {
+        workspaceRangesValid =
+            append_dma_range(workspace, 10u, &workspaceCount,
+                             scratchpadStoragePhysical, scratchpadStorageBytes) &&
+            append_dma_range(workspace, 10u, &workspaceCount,
+                             s_dmaAddresses.scratchpadArray, scratchpadArrayBytes);
+    }
+    if (!workspaceRangesValid) {
+        diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
+                         modern_input_diagnostics::Status::Blocked,
+                         workspaceCount, true, 0u, false,
+                         0u, 0u, 0u, 0u, false,
+                         "DMA_WORKSPACE_RANGE_INVALID");
+        return false;
+    }
+
+    // A prior firmware or boot stage may have left PCI bus mastering enabled.
+    // Qualification requires observing it disabled before any OS-owned DMA
+    // structures are handed to the controller.
+    s_pciCommand = pci_read16(s_bus, s_dev, s_func, 0x04u);
+    if ((s_pciCommand & 0x0004u) != 0u) {
+        diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
+                         modern_input_diagnostics::Status::Blocked,
+                         s_pciCommand, true, 0u, false,
+                         0u, 0u, 0u, 0u, false,
+                         "PCI_BUS_MASTER_ALREADY_ENABLED_BEFORE_DMA_QUALIFICATION");
+        serial_puts("[XHCI] DMA blocked: PCI bus mastering was already enabled\n");
+        return false;
+    }
+
+    modern_input_diagnostics::Snapshot snapshot = {};
+    modern_input_diagnostics::copy_snapshot(&snapshot);
+    const bool intelDmarDirectCandidate =
+        snapshot.platform == modern_input_diagnostics::Platform::Intel &&
+        snapshot.dmarTablePresent;
+    if (intelDmarDirectCandidate) {
+        const bool mapBackingValid = dma_memory::valid_view(s_uefiMemoryMap) &&
+            workspaceCount != 0u;
+        bool allKernelOwned = mapBackingValid;
+        for (uint32_t i = 0u; allKernelOwned && i < workspaceCount; ++i) {
+            allKernelOwned = dma_memory::range_has_ownership(
+                s_uefiMemoryMap, workspace[i].base, workspace[i].length, false,
+                64u) ==
+                    dma_memory::MemoryMapCheck::Valid;
+        }
+        intel_dmar::RmrrMemorySummary rmrrSummary = {};
+        // Re-read immediately before admission; the Intel qualifier also
+        // verifies the live command register while checking requester identity.
+        s_pciCommand = pci_read16(s_bus, s_dev, s_func, 0x04u);
+        const bool busMasterDisabled = (s_pciCommand & 0x0004u) == 0u;
+        const bool workspaceExclusive = s_dmaWorkspaceExclusive &&
+            s_diagnosticControllerIndex == snapshot.selectedControllerIndex;
+        const intel_dmar::DirectDmaDecision decision =
+            intel_vtd::qualify_direct_physical_dma(
+                s_diagnosticControllerIndex, s_uefiMemoryMap,
+                workspace, workspaceCount, busMasterDisabled,
+                true, workspaceExclusive, &rmrrSummary);
+        modern_input_diagnostics::record_dma_memory_validation(
+            s_diagnosticControllerIndex,
+            allKernelOwned ? modern_input_diagnostics::Status::Pass
+                           : modern_input_diagnostics::Status::Blocked,
+            rmrrSummary.status == intel_dmar::RmrrMemoryStatus::Valid
+                ? modern_input_diagnostics::Status::Pass
+                : modern_input_diagnostics::Status::Blocked);
+        if (decision != intel_dmar::DirectDmaDecision::Verified) {
+            const char* reason = intel_dmar::direct_dma_decision_name(decision);
+            diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
+                             modern_input_diagnostics::Status::Blocked,
+                             s_pciCommand, true, 0u, false,
+                             0u, 0u, 0u, 0u, false, reason);
+            serial_puts("[XHCI] DMA blocked: ");
+            serial_puts(reason);
+            serial_puts("\n");
+            return false;
+        }
+        diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
+                         modern_input_diagnostics::Status::Pass, 0u, false,
+                         0u, false, 0u, 0u, 0u, 0u, false,
+                         "DMA_VERIFIED_DIRECT_PHYSICAL");
+        s_dmaReady = true;
+        serial_puts("[XHCI] DMA verified: Intel direct physical contract passed\n");
+        return true;
+    }
+
     const XhciDeviceDmaTranslationEvidence translationEvidence =
         !s_acpiDmaRemappingScanValid
             ? XhciDeviceDmaTranslationEvidence::Unknown
@@ -593,8 +717,6 @@ static bool validate_dma_prerequisites()
                 ? XhciDeviceDmaTranslationEvidence::AcpiRemappingTablePresent
                 : XhciDeviceDmaTranslationEvidence::NoAcpiRemappingTable);
     if (!xhci_device_dma_translation_verified(translationEvidence)) {
-        const bool remappingTablePresent = translationEvidence ==
-            XhciDeviceDmaTranslationEvidence::AcpiRemappingTablePresent;
         const char* reason = dma_translation_block_reason();
         diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
                          modern_input_diagnostics::Status::Blocked,
@@ -610,7 +732,7 @@ static bool validate_dma_prerequisites()
     diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
                      modern_input_diagnostics::Status::Pass, 0u, false,
                      0u, false, 0u, 0u, 0u, 0u, false,
-                     "DIRECT_PHYSICAL_DMA_VERIFIED_NO_REMAP_TABLE");
+                     "DMA_VERIFIED_DIRECT_PHYSICAL_NO_REMAP_TABLE");
     serial_puts("[XHCI] DMA regions and scratchpads validated; direct physical DMA selected\n");
     return true;
 }
@@ -852,6 +974,24 @@ static bool enable_pci_memory_space(const XhciBarInfo& bar)
     return (command & 0x0002u) != 0u;
 }
 
+static bool enable_pci_bus_master()
+{
+    if (!s_dmaReady || !s_dmaWorkspaceExclusive ||
+        (s_ownership != XhciOwnershipState::NoCapability &&
+         s_ownership != XhciOwnershipState::OsOwned) ||
+        s_state != XhciControllerState::Reset) {
+        return false;
+    }
+    uint16_t command = pci_read16(s_bus, s_dev, s_func, 0x04u);
+    if ((command & 0x0004u) == 0u) {
+        pci_write16(s_bus, s_dev, s_func, 0x04u,
+                    static_cast<uint16_t>(command | 0x0004u));
+        command = pci_read16(s_bus, s_dev, s_func, 0x04u);
+    }
+    s_pciCommand = command;
+    return (command & 0x0004u) != 0u;
+}
+
 static bool map_initial_capabilities(const XhciBarInfo& bar)
 {
     static const uint64_t kInitialCapabilitySpan =
@@ -966,6 +1106,14 @@ static bool parse_capabilities()
 
 static bool acquire_ownership()
 {
+    if (!s_dmaReady || !s_dmaWorkspaceExclusive ||
+        s_diagnosticControllerIndex < 0) {
+        diagnostic_stage(modern_input_diagnostics::Stage::BiosOwnership,
+                         modern_input_diagnostics::Status::Blocked,
+                         0u, false, 0u, false, 0u, 0u, 0u, 0u, false,
+                         "DMA_AND_EXCLUSIVE_WORKSPACE_REQUIRED_BEFORE_OWNERSHIP");
+        return false;
+    }
     if (s_caps.xecp == 0u) {
         s_ownership = XhciOwnershipState::NoCapability;
         modern_input_diagnostics::record_ownership_status(
@@ -1062,8 +1210,25 @@ static bool acquire_ownership()
 // Controller halt
 // ================================================================
 
+static bool controller_mutation_preconditions()
+{
+    const bool ownershipResolved =
+        s_ownership == XhciOwnershipState::NoCapability ||
+        s_ownership == XhciOwnershipState::OsOwned;
+    return xhci_controller_state_change_allowed(
+        s_dmaReady, ownershipResolved, s_dmaWorkspaceExclusive,
+        s_diagnosticControllerIndex >= 0);
+}
+
 static bool halt_controller()
 {
+    if (!controller_mutation_preconditions()) {
+        diagnostic_stage(modern_input_diagnostics::Stage::ControllerHalt,
+                         modern_input_diagnostics::Status::Blocked,
+                         0u, false, 0u, false, 0u, 0u, 0u, 0u, false,
+                         "DMA_OWNERSHIP_OR_WORKSPACE_PRECONDITION_FAILED");
+        return false;
+    }
     uint32_t usbcmd = op_read32(XHCI_OP_USBCMD);
     if (!(usbcmd & XHCI_USBCMD_RUN_STOP)) {
         // Already halted
@@ -1103,6 +1268,13 @@ static bool halt_controller()
 
 static bool reset_controller()
 {
+    if (!controller_mutation_preconditions()) {
+        diagnostic_stage(modern_input_diagnostics::Stage::ControllerReset,
+                         modern_input_diagnostics::Status::Blocked,
+                         0u, false, 0u, false, 0u, 0u, 0u, 0u, false,
+                         "DMA_OWNERSHIP_OR_WORKSPACE_PRECONDITION_FAILED");
+        return false;
+    }
     // Ensure halted first
     if (s_state != XhciControllerState::Halted) {
         if (!halt_controller()) {
@@ -1264,12 +1436,50 @@ static bool configure_max_slots()
     return true;
 }
 
+// If Run/Stop fails to reach Running, preserve the first failure while making
+// one bounded attempt to halt before clearing PCI bus mastering. The xHCI spec
+// requires Run/Stop=0 and HCHalted=1 before BME is cleared.
+static void quiesce_after_start_failure()
+{
+    const uint32_t command = op_read32(XHCI_OP_USBCMD);
+    op_write32(XHCI_OP_USBCMD, command & ~XHCI_USBCMD_RUN_STOP);
+    const bool haltObservedWithinBound = wait_for_halted(1000u);
+    const bool halted = (op_read32(XHCI_OP_USBSTS) & XHCI_USBSTS_HCHALTED) != 0u;
+    const bool runStopClear =
+        (op_read32(XHCI_OP_USBCMD) & XHCI_USBCMD_RUN_STOP) == 0u;
+    if (!xhci_pci_bus_master_disable_allowed(
+            haltObservedWithinBound, halted, runStopClear)) {
+        serial_puts("[XHCI] post-start-failure quiesce=TIMEOUT bus-master=LEFT_ENABLED\n");
+        return;
+    }
+
+    uint16_t pciCommand = pci_read16(s_bus, s_dev, s_func, 0x04u);
+    if ((pciCommand & 0x0004u) != 0u) {
+        pci_write16(s_bus, s_dev, s_func, 0x04u,
+                    static_cast<uint16_t>(pciCommand & ~0x0004u));
+        pciCommand = pci_read16(s_bus, s_dev, s_func, 0x04u);
+    }
+    s_pciCommand = pciCommand;
+    serial_puts((pciCommand & 0x0004u) == 0u
+        ? "[XHCI] post-start-failure quiesce=HALTED bus-master=DISABLED\n"
+        : "[XHCI] post-start-failure quiesce=HALTED bus-master=ENABLE_FAILED\n");
+}
+
 // ================================================================
 // Start controller
 // ================================================================
 
 static bool start_controller()
 {
+    if (!controller_mutation_preconditions() ||
+        (pci_read16(s_bus, s_dev, s_func, 0x04u) & 0x0004u) == 0u) {
+        diagnostic_stage(modern_input_diagnostics::Stage::ControllerRunning,
+                         modern_input_diagnostics::Status::Blocked,
+                         pci_read16(s_bus, s_dev, s_func, 0x04u), true,
+                         0u, false, 0u, 0u, 0u, 0u, false,
+                         "DMA_OWNERSHIP_OR_PCI_BUS_MASTER_PRECONDITION_FAILED");
+        return false;
+    }
     // Set Run/Stop
     op_write32(XHCI_OP_USBCMD, op_read32(XHCI_OP_USBCMD) | XHCI_USBCMD_RUN_STOP);
 
@@ -1280,6 +1490,7 @@ static bool start_controller()
                          modern_input_diagnostics::Status::Timeout,
                          op_read32(XHCI_OP_USBCMD), true,
                          op_read32(XHCI_OP_USBSTS), true);
+        quiesce_after_start_failure();
         return false;
     }
 
@@ -1974,9 +2185,11 @@ bool init()
     serial_puts(" snapshot=");
     kernel::serial::put_hex64(bootSnapshot.snapshotSequence);
     serial_puts("\n");
-    if (s_initialized) {
+    if (s_initialized || s_initializationAttempted) {
         return s_running;
     }
+    s_initializationAttempted = true;
+    s_dmaWorkspaceExclusive = false;
 
     serial_puts("[XHCI] init begin\n");
 
@@ -1985,6 +2198,11 @@ bool init()
         serial_puts("[XHCI] PCI device not found\n");
         return false;
     }
+    modern_input_diagnostics::Snapshot selectedSnapshot = {};
+    modern_input_diagnostics::copy_snapshot(&selectedSnapshot);
+    s_dmaWorkspaceExclusive =
+        s_diagnosticControllerIndex >= 0 &&
+        s_diagnosticControllerIndex == selectedSnapshot.selectedControllerIndex;
     serial_puts("[XHCI] PCI device found\n");
 
     s_pciBar0 = pci_read32(s_bus, s_dev, s_func, 0x10u);
@@ -1997,6 +2215,18 @@ bool init()
     modern_input_diagnostics::record_mmio_configuration(
         s_diagnosticControllerIndex, s_pciBar0, s_pciBar1, s_pciCommand,
         barType, barIoSpace, barIs64, barPrefetchable);
+
+    // Do not enable MMIO decoding on a controller that arrives with bus
+    // mastering active. Firmware may still own it or have live DMA in flight.
+    if ((s_pciCommand & 0x0004u) != 0u) {
+        diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
+                         modern_input_diagnostics::Status::Blocked,
+                         s_pciCommand, true, 0u, false,
+                         0u, 0u, 0u, 0u, false,
+                         "PCI_BUS_MASTER_ALREADY_ENABLED_BEFORE_DMA_QUALIFICATION");
+        serial_puts("[XHCI] DMA blocked: PCI bus mastering was already enabled\n");
+        return false;
+    }
 
     static const uint64_t kInitialCapabilitySpan =
         static_cast<uint64_t>(XHCI_CAP_DWORD_COUNT) * sizeof(uint32_t);
@@ -2075,6 +2305,17 @@ bool init()
     init_interrupter();
     diagnostic_stage(modern_input_diagnostics::Stage::RingInitialization,
                      modern_input_diagnostics::Status::Pass);
+
+    if (!enable_pci_bus_master()) {
+        diagnostic_stage(modern_input_diagnostics::Stage::RingInitialization,
+                         modern_input_diagnostics::Status::Blocked,
+                         pci_read16(s_bus, s_dev, s_func, 0x04u), true,
+                         0u, false, 0u, 0u, 0u, 0u, false,
+                         "PCI_BUS_MASTER_ENABLE_FAILED_AFTER_DMA_VALIDATION");
+        serial_puts("[XHCI] PCI bus mastering blocked after DMA/ring setup\n");
+        return false;
+    }
+    s_pciCommand = pci_read16(s_bus, s_dev, s_func, 0x04u);
 
     if (!start_controller()) {
         return false;
@@ -2232,6 +2473,17 @@ void set_acpi_dma_remapping_state(bool scanValid, bool remappingTablePresent)
 {
     s_acpiDmaRemappingScanValid = scanValid;
     s_acpiDmaRemappingTablePresent = scanValid && remappingTablePresent;
+}
+
+void set_uefi_memory_map(const uint8_t* bytes, uint64_t entryCount,
+                         uint64_t descriptorSize)
+{
+    s_uefiMemoryMap.bytes = bytes;
+    s_uefiMemoryMap.entryCount = entryCount;
+    s_uefiMemoryMap.descriptorSize = descriptorSize;
+    if (!dma_memory::valid_view(s_uefiMemoryMap)) {
+        s_uefiMemoryMap = {};
+    }
 }
 
 // Enumerate the first connected USB device: port reset, Enable Slot,

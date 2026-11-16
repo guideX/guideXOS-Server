@@ -600,10 +600,144 @@ Do not retry controller halt/reset while DMA eligibility remains blocked. After
 SARAH_DT evidence is recorded, repeat the same comparison on LEON2_RDT; do not
 assume its firmware tables match because the chassis model is the same.
 
-R7 does not implement USB HID delivery, reconfigure VT-d, alter BIOS settings,
-disable audio in production, or claim physical acceptance. The bounded 34-page
-static pool, single-active-controller workspace, segment-0 PCI path, lack of
-an Intel DMA-domain mapper, and absent physical raw-register evidence define
-the next work. R8 should first implement a reviewed per-controller DMA-domain
-and IOVA mapping/lifetime contract with RMRR handling and invalidation; only
-then can a later physical run consider xHCI halt/reset and DMA.
+R7 did not implement USB HID delivery, reconfigure VT-d, alter BIOS settings,
+disable audio in production, or claim physical acceptance. R8 adds conditional
+direct-physical qualification; it does not enable Intel IOVA domains. See the
+R8 section below for the remaining physical and mapping limits.
+
+## INPUT3D-R8: conditional Intel direct-physical DMA
+
+R8 replaces the R7 refusal for Intel hardware whose validated DMAR route
+reports translation disabled. The former first blocker was
+`VTD_TRANSLATION_DISABLED_MAPPING_UNAVAILABLE`. That reason did not establish
+that direct DMA was safe; it identified that R7 had no device-visible address
+contract. R8 adds a narrow admission contract and continues to block whenever
+one of its independent proofs is missing.
+
+### Specification basis
+
+- The reviewed Intel VT-d source is the **Intel Virtualization Technology for
+  Directed I/O Architecture Specification, Revision 4.1, Order Number
+  D51397-016**. Sections 8.1–8.3 describe remapping-unit scope and PCI topology;
+  section 8.4 defines RMRR reporting and requires its memory-map range to be
+  reported reserved or as EFI runtime; sections 11.4.4.1 and 11.4.4.2 define
+  GCMD and GSTS. GCMD.TE is write-only and a read is undefined; GSTS.TES is the
+  read-only translation status. R8 therefore bases the observed state only on
+  GSTS.TES and no longer reads GCMD. [Intel VT-d Architecture Specification,
+  Rev. 4.1](https://cdrdv2-public.intel.com/774206/vt-directed-io-spec%20.pdf)
+- The reviewed xHCI source is the **Intel xHCI Requirements Specification,
+  Revision 1.2, May 2019**. Relevant sections include 4.2 (initialization),
+  4.20 (scratchpads), 4.21.2 (PCI Bus Master Enable), 4.22.1 (pre-OS handoff),
+  5.3.4 (HCSPARAMS2), 5.4.3 (PAGESIZE), 5.4.5–5.4.6 (CRCR/DCBAAP), 5.5.2.3
+  (event-ring registers), 6.1 (DCBAA), 6.3 (TRB rings), 6.5 (ERST), and 6.6
+  (Scratchpad Buffer Array). [Intel xHCI Requirements Specification,
+  Rev. 1.2](https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/extensible-host-controler-interface-usb-xhci.pdf)
+- The reviewed firmware contract is **UEFI Specification 2.10 Errata A**,
+  sections 7.2.1 (page allocation), 7.2.3 (`GetMemoryMap` and descriptor
+  stride), and 7.4.6 (`ExitBootServices`). The loader passes the descriptor
+  stride and map into BootInfo, and the kernel validates the stride rather
+  than assuming a fixed descriptor size. [UEFI 2.10 Errata A, Boot Services](https://uefi.org/specs/UEFI/2.10_A/07_Services_Boot_Services.html)
+
+### Admission contract
+
+`DMA_VERIFIED_DIRECT_PHYSICAL` is published only after all of these conditions
+pass:
+
+1. DMAR parsed and checksummed as valid; the selected xHCI has an unambiguous
+   segment-0 DRHD route. Unsupported scopes/topology, uncovered or ambiguous
+   routes, and nonzero PCI segments fail closed.
+2. The saved requester identity matches fresh PCI vendor, device, class and
+   programming-interface reads. The bounded bridge path is reconstructed
+   again and must match the path used for DMAR scope resolution.
+3. The routed VT-d register set is valid, readable, and reports supported
+   capabilities. Translation is disabled only when GSTS.TES is readable and
+   clear. GSTS.TES set blocks direct DMA; unreadable or invalid register state
+   remains unknown/blocked. The root-table register must not have invalid or
+   unknown encoding. No VT-d register is written, and existing firmware
+   mappings are never replaced.
+4. Every static xHCI DMA workspace address is derived from the kernel's
+   validated physical load base, lies inside the loaded kernel image, satisfies
+   the xHCI alignment and AC64 checks, and has complete UEFI `EfiLoaderData`
+   coverage. The workspace includes command/event rings, ERST, DCBAA, input and
+   device contexts, EP0 ring, control buffer, scratchpad storage and array.
+   These objects remain static for the kernel lifetime and are reserved to the
+   one selected controller.
+5. Every RMRR has a valid 4 KiB-aligned range and scope. Its memory-map
+   coverage must be `EfiReservedMemoryType`, `EfiRuntimeServicesCode`, or
+   `EfiRuntimeServicesData` with `EFI_MEMORY_RUNTIME` set for runtime types.
+   Gaps, ambiguous descriptors, other memory types, and any overlap with the
+   xHCI workspace block admission. Each entry logs segment, base, limit,
+   whether its scope covers the selected xHCI, ownership result, and
+   workspace-overlap result. Unrelated RMRRs are still validated and retained;
+   none are rewritten or reused.
+6. PCI bus mastering is observed disabled before enabling PCI memory decoding
+   and before DMA qualification. If it is already enabled, R8 blocks rather
+   than trying to clear it while firmware ownership or controller activity is
+   unknown. After qualification, ownership
+   handoff, halt, reset, CNR clear, and ring configuration, R8 enables BME with
+   a 16-bit PCI command write and verifies readback before setting Run/Stop.
+7. If Running times out, the timeout snapshot remains the sticky first
+   failure. R8 makes one bounded attempt to clear Run/Stop and observe
+   HCHalted; only after halt is confirmed does it clear and verify PCI BME.
+   If halt cannot be confirmed, BME remains enabled because the controller may
+   still be issuing DMA. R8 does not retry reset or restart the controller.
+
+This mode means the xHCI is given vetted **system physical** addresses while
+VT-d translation is disabled. It does not provide IOMMU isolation from a
+misbehaving or compromised controller. The contract relies on the statically
+owned xHCI structures, validated address widths, the supported x86 PCIe DMA
+coherency model, and the controller's descriptor-following behavior. It is not
+a general DMA allocator or a claim that arbitrary physical memory is safe to
+expose. Intel devices with enabled translation still require a future explicit
+DMA domain/IOVA implementation.
+
+### RMRR evidence and platform limit
+
+The accepted SARAH_DT R7 transcript reports **three RMRR regions**, but it
+does not contain their segment, base, limit, or device-scope entries. R8 does
+not infer those values or claim which entries apply to `00:14.0`. The next
+physical boot will log each raw region and its current applicability and
+ownership result. Until that boot, SARAH_DT's exact RMRR ownership and direct
+DMA eligibility remain unobserved. An RMRR that overlaps the workspace, lacks
+reserved/runtime map ownership, or has unsupported scope blocks DMA.
+
+For future VT-d enablement, each selected-device RMRR must remain reserved and
+be identity-mapped into that device's remapping domain as required by the
+platform contract; its pages cannot be allocated to controller rings or other
+kernel data. R8 does not enable translation, build a domain, or perform
+invalidation.
+
+### Controller state and diagnostics
+
+The one-shot controller state machine remains DMA approval → ownership
+resolution → halt → reset → CNR clear → ring setup → BME enable → Run/Stop.
+Each wait remains bounded. No second controller can reuse the active static
+workspace, and a failed initialization is not blindly retried. After Running,
+the existing code samples and reports each root port without clearing
+write-one-to-clear status bits. Running, root-port connection, USB descriptor
+completion, and HID delivery remain separate outcomes.
+
+The overlay now reports physical-backing and reserved-memory validation
+independently, in addition to VT-d route, RMRR relevant/unrelated counts,
+GSTS.TES, DMA decision reason, controller identity, first failure, and stage
+results. `NOT ATTEMPTED` remains distinct from a successful result.
+
+### R8 verification and physical procedure
+
+Hosted tests cover GSTS-only translation classification; enabled, disabled,
+unreadable and unsupported states; exact requester and route decisions;
+physical range alignment, overflow, missing/partial backing, ownership type,
+and addressability; relevant/unrelated and overlapping RMRRs; BME state; and
+exclusive workspace ownership. They use synthetic maps and register values,
+not SARAH_DT measurements.
+
+For a single controlled SARAH_DT boot, record the source/build identity,
+selected xHCI BDF and vendor/device, raw HCSPARAMS2 and scratchpad fields, DMAR
+status and DRHD route, every logged RMRR entry, GSTS.TES and root-table state,
+physical-backing and reserved-memory results, final DMA decision, and exact
+first failure. Only if DMA is verified should the log proceed through ownership,
+halt/reset/CNR, Running, and root-port status. Do not change BIOS settings or
+disable VT-d. A blocked result is valid evidence; a Running result does not
+prove keyboard/mouse HID delivery without observed HID events. No physical
+boot was performed during source qualification, so SARAH_DT controller Running
+remains unverified.

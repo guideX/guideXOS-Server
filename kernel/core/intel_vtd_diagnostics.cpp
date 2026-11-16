@@ -19,6 +19,26 @@ static const uint8_t PCI_CLASS_BRIDGE = 0x06u;
 static const uint8_t PCI_SUBCLASS_PCI_BRIDGE = 0x04u;
 
 static intel_dmar::Table s_table = {};
+static intel_dmar::PciPath s_paths[modern_input_diagnostics::MAX_CONTROLLERS] = {};
+static intel_dmar::Route s_routes[modern_input_diagnostics::MAX_CONTROLLERS] = {};
+static intel_dmar::RegisterSnapshot s_registersByUnit[intel_dmar::MAX_DRHD_UNITS] = {};
+static bool s_pathValid[modern_input_diagnostics::MAX_CONTROLLERS] = {};
+static bool s_unitInspected[intel_dmar::MAX_DRHD_UNITS] = {};
+
+static const char* memory_map_check_name(dma_memory::MemoryMapCheck check)
+{
+    switch (check) {
+        case dma_memory::MemoryMapCheck::Valid: return "VALID";
+        case dma_memory::MemoryMapCheck::InvalidView: return "MAP_UNAVAILABLE";
+        case dma_memory::MemoryMapCheck::InvalidDescriptor: return "INVALID_DESCRIPTOR";
+        case dma_memory::MemoryMapCheck::InvalidAlignment: return "INVALID_ALIGNMENT";
+        case dma_memory::MemoryMapCheck::RangeOverflow: return "RANGE_OVERFLOW";
+        case dma_memory::MemoryMapCheck::RangeUncovered: return "RANGE_UNCOVERED";
+        case dma_memory::MemoryMapCheck::OwnershipTypeMismatch: return "OWNER_MISMATCH";
+        case dma_memory::MemoryMapCheck::AmbiguousOwnership: return "OWNER_AMBIGUOUS";
+        default: return "UNKNOWN";
+    }
+}
 
 struct BridgePathElement {
     uint8_t bus;
@@ -131,6 +151,20 @@ static bool build_pci_path(uint16_t segment, uint8_t bus, uint8_t device,
     return true;
 }
 
+static bool same_pci_path(const intel_dmar::PciPath& left,
+                          const intel_dmar::PciPath& right)
+{
+    if (!left.valid || !right.valid || left.segment != right.segment ||
+        left.count == 0u || left.count != right.count ||
+        left.count > intel_dmar::MAX_SCOPE_PATH) return false;
+    for (uint32_t i = 0u; i < left.count; ++i) {
+        if (left.entries[i].bus != right.entries[i].bus ||
+            left.entries[i].device != right.entries[i].device ||
+            left.entries[i].function != right.entries[i].function) return false;
+    }
+    return true;
+}
+
 static intel_dmar::RegisterSnapshot inspect_unit(const intel_dmar::DrhdUnit& unit)
 {
     intel_dmar::RegisterSnapshot result = {};
@@ -168,13 +202,11 @@ static intel_dmar::RegisterSnapshot inspect_unit(const intel_dmar::DrhdUnit& uni
         return result;
     }
 
-    // All accesses below are volatile reads. R7 does not write GCMD, GSTS,
-    // RTADDR, FSTS, or any other VT-d register.
+    // Read only architecturally readable state. GCMD fields are write-only;
+    // GCMD.TE reads undefined, so GSTS.TES is the translation-state source.
     const uint64_t capability = *reinterpret_cast<const volatile uint64_t*>(bytes + 0x08u);
     const uint64_t extendedCapability =
         *reinterpret_cast<const volatile uint64_t*>(bytes + 0x10u);
-    const uint32_t globalCommand =
-        *reinterpret_cast<const volatile uint32_t*>(bytes + 0x18u);
     const uint32_t globalStatus =
         *reinterpret_cast<const volatile uint32_t*>(bytes + 0x1Cu);
     const uint64_t rootTableAddress =
@@ -182,7 +214,7 @@ static intel_dmar::RegisterSnapshot inspect_unit(const intel_dmar::DrhdUnit& uni
     const uint32_t faultStatus =
         *reinterpret_cast<const volatile uint32_t*>(bytes + 0x34u);
     return intel_dmar::classify_registers(
-        true, version, capability, extendedCapability, globalCommand,
+        true, version, capability, extendedCapability,
         globalStatus, rootTableAddress, faultStatus);
 #else
     result.status = intel_dmar::RegisterStatus::MappingUnavailable;
@@ -235,6 +267,19 @@ void initialize(const uint8_t* dmarCopy, uint32_t dmarLength,
                 bool remappingTablePresent)
 {
     intel_dmar::clear(&s_table);
+    for (uint32_t i = 0u; i < modern_input_diagnostics::MAX_CONTROLLERS; ++i) {
+        s_paths[i] = {};
+        s_routes[i] = {};
+        s_routes[i].unitIndex = -1;
+        s_pathValid[i] = false;
+    }
+    for (uint32_t i = 0u; i < intel_dmar::MAX_DRHD_UNITS; ++i) {
+        s_registersByUnit[i] = {};
+        s_registersByUnit[i].status = intel_dmar::RegisterStatus::NotAttempted;
+        s_registersByUnit[i].translation = intel_dmar::TranslationState::Unknown;
+        s_registersByUnit[i].rootTable = intel_dmar::RootTableState::Unknown;
+        s_unitInspected[i] = false;
+    }
     intel_dmar::ParseStatus status = intel_dmar::ParseStatus::NotPresent;
     if (dmarTableCount > 1u) {
         status = intel_dmar::ParseStatus::AmbiguousTables;
@@ -295,8 +340,6 @@ void qualify_xhci_controllers()
 {
     modern_input_diagnostics::Snapshot snapshot = {};
     modern_input_diagnostics::copy_snapshot(&snapshot);
-    intel_dmar::RegisterSnapshot registersByUnit[intel_dmar::MAX_DRHD_UNITS] = {};
-    bool inspected[intel_dmar::MAX_DRHD_UNITS] = {};
 
     for (uint32_t i = 0u; i < snapshot.storedControllerCount; ++i) {
         const modern_input_diagnostics::ControllerSnapshot& controller =
@@ -322,6 +365,11 @@ void qualify_xhci_controllers()
                 controller.function, &path);
             if (pathValid) route = intel_dmar::route_device(s_table, path);
         }
+        if (i < modern_input_diagnostics::MAX_CONTROLLERS) {
+            s_paths[i] = path;
+            s_pathValid[i] = path.valid;
+            s_routes[i] = route;
+        }
 
         modern_input_diagnostics::record_vtd_route(
             static_cast<int32_t>(i), controller.pciSegment, controller.bus,
@@ -340,10 +388,10 @@ void qualify_xhci_controllers()
         }
 
         const uint32_t unitIndex = static_cast<uint32_t>(route.unitIndex);
-        if (!inspected[unitIndex]) {
-            registersByUnit[unitIndex] = inspect_unit(s_table.drhd[unitIndex]);
-            inspected[unitIndex] = true;
-            const intel_dmar::RegisterSnapshot& registers = registersByUnit[unitIndex];
+        if (!s_unitInspected[unitIndex]) {
+            s_registersByUnit[unitIndex] = inspect_unit(s_table.drhd[unitIndex]);
+            s_unitInspected[unitIndex] = true;
+            const intel_dmar::RegisterSnapshot& registers = s_registersByUnit[unitIndex];
             serial::puts("[VTD] unit=");
             serial::put_hex8(static_cast<uint8_t>(unitIndex));
             serial::puts(" registers=");
@@ -358,8 +406,6 @@ void qualify_xhci_controllers()
                 serial::put_hex64(registers.capability);
                 serial::puts(" ECAP=");
                 serial::put_hex64(registers.extendedCapability);
-                serial::puts(" GCMD=");
-                serial::put_hex32(registers.globalCommand);
                 serial::puts(" GSTS=");
                 serial::put_hex32(registers.globalStatus);
                 serial::puts(" RTADDR=");
@@ -370,11 +416,11 @@ void qualify_xhci_controllers()
             }
         }
         modern_input_diagnostics::record_vtd_registers(
-            static_cast<int32_t>(i), registersByUnit[unitIndex]);
+            static_cast<int32_t>(i), s_registersByUnit[unitIndex]);
 
         if (static_cast<int32_t>(i) == snapshot.selectedControllerIndex &&
             snapshot.dmarTablePresent) {
-            const intel_dmar::RegisterSnapshot& registers = registersByUnit[unitIndex];
+            const intel_dmar::RegisterSnapshot& registers = s_registersByUnit[unitIndex];
             const char* reason = "DEVICE_DMA_MAPPING_NOT_ESTABLISHED";
             if (route.rmrrRequired) {
                 reason = "RMRR_MAPPING_REQUIREMENTS_UNSATISFIED";
@@ -398,6 +444,142 @@ void qualify_xhci_controllers()
             modern_input_diagnostics::record_dma_safety(reason, false);
         }
     }
+}
+
+intel_dmar::DirectDmaDecision qualify_direct_physical_dma(
+    int32_t controllerIndex, const dma_memory::MemoryMapView& memoryMap,
+    const dma_memory::PhysicalRange* dmaRanges, uint32_t dmaRangeCount,
+    bool busMasterDisabled, bool deviceAddressabilityValidated,
+    bool workspaceExclusive, intel_dmar::RmrrMemorySummary* rmrrSummary)
+{
+    intel_dmar::DirectDmaEvidence evidence{};
+    evidence.route = intel_dmar::RouteStatus::Unknown;
+    evidence.registers = intel_dmar::RegisterStatus::NotAttempted;
+    evidence.translation = intel_dmar::TranslationState::Unknown;
+    evidence.rootTable = intel_dmar::RootTableState::Unknown;
+    evidence.rmrrMemory = intel_dmar::RmrrMemoryStatus::InvalidDmar;
+    evidence.busMasterDisabled = busMasterDisabled;
+    evidence.workspaceExclusive = workspaceExclusive;
+    if (rmrrSummary != nullptr) {
+        *rmrrSummary = {};
+        rmrrSummary->status = intel_dmar::RmrrMemoryStatus::InvalidDmar;
+    }
+
+    if (controllerIndex < 0 ||
+        static_cast<uint32_t>(controllerIndex) >=
+            modern_input_diagnostics::MAX_CONTROLLERS ||
+        !s_pathValid[static_cast<uint32_t>(controllerIndex)]) {
+        return intel_dmar::evaluate_direct_physical_dma(evidence);
+    }
+    const uint32_t index = static_cast<uint32_t>(controllerIndex);
+    modern_input_diagnostics::Snapshot snapshot = {};
+    modern_input_diagnostics::copy_snapshot(&snapshot);
+    if (index >= snapshot.storedControllerCount) {
+        return intel_dmar::evaluate_direct_physical_dma(evidence);
+    }
+
+    const modern_input_diagnostics::ControllerSnapshot& controller =
+        snapshot.controllers[index];
+    const intel_dmar::PciPath& path = s_paths[index];
+    const intel_dmar::Route& route = s_routes[index];
+    const uint32_t liveIdentity = msi::pci_config_read32(
+        controller.bus, controller.device, controller.function, 0u);
+    const uint32_t liveClassRevision = msi::pci_config_read32(
+        controller.bus, controller.device, controller.function,
+        PCI_CLASS_REVISION_OFFSET);
+    const uint16_t liveVendor = static_cast<uint16_t>(liveIdentity & 0xFFFFu);
+    const uint16_t liveDevice = static_cast<uint16_t>(liveIdentity >> 16u);
+    const uint8_t liveProgIf = static_cast<uint8_t>(liveClassRevision >> 8u);
+    const uint8_t liveSubClass = static_cast<uint8_t>(liveClassRevision >> 16u);
+    const uint8_t liveBaseClass = static_cast<uint8_t>(liveClassRevision >> 24u);
+    intel_dmar::PciPath livePath = {};
+    const bool livePathValidated = build_pci_path(
+        controller.pciSegment, controller.bus, controller.device,
+        controller.function, &livePath) && same_pci_path(path, livePath);
+    evidence.pciIdentityValidated = controller.occupied && path.segment == 0u &&
+        controller.kind == modern_input_diagnostics::ControllerKind::XHCI &&
+        controller.vendorId == 0x8086u && controller.baseClass == 0x0Cu &&
+        controller.subClass == 0x03u && controller.progIf == 0x30u &&
+        liveIdentity != UINT32_MAX && liveVendor == controller.vendorId &&
+        liveDevice == controller.deviceId && liveBaseClass == 0x0Cu &&
+        liveSubClass == 0x03u && liveProgIf == 0x30u && livePathValidated &&
+        path.valid && path.count != 0u && path.segment == controller.pciSegment &&
+        path.entries[path.count - 1u].bus == controller.bus &&
+        path.entries[path.count - 1u].device == controller.device &&
+        path.entries[path.count - 1u].function == controller.function;
+    evidence.route = route.status;
+    if (route.unitIndex >= 0 &&
+        static_cast<uint32_t>(route.unitIndex) < s_table.drhdCount) {
+        const uint32_t unitIndex = static_cast<uint32_t>(route.unitIndex);
+        if (s_unitInspected[unitIndex]) {
+            evidence.registers = s_registersByUnit[unitIndex].status;
+            evidence.translation = s_registersByUnit[unitIndex].translation;
+            evidence.rootTable = s_registersByUnit[unitIndex].rootTable;
+        }
+    }
+
+    evidence.physicalBackingValidated = dmaRanges != nullptr &&
+        dmaRangeCount != 0u && dma_memory::valid_view(memoryMap);
+    for (uint32_t i = 0u; evidence.physicalBackingValidated &&
+         i < dmaRangeCount; ++i) {
+        evidence.physicalBackingValidated =
+            dma_memory::range_has_ownership(memoryMap, dmaRanges[i].base,
+                dmaRanges[i].length, false, 64u) == dma_memory::MemoryMapCheck::Valid;
+    }
+    const uint16_t liveCommand = msi::pci_config_read16(
+        controller.bus, controller.device, controller.function, 0x04u);
+    evidence.busMasterDisabled = busMasterDisabled &&
+        (liveCommand & 0x0004u) == 0u;
+    evidence.deviceAddressabilityValidated = deviceAddressabilityValidated;
+
+    const intel_dmar::RmrrMemorySummary summary =
+        intel_dmar::validate_rmrr_memory(
+            s_table, path, memoryMap, dmaRanges, dmaRangeCount);
+    evidence.rmrrMemory = summary.status;
+    if (rmrrSummary != nullptr) *rmrrSummary = summary;
+    modern_input_diagnostics::record_vtd_rmrr_memory(controllerIndex, summary);
+    for (uint32_t i = 0u; i < s_table.rmrrCount; ++i) {
+        const intel_dmar::RmrrRegion& region = s_table.rmrr[i];
+        bool applies = false;
+        if (region.segment == path.segment) {
+            for (uint32_t j = 0u; j < region.scopeCount; ++j) {
+                if (intel_dmar::scope_matches_path(region.scopes[j], path)) {
+                    applies = true;
+                    break;
+                }
+            }
+        }
+        const dma_memory::MemoryMapCheck ownerCheck =
+            dma_memory::range_has_ownership(
+                memoryMap, region.base, region.length, true);
+        bool workspaceOverlap = false;
+        if (dmaRanges != nullptr) {
+            const dma_memory::PhysicalRange rmrrRange = {
+                region.base, region.length};
+            for (uint32_t j = 0u; j < dmaRangeCount; ++j) {
+                if (dma_memory::ranges_overlap(rmrrRange, dmaRanges[j])) {
+                    workspaceOverlap = true;
+                    break;
+                }
+            }
+        }
+        serial::puts("[VTD] RMRR index=");
+        serial::put_hex32(i);
+        serial::puts(" segment=");
+        serial::put_hex16(region.segment);
+        serial::puts(" base=");
+        serial::put_hex64(region.base);
+        serial::puts(" limit=");
+        serial::put_hex64(region.limit);
+        serial::puts(" scope=");
+        serial::puts(applies ? "SELECTED_XHCI" : "UNRELATED_TO_SELECTED_XHCI");
+        serial::puts(" owner=");
+        serial::puts(memory_map_check_name(ownerCheck));
+        serial::puts(" workspace-overlap=");
+        serial::puts(workspaceOverlap ? "yes" : "no");
+        serial::puts("\n");
+    }
+    return intel_dmar::evaluate_direct_physical_dma(evidence);
 }
 
 } // namespace intel_vtd
