@@ -2,6 +2,7 @@
 #include "tests/phase8j_ecdsa_vectors.h"
 #include "gxos_tls_prerequisites.h"
 #include "kernel/core/include/gxos_time_estimate.h"
+#include "kernel/core/include/gxos_tls_distrust_after.h"
 #include "kernel/core/include/gxos_tls_time_policy.h"
 
 #if defined(GXOS_BARE_METAL)
@@ -3056,10 +3057,13 @@ struct GxosTlsHttpByteStreamSession {
     gxos::clockassurance::TlsTimeEstimateLease timeLease{};
     int64_t tightestNotBeforeUnixSeconds = 0;
     int64_t tightestNotAfterUnixSeconds = 0;
+    int64_t mozillaDistrustAfterCutoffUnixSeconds = 0;
     bool controlledTimeRequired = false;
     bool controlledTimeScopeReady = false;
     bool certificateTimeBoundsSeen = false;
     bool timeAssuranceRejected = false;
+    bool mozillaDistrustAfterPolicySeen = false;
+    bool mozillaDistrustAfterRejected = false;
     bool closed = false;
 };
 
@@ -3180,13 +3184,65 @@ int gxos_tls_controlled_time_verify_callback(void* context,
                                               mbedtls_x509_crt* certificate,
                                               int depth, uint32_t* flags)
 {
-    (void)depth;
     GxosTlsHttpByteStreamSession* session =
         static_cast<GxosTlsHttpByteStreamSession*>(context);
-    if (!session || !flags || !session->controlledTimeRequired) {
+    if (!session || !flags) {
         if (flags) *flags |= MBEDTLS_X509_BADCERT_OTHER;
         return 0;
     }
+
+    /*
+     * Mbed TLS 4.1.0 invokes the verification callback root-to-leaf. Collect
+     * exact restricted certificate identities from the verified path, then
+     * compare the end-entity notBefore once depth zero is reached. This is
+     * independent of wall-clock time and leaves Mbed TLS's normal flags intact.
+     */
+    if (depth > 0 && certificate && certificate->raw.p && certificate->raw.len != 0) {
+        uint8_t fingerprint[32] = {};
+        size_t fingerprintLength = 0;
+        const psa_status_t hashStatus = psa_hash_compute(
+            PSA_ALG_SHA_256,
+            certificate->raw.p,
+            certificate->raw.len,
+            fingerprint,
+            sizeof(fingerprint),
+            &fingerprintLength);
+        if (hashStatus != PSA_SUCCESS || fingerprintLength != sizeof(fingerprint)) {
+            *flags |= MBEDTLS_X509_BADCERT_OTHER;
+            session->mozillaDistrustAfterRejected = true;
+            return 0;
+        }
+        char fingerprintHex[65] = {};
+        bytes_to_lower_hex(fingerprint, sizeof(fingerprint), fingerprintHex, sizeof(fingerprintHex));
+        const GxosTlsDistrustAfterPolicy* policy =
+            gxos_tls_mozilla_distrust_after_policy_for_fingerprint(fingerprintHex);
+        if (policy) {
+            if (!session->mozillaDistrustAfterPolicySeen ||
+                policy->cutoffUnixSeconds < session->mozillaDistrustAfterCutoffUnixSeconds) {
+                session->mozillaDistrustAfterCutoffUnixSeconds = policy->cutoffUnixSeconds;
+            }
+            session->mozillaDistrustAfterPolicySeen = true;
+        }
+    }
+    if (depth == 0 && session->mozillaDistrustAfterPolicySeen) {
+        int64_t leafNotBefore = 0;
+        int64_t leafNotAfter = 0;
+        const bool leafDateValid =
+            tls_certificate_dates_to_unix(certificate, &leafNotBefore, &leafNotAfter);
+        // Mozilla's TLS rule also rejects SCT timestamps after the cutoff. The
+        // current TLS callback has no verified SCT timestamps, so fail closed
+        // for every path through an exact root with a distrust-after record.
+        constexpr int sctTimestampCheckEnforced = 0;
+        if (!leafDateValid || gxos_tls_mozilla_tls_distrust_after_rejects(
+                leafNotBefore,
+                session->mozillaDistrustAfterCutoffUnixSeconds,
+                sctTimestampCheckEnforced)) {
+            *flags |= MBEDTLS_X509_BADCERT_OTHER;
+            session->mozillaDistrustAfterRejected = true;
+        }
+    }
+
+    if (!session->controlledTimeRequired) return 0;
     if (!session->controlledTimeScopeReady ||
         !tls_controlled_fixture_scope_ready(session->result
             ? session->result->sniHost : nullptr)) {
@@ -4893,9 +4949,10 @@ bool gxos_tls_open_http_byte_stream(const char* sniHostname,
                     "Controlled TLS has no current policy-accepted fixture time estimate.");
                 break;
             }
-            mbedtls_ssl_set_verify(&session->ssl,
-                gxos_tls_controlled_time_verify_callback, session);
         }
+
+        mbedtls_ssl_set_verify(&session->ssl,
+            gxos_tls_controlled_time_verify_callback, session);
 
         mbedtls_ssl_set_bio(&session->ssl, &session->io, gxos_tls_stream_send, gxos_tls_stream_recv, nullptr);
         result->sslBioStatus = 0;

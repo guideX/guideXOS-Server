@@ -1,0 +1,46 @@
+{
+  "schema_version": "guidexos.mozilla-trust-source-lock.v2",
+  "snapshot_date": "2026-11-17",
+  "baseline_source_lock": {
+    "local_path": "assets/certs/mozilla/navhttps20-sources/source-lock.json",
+    "sha256": "8c18c1a11f1c471a672e48e496fd42690531797cc6a3f5a7e209a85631774095",
+    "purpose": "Preserve and verify the accepted NAVHTTPS20 NSS, Mozilla policy, wiki, curl, and fixture source pins."
+  },
+  "ccadb_v5_all_certificate_records": {
+    "owner": "Common CA Database (Linux Foundation)",
+    "url": "https://ccadb.my.salesforce-sites.com/ccadb/AllCertificateRecordsCSVFormatV5",
+    "revision": "downloaded-snapshot-2026-11-17",
+    "retrieved_date_utc": "2026-11-17",
+    "local_path": "assets/certs/mozilla/navhttps21-sources/ccadb-v5-2026-11-17.csv",
+    "sha256": "f3b205d590aa5e78d5e79df631b87a331f2e3e1ea990b704c3165fa2627daf36",
+    "license": "CDLA-2.0-Permissive; attribution to CCADB required",
+    "roles": [
+      "certificate-fingerprint-and-record-type-cross-check",
+      "Mozilla root status cross-check",
+      "CCADB trust-bit and EV metadata cross-check"
+    ],
+    "coverage_limits": [
+      "The report is a dynamic snapshot and does not expose a complete machine-readable inventory of Mozilla code-level restrictions.",
+      "The aggregate Trust Bits for Root Cert field is not a Mozilla-only trust decision.",
+      "An absent record or blank field does not establish that no Mozilla restriction applies."
+    ]
+  },
+  "root_restrictions_overlay": {
+    "local_path": "assets/certs/mozilla/navhttps21-sources/root-restrictions-overlay.json",
+    "sha256": "25339dd599e85905547096805b873209f76d137ddd24d5a1d703b4c2c6ff12f6",
+    "schema_version": "guidexos.mozilla-root-restrictions.v2",
+    "coverage_status": "incomplete"
+  },
+  "distrust_after_enforcement_policy": {
+    "local_path": "assets/certs/mozilla/navhttps21-sources/distrust-after-enforcement.json",
+    "sha256": "36127d88adc1c7bd1868969420c88a5ca93780c646838442cfeb35570fe591ef",
+    "schema_version": "guidexos.mozilla-server-distrust-after.v2",
+    "mechanism": "navigator-tls-verify-callback-leaf-notbefore-v1"
+  },
+  "license_and_attribution": {
+    "ccadb": "CCADB Data Usage Terms: CDLA-2.0-Permissive; attribute CCADB when redistributing or using derived data.",
+    "mozilla_nss": "MPL-2.0, as pinned by NAVHTTPS20.",
+    "mozilla_root_store_policy": "CC-BY-SA-3.0-or-later per NAVHTTPS20 source lock.",
+    "mozilla_additional_trust_changes": "CC-BY-SA-3.0-or-later per NAVHTTPS20 source lock."
+  }
+}

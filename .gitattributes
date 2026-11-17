@@ -1,4 +1,6 @@
 /assets/certs/mozilla/navhttps20-sources/** -text
+/assets/certs/mozilla/navhttps21-sources/** -text
+/assets/certs/mozilla/navhttps21-sources/ccadb-v5-2026-11-17.csv -whitespace
 /assets/certs/candidates/mozilla-nss-2026-11-13.navhttps20-trust-manifest.json -text
 /assets/certs/candidates/mozilla-cacert-2026-11-05.pem -text
 /scripts/fixtures/navigator-smoke-root-ca-bundle.pem -text

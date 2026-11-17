@@ -1,0 +1,45 @@
+{
+  "schema_version": "guidexos.mozilla-server-distrust-after.v2",
+  "source_owner": "Mozilla NSS built-in root store",
+  "source_revision": "8c60e757c30b1b239bae46532b4f6d4ebb1e1cad",
+  "source_path": "lib/ckfw/builtins/certdata.txt",
+  "source_sha256": "6d177e33ab54b338edfee24dc3868585833636716a320a725137ab4a15927292",
+  "trust_purpose": "tls-server-auth",
+  "comparison": "the runtime foundation rejects when leaf notBefore is strictly later than the UTC cutoff; equality is allowed",
+  "timestamp_encoding": "NSS DER time bytes normalized to UTC seconds; no wall-clock comparison",
+  "supported_enforcement_mechanism": "navigator-tls-verify-callback-leaf-notbefore-v1",
+  "full_tls_enforcement_status": "partial-notbefore-only",
+  "tls_sct_timestamp_check": "unsupported",
+  "sct_semantics_source": "https://bugzilla.mozilla.org/show_bug.cgi?id=2018979",
+  "sct_semantics_note": "Mozilla states TLS distrust-after also rejects SCT timestamps after the cutoff. Navigator has no SCT timestamp verifier; roots with a TLS distrust-after date remain ineligible.",
+  "records": [
+    {
+      "certificate_sha256": "2530cc8e98321502bad96f9b1fba1b099e2d299e0f4548bb914f363bc0d4531f",
+      "label": "Izenpe.com",
+      "cutoff_utc": "2604-01-05T23:59:59Z",
+      "tls_server_auth_trusted": true,
+      "enforcement_status": "notbefore-only"
+    },
+    {
+      "certificate_sha256": "40f6af0346a99aa1cd1d555a4e9cce62c7f9634603ee406615833dc8c8d00367",
+      "label": "emSign Root CA - G1",
+      "cutoff_utc": "2611-01-06T23:59:59Z",
+      "tls_server_auth_trusted": true,
+      "enforcement_status": "notbefore-only"
+    },
+    {
+      "certificate_sha256": "552f7bdcf1a7af9e6ce672017f4f12abf77240c78e761ac203d1d9d20ac89988",
+      "label": "DigiCert Trusted Root G4",
+      "cutoff_utc": "2609-01-04T23:59:59Z",
+      "tls_server_auth_trusted": true,
+      "enforcement_status": "notbefore-only"
+    },
+    {
+      "certificate_sha256": "57de0583efd2b26e0361da99da9df4648def7ee8441c3b728afa9bcde0f9b26a",
+      "label": "Autoridad de Certificacion Firmaprofesional CIF A62634068",
+      "cutoff_utc": "2608-06-07T01:00:00Z",
+      "tls_server_auth_trusted": true,
+      "enforcement_status": "notbefore-only"
+    }
+  ]
+}

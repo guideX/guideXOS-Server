@@ -1,0 +1,43 @@
+{
+  "schema_version": "guidexos.mozilla-root-restrictions.v2",
+  "source_revision": "navhttps21-investigation-snapshot-2026-11-17",
+  "effective_date": "2026-11-17",
+  "coverage_status": "incomplete",
+  "sources": [
+    {
+      "source_id": "mozilla-additional-trust-changes",
+      "owner": "Mozilla Root Program",
+      "url": "https://wiki.mozilla.org/CA/Additional_Trust_Changes",
+      "revision": "retrieved-snapshot-2026-11-16",
+      "sha256": "4cf63203c5fb8aef744b8c8d148d4bc4cd43c2e37881b20ae03f9c16eed2b60d",
+      "license": "CC-BY-SA-3.0-or-later",
+      "coverage": "Best-efforts explanatory coverage; explicitly not a complete per-root registry."
+    },
+    {
+      "source_id": "ccadb-v5",
+      "owner": "Common CA Database (Linux Foundation)",
+      "url": "https://ccadb.my.salesforce-sites.com/ccadb/AllCertificateRecordsCSVFormatV5",
+      "revision": "downloaded-snapshot-2026-11-17",
+      "sha256": "f3b205d590aa5e78d5e79df631b87a331f2e3e1ea990b704c3165fa2627daf36",
+      "license": "CDLA-2.0-Permissive; attribution to CCADB required",
+      "coverage": "Root status, fingerprint, trust-bit summary, EV metadata, and submitted record fields; not a complete Mozilla runtime restriction registry."
+    },
+    {
+      "source_id": "mozilla-root-store-policy",
+      "owner": "Mozilla Root Program",
+      "url": "https://github.com/mozilla/pkipolicy/blob/bb613bb30b8d85706bac7ecdd877d19b50efe4e7/rootstore/policy.md",
+      "revision": "bb613bb30b8d85706bac7ecdd877d19b50efe4e7",
+      "sha256": "0e39e12a7251b5011c86cbc83355eb63dd0b82ca33019f5ccafad6cc7ffb59db",
+      "license": "CC-BY-SA-3.0-or-later per NAVHTTPS20 source lock",
+      "coverage": "Program-wide requirements; not a fingerprint-keyed no-restrictions assertion."
+    }
+  ],
+  "coverage_notes": [
+    "An omitted root record means unknown, never unrestricted.",
+    "A CCADB blank field or absent technical-constraint indicator does not establish absence of Mozilla code-level restrictions.",
+    "EV OID metadata describes EV treatment; it does not establish general TLS certificate-policy requirements or full RFC 5280 policy processing.",
+    "OneCRL and intermediate revocation remain outside root restrictions and are not represented here.",
+    "No candidate root currently has a complete, fingerprint-keyed assessment for all applicable restrictions."
+  ],
+  "records": {}
+}
