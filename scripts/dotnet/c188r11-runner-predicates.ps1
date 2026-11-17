@@ -80,9 +80,11 @@ function Test-C188R11ImageContextMatch([string]$SerialText) {
     return $true
 }
 
-function Test-C188R11ManagedLaunchState([string]$SerialText) {
+function Test-C188R11ManagedLaunchState([string]$SerialText,
+    [uint32]$ExpectedDescriptorCount = 5) {
     return [regex]::IsMatch($SerialText,
-        '(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state seq=[1-9]\d* st=managed-return selector=4 ownerGen=1 rg=[1-9]\d* re=1 rr=0 rcl=0 p=[1-9]\d* pr=0 ps=[1-9]\d* psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=5 result=0 gc=\d+ w=1:1\r?$')
+        '(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state seq=[1-9]\d* st=managed-return selector=4 ownerGen=1 rg=[1-9]\d* re=1 rr=0 rcl=0 p=[1-9]\d* pr=0 ps=[1-9]\d* psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=' +
+        [regex]::Escape([string]$ExpectedDescriptorCount) + ' result=0 gc=\d+ w=1:1\r?$')
 }
 
 function Test-C188R11ManagedInputState([string]$SerialText, [uint32]$Count,
@@ -194,7 +196,8 @@ function Test-C188R11ManagedBoundaryCorrelation([string]$SerialText) {
             [uint32]$managed.Groups[3].Value
 }
 
-function Get-C188R11ReadinessFailureReason([string]$SerialText) {
+function Get-C188R11ReadinessFailureReason([string]$SerialText,
+    [uint32]$ExpectedDescriptorCount = 5) {
     if (-not [regex]::IsMatch($SerialText,
             '(?m)^\[KERNEL\] Entering main loop \(waiting for input\)\.\.\.\r?$')) {
         return 'main-loop-not-reached'
@@ -207,7 +210,7 @@ function Get-C188R11ReadinessFailureReason([string]$SerialText) {
             '(?m)^\[C150-SURFACE\] action=create appId=com\.guidexos\.apps\.managed\.notes generation=00000001 window=[0-9A-Fa-f]{8} result=PASS\r?$')) {
         return 'notes-surface-not-created'
     }
-    if (-not (Test-C188R11ManagedLaunchState $SerialText)) {
+    if (-not (Test-C188R11ManagedLaunchState $SerialText $ExpectedDescriptorCount)) {
         return 'managed-return-state-missing-or-invalid'
     }
     if (-not (Test-C188R11InitializationEvidence $SerialText)) {

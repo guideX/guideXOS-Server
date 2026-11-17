@@ -156,6 +156,26 @@ Assert-Predicate 'active Notes window alone leaves document route and widget foc
     -not $windowOnlyFocus.editableDocumentWidgetFocused -and
     $windowOnlyFocus.focusUnknown)
 
+$r30NativeSurface = '[C188R12R1-SURFACE] stage=created appId=com.guidexos.apps.managed.notes selector=00000004 generation=00000001 surfaceGeneration=00000001 window=000003E8 x=00000154 y=000000DC width=00000258 height=00000168 visible=1 minimized=0 focused=1 front=1 dirty=1 result=PASS'
+$r30SurfaceFocus = Get-C188R11R4R2NotesFocusEvidence $r30NativeSurface
+Assert-Predicate 'native visible, front, focused Notes surface qualifies application-window readiness before any input event' (
+    $r30SurfaceFocus.notesWindowActive -and
+    $r30SurfaceFocus.notesSurfaceFocusObserved -and
+    -not $r30SurfaceFocus.documentControlRouteEstablished -and
+    -not $r30SurfaceFocus.editableDocumentWidgetFocused)
+
+$unfocusedR30Surface = $r30NativeSurface.Replace('focused=1 front=1', 'focused=0 front=1')
+$unfocusedR30Evidence = Get-C188R11R4R2NotesFocusEvidence $unfocusedR30Surface
+Assert-Predicate 'native surface without focused state cannot satisfy application-window readiness' (
+    -not $unfocusedR30Evidence.notesWindowActive -and
+    -not $unfocusedR30Evidence.notesSurfaceFocusObserved)
+
+$backgroundR30Surface = $r30NativeSurface.Replace('focused=1 front=1', 'focused=1 front=0')
+$backgroundR30Evidence = Get-C188R11R4R2NotesFocusEvidence $backgroundR30Surface
+Assert-Predicate 'native surface behind another window cannot satisfy application-window readiness' (
+    -not $backgroundR30Evidence.notesWindowActive -and
+    -not $backgroundR30Evidence.notesSurfaceFocusObserved)
+
 $unrelatedControlFocus = Get-C188R11R4R2NotesFocusEvidence (
     '[C188R11R2_KEY] stage=main-loop-focus window=00000004 title=Managed Notes owner=ManagedAppWindow result=focused' + [Environment]::NewLine +
     '[C102-MANAGED-OUTPUT] C120-ROUTING active=control result=PASS')

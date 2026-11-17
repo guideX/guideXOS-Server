@@ -8,6 +8,7 @@ param(
     [Parameter()][ValidateRange(60,3600)][int]$MaxRuntimeSeconds = 1200,
     [Parameter()][ValidateRange(30,300)][int]$BootTimeoutSeconds = 180,
     [Parameter()][ValidateRange(30,1800)][int]$AdmissionTimeoutSeconds = 1750,
+    [Parameter()][ValidateSet(2,5)][int]$ExpectedManagedDescriptorCount = 5,
     [Parameter()][ValidatePattern('^[A-Fa-f0-9]{32}$')][string]$RunIdentityId = ([guid]::NewGuid().ToString('N'))
 )
 $ErrorActionPreference = 'Stop'
@@ -20,6 +21,7 @@ if ([bool]$ProductionCompatibility -ne $isProductionScenario) {
 }
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+. (Join-Path $PSScriptRoot 'c188r33-settings-handoff-predicates.ps1')
 . (Join-Path $PSScriptRoot 'c188r25-failfast-runner-predicates.ps1')
 $phaseRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188-external-app-identity')),
@@ -56,6 +58,26 @@ if ($phaseRoot.Count -eq 0) {
     throw "C188 guest evidence must remain below one of: $($phaseRoots -join ', ')."
 }
 $phaseRoot = $phaseRoot[0]
+if ($ExpectedManagedDescriptorCount -eq 2) {
+    $handoffInputManifestPath = Join-Path $bootRoot 'r12r2r1-input-manifest.json'
+    if ($Scenario -ne 'settings-handoff-diagnostic' -or
+        -not (Test-Path -LiteralPath $handoffInputManifestPath -PathType Leaf)) {
+        throw 'Two-descriptor readiness is reserved for a validated R30 Settings handoff run.'
+    }
+    $handoffInputManifest = Get-Content -LiteralPath $handoffInputManifestPath -Raw |
+        ConvertFrom-Json -ErrorAction Stop
+    $candidateReadinessProfile = Get-C188R33ManagedReadinessProfile `
+        ([string]$handoffInputManifest.candidateRoot)
+    if ([string]$handoffInputManifest.readinessProfile -cne
+            'C188R30_THREAD_ATTACHMENT_TRACE_TWO_DESCRIPTORS' -or
+        [uint32]$handoffInputManifest.expectedManagedDescriptorCount -ne 2 -or
+        [string]$handoffInputManifest.readinessRuntimePackManifestSha256 -ine
+            [string]$candidateReadinessProfile.runtimePackManifestSha256 -or
+        [string]$candidateReadinessProfile.profile -cne
+            'C188R30_THREAD_ATTACHMENT_TRACE_TWO_DESCRIPTORS') {
+        throw 'R30 two-descriptor readiness profile failed candidate/runtime manifest validation.'
+    }
+}
 $esp = Join-Path $bootRoot 'esp'
 $serial = Join-Path $bootRoot 'serial.log'
 $qmpLog = Join-Path $bootRoot 'qmp.log'
@@ -421,7 +443,8 @@ try {
 
     $text = Read-GuestSerial
     if ($isC188R11Boot) {
-        $readinessFailure = Get-C188R11ReadinessFailureReason $text
+        $readinessFailure = Get-C188R11ReadinessFailureReason $text `
+            ([uint32]$ExpectedManagedDescriptorCount)
         if (-not [string]::IsNullOrEmpty($readinessFailure)) {
             throw "[C188R11-FAIL] reason=$readinessFailure; no screenshot or input may be captured."
         }

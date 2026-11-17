@@ -60,8 +60,11 @@ function Get-C188R11R4R2StageSnapshot([string]$SerialText,
 
 function Get-C188R11R4R2NotesFocusEvidence([string]$SerialText,
     [int]$ExpectedLocalX = 24, [int]$ExpectedLocalY = 99) {
-    $notesWindowActive = [regex]::IsMatch($SerialText,
+    $legacyInputFocus = [regex]::IsMatch($SerialText,
         '(?m)^\[C188R11R2_KEY\] stage=main-loop-focus window=[A-Fa-f0-9]{8} title=Managed Notes owner=.+? result=focused\r?$')
+    $nativeSurfaceFocus = [regex]::IsMatch($SerialText,
+        '(?m)^\[C188R12R1-SURFACE\] stage=created appId=com\.guidexos\.apps\.managed\.notes selector=00000004 generation=00000001 surfaceGeneration=[A-Fa-f0-9]{8} window=[A-Fa-f0-9]{8} .*? visible=1 minimized=0 focused=1 front=1 .*? result=PASS\r?$')
+    $notesWindowActive = $legacyInputFocus -or $nativeSurfaceFocus
     $documentPointerRoute = [regex]::Match($SerialText,
         '(?m)^\[C102-MANAGED-OUTPUT\] C120-POINTER target=document result=PASS\r?$')
     $documentKeyboardRoute = [regex]::Match($SerialText,
@@ -133,6 +136,7 @@ function Get-C188R11R4R2NotesFocusEvidence([string]$SerialText,
 
     return [ordered]@{
         notesWindowActive=[bool]$notesWindowActive
+        notesSurfaceFocusObserved=[bool]$nativeSurfaceFocus
         documentControlRouteEstablished=[bool]$documentPointerRoute.Success
         documentRouteCorrelatedToPointer=[bool]$routeCorrelatedToPointer
         editableDocumentWidgetFocused=[bool]$editableDocumentWidgetFocused

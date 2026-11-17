@@ -1,0 +1,17 @@
+# Exact ordered excerpt from R32 serial.log, SHA-256 D35F173911D01B6738EDF6027CD75F5938619E616B9A59CB42C09F323592FFBA.
+[C188R11-NATIVE] nseq=00000002 stage=before-managed-entry route=resident-launch call=00000001 corr=00000001 id=4 gen=00000001 input=00000000 module=00000001 entryOff=00000000000F73A0 segments=00000007 span=00000000005BB000 rc=FFFFFFFF
+[C188R12R4R5R4_THREAD] seq=0000000000000038 event=module_initialize_complete raw0=0000000100000000 raw1=0000000000000001
+[C102-STARTUP] stage=C188B005
+[C102-STARTUP] stage=C188B002
+[C102-MANAGED-OUTPUT] C188R11-MANAGED stage=entry seq=1 call=1 corr=1 id=4 gen=1 in=0 rc=-1
+[C188R11-NATIVE] nseq=00000009 stage=managed-init-event regEpoch=00000001 poolEpoch=00000001 module=00000001
+[C102-MANAGED-OUTPUT] C188R11-INIT seq=4 re=1 pe=1 rg=1 p=1 ps=1
+[C102-MANAGED-OUTPUT] C188R11 state seq=9 st=instance-start selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=2 result=0 gc=0 w=1:1
+[C150-APP-LAUNCH] id=com.guidexos.apps.managed.notes generation=00000001 selector=00000004 kind=normal
+[C150-SURFACE] action=create appId=com.guidexos.apps.managed.notes generation=00000001 window=000003E8 result=PASS
+[C188R12R1-SURFACE] stage=created appId=com.guidexos.apps.managed.notes selector=00000004 generation=00000001 surfaceGeneration=00000001 window=000003E8 x=00000154 y=000000DC width=00000258 height=00000168 visible=1 minimized=0 focused=1 front=1 dirty=1 result=PASS
+[C102-MANAGED-OUTPUT] C166-ORDINARY-READY app=ManagedNotes render=PASS
+[C102-MANAGED-OUTPUT] C188R11 state seq=10 st=managed-return selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=2 result=0 gc=0 w=1:1
+[C102-MANAGED-OUTPUT] C188R11-MANAGED stage=exit seq=11 call=1 corr=1 id=4 gen=1 in=0 rc=0
+[C188R11-NATIVE] nseq=0000000A stage=after-managed-return route=resident-launch call=00000001 corr=00000001 id=4 gen=00000001 input=00000000 module=00000001 entryOff=00000000000F73A0 segments=00000007 span=00000000005BB000 rc=00000000
+[KERNEL] Entering main loop (waiting for input)...

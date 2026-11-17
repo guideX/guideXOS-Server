@@ -55,6 +55,7 @@ $ownershipHelpers = Join-Path $PSScriptRoot 'c188r11qac-ownership-predicates.ps1
 . (Join-Path $PSScriptRoot 'c188r12r3-lifetime-predicates.ps1')
 . (Join-Path $PSScriptRoot 'c188r12r4-factory-predicates.ps1')
 . (Join-Path $PSScriptRoot 'c188r22-bootstrap-handoff-predicates.ps1')
+. (Join-Path $PSScriptRoot 'c188r33-settings-handoff-predicates.ps1')
 
 $candidateEsp = Join-Path $candidate 'esp'
 $stagingManifestPath = Join-Path $candidate 'ramdisk-staging.json'
@@ -73,6 +74,7 @@ if ($stagingManifest.result -ne 'PASS' -or
     (Get-FileHash -LiteralPath (Join-Path $candidateEsp 'ramdisk.img') -Algorithm SHA256).Hash -ne $stagingManifest.ramdiskSha256.ToUpperInvariant()) {
     throw 'Candidate staging manifest or kernel/ramdisk hashes do not match the qualified inputs.'
 }
+$readinessProfile = Get-C188R33ManagedReadinessProfile $candidate
 $sourceMediaHashes = [ordered]@{}
 foreach ($relativeMedia in @('kernel.elf','ramdisk.img','EFI\BOOT\BOOTX64.EFI')) {
     $sourceMediaHashes[$relativeMedia.Replace('\','/')] =
@@ -97,6 +99,9 @@ $runManifestPath = Join-Path $bootRoot 'r12r2r1-input-manifest.json'
 [ordered]@{
     phase='C188R12R2R1-settings-dispatch';runIdentityId=$runIdentityId
     candidateRoot=$candidate;stagingManifest=$stagingManifestPath
+    readinessProfile=[string]$readinessProfile.profile
+    expectedManagedDescriptorCount=[uint32]$readinessProfile.expectedDescriptorCount
+    readinessRuntimePackManifestSha256=[string]$readinessProfile.runtimePackManifestSha256
     stagingManifestSha256=(Get-FileHash -LiteralPath $stagingManifestPath -Algorithm SHA256).Hash
     expectedKernelSha256=$ExpectedKernelSha256.ToUpperInvariant()
     sourceMediaHashes=$sourceMediaHashes;copiedMediaHashes=$copiedMediaHashes
@@ -277,6 +282,7 @@ try {
         '-BootEvidencePath',$bootRoot,
         '-ExpectedKernelSha256',$ExpectedKernelSha256,
         '-Scenario','settings-handoff-diagnostic',
+        '-ExpectedManagedDescriptorCount',[string]$readinessProfile.expectedDescriptorCount,
         '-MaxRuntimeSeconds',[string]$MaxRuntimeSeconds,
         '-BootTimeoutSeconds','180','-AdmissionTimeoutSeconds','60',
         '-RunIdentityId',$runIdentityId)
@@ -299,11 +305,10 @@ try {
             try {
                 $active = Get-Content -LiteralPath $activePath -Raw | ConvertFrom-Json
                 $serialText = Read-C188R12R1SharedText $serialPath
-                $notesFocus = Get-C188R11R4R2NotesFocusEvidence $serialText
-                if ([int]$active.screenWidth -gt 0 -and
-                    [int]$active.screenHeight -gt 0 -and
-                    (Test-C188R11NotesReady $serialText) -and
-                    [bool]$notesFocus.notesWindowActive) {
+                if (Test-C188R33SettingsClickGate $serialText `
+                    $readinessProfile.profile `
+                    ([uint32]$readinessProfile.expectedDescriptorCount) `
+                    ([int]$active.screenWidth) ([int]$active.screenHeight)) {
                     $ready = $true
                     break
                 }
@@ -611,6 +616,9 @@ $finalEvidence = [ordered]@{
     runnerExitCode=$qacRunnerExitCode;runnerStdoutPath=$qacStdoutPath;runnerStderrPath=$qacStderrPath
     runnerTerminalEvidence=$runnerTerminalEvidence
     bootReady=$ready;readinessTimeout=$readinessTimeout;failure=$failureText
+    readinessProfile=[string]$readinessProfile.profile
+    expectedManagedDescriptorCount=[uint32]$readinessProfile.expectedDescriptorCount
+    readinessRuntimePackManifestSha256=[string]$readinessProfile.runtimePackManifestSha256
     clickAttempted=$clickAttempted;clickExitCode=$clickExitCode;clickTarget=$clickTarget
     clickEvidence=$clickEvidence;runnerInputEvidence=$runnerInputEvidence
     pointerPositionEvidence=@($pointerPositionEvidence);pointerTargetEvidence=$pointerTargetEvidence

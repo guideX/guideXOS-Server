@@ -14,6 +14,19 @@ if (-not (Test-C188R11ImageContextMatch $fixture)) { throw 'Matching NativeAOT i
 $passed++
 if (-not (Test-C188R11ManagedLaunchState $fixture)) { throw 'Successful managed-return snapshot was rejected.' }
 $passed++
+$twoDescriptorR30State = $fixture.Replace('n=5 result=0 gc=0 w=1:1', 'n=2 result=0 gc=0 w=1:1')
+if (Test-C188R11ManagedLaunchState $twoDescriptorR30State) { throw 'R30 descriptor count was accepted by the default five-descriptor profile.' }
+$passed++
+if (-not (Test-C188R11ManagedLaunchState $twoDescriptorR30State 2)) { throw 'R30 two-descriptor managed return state was rejected for its explicit profile.' }
+$passed++
+foreach ($invalidCount in @(1,3,5)) {
+    $invalidDescriptorCountState = $twoDescriptorR30State.Replace('n=2 result=0 gc=0 w=1:1',
+        ('n=' + $invalidCount + ' result=0 gc=0 w=1:1'))
+    if (Test-C188R11ManagedLaunchState $invalidDescriptorCountState 2) {
+        throw "R30 readiness accepted descriptor count $invalidCount instead of two."
+    }
+    $passed++
+}
 if (-not (Test-C188R11ManagedInputState $fixture 5 1 '-1')) { throw 'Populated input-dispatch snapshot was rejected.' }
 $passed++
 if (-not (Test-C188R11TryFindResult $fixture 0)) { throw 'Successful TryFind result was rejected.' }
