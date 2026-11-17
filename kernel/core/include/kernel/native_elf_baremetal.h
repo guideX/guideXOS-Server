@@ -19,7 +19,8 @@ namespace native_elf {
 
 enum class ExecutionModel : uint8_t {
     Synchronous = 0,
-    CooperativeSchedulerV1
+    CooperativeSchedulerV1,
+    TimerPreemptionPilotV1
 };
 
 // Stable App Model metadata for a package that has passed manifest, target,

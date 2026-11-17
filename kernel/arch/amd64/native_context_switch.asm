@@ -1,8 +1,8 @@
 ;
 ; Microsoft x64 ABI cooperative context switch for the freestanding kernel.
-; Saves nonvolatile GPRs and every user xstate component enabled in XCR0.
-; Kernel AMD64 C++ remains compiled without SIMD; interrupts remain enabled
-; and do not switch contexts.
+; Saves nonvolatile GPRs and every xstate component enabled in XCR0. The
+; timer-interrupt continuation uses the separate switch routine below.
+; Kernel AMD64 C++ remains compiled without SIMD.
 ;
 
 [BITS 64]
@@ -10,6 +10,7 @@
 section .text
 
 global gxos_context_switch
+global gxos_context_switch_from_timer
 global gxos_context_entry_trampoline
 global gxos_scheduler_selftest_probe
 global gxos_scheduler_selftest_xstate_probe
@@ -50,6 +51,43 @@ gxos_context_switch:
     pop rsi
     pop rbp
     pop rbx
+    ret
+
+; Timer IRQ call-site switch using the same cooperative continuation frame.
+; The IRQ CPU frame and volatile-register saves remain below this call on the
+; interrupted Native ELF stack. Resume returns through the IRQ stub's iretq.
+; On the first transfer only, IF is enabled for the suspended root scheduler.
+gxos_context_switch_from_timer:
+    mov r10, rdx
+    mov r11, [rel gxos_native_scheduler_xstate_mask]
+    mov eax, r11d
+    shr r11, 32
+    mov edx, r11d
+    xsave64 [r8]
+    mov r11, [rel gxos_native_scheduler_xstate_mask]
+    mov eax, r11d
+    shr r11, 32
+    mov edx, r11d
+    xrstor64 [r9]
+    push rbx
+    push rbp
+    push rsi
+    push rdi
+    push r12
+    push r13
+    push r14
+    push r15
+    mov [rcx], rsp
+    mov rsp, r10
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rdi
+    pop rsi
+    pop rbp
+    pop rbx
+    sti
     ret
 
 ; First dispatch returns through the synthetic frame with R12 holding the

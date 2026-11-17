@@ -1,8 +1,7 @@
 //
-// Bounded cooperative AMD64 execution contexts for trusted kernel work.
-//
-// These contexts are not application processes and do not provide isolation.
-// Native ELF continues to use its separate synchronous managed-execution path.
+// Bounded single-CPU AMD64 execution contexts for trusted kernel work and
+// explicitly managed Native ELF applications. Eligibility is opt-in; these
+// contexts do not provide process or address-space isolation.
 //
 
 #pragma once
@@ -30,6 +29,15 @@ enum class Result : uint8_t {
     InvalidState,
     UnsafeContext,
     Unsupported
+};
+
+struct PreemptionStats {
+    uint64_t timerInterrupts;
+    uint64_t preemptionDecisions;
+    uint64_t preemptiveSwitches;
+    uint64_t deferredPreemptions;
+    uint64_t eligibilityRejections;
+    uint64_t applicationResumptions;
 };
 
 enum class OwnerKind : uint8_t {
@@ -89,6 +97,18 @@ public:
     Result dispatchOne(bool* dispatched);
     Result yieldCurrent();
 
+    // Timer preemption is restricted to an eligible Native ELF slot. The IRQ
+    // dispatcher calls this only after acknowledging the PIC timer.
+    void timerInterrupt(bool outermostInterrupt);
+
+    // Host ABI services use these balanced single-CPU guards around shared
+    // kernel state. Leaving the outermost guard may service a deferred tick.
+    Result enterNonPreemptible();
+    Result leaveNonPreemptible();
+    Result suspendPreemptionForCooperativeYield();
+    Result cancelPreemptionSuspendForCooperativeYield();
+    Result setCurrentPreemptionEligible(bool eligible);
+
     bool query(Handle handle, Snapshot* output) const;
     bool stacksAreSeparate(Handle first, Handle second) const;
     bool executionStackBounds(Handle handle, uintptr_t* low, uintptr_t* top) const;
@@ -96,6 +116,8 @@ public:
     uint64_t enabledXstateMask() const;
     uint32_t enabledXstateBytes() const;
     uint64_t trustedKernelDispatchCount() const;
+    PreemptionStats preemptionStats() const;
+    uint32_t preemptionDisableDepth() const;
 
     // Termination is deliberately unsupported. A cooperative context can
     // only finish by returning from its entry function.
@@ -126,6 +148,9 @@ private:
         void* argument;
         int32_t exitCode;
         bool retired;
+        bool savedFromTimerInterrupt;
+        bool preemptionEligible;
+        uint32_t suspendedPreemptionDisableDepth;
         alignas(64) uint8_t xstate[kMaximumXstateBytes];
     };
 
@@ -138,6 +163,8 @@ private:
     bool intactStackGuards(const Context& context) const;
     void releaseCompletedStack(Context& context);
     void finishCurrent(Context& context, int32_t exitCode);
+    Result switchCurrentToRoot(bool timerInterrupt);
+    Result serviceDeferredPreemption();
 
     Context m_contexts[kMaximumContexts];
     uint64_t m_rootStackPointer;
@@ -147,6 +174,10 @@ private:
     uint32_t m_currentSlot;
     bool m_initialized;
     bool m_dispatching;
+    bool m_transition;
+    bool m_preemptionPending;
+    uint32_t m_preemptionDisableDepth;
+    PreemptionStats m_preemptionStats;
 #if defined(GXOS_NATIVE_SCHEDULER_SELFTEST_ACTIVE)
     bool m_failNextAllocation;
 #endif

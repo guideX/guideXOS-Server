@@ -15,6 +15,9 @@
 #include "include/kernel/arch.h"
 #include "include/kernel/native_elf_fault.h"
 #include "include/kernel/serial_debug.h"
+#if defined(ARCH_AMD64)
+#include "include/kernel/native_scheduler.h"
+#endif
 
 namespace kernel {
 namespace interrupts {
@@ -154,6 +157,7 @@ static GDTPtr   s_gdtPtr;
 static IDTEntry s_idt[kIDTSize];
 static IDTPtr   s_idtPtr;
 static irq_handler_t s_handlers[16] = { 0 };
+static volatile uint32_t s_irqDepth = 0u;
 
 #if defined(__x86_64__) || defined(_M_X64)
 // Exception diagnostics must not use the interrupted Native ELF stack.  The
@@ -361,6 +365,7 @@ static void set_idt_entry(int index, uint32_t addr, uint8_t type_attr)
 
 extern "C" void irq_dispatch(uint32_t irq_number)
 {
+    ++s_irqDepth;
     static uint32_t irq_total = 0;
     irq_total++;
     if (irq_total <= 10) {
@@ -372,6 +377,19 @@ extern "C" void irq_dispatch(uint32_t irq_number)
         s_handlers[irq_number]();
     }
     eoi(static_cast<uint8_t>(irq_number));
+#if defined(ARCH_AMD64)
+    if (irq_number == 0u) {
+        // A same-privilege interrupt runs on the interrupted context's stack.
+        // Drop the IRQ-depth marker only while the Native ELF task is parked
+        // on its own saved IRQ call chain; it is restored when that chain is
+        // eventually selected and resumes here.
+        const bool outermost = s_irqDepth == 1u;
+        if (s_irqDepth != 0u) --s_irqDepth;
+        native_scheduler::runtime().timerInterrupt(outermost);
+        ++s_irqDepth;
+    }
+#endif
+    if (s_irqDepth != 0u) --s_irqDepth;
 }
 
 // ----------------------------------------------------------------
@@ -383,11 +401,10 @@ extern "C" void irq_dispatch(uint32_t irq_number)
 #if defined(__x86_64__)
 
 // 64-bit ISR stubs
-// Stack must be 16-byte aligned before 'call'. After interrupt pushes
-// SS/RSP/RFLAGS/CS/RIP (40 bytes) and we push 9 regs (72 bytes), total
-// is 112 bytes. We need to sub 8 to make it 120 (divisible by 16) before call.
-//
-// MinGW uses Microsoft x64 ABI (first arg in RCX)
+// Same-CPL AMD64 IRQs push RIP/CS/RFLAGS only, and may arrive with any stack
+// alignment. Preserve a scratch nonvolatile register as the original stack
+// pointer, align the temporary C-call stack explicitly, and restore the exact
+// interrupt stack before the volatile registers and iretq frame.
 // Linux/ELF uses System V ABI (first arg in RDI)
 #if defined(__MINGW32__) || defined(__MINGW64__) || defined(_WIN64)
 // Microsoft x64 ABI: first argument in RCX
@@ -405,10 +422,14 @@ extern "C" void irq_dispatch(uint32_t irq_number)
         "    push %r9\n"                                   \
         "    push %r10\n"                                  \
         "    push %r11\n"                                  \
-        "    sub $40, %rsp\n"                              \
+        "    push %r12\n"                                  \
+        "    mov %rsp, %r12\n"                             \
+        "    and $-16, %rsp\n"                             \
+        "    sub $32, %rsp\n"                              \
         "    mov $" #n ", %ecx\n"                          \
         "    call irq_dispatch\n"                          \
-        "    add $40, %rsp\n"                              \
+        "    mov %r12, %rsp\n"                             \
+        "    pop %r12\n"                                   \
         "    pop %r11\n"                                   \
         "    pop %r10\n"                                   \
         "    pop %r9\n"                                    \
@@ -436,10 +457,13 @@ extern "C" void irq_dispatch(uint32_t irq_number)
         "    push %r9\n"                                   \
         "    push %r10\n"                                  \
         "    push %r11\n"                                  \
-        "    sub $8, %rsp\n"                               \
+        "    push %r12\n"                                  \
+        "    mov %rsp, %r12\n"                             \
+        "    and $-16, %rsp\n"                             \
         "    mov $" #n ", %edi\n"                          \
         "    call irq_dispatch\n"                          \
-        "    add $8, %rsp\n"                               \
+        "    mov %r12, %rsp\n"                             \
+        "    pop %r12\n"                                   \
         "    pop %r11\n"                                   \
         "    pop %r10\n"                                   \
         "    pop %r9\n"                                    \

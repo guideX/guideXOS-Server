@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "com.guidexos.schedulerpreemptionpilot",
+  "displayName": "SECURITY3G Timer Preemption Pilot",
+  "version": "0.1.0",
+  "publisher": "guideXOS SDK",
+  "description": "A bounded Native ELF proof of timer-driven preemption, context resume, and safe completion.",
+  "category": "Samples",
+  "kind": "NativeElf",
+  "icon": "",
+  "minGuideXOSVersion": "0.1.0",
+  "supportedArchitectures": [
+    "amd64"
+  ],
+  "entries": [
+    {
+      "architecture": "amd64",
+      "path": "bin/amd64/schedulerpreemptionpilot.elf",
+      "entryPoint": "gx_main",
+      "abi": "guidexos-c-abi-v1",
+      "runtime": "native-elf",
+      "executionModel": "timer-preemption-pilot-v1"
+    }
+  ],
+  "permissions": [
+    "log",
+    "window"
+  ],
+  "fileAssociations": [],
+  "defaultWindow": {
+    "width": 600,
+    "height": 300,
+    "resizable": false
+  }
+}

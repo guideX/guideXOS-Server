@@ -41,6 +41,8 @@ static CycleArgument s_cycleArgument = {};
 static uint32_t s_registerMask = 0u;
 static uint32_t s_xstateMask = 0u;
 static uint32_t s_stackAbiMask = 0u;
+static bool s_deferredPreemptionProof = false;
+static PreemptionStats s_deferredPreemptionDeltas = {};
 
 static void register_probe_yield()
 {
@@ -81,6 +83,86 @@ static int32_t yielding_proof_task(void* opaque)
 static int32_t capacity_noop_task(void*)
 {
     return 0;
+}
+
+static int32_t preemption_guard_task(void*)
+{
+    Runtime& scheduler = runtime();
+    if (scheduler.leaveNonPreemptible() != Result::InvalidState ||
+        scheduler.preemptionDisableDepth() != 0u) return -20;
+    if (scheduler.enterNonPreemptible() != Result::Ok ||
+        scheduler.preemptionDisableDepth() != 1u) return -21;
+    if (scheduler.enterNonPreemptible() != Result::Ok ||
+        scheduler.preemptionDisableDepth() != 2u) return -22;
+    if (scheduler.leaveNonPreemptible() != Result::Ok ||
+        scheduler.preemptionDisableDepth() != 1u) return -23;
+    if (scheduler.leaveNonPreemptible() != Result::Ok ||
+        scheduler.preemptionDisableDepth() != 0u) return -24;
+
+    uint32_t accepted = 0u;
+    for (; accepted < 32u; ++accepted) {
+        if (scheduler.enterNonPreemptible() != Result::Ok) return -25;
+    }
+    if (scheduler.enterNonPreemptible() != Result::UnsafeContext) return -26;
+    for (uint32_t i = 0u; i < accepted; ++i) {
+        if (scheduler.leaveNonPreemptible() != Result::Ok) return -27;
+    }
+    if (scheduler.preemptionDisableDepth() != 0u ||
+        scheduler.leaveNonPreemptible() != Result::InvalidState) return -28;
+    return 12;
+}
+
+static int32_t deferred_preemption_task(void*)
+{
+    Runtime& scheduler = runtime();
+    if (scheduler.enterNonPreemptible() != Result::Ok) return -30;
+    const PreemptionStats before = scheduler.preemptionStats();
+    if (scheduler.setCurrentPreemptionEligible(true) != Result::Ok) {
+        (void)scheduler.leaveNonPreemptible();
+        return -31;
+    }
+
+    // Wait for a real PIT interrupt while the eligible context is protected.
+    // The bound makes a broken timer fail the guest self-test instead of
+    // trapping boot in an unbounded loop.
+    bool deferredTickObserved = false;
+    for (volatile uint32_t spin = 0u; spin < 50000000u; ++spin) {
+        if ((spin & 0xFFFFFu) != 0u) continue;
+        const PreemptionStats current = scheduler.preemptionStats();
+        if (current.timerInterrupts > before.timerInterrupts &&
+            current.deferredPreemptions > before.deferredPreemptions) {
+            deferredTickObserved = true;
+            break;
+        }
+    }
+    if (!deferredTickObserved) {
+        (void)scheduler.setCurrentPreemptionEligible(false);
+        (void)scheduler.leaveNonPreemptible();
+        return -32;
+    }
+
+    // Leaving the outermost guard services the pending timer request through
+    // the existing root scheduler, then this task resumes at this call site.
+    if (scheduler.leaveNonPreemptible() != Result::Ok) return -33;
+    if (scheduler.setCurrentPreemptionEligible(false) != Result::Ok) return -34;
+
+    const PreemptionStats after = scheduler.preemptionStats();
+    s_deferredPreemptionDeltas.timerInterrupts =
+        after.timerInterrupts - before.timerInterrupts;
+    s_deferredPreemptionDeltas.preemptionDecisions =
+        after.preemptionDecisions - before.preemptionDecisions;
+    s_deferredPreemptionDeltas.preemptiveSwitches =
+        after.preemptiveSwitches - before.preemptiveSwitches;
+    s_deferredPreemptionDeltas.deferredPreemptions =
+        after.deferredPreemptions - before.deferredPreemptions;
+    s_deferredPreemptionDeltas.applicationResumptions =
+        after.applicationResumptions - before.applicationResumptions;
+    s_deferredPreemptionProof =
+        after.deferredPreemptions > before.deferredPreemptions &&
+        after.preemptiveSwitches > before.preemptiveSwitches &&
+        after.applicationResumptions > before.applicationResumptions &&
+        scheduler.preemptionDisableDepth() == 0u;
+    return s_deferredPreemptionProof ? 13 : -35;
 }
 
 static int32_t register_probe_task(void*)
@@ -270,6 +352,33 @@ bool runSelfTest()
         stackAbiSnapshot.state == State::Completed && stackAbiSnapshot.exitCode == 11 &&
         stackAbiSnapshot.dispatchCount == 2u && s_stackAbiMask == 0xFu;
     GXOS_SELFTEST_CHECKPOINT("stack-alignment-and-shadow-space-after-resume");
+
+    Handle preemptionGuard{};
+    passed = passed && scheduler.createNativeElfTask(
+        preemption_guard_task, nullptr, &preemptionGuard) == Result::Ok;
+    passed = passed && run_until_complete(preemptionGuard, 2u);
+    Snapshot preemptionGuardSnapshot{};
+    passed = passed && scheduler.query(preemptionGuard, &preemptionGuardSnapshot) &&
+        preemptionGuardSnapshot.state == State::Completed &&
+        preemptionGuardSnapshot.exitCode == 12 &&
+        preemptionGuardSnapshot.dispatchCount == 1u &&
+        scheduler.preemptionDisableDepth() == 0u;
+    GXOS_SELFTEST_CHECKPOINT("balanced-nested-preemption-critical-sections");
+
+    Handle deferredPreemption{};
+    s_deferredPreemptionProof = false;
+    passed = passed && scheduler.createNativeElfTask(
+        deferred_preemption_task, nullptr, &deferredPreemption) == Result::Ok;
+    passed = passed && run_until_complete(deferredPreemption, 8u);
+    Snapshot deferredPreemptionSnapshot{};
+    passed = passed && scheduler.query(deferredPreemption,
+        &deferredPreemptionSnapshot) &&
+        deferredPreemptionSnapshot.state == State::Completed &&
+        deferredPreemptionSnapshot.exitCode == 13 &&
+        deferredPreemptionSnapshot.dispatchCount >= 2u &&
+        deferredPreemptionSnapshot.dispatchCount <= 8u &&
+        s_deferredPreemptionProof && scheduler.preemptionDisableDepth() == 0u;
+    GXOS_SELFTEST_CHECKPOINT("real-timer-deferred-preemption-at-guard-exit");
 
     scheduler.failNextAllocationForTest();
     Handle allocationFailure{};
@@ -461,9 +570,23 @@ bool runSelfTest()
     }
     GXOS_SELFTEST_CHECKPOINT("application-slot-round-robin-generation-reuse");
 
+    serial::puts("[NATIVE-SCHEDULER-SELFTEST] deferred-preemption=");
+    serial::puts(s_deferredPreemptionProof ? "PASS" : "FAIL");
+    serial::puts(" timerInterrupts=0x");
+    serial::put_hex64(s_deferredPreemptionDeltas.timerInterrupts);
+    serial::puts(" decisions=0x");
+    serial::put_hex64(s_deferredPreemptionDeltas.preemptionDecisions);
+    serial::puts(" deferred=0x");
+    serial::put_hex64(s_deferredPreemptionDeltas.deferredPreemptions);
+    serial::puts(" safeSwitches=0x");
+    serial::put_hex64(s_deferredPreemptionDeltas.preemptiveSwitches);
+    serial::puts(" resumptions=0x");
+    serial::put_hex64(s_deferredPreemptionDeltas.applicationResumptions);
+    serial::putc('\n');
+
     serial::puts("[NATIVE-SCHEDULER-SELFTEST] result=");
     serial::puts(passed ? "PASS" : "FAIL");
-    serial::puts(" proof=independent-stacks round-robin yield-resume local-state gpr-preservation xmm-x87-mxcsr-avx-state stack-alignment shadow-space completion reaping generation reserved-system-capacity application-exhaustion allocation-failure unsupported-termination repeated-cycles\n");
+    serial::puts(" proof=independent-stacks round-robin yield-resume local-state gpr-preservation xmm-x87-mxcsr-avx-state stack-alignment shadow-space nested-preemption-guards real-timer-deferred-preemption completion reaping generation reserved-system-capacity application-exhaustion allocation-failure unsupported-termination repeated-cycles\n");
 #undef GXOS_SELFTEST_CHECKPOINT
     return passed;
 }

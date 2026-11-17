@@ -1,7 +1,7 @@
 //
-// Small, single-CPU cooperative scheduler for trusted AMD64 kernel work.
-// Scheduling occurs only at explicit call boundaries from the desktop loop.
-// Timer interrupts never switch contexts.
+// Small, single-CPU scheduler for trusted AMD64 kernel work and controlled
+// Native ELF execution. Most contexts remain cooperative; an explicitly
+// eligible Native ELF task may be switched out by the outermost PIT IRQ.
 //
 
 #include "include/kernel/native_scheduler.h"
@@ -12,6 +12,10 @@
 extern "C" void gxos_context_switch(uint64_t* oldStackPointer,
                                      uint64_t newStackPointer,
                                      void* oldXstate, const void* newXstate);
+extern "C" void gxos_context_switch_from_timer(uint64_t* oldStackPointer,
+                                                uint64_t newStackPointer,
+                                                void* oldXstate,
+                                                const void* newXstate);
 extern "C" void gxos_context_entry_trampoline();
 extern "C" char __text_start[];
 extern "C" char __text_end[];
@@ -33,6 +37,12 @@ static const uint32_t kStackAllocationBytes = Runtime::kStackBytes + 64u;
 static const uint32_t kSavedFrameWords = 9u;
 static const uint32_t kEntryShadowBytes = 40u;
 static uint32_t s_enabledXstateBytes = 0u;
+static const uint32_t kMaximumPreemptionDisableDepth = 32u;
+
+static void increment_saturated(uint64_t* value)
+{
+    if (value && *value != UINT64_MAX) ++*value;
+}
 
 static uintptr_t align_up_16(uintptr_t value)
 {
@@ -180,7 +190,8 @@ Runtime s_runtime;
 Runtime::Runtime()
     : m_contexts{}, m_rootStackPointer(0u), m_nextRuntimeId(1u),
       m_nextSlot(0u), m_currentSlot(kInvalidSlot), m_initialized(false),
-      m_dispatching(false)
+      m_dispatching(false), m_transition(false), m_preemptionPending(false),
+      m_preemptionDisableDepth(0u), m_preemptionStats{}
 #if defined(GXOS_NATIVE_SCHEDULER_SELFTEST_ACTIVE)
       , m_failNextAllocation(false)
 #endif
@@ -201,6 +212,9 @@ Runtime::Runtime()
         m_contexts[i].argument = nullptr;
         m_contexts[i].exitCode = 0;
         m_contexts[i].retired = false;
+        m_contexts[i].savedFromTimerInterrupt = false;
+        m_contexts[i].preemptionEligible = false;
+        m_contexts[i].suspendedPreemptionDisableDepth = 0u;
     }
 }
 
@@ -225,6 +239,10 @@ Result Runtime::initialize()
     m_nextSlot = 0u;
     m_currentSlot = kInvalidSlot;
     m_dispatching = false;
+    m_transition = false;
+    m_preemptionPending = false;
+    m_preemptionDisableDepth = 0u;
+    m_preemptionStats = {};
     for (uint32_t i = 0u; i < sizeof(m_rootXstate); ++i) m_rootXstate[i] = 0u;
     for (uint32_t i = 0u; i < kMaximumContexts; ++i) {
         Context& context = m_contexts[i];
@@ -243,6 +261,9 @@ Result Runtime::initialize()
         context.argument = nullptr;
         context.exitCode = 0;
         context.retired = false;
+        context.savedFromTimerInterrupt = false;
+        context.preemptionEligible = false;
+        context.suspendedPreemptionDisableDepth = 0u;
         for (uint32_t j = 0u; j < sizeof(context.xstate); ++j) context.xstate[j] = 0u;
     }
 #if defined(GXOS_NATIVE_SCHEDULER_SELFTEST_ACTIVE)
@@ -424,6 +445,9 @@ Result Runtime::createTask(Entry entry, void* argument, Handle* output,
     context.argument = argument;
     context.exitCode = 0;
     context.retired = false;
+    context.savedFromTimerInterrupt = false;
+    context.preemptionEligible = false;
+    context.suspendedPreemptionDisableDepth = 0u;
     for (uint32_t i = 0u; i < sizeof(context.xstate); ++i) context.xstate[i] = 0u;
     frame[3] = reinterpret_cast<uint64_t>(&context);
 
@@ -485,6 +509,11 @@ Result Runtime::dispatchOne(bool* dispatched)
         return Result::InvalidState;
     }
 
+    // The timer may arrive at any instruction, including while the root is
+    // handing off the stack. Mark this short interval so the IRQ can count
+    // the tick without treating the root's stack as the selected task.
+    asm volatile("cli" : : : "memory");
+    m_transition = true;
     context.state = State::Running;
     if (context.dispatchCount != UINT64_MAX) ++context.dispatchCount;
     m_currentSlot = selected;
@@ -492,9 +521,17 @@ Result Runtime::dispatchOne(bool* dispatched)
     m_dispatching = true;
     *dispatched = true;
 
+    if (context.savedFromTimerInterrupt) {
+        // Keep IRQs masked until the suspended handler reaches iretq, which
+        // restores the interrupted Native ELF RFLAGS/IF exactly.
+        asm volatile("cli" : : : "memory");
+    } else {
+        asm volatile("sti" : : : "memory");
+    }
     gxos_context_switch(&m_rootStackPointer, context.savedStackPointer,
                         m_rootXstate, context.xstate);
 
+    m_transition = false;
     m_dispatching = false;
     if (m_currentSlot != kInvalidSlot) {
         m_currentSlot = kInvalidSlot;
@@ -550,18 +587,230 @@ Result Runtime::yieldCurrent()
     if (!m_initialized) return Result::NotInitialized;
     if (m_currentSlot == kInvalidSlot || !m_dispatching) return Result::InvalidState;
     if (!interrupts_enabled()) return Result::UnsafeContext;
+    if (m_preemptionDisableDepth != 0u) return Result::UnsafeContext;
 
     const uint32_t slot = m_currentSlot;
     Context& context = m_contexts[slot];
     if (context.state != State::Running) return Result::InvalidState;
+    asm volatile("cli" : : : "memory");
+    m_transition = true;
     context.state = State::Ready;
     m_currentSlot = kInvalidSlot;
+    asm volatile("sti" : : : "memory");
     gxos_context_switch(&context.savedStackPointer, m_rootStackPointer,
                         context.xstate, m_rootXstate);
 
+    if (context.suspendedPreemptionDisableDepth != 0u) {
+        if (m_preemptionDisableDepth != 0u) return Result::InvalidState;
+        m_preemptionDisableDepth = context.suspendedPreemptionDisableDepth;
+        context.suspendedPreemptionDisableDepth = 0u;
+    }
+    m_transition = false;
     if (m_currentSlot != slot || context.state != State::Running)
         return Result::InvalidState;
     return Result::Ok;
+#endif
+}
+
+Result Runtime::switchCurrentToRoot(bool timerInterrupt)
+{
+#if !defined(ARCH_AMD64)
+    (void)timerInterrupt;
+    return Result::Unsupported;
+#else
+    if (!m_initialized || m_currentSlot >= kMaximumContexts || !m_dispatching)
+        return Result::InvalidState;
+    const uint32_t slot = m_currentSlot;
+    Context& context = m_contexts[slot];
+    if (context.ownerKind != OwnerKind::NativeElfApplication ||
+        context.state != State::Running || !m_rootStackPointer ||
+        !context.preemptionEligible || m_transition ||
+        context.suspendedPreemptionDisableDepth != 0u) return Result::UnsafeContext;
+
+    if (!timerInterrupt) {
+        if (!interrupts_enabled()) return Result::UnsafeContext;
+        asm volatile("cli" : : : "memory");
+        // A timer can consume the pending request after the caller's check
+        // but before this function masks interrupts. Recheck atomically so a
+        // resumed safe-boundary path cannot perform a redundant second switch.
+        if (!m_preemptionPending) {
+            asm volatile("sti" : : : "memory");
+            return Result::Ok;
+        }
+    }
+    m_transition = true;
+    context.state = State::Ready;
+    context.savedFromTimerInterrupt = timerInterrupt;
+    m_currentSlot = kInvalidSlot;
+    m_preemptionPending = false;
+    increment_saturated(&m_preemptionStats.preemptiveSwitches);
+
+    if (timerInterrupt) {
+        gxos_context_switch_from_timer(&context.savedStackPointer,
+            m_rootStackPointer, context.xstate, m_rootXstate);
+        // This call returns only when the parked IRQ frame has been selected
+        // again and is about to unwind through iretq. Future switches from
+        // this context may be cooperative and must use the normal IF path.
+        context.savedFromTimerInterrupt = false;
+    } else {
+        asm volatile("sti" : : : "memory");
+        gxos_context_switch(&context.savedStackPointer, m_rootStackPointer,
+            context.xstate, m_rootXstate);
+    }
+
+    // Reached only after the root selected this context again. For a timer
+    // continuation, IF is still clear here and iretq restores the saved flags.
+    if (m_currentSlot != slot || context.state != State::Running)
+        return Result::InvalidState;
+    context.savedFromTimerInterrupt = false;
+    m_transition = false;
+    increment_saturated(&m_preemptionStats.applicationResumptions);
+    return Result::Ok;
+#endif
+}
+
+void Runtime::timerInterrupt(bool outermostInterrupt)
+{
+#if defined(ARCH_AMD64)
+    if (!m_initialized) return;
+    increment_saturated(&m_preemptionStats.timerInterrupts);
+
+    // A tick on the desktop/root stack, during scheduler handoff, or in the
+    // trusted service task is a heartbeat only. Those classes are not yet
+    // eligible for timer preemption.
+    if (!outermostInterrupt || m_transition || m_currentSlot >= kMaximumContexts ||
+        !m_dispatching) {
+        if (m_currentSlot < kMaximumContexts && m_dispatching)
+            increment_saturated(&m_preemptionStats.eligibilityRejections);
+        return;
+    }
+
+    Context& context = m_contexts[m_currentSlot];
+    if (context.ownerKind != OwnerKind::NativeElfApplication ||
+        context.state != State::Running || interrupts_enabled()) {
+        increment_saturated(&m_preemptionStats.eligibilityRejections);
+        return;
+    }
+    if (!context.preemptionEligible) {
+        increment_saturated(&m_preemptionStats.eligibilityRejections);
+        return;
+    }
+
+    increment_saturated(&m_preemptionStats.preemptionDecisions);
+    if (m_preemptionDisableDepth != 0u) {
+        if (!m_preemptionPending)
+            increment_saturated(&m_preemptionStats.deferredPreemptions);
+        m_preemptionPending = true;
+        return;
+    }
+
+    (void)switchCurrentToRoot(true);
+#else
+    (void)outermostInterrupt;
+#endif
+}
+
+Result Runtime::enterNonPreemptible()
+{
+#if !defined(ARCH_AMD64)
+    return Result::Unsupported;
+#else
+    if (!m_initialized) return Result::NotInitialized;
+    if (m_currentSlot >= kMaximumContexts || !m_dispatching || m_transition ||
+        m_contexts[m_currentSlot].ownerKind != OwnerKind::NativeElfApplication ||
+        m_contexts[m_currentSlot].state != State::Running) return Result::UnsafeContext;
+    if (m_preemptionDisableDepth >= kMaximumPreemptionDisableDepth)
+        return Result::UnsafeContext;
+    ++m_preemptionDisableDepth;
+    return Result::Ok;
+#endif
+}
+
+Result Runtime::leaveNonPreemptible()
+{
+#if !defined(ARCH_AMD64)
+    return Result::Unsupported;
+#else
+    if (m_currentSlot >= kMaximumContexts || !m_dispatching || m_transition ||
+        m_contexts[m_currentSlot].ownerKind != OwnerKind::NativeElfApplication ||
+        m_contexts[m_currentSlot].state != State::Running ||
+        m_preemptionDisableDepth == 0u) return Result::InvalidState;
+    --m_preemptionDisableDepth;
+    if (m_preemptionDisableDepth == 0u && m_preemptionPending)
+        return serviceDeferredPreemption();
+    return Result::Ok;
+#endif
+}
+
+Result Runtime::suspendPreemptionForCooperativeYield()
+{
+#if !defined(ARCH_AMD64)
+    return Result::Unsupported;
+#else
+    if (m_currentSlot >= kMaximumContexts || !m_dispatching || m_transition ||
+        m_contexts[m_currentSlot].ownerKind != OwnerKind::NativeElfApplication ||
+        m_contexts[m_currentSlot].state != State::Running ||
+        m_preemptionDisableDepth == 0u) return Result::InvalidState;
+    Context& context = m_contexts[m_currentSlot];
+    if (context.suspendedPreemptionDisableDepth != 0u) return Result::InvalidState;
+    context.suspendedPreemptionDisableDepth = m_preemptionDisableDepth;
+    m_preemptionDisableDepth = 0u;
+    // The explicit voluntary yield already transfers control to the root;
+    // do not later count the same pending timer request as timer preemption.
+    m_preemptionPending = false;
+    return Result::Ok;
+#endif
+}
+
+Result Runtime::cancelPreemptionSuspendForCooperativeYield()
+{
+#if !defined(ARCH_AMD64)
+    return Result::Unsupported;
+#else
+    if (m_currentSlot >= kMaximumContexts || !m_dispatching || m_transition ||
+        m_preemptionDisableDepth != 0u ||
+        m_contexts[m_currentSlot].ownerKind != OwnerKind::NativeElfApplication ||
+        m_contexts[m_currentSlot].state != State::Running ||
+        m_contexts[m_currentSlot].suspendedPreemptionDisableDepth == 0u)
+        return Result::InvalidState;
+    Context& context = m_contexts[m_currentSlot];
+    m_preemptionDisableDepth = context.suspendedPreemptionDisableDepth;
+    context.suspendedPreemptionDisableDepth = 0u;
+    return Result::Ok;
+#endif
+}
+
+Result Runtime::setCurrentPreemptionEligible(bool eligible)
+{
+#if !defined(ARCH_AMD64)
+    (void)eligible;
+    return Result::Unsupported;
+#else
+    if (m_currentSlot >= kMaximumContexts || !m_dispatching || m_transition ||
+        m_contexts[m_currentSlot].ownerKind != OwnerKind::NativeElfApplication ||
+        m_contexts[m_currentSlot].state != State::Running) return Result::UnsafeContext;
+    if (eligible && m_preemptionDisableDepth == 0u) return Result::UnsafeContext;
+    m_contexts[m_currentSlot].preemptionEligible = eligible;
+    // Ticks deferred during setup of the pilot predate its measured CPU work;
+    // only requests arriving after eligibility is established can switch it.
+    m_preemptionPending = false;
+    return Result::Ok;
+#endif
+}
+
+Result Runtime::serviceDeferredPreemption()
+{
+#if defined(ARCH_AMD64)
+    if (!m_preemptionPending) return Result::Ok;
+    if (m_currentSlot >= kMaximumContexts ||
+        !m_contexts[m_currentSlot].preemptionEligible) {
+        m_preemptionPending = false;
+        return Result::Ok;
+    }
+    if (!interrupts_enabled()) return Result::UnsafeContext;
+    return switchCurrentToRoot(false);
+#else
+    return Result::Unsupported;
 #endif
 }
 
@@ -571,10 +820,14 @@ void Runtime::finishCurrent(Context& context, int32_t exitCode)
     // Returning to the root context with IF clear would silently disable the
     // desktop's timer/input interrupts. Such a task violated the cooperative
     // entry contract, so fail closed instead of transferring that state.
-    if (!interrupts_enabled()) halt_forever();
+    if (!interrupts_enabled() || m_preemptionDisableDepth != 0u ||
+        context.suspendedPreemptionDisableDepth != 0u) halt_forever();
+    asm volatile("cli" : : : "memory");
     context.exitCode = exitCode;
     context.state = State::Completed;
+    m_transition = true;
     m_currentSlot = kInvalidSlot;
+    asm volatile("sti" : : : "memory");
     gxos_context_switch(&context.savedStackPointer, m_rootStackPointer,
                         context.xstate, m_rootXstate);
     halt_forever();
@@ -593,6 +846,9 @@ void Runtime::enterFromTrampoline(void* opaque)
         selected->state != State::Running || !selected->entry) {
         halt_forever();
     }
+    // Initial tasks cannot be preempted until their complete entry contract
+    // has been established. The trampoline is the first safe task boundary.
+    m_transition = false;
     Entry entry = selected->entry;
     void* argument = selected->argument;
     const int32_t exitCode = entry(argument);
@@ -667,6 +923,16 @@ uint64_t Runtime::trustedKernelDispatchCount() const
         total += context.dispatchCount;
     }
     return total;
+}
+
+PreemptionStats Runtime::preemptionStats() const
+{
+    return m_preemptionStats;
+}
+
+uint32_t Runtime::preemptionDisableDepth() const
+{
+    return m_preemptionDisableDepth;
 }
 
 Result Runtime::requestTermination(Handle handle) const

@@ -1241,7 +1241,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             nativeScheduler.initialize();
         kernel::serial::puts("[NATIVE-SCHEDULER] initialize result=");
         kernel::serial::puts(kernel::native_scheduler::resultName(schedulerInit));
-        kernel::serial::puts(" contexts=8 stackBytes=65536 policy=cooperative owner=kernel-system\n");
+        kernel::serial::puts(" contexts=8 stackBytes=65536 policy=round-robin-100Hz owner=eligible-native-elf\n");
         kernel::serial::puts("[NATIVE-SCHEDULER] cpuState=xsave xcr0=0x");
         kernel::serial::put_hex64(nativeScheduler.enabledXstateMask());
         kernel::serial::puts(" bytes=0x");
@@ -1369,6 +1369,14 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             kernel::serial::puts(legacyNativeElfLaunched ? "PASS" : "FAIL");
             kernel::serial::putc('\n');
         }
+#endif
+#if defined(GXOS_SECURITY3G_TIMER_PREEMPTION_GUEST_PROOF) && defined(ARCH_AMD64)
+        kernel::serial::puts("[SECURITY3G-GUEST-PROOF] production desktop launcher non-yielding Native ELF begin\n");
+        const bool preemptionPilotLaunched = schedulerCanRun &&
+            kernel::desktop::launch_app("SECURITY3G Timer Preemption Pilot");
+        kernel::serial::puts("[SECURITY3G-GUEST-PROOF] production desktop launcher result=");
+        kernel::serial::puts(preemptionPilotLaunched ? "PASS" : "FAIL");
+        kernel::serial::putc('\n');
 #endif
         kernel::serial::puts("[KERNEL] Entering main loop (waiting for input)...\n");
         

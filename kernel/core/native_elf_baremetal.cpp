@@ -93,18 +93,22 @@ public:
     }
 
     void onMouseMove(int x, int y) override {
+        record_pilot_desktop_input();
         queue_mouse_event(x, y, GX_MOUSE_BUTTON_NONE, GX_MOUSE_ACTION_MOVE, 0);
     }
 
     void onMouseDown(int x, int y, uint8_t button) override {
+        record_pilot_desktop_input();
         queue_mouse_event(x, y, mouse_button_for_abi(button), GX_MOUSE_ACTION_DOWN, 0);
     }
 
     void onMouseUp(int x, int y, uint8_t button) override {
+        record_pilot_desktop_input();
         queue_mouse_event(x, y, mouse_button_for_abi(button), GX_MOUSE_ACTION_UP, 0);
     }
 
     void onMouseWheel(int x, int y, int wheelDelta) override {
+        record_pilot_desktop_input();
         queue_mouse_event(x, y, GX_MOUSE_BUTTON_NONE, GX_MOUSE_ACTION_WHEEL, wheelDelta);
     }
 
@@ -308,6 +312,7 @@ private:
     }
 
     void record_frame_guard_failure();
+    void record_pilot_desktop_input();
 
     bool guards_intact() const {
         if (!m_allocation || !m_pixels || m_pixelBytes == 0) return true;
@@ -345,6 +350,11 @@ struct Runtime {
     native_scheduler::Handle schedulerHandle;
     managed_execution::Handle executionHandle;
     bool schedulerManaged;
+    bool preemptionPilot;
+    bool preemptionPilotActive;
+    bool preemptionPilotStarted;
+    bool preemptionPilotEnded;
+    bool preemptionPilotEligible;
     bool entryStarted;
     bool entryReturned;
     bool entryStackVerified;
@@ -353,6 +363,28 @@ struct Runtime {
     uint32_t schedulerServiceProgressObservations;
     gx_result entryResult;
     uint64_t yieldCount;
+    uint64_t preemptionPilotStartYieldCount;
+    uint64_t preemptionPilotEndYieldCount;
+    uint64_t preemptionPilotStartTimerInterrupts;
+    uint64_t preemptionPilotStartDecisions;
+    uint64_t preemptionPilotStartRejections;
+    uint64_t preemptionPilotStartTimerSwitches;
+    uint64_t preemptionPilotStartDeferred;
+    uint64_t preemptionPilotStartResumptions;
+    uint64_t preemptionPilotStartKernelDispatches;
+    uint64_t preemptionPilotStartDesktopPumps;
+    uint64_t preemptionPilotStartDesktopInput;
+    uint64_t preemptionPilotEndTimerInterrupts;
+    uint64_t preemptionPilotEndDecisions;
+    uint64_t preemptionPilotEndRejections;
+    uint64_t preemptionPilotEndTimerSwitches;
+    uint64_t preemptionPilotEndDeferred;
+    uint64_t preemptionPilotEndResumptions;
+    uint64_t preemptionPilotEndKernelDispatches;
+    uint64_t preemptionPilotEndDesktopPumps;
+    uint64_t preemptionPilotEndDesktopInput;
+    uint64_t preemptionPilotDesktopPumpCount;
+    uint64_t preemptionPilotDesktopInputCount;
     bool exitRequested;
     gx_result exitCode;
     bool lastFocus;
@@ -363,6 +395,7 @@ struct Runtime {
     NativeAbiOperation currentAbiOperation;
     NativeAbiOperation lastCompletedAbiOperation;
     uint64_t abiCallCount;
+    uint32_t abiPreemptionGuardDepth;
     uint64_t appFrameSequence;
     uint64_t inputEventCount;
     bool faulted;
@@ -384,6 +417,13 @@ struct Runtime {
 
 void NativeWindowOwner::record_frame_guard_failure() {
     if (m_runtime) ++m_runtime->frameGuardFailures;
+}
+
+void NativeWindowOwner::record_pilot_desktop_input() {
+    if (m_runtime && m_runtime->preemptionPilotActive &&
+        m_runtime->preemptionPilotDesktopInputCount != UINT64_MAX) {
+        ++m_runtime->preemptionPilotDesktopInputCount;
+    }
 }
 
 static Package s_packages[kMaxPackages];
@@ -590,8 +630,43 @@ static const char* native_exception_name(uint64_t vector) {
     }
 }
 
+static bool enter_native_preemption_guard(Runtime* runtime) {
+    if (!runtime || !runtime->schedulerManaged) return false;
+    native_scheduler::Runtime& scheduler = native_scheduler::runtime();
+    if (!scheduler.isCurrent(runtime->schedulerHandle)) return false;
+    if (scheduler.enterNonPreemptible() != native_scheduler::Result::Ok) {
+        serial::puts("[NATIVE-ELF-SCHEDULER] preemption guard entry failed; kernel halted\n");
+        for (;;) arch::halt();
+    }
+    return true;
+}
+
+static void leave_native_preemption_guard(Runtime* runtime, bool active) {
+    if (!active || !runtime) return;
+    if (native_scheduler::runtime().leaveNonPreemptible() !=
+        native_scheduler::Result::Ok) {
+        serial::puts("[NATIVE-ELF-SCHEDULER] preemption guard exit failed; kernel halted\n");
+        for (;;) arch::halt();
+    }
+}
+
+class ScopedNativePreemptionDisable {
+public:
+    explicit ScopedNativePreemptionDisable(Runtime* runtime)
+        : m_runtime(runtime), m_active(enter_native_preemption_guard(runtime)) {}
+    ~ScopedNativePreemptionDisable() {
+        leave_native_preemption_guard(m_runtime, m_active);
+    }
+    ScopedNativePreemptionDisable(const ScopedNativePreemptionDisable&) = delete;
+    ScopedNativePreemptionDisable& operator=(const ScopedNativePreemptionDisable&) = delete;
+private:
+    Runtime* m_runtime;
+    bool m_active;
+};
+
 static void abi_begin(Runtime* runtime, NativeAbiOperation operation) {
     if (!runtime) return;
+    if (enter_native_preemption_guard(runtime)) ++runtime->abiPreemptionGuardDepth;
     runtime->currentAbiOperation = operation;
     ++runtime->abiCallCount;
 }
@@ -600,6 +675,12 @@ static void abi_complete(Runtime* runtime, NativeAbiOperation operation) {
     if (!runtime) return;
     runtime->lastCompletedAbiOperation = operation;
     runtime->currentAbiOperation = NativeAbiOperation::None;
+    // The callback has finished mutating kernel-owned state. If a timer tick
+    // arrived inside it, the outermost leave resumes the deferred scheduler
+    // request from this safe call boundary.
+    const bool guardActive = runtime->abiPreemptionGuardDepth != 0u;
+    if (guardActive) --runtime->abiPreemptionGuardDepth;
+    leave_native_preemption_guard(runtime, guardActive);
 }
 
 static gx_result abi_result(Runtime* runtime, NativeAbiOperation operation, gx_result result) {
@@ -976,8 +1057,14 @@ static bool parse_package(const char* directory, Package* package) {
     char executionModel[48];
     if (json_string(s_manifest, "\"executionModel\"", executionModel,
                     sizeof(executionModel))) {
-        if (!text_equal(executionModel, "cooperative-scheduler-v1")) return false;
-        package->executionModel = ExecutionModel::CooperativeSchedulerV1;
+        if (text_equal(executionModel, "cooperative-scheduler-v1")) {
+            package->executionModel = ExecutionModel::CooperativeSchedulerV1;
+        } else if (text_equal(executionModel, "timer-preemption-pilot-v1") &&
+                   text_equal(package->id, "com.guidexos.schedulerpreemptionpilot")) {
+            package->executionModel = ExecutionModel::TimerPreemptionPilotV1;
+        } else {
+            return false;
+        }
     }
     if (!text_equal(package->entryPoint, "gx_main") || !text_equal(package->abi, GX_ABI_NAME)) return false;
     package->hasAudioOutput = json_array_contains(s_manifest, "\"permissions\"", "audio.output");
@@ -1999,6 +2086,61 @@ static Runtime* runtime_from(gx_app_context* context) {
 
 static gx_result GX_CALL host_log(gx_app_context* context, const char* message) {
     Runtime* runtime = runtime_from(context);
+    ScopedNativePreemptionDisable preemptionGuard(runtime);
+    if (runtime && runtime->preemptionPilot &&
+        text_equal(message, "SECURITY3G-NONYIELD-BEGIN")) {
+        if (runtime->preemptionPilotStarted || runtime->preemptionPilotEnded)
+            return GX_ERROR_BUSY;
+        const native_scheduler::PreemptionStats stats =
+            native_scheduler::runtime().preemptionStats();
+        runtime->preemptionPilotStartYieldCount = runtime->yieldCount;
+        runtime->preemptionPilotStartTimerInterrupts = stats.timerInterrupts;
+        runtime->preemptionPilotStartDecisions = stats.preemptionDecisions;
+        runtime->preemptionPilotStartRejections = stats.eligibilityRejections;
+        runtime->preemptionPilotStartTimerSwitches = stats.preemptiveSwitches;
+        runtime->preemptionPilotStartDeferred = stats.deferredPreemptions;
+        runtime->preemptionPilotStartResumptions = stats.applicationResumptions;
+        runtime->preemptionPilotStartKernelDispatches =
+            native_scheduler::runtime().trustedKernelDispatchCount();
+        runtime->preemptionPilotStartDesktopPumps =
+            runtime->preemptionPilotDesktopPumpCount;
+        runtime->preemptionPilotStartDesktopInput =
+            runtime->preemptionPilotDesktopInputCount;
+        runtime->preemptionPilotStarted = true;
+        runtime->preemptionPilotActive = true;
+        const native_scheduler::Result eligibility =
+            native_scheduler::runtime().setCurrentPreemptionEligible(true);
+        runtime->preemptionPilotEligible = eligibility ==
+            native_scheduler::Result::Ok;
+        return runtime->preemptionPilotEligible ? GX_OK : GX_ERROR_INTERNAL;
+    }
+    if (runtime && runtime->preemptionPilot &&
+        text_equal(message, "SECURITY3G-NONYIELD-END")) {
+        if (!runtime->preemptionPilotStarted || runtime->preemptionPilotEnded)
+            return GX_ERROR_INVALID_ARGUMENT;
+        const native_scheduler::PreemptionStats stats =
+            native_scheduler::runtime().preemptionStats();
+        runtime->preemptionPilotEndYieldCount = runtime->yieldCount;
+        runtime->preemptionPilotEndTimerInterrupts = stats.timerInterrupts;
+        runtime->preemptionPilotEndDecisions = stats.preemptionDecisions;
+        runtime->preemptionPilotEndRejections = stats.eligibilityRejections;
+        runtime->preemptionPilotEndTimerSwitches = stats.preemptiveSwitches;
+        runtime->preemptionPilotEndDeferred = stats.deferredPreemptions;
+        runtime->preemptionPilotEndResumptions = stats.applicationResumptions;
+        runtime->preemptionPilotEndKernelDispatches =
+            native_scheduler::runtime().trustedKernelDispatchCount();
+        runtime->preemptionPilotEndDesktopPumps =
+            runtime->preemptionPilotDesktopPumpCount;
+        runtime->preemptionPilotEndDesktopInput =
+            runtime->preemptionPilotDesktopInputCount;
+        const native_scheduler::Result eligibility =
+            native_scheduler::runtime().setCurrentPreemptionEligible(false);
+        runtime->preemptionPilotEligible = false;
+        runtime->preemptionPilotActive = false;
+        runtime->preemptionPilotEnded = eligibility ==
+            native_scheduler::Result::Ok;
+        return runtime->preemptionPilotEnded ? GX_OK : GX_ERROR_INTERNAL;
+    }
     if (message && message[0] == 'P' && message[1] == 'A' && message[2] == 'C' &&
         message[3] == 'B' && message[4] == 'M' && message[5] == ' ') {
         log_breadcrumb(runtime, message + 6);
@@ -2046,6 +2188,7 @@ static gx_result GX_CALL host_request_window(gx_app_context* context, const char
 
 static gx_result GX_CALL host_draw_text(gx_app_context* context, gx_handle window, int x, int y, const char* text) {
     Runtime* runtime = runtime_from(context);
+    ScopedNativePreemptionDisable preemptionGuard(runtime);
     if (!runtime || !runtime->owner || !runtime->owner->window() ||
         window != runtime->owner->window()->id || !text) return GX_ERROR_INVALID_ARGUMENT;
     return runtime->owner->draw_text(x, y, text);
@@ -2054,6 +2197,7 @@ static gx_result GX_CALL host_draw_text(gx_app_context* context, gx_handle windo
 static gx_result GX_CALL host_draw_rect(gx_app_context* context, gx_handle window, int x, int y,
                                         int width, int height, uint32_t color) {
     Runtime* runtime = runtime_from(context);
+    ScopedNativePreemptionDisable preemptionGuard(runtime);
     if (!runtime || !runtime->owner || !runtime->owner->window() ||
         window != runtime->owner->window()->id) return GX_ERROR_INVALID_ARGUMENT;
     return runtime->owner->draw_rect(x, y, width, height, color);
@@ -2073,8 +2217,19 @@ static gx_result yield_scheduler_context(Runtime* runtime) {
         executions.markYielded(runtime->executionHandle);
     if (yielded != managed_execution::Result::Ok) return GX_ERROR_INTERNAL;
 
+    const native_scheduler::Result yieldGuard =
+        scheduler.suspendPreemptionForCooperativeYield();
+    if (yieldGuard != native_scheduler::Result::Ok) {
+        (void)executions.markRunning(runtime->executionHandle);
+        return GX_ERROR_INTERNAL;
+    }
     const native_scheduler::Result switchResult = scheduler.yieldCurrent();
     if (switchResult != native_scheduler::Result::Ok) {
+        if (scheduler.cancelPreemptionSuspendForCooperativeYield() !=
+            native_scheduler::Result::Ok) {
+            serial::puts("[NATIVE-ELF-SCHEDULER] failed-yield guard restoration failed; kernel halted\n");
+            for (;;) arch::halt();
+        }
         (void)executions.markRunning(runtime->executionHandle);
         return GX_ERROR_INTERNAL;
     }
@@ -2111,6 +2266,11 @@ static void pump_desktop(Runtime* runtime) {
     static bool pumping = false;
     if (pumping) return;
     pumping = true;
+    if (runtime && runtime->preemptionPilotActive &&
+        !native_scheduler::runtime().isCurrent(runtime->schedulerHandle) &&
+        runtime->preemptionPilotDesktopPumpCount != UINT64_MAX) {
+        ++runtime->preemptionPilotDesktopPumpCount;
+    }
     input::poll();
     const int8_t wheel = input::mouse_scroll_y();
     if (input::mouse_dirty()) {
@@ -2126,6 +2286,10 @@ static void pump_desktop(Runtime* runtime) {
     app_audio::backend_instance().pump();
     (void)runtime;
     pumping = false;
+}
+
+static uint64_t counter_delta(uint64_t end, uint64_t start) {
+    return end >= start ? end - start : 0u;
 }
 
 static gx_result GX_CALL host_poll_event(gx_app_context* context, gx_event* outEvent, int timeoutMs) {
@@ -2197,6 +2361,7 @@ static gx_result GX_CALL host_poll_event(gx_app_context* context, gx_event* outE
 
 static gx_result GX_CALL host_wait_for_close(gx_app_context* context, gx_handle window, int timeoutMs) {
     Runtime* runtime = runtime_from(context);
+    ScopedNativePreemptionDisable preemptionGuard(runtime);
     if (!runtime || !runtime->owner || window != runtime->owner->window()->id) return GX_ERROR_INVALID_ARGUMENT;
     for (;;) {
         gx_event event;
@@ -2218,6 +2383,7 @@ static gx_result GX_CALL host_exit(gx_app_context* context, gx_result exitCode) 
 
 static gx_result GX_CALL host_file_exists(gx_app_context* context, const char* relative, uint32_t* outExists) {
     Runtime* runtime = runtime_from(context);
+    ScopedNativePreemptionDisable preemptionGuard(runtime);
     if (!runtime || !outExists) return GX_ERROR_INVALID_ARGUMENT;
 #if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
     if (!package_source_unchanged(runtime->package)) return GX_ERROR_PERMISSION_DENIED;
@@ -2270,6 +2436,10 @@ static gx_result GX_CALL host_file_read(gx_app_context* context, const char* rel
 
 static gx_result GX_CALL host_file_read_all(gx_app_context* context, const char* relative,
                                             void* buffer, uint32_t bufferSize, uint32_t* outBytesRead) {
+    // Each VFS read chunk owns its own narrow ABI guard. The aggregation loop
+    // mutates only this Native ELF stack and output buffer, so holding the
+    // shared-kernel guard across an arbitrarily large caller buffer would
+    // delay safe timer preemption longer than necessary.
     if (!outBytesRead) return GX_ERROR_INVALID_ARGUMENT;
     *outBytesRead = 0;
     uint64_t offset = 0;
@@ -2632,6 +2802,7 @@ static gx_result GX_CALL host_play_pcm(gx_app_context* context, const void* pcmD
     // (explicit null-sink degrade), so applications stay fully playable
     // without audio; only malformed/denied/busy requests report errors.
     Runtime* runtime = runtime_from(context);
+    ScopedNativePreemptionDisable preemptionGuard(runtime);
     if (!runtime) return GX_ERROR_INVALID_ARGUMENT;
     if (!runtime->package || !runtime->package->hasAudioOutput) {
         return GX_ERROR_PERMISSION_DENIED;
@@ -2888,8 +3059,9 @@ static bool drive_scheduled_native_elf(Runtime* runtime,
         }
         const bool applicationSuspended = runtime->entryStarted &&
             !runtime->entryReturned && beforeSnapshot.state == native_scheduler::State::Ready &&
-            (runtime->currentAbiOperation == NativeAbiOperation::Yield ||
-             runtime->currentAbiOperation == NativeAbiOperation::PollEvent);
+            ((runtime->currentAbiOperation == NativeAbiOperation::Yield ||
+              runtime->currentAbiOperation == NativeAbiOperation::PollEvent) ||
+             (runtime->preemptionPilotActive && runtime->preemptionPilotEligible));
         const uint64_t kernelDispatchesBefore =
             scheduler.trustedKernelDispatchCount();
         bool dispatched = false;
@@ -2937,8 +3109,10 @@ static bool run_package(Package* package) {
     runtime.package = package;
     runtime.exitCode = GX_OK;
     runtime.entryResult = GX_ERROR_INTERNAL;
-    runtime.schedulerManaged = package && package->executionModel ==
-        ExecutionModel::CooperativeSchedulerV1;
+    runtime.schedulerManaged = package && package->executionModel !=
+        ExecutionModel::Synchronous;
+    runtime.preemptionPilot = package && package->executionModel ==
+        ExecutionModel::TimerPreemptionPilotV1;
     ++s_runtimeSequence;
     runtime.audioOwner = s_runtimeSequence;
     initialize_host_table(&runtime);
@@ -2954,9 +3128,11 @@ static bool run_package(Package* package) {
         return false;
     }
 #endif
-    log_runtime(&runtime, runtime.schedulerManaged
-        ? "launch begin executionModel=cooperative-scheduler-v1 path=package-relative runtime=native-elf abi=guidexos-c-abi-v1"
-        : "launch begin executionModel=synchronous path=package-relative runtime=native-elf abi=guidexos-c-abi-v1");
+    log_runtime(&runtime, runtime.preemptionPilot
+        ? "launch begin executionModel=timer-preemption-pilot-v1 path=package-relative runtime=native-elf abi=guidexos-c-abi-v1"
+        : (runtime.schedulerManaged
+            ? "launch begin executionModel=cooperative-scheduler-v1 path=package-relative runtime=native-elf abi=guidexos-c-abi-v1"
+            : "launch begin executionModel=synchronous path=package-relative runtime=native-elf abi=guidexos-c-abi-v1"));
     if (!load_image(&runtime)) {
         delete[] runtime.image;
         delete[] runtime.verifiedElf;
@@ -3102,6 +3278,72 @@ static bool run_package(Package* package) {
         }
         const gx_result scheduledResult = runtime.entryReturned
             ? runtime.entryResult : GX_ERROR_INTERNAL;
+        bool preemptionPilotPassed = false;
+        if (runtime.preemptionPilot) {
+            const uint64_t timerInterrupts = counter_delta(
+                runtime.preemptionPilotEndTimerInterrupts,
+                runtime.preemptionPilotStartTimerInterrupts);
+            const uint64_t decisions = counter_delta(
+                runtime.preemptionPilotEndDecisions,
+                runtime.preemptionPilotStartDecisions);
+            const uint64_t rejections = counter_delta(
+                runtime.preemptionPilotEndRejections,
+                runtime.preemptionPilotStartRejections);
+            const uint64_t timerSwitches = counter_delta(
+                runtime.preemptionPilotEndTimerSwitches,
+                runtime.preemptionPilotStartTimerSwitches);
+            const uint64_t deferred = counter_delta(
+                runtime.preemptionPilotEndDeferred,
+                runtime.preemptionPilotStartDeferred);
+            const uint64_t resumptions = counter_delta(
+                runtime.preemptionPilotEndResumptions,
+                runtime.preemptionPilotStartResumptions);
+            const uint64_t trustedDispatches = counter_delta(
+                runtime.preemptionPilotEndKernelDispatches,
+                runtime.preemptionPilotStartKernelDispatches);
+            const uint64_t desktopPumps = counter_delta(
+                runtime.preemptionPilotEndDesktopPumps,
+                runtime.preemptionPilotStartDesktopPumps);
+            const uint64_t desktopInputCallbacks = counter_delta(
+                runtime.preemptionPilotEndDesktopInput,
+                runtime.preemptionPilotStartDesktopInput);
+            const bool noVoluntaryYield = runtime.preemptionPilotEndYieldCount ==
+                runtime.preemptionPilotStartYieldCount;
+            preemptionPilotPassed = runtime.preemptionPilotStarted &&
+                runtime.preemptionPilotEnded && timerInterrupts >= 3u &&
+                timerSwitches >= 3u && resumptions >= 3u &&
+                trustedDispatches != 0u &&
+                desktopPumps != 0u && noVoluntaryYield &&
+                !runtime.preemptionPilotEligible &&
+                !runtime.preemptionPilotActive && scheduledResult == GX_OK;
+            serial::puts("[NATIVE-ELF-PREEMPTION] appId=");
+            serial::puts(package->id);
+            serial::puts(" result=");
+            serial::puts(preemptionPilotPassed ? "PASS" : "FAIL");
+            serial::puts(" timerInterrupts=0x");
+            serial::put_hex64(timerInterrupts);
+            serial::puts(" preemptionDecisions=0x");
+            serial::put_hex64(decisions);
+            serial::puts(" timerDrivenSwitches=0x");
+            serial::put_hex64(timerSwitches);
+            serial::puts(" deferredRequests=0x");
+            serial::put_hex64(deferred);
+            serial::puts(" applicationResumptions=0x");
+            serial::put_hex64(resumptions);
+            serial::puts(" trustedDispatchesDuringWork=0x");
+            serial::put_hex64(trustedDispatches);
+            serial::puts(" desktopPumpsDuringWork=0x");
+            serial::put_hex64(desktopPumps);
+            serial::puts(" desktopInputCallbacksDuringWork=0x");
+            serial::put_hex64(desktopInputCallbacks);
+            serial::puts(" eligibilityRejections=0x");
+            serial::put_hex64(rejections);
+            serial::puts(" voluntaryYieldsDuringWork=0x");
+            serial::put_hex64(noVoluntaryYield ? 0u :
+                counter_delta(runtime.preemptionPilotEndYieldCount,
+                              runtime.preemptionPilotStartYieldCount));
+            serial::puts(" workload=bounded-no-host-calls\n");
+        }
         serial::puts("[NATIVE-ELF] runtime="); serial::put_hex64(s_runtimeSequence);
         serial::puts(" execution=scheduled entryStackVerified=");
         serial::puts(runtime.entryStackVerified ? "yes" : "no");
@@ -3162,13 +3404,18 @@ static bool run_package(Package* package) {
             serial::puts(" resourcesReleased=yes schedulerStackReaped=yes\n");
         }
         const bool cooperativeYieldProved = runtime.yieldCount != 0u;
+        const bool schedulerExecutionProved = runtime.preemptionPilot
+            ? preemptionPilotPassed : cooperativeYieldProved;
         log_runtime(&runtime, runtime.faulted
             ? "scheduled lifecycle FAULT resources released after execution stopped"
-            : (contextCompleted && runtime.entryReturned && cooperativeYieldProved &&
+            : (contextCompleted && runtime.entryReturned && schedulerExecutionProved &&
                scheduledResult == GX_OK
-                ? "scheduled lifecycle PASS yield/resume/return/cleanup"
-                : "scheduled lifecycle FAIL entry, yield, or scheduler result"));
-        return contextCompleted && runtime.entryReturned && cooperativeYieldProved &&
+                ? (runtime.preemptionPilot
+                    ? "scheduled lifecycle PASS timer-preempt/resume/return/cleanup"
+                    : "scheduled lifecycle PASS yield/resume/return/cleanup")
+                : "scheduled lifecycle FAIL entry, scheduling, or cleanup result"));
+        return contextCompleted && runtime.entryReturned &&
+            (runtime.preemptionPilot ? preemptionPilotPassed : cooperativeYieldProved) &&
             runtime.entryStackVerified && !runtime.faulted &&
             scheduledResult == GX_OK;
     }
