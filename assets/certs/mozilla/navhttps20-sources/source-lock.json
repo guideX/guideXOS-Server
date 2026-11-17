@@ -1,0 +1,104 @@
+{
+  "schema_version": "guidexos.mozilla-trust-source-lock.v1",
+  "snapshot_date": "2026-11-16",
+  "external_policy_overlay": {
+    "local_path": "assets/certs/mozilla/navhttps20-sources/external-policy-overlay.json",
+    "sha256": "8832ab49fd01cb669d028e347582f43ed5970b3ee6d1cba77a8edbe3350734a5",
+    "completeness": "incomplete; fail closed"
+  },
+  "sources": {
+    "nss_certdata": {
+      "repository": "https://github.com/mozilla/nss",
+      "revision": "8c60e757c30b1b239bae46532b4f6d4ebb1e1cad",
+      "revision_date_utc": "2026-11-13T23:31:24Z",
+      "path": "lib/ckfw/builtins/certdata.txt",
+      "local_path": "assets/certs/mozilla/navhttps20-sources/certdata.txt",
+      "sha256": "6d177e33ab54b338edfee24dc3868585833636716a320a725137ab4a15927292",
+      "license": "MPL-2.0",
+      "roles": [
+        "root-certificate-der",
+        "tls-server-auth-trust",
+        "explicit-distrust",
+        "server-distrust-after",
+        "email-distrust-after",
+        "mozilla-ca-policy-membership",
+        "certificate-labels-and-identifiers"
+      ]
+    },
+    "mozilla_root_store_policy": {
+      "repository": "https://github.com/mozilla/pkipolicy",
+      "revision": "bb613bb30b8d85706bac7ecdd877d19b50efe4e7",
+      "revision_date_utc": "2026-09-23T13:24:54Z",
+      "path": "rootstore/policy.md",
+      "local_path": "assets/certs/mozilla/navhttps20-sources/rootstore-policy.md",
+      "sha256": "0e39e12a7251b5011c86cbc83355eb63dd0b82ca33019f5ccafad6cc7ffb59db",
+      "policy_version": "3.1",
+      "effective_date": "2026-07-01",
+      "license": "CC-BY-SA-3.0-or-later (Mozilla website text license; repository API reports no SPDX license)",
+      "roles": [
+        "root-program-policy-version",
+        "certificate-purpose-requirements",
+        "root-lifecycle-policy",
+        "program-eligibility-requirements"
+      ]
+    },
+    "mozilla_additional_trust_changes": {
+      "url": "https://wiki.mozilla.org/CA/Additional_Trust_Changes",
+      "revision": "retrieved-snapshot-2026-11-16",
+      "retrieved_date_utc": "2026-11-16",
+      "local_path": "assets/certs/mozilla/navhttps20-sources/additional-trust-changes.wiki",
+      "sha256": "4cf63203c5fb8aef744b8c8d148d4bc4cd43c2e37881b20ae03f9c16eed2b60d",
+      "license": "CC-BY-SA-3.0-or-later",
+      "attribution": "MozillaWiki, CA/Additional Trust Changes",
+      "machine_readable": false,
+      "complete_per_root_restrictions": false,
+      "roles": [
+        "external-root-restriction-inventory",
+        "ev-policy-in-psm-indicator",
+        "onecrl-and-intermediate-distrust-boundary"
+      ]
+    },
+    "curl_ca_extract_comparison": {
+      "url": "https://curl.se/caextract.html",
+      "revision": "cacert.pem-2026-11-05",
+      "source_date_utc": "2026-11-05T04:12:01Z",
+      "local_path": "assets/certs/candidates/mozilla-cacert-2026-11-05.pem",
+      "sha256": "427c064216761a1e72a8b30f0d954d08cb6e4435a82091fb865afd20c8497285",
+      "license": "MPL-2.0",
+      "converter_repository": "https://github.com/curl/curl",
+      "converter_revision": "a7342f165557f6889e6ba9ba193f0499b5084327",
+      "converter_revision_date_utc": "2026-10-22T11:49:33Z",
+      "converter_path": "scripts/mk-ca-bundle.pl",
+      "converter_local_path": "assets/certs/mozilla/navhttps20-sources/mk-ca-bundle.pl",
+      "converter_sha256": "a70b45f335e51177748dbc29b3041964e4921c00554ca389ae05598a6f418659",
+      "converter_license": "curl",
+      "roles": ["comparison-input-only"],
+      "carries_mozilla_policy_restrictions": false
+    }
+  },
+  "cryptographic_library_baseline": {
+    "mbed_tls": {
+      "version": "4.1.0",
+      "revision": "0fe989b6b514192783c469039edd325fd0989806"
+    },
+    "tf_psa_crypto": {
+      "version": "1.1.0",
+      "revision": "29160dd877d29658279fd683b2ae57b320ddcf09"
+    },
+    "name_constraints": "NAVHTTPS19: DNS, IP, email and directoryName enforced; unsupported constrained GeneralName forms fail closed"
+  },
+  "fixture_root_files": [
+    {
+      "path": "scripts/fixtures/navigator-smoke-root-ca-bundle.pem",
+      "sha256": "11f1fecaeddaaa2504e72dd6bd4ccc3a33bbf38aa759f55ae0547ac4679ad4ce"
+    },
+    {
+      "path": "scripts/fixtures/navigator-validated-root-ca-bundle.pem",
+      "sha256": "c28c679d134e640c21cb739b617034e996d48a535b97499ffa667e832711e606"
+    },
+    {
+      "path": "scripts/fixtures/navigator-critical-name-constraints-root.pem",
+      "sha256": "df6916c410664e71b501203773610b436dd45f8a9dfb20e67c0b39332acce7e9"
+    }
+  ]
+}

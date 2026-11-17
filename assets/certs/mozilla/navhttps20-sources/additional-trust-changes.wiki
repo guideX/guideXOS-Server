@@ -1,0 +1,74 @@
+The Mozilla Root Program's official repository of the roots it trusts is [https://hg.mozilla.org/mozilla-central/raw-file/tip/security/nss/lib/ckfw/builtins/certdata.txt certdata.txt]. Some information about the level of trust in each root is included in that file - for example, whether it's trusted for server SSL, S/MIME or both. However, not all restrictions recommended by Mozilla on the roots can be or are encoded in certdata.txt. Some are implemented in our security library, "NSS", or in Firefox and Thunderbird (so-called "PSM").
+
+Sometimes, other companies and organizations decide to use Mozilla's root store in their products. As the [[CA:FAQ#Can_I_use_Mozilla.27s_set_of_CA_certificates.3F|CA FAQ]] notes, Mozilla does not promise to take into account the needs of other users of its root store when making decisions. However, for the benefit of such users and on a best-efforts basis, this page documents the additional trust settings that Mozilla recommends.
+
+==Extended Validation (EV)==
+
+The status of whether a root is approved to issue EV certificates or not is [https://dxr.mozilla.org/mozilla-central/source/security/certverifier/ExtendedValidation.cpp stored in PSM] rather than certdata.txt.
+
+==OneCRL==
+
+While not technically a modification to the root store as we don't use it for un-trusting roots, Mozilla's [https://blog.mozilla.org/security/2015/03/03/revoking-intermediate-certificates-introducing-onecrl/ OneCRL] system is used for communicating information about the revocation of intermediate certificates (and high-profile misissued end-entity certificates) to Firefox clients. Reports are provided about revoked intermediate certificates on the [[CA/Intermediate_Certificates|CA/Intermediate Certificates wiki page]].
+
+==Distrust After==
+For some root certificates Mozilla has set 'Distrust for TLS After Date' or 'Distrust for S/MIME After Date'. For certificates chaining up to those root certificates, Mozilla does not trust end-entity certificates that have a Valid-From date later than the specified distrust-after date. Certificates with a Valid-From date earlier than the distrust-after date will continue to be trusted until the certificate's natural expiration or until the certificate is revoked.
+
+These root certificates may be identified via the 'Included CA Certificates' reports on the  [[CA/Included_Certificates|CA/Included Certificates wiki page]]. Within those reports look for dates in the 'Distrust for TLS After Date' and 'Distrust for S/MIME After Date' columns.
+
+==Kamu SM==
+
+The Turkish Government CA is name-constrained to *.tr. ([https://phabricator.services.mozilla.com/D177242 code change])
+
+==Symantec==
+In accordance [https://groups.google.com/d/topic/mozilla.dev.security.policy/FLHRT79e3XE/discussion with the consensus proposal that was adopted in 2017], Mozilla began to distrust Symantec (including GeoTrust, RapidSSL, and Thawte) certificates issued before 1-June 2016 starting in Firefox 60, and plans to distrust Symantec certificates regardless of the date of issuance starting in Firefox 64, unless they are issued by whitelisted subordinate CAs that have the following SHA-256 Subject Public Key hashes (subjectPublicKeyInfo):
+
+Apple:<br />
+
+* [https://crt.sh/?spkisha256=c0554bde87a075ec13a61f275983ae023957294b454caf0a9724e3b21b7935bc c0554bde87a075ec13a61f275983ae023957294b454caf0a9724e3b21b7935bc]
+* [https://crt.sh/?spkisha256=56e98deac006a729afa2ed79f9e419df69f451242596d2aaf284c74a855e352e 56e98deac006a729afa2ed79f9e419df69f451242596d2aaf284c74a855e352e]
+* [https://crt.sh/?spkisha256=7289c06dedd16b71a7dcca66578572e2e109b11d70ad04c2601b6743bc66d07b 7289c06dedd16b71a7dcca66578572e2e109b11d70ad04c2601b6743bc66d07b]
+* [https://crt.sh/?spkisha256=fae46000d8f7042558541e98acf351279589f83b6d3001c18442e4403d111849 fae46000d8f7042558541e98acf351279589f83b6d3001c18442e4403d111849]
+* [https://crt.sh/?spkisha256=b5cf82d47ef9823f9aa78f123186c52e8879ea84b0f822c91d83e04279b78fd5 b5cf82d47ef9823f9aa78f123186c52e8879ea84b0f822c91d83e04279b78fd5]
+* [https://crt.sh/?spkisha256=e24f8e8c2185da2f5e88d4579e817c47bf6eafbc8505f0f960fd5a0df4473ad3 e24f8e8c2185da2f5e88d4579e817c47bf6eafbc8505f0f960fd5a0df4473ad3]
+* [https://crt.sh/?spkisha256=3174d9092f9531c06026ba489891016b436d5ec02623f9aafe2009ecc3e4d557 3174d9092f9531c06026ba489891016b436d5ec02623f9aafe2009ecc3e4d557]
+
+Google:<br />
+
+* [https://crt.sh/?spkisha256=ec722969cb64200ab6638f68ac538e40abab5b19a6485661042a1061c4612776 ec722969cb64200ab6638f68ac538e40abab5b19a6485661042a1061c4612776]
+
+DigiCert:<br />
+
+* [https://crt.sh/?spkisha256=8bb593a93be1d0e8a822bb887c547890c3e706aad2dab76254f97fb36b82fc26 8bb593a93be1d0e8a822bb887c547890c3e706aad2dab76254f97fb36b82fc26]
+* [https://crt.sh/?spkisha256=b94c198300cec5c057ad0727b70bbe91816992256439a7b32f4598119dda9c97 b94c198300cec5c057ad0727b70bbe91816992256439a7b32f4598119dda9c97]
+* [https://crt.sh/?spkisha256=7cac9a0ff315387750ba8bafdb1c2bc29b3f0bba16362ca93a90f84da2df5f3e 7cac9a0ff315387750ba8bafdb1c2bc29b3f0bba16362ca93a90f84da2df5f3e]
+* [https://crt.sh/?spkisha256=ac50b5fb738aed6cb781cc35fbfff7786f77109ada7c08867c04a573fd5cf9ee ac50b5fb738aed6cb781cc35fbfff7786f77109ada7c08867c04a573fd5cf9ee]
+
+Note: In some instances, multiple subordinate CAs contain the same public key, necessitating whitelisting by subjectPublicKeyInfo. Refer to ([https://bugzilla.mozilla.org/show_bug.cgi?id=1409257 Bug 1409257]) for more information.
+
+The [https://support.mozilla.org/en-US/kb/about-config-editor-firefox Firefox preference] "security.pki.distrust_ca_policy" may be set to '2' to enable distrust (regardless of issuance date) and '0' to override these changes. Mozilla plans to remove this preference in Firefox 65.
+
+In a future Firefox release, we expect to remove the whitelist, and remove the ‘websites’ trust bit from all Symantec roots. The timing of these changes, and any changes to the ‘email’ trust bit (S/MIME) have not yet been determined.
+
+<br />
+'''Update December 2020:''' 
+<br />
+The following 10 root certificates were removed via {{bug|1670769}} from [[NSS:Release_Versions|NSS 3.60]] and [[Release_Management/Calendar|Firefox 85]].
+# [https://crt.sh/?id=17 GeoTrust Global CA]
+# [https://crt.sh/?id=4350 GeoTrust Primary Certification Authority]
+# [https://crt.sh/?id=847444 GeoTrust Primary Certification Authority - G3]
+# [https://crt.sh/?id=30 thawte Primary Root CA]
+# [https://crt.sh/?id=254193 thawte Primary Root CA - G3]
+# [https://crt.sh/?id=2771491 VeriSign Class 3 Public Primary Certification Authority - G4]
+# [https://crt.sh/?id=93 VeriSign Class 3 Public Primary Certification Authority - G5]
+# [https://crt.sh/?id=3382830 thawte Primary Root CA - G2]
+# [https://crt.sh/?id=4174851 GeoTrust Universal CA]
+# [https://crt.sh/?id=4175126 GeoTrust Universal CA 2]
+
+'''Update June 2020:''' 
+<br />
+There is a [https://bugzilla.mozilla.org/show_bug.cgi?id=1465613 new Distrust-After capability] available in [https://hg.mozilla.org/releases/mozilla-beta/file/tip/security/nss/lib/ckfw/builtins/certdata.txt certdata.txt], which is enforced as of Firefox 78 ([https://bugzilla.mozilla.org/show_bug.cgi?id=1615438 Bug #1615438]), and will be enforced in Thunderbird at a later date. The following Bugzilla bugs were filed to use this capability. This update was [https://groups.google.com/d/msg/mozilla.dev.security.policy/WpJiD14tiXc/2Waf17XCFQAJ described in the mozilla.dev.security.policy forum]. 
+* [https://bugzilla.mozilla.org/show_bug.cgi?id=1618404 Symantec root certs - Set CKA_NSS_SERVER_DISTRUST_AFTER]
+** Implemented in NSS 3.53, Firefox 78.
+** Setting CKA_NSS_SERVER_DISTRUST_AFTER to the specified dates distrusts TLS certs that have “Valid From” newer than the specified date. TLS certificates issued prior to this date will continue to be trusted until the certificate’s natural expiration or until we disable the trust bit or remove the root. 
+* [https://bugzilla.mozilla.org/show_bug.cgi?id=1618407 Symantec root certs - Set CKA_NSS_EMAIL_DISTRUST_AFTER]
+** Setting CKA_NSS_EMAIL_DISTRUST_AFTER to the specified dates distrusts S/MIME certs that have “Valid From” newer than the specified date. S/MIME certificates issued prior to this date will continue to be trusted until the certificate’s natural expiration or until we disable the trust bit or remove the root.

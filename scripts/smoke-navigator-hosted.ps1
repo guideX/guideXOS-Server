@@ -1,6 +1,7 @@
 param(
     [switch]$Build,
-    [switch]$DisablePaintDefer
+    [switch]$DisablePaintDefer,
+    [string]$PersistentFixtureDir
 )
 
 $ErrorActionPreference = "Stop"
@@ -54,7 +55,11 @@ function Set-EnvFlag {
 $python = Find-Python
 if (-not $python) { throw "python not found; required for local Navigator POST smoke server." }
 $persistentFixtureGenerator = Join-Path $Root "scripts\generate-navigator-persistent-fixtures.py"
-$persistentFixtureDir = Join-Path $Root "navigator-smoke\generated"
+if ([string]::IsNullOrWhiteSpace($PersistentFixtureDir)) {
+    $PersistentFixtureDir = Join-Path $Root "navigator-smoke\generated"
+} else {
+    $PersistentFixtureDir = [System.IO.Path]::GetFullPath($PersistentFixtureDir)
+}
 & $python $persistentFixtureGenerator --output-dir $persistentFixtureDir
 if ($LASTEXITCODE -ne 0) { throw "deterministic Navigator viewport fixture generation failed." }
 

@@ -1,0 +1,14 @@
+{
+  "schema_version": "guidexos.mozilla-root-restrictions.v1",
+  "source_revision": "retrieved-snapshot-2026-11-16",
+  "source_sha256": "4cf63203c5fb8aef744b8c8d148d4bc4cd43c2e37881b20ae03f9c16eed2b60d",
+  "complete_for_source_roots": false,
+  "records": {},
+  "incomplete_reasons": [
+    "Mozilla describes this page as best-efforts guidance, not a complete machine-readable per-root restrictions registry.",
+    "EV approval data is maintained in Firefox PSM rather than certdata.txt.",
+    "Domain/name constraints and other root-specific limits may be implemented in NSS or Firefox/Thunderbird code and are not fully represented in this snapshot.",
+    "Certificate-policy profiles and required OIDs are not imported from a complete, fingerprint-keyed source.",
+    "OneCRL intermediate and certificate revocation status is separate from root trust and is not included as root distrust data."
+  ]
+}

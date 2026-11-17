@@ -1,0 +1,6 @@
+/assets/certs/mozilla/navhttps20-sources/** -text
+/assets/certs/candidates/mozilla-nss-2026-11-13.navhttps20-trust-manifest.json -text
+/assets/certs/candidates/mozilla-cacert-2026-11-05.pem -text
+/scripts/fixtures/navigator-smoke-root-ca-bundle.pem -text
+/scripts/fixtures/navigator-validated-root-ca-bundle.pem -text
+/scripts/fixtures/navigator-critical-name-constraints-root.pem -text
