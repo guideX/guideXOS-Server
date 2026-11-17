@@ -135,7 +135,10 @@ def verify_linked_candidate(candidate: Path) -> dict[str, int]:
         raise ValueError("candidate does not link pinned ThreadStore::AttachCurrentThread")
     pal_bounds_lines = [
         line for line in map_text.splitlines()
-        if re.search(r"\bPalGetMaximumStackBounds\b", line)
+        if re.search(
+            r"^\s*[0-9A-Fa-f]{4}:[0-9A-Fa-f]{8}\s+PalGetMaximumStackBounds\s+",
+            line,
+        )
     ]
     if len(pal_bounds_lines) != 1 or \
             "Runtime.WorkstationGC:guidexos_nativeaot_pal_common_replacement.threadstore.obj" not in pal_bounds_lines[0]:
