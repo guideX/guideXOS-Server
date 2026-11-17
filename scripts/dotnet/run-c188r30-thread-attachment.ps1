@@ -335,7 +335,9 @@ $m4State = $null -ne $transitionAttachStateEvent -and
     $transitionAttachStateEvent.Raw1 -eq 0
 $m4Fls = $null -ne $transitionAttachFlsEvent -and
     $null -ne $transitionEnterEvent -and
-    $transitionAttachFlsEvent.Raw0 -ne [uint64]0xFFFFFFFF -and
+    # Keep this decimal: PowerShell parses 0xFFFFFFFF as signed -1, which
+    # cannot be cast to UInt64 when a native transition actually returns.
+    $transitionAttachFlsEvent.Raw0 -ne [uint64]4294967295 -and
     $transitionAttachFlsEvent.Raw1 -ne 0 -and
     $transitionAttachFlsEvent.Raw1 -eq $transitionEnterEvent.Raw1 -and
     ($null -eq $palFlsSetEvent -or

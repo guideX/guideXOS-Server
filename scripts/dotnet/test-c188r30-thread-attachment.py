@@ -406,6 +406,8 @@ class ReverseEntrySourceTests(unittest.TestCase):
         self.assertIn("constructorPalDependenciesCompleted", runner)
         self.assertIn("nativeStackBoundsValid", runner)
         self.assertIn("r32ThreadConstructionMilestones=$r32Milestones", runner)
+        self.assertIn("[uint64]4294967295", runner)
+        self.assertNotIn("[uint64]0xFFFFFFFF", runner)
         self.assertIn("rhp_array_gc_state_valid", runner)
         self.assertIn("rhp_array_stock_enter", runner)
         self.assertIn("rhp_array_stock_return", runner)
