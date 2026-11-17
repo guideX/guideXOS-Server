@@ -22,6 +22,7 @@ static_assert(offsetof(gx_event, param4) == 28, "gx_event.param4 offset changed"
 //   workspace/build/dev-run/dev-debug eras: 120 -> 240 bytes.
 //   MC5 audio era: play_pcm appended at 240.
 //   MC6 App Model era: document activation appended at 248 -> 256 bytes.
+//   SECURITY3F yield extension appended at 256 -> 264 bytes.
 static_assert(offsetof(gx_host_calls, size) == 0, "host-call table size field moved");
 static_assert(offsetof(gx_host_calls, version) == 4, "host-call table version field moved");
 static_assert(alignof(gx_host_calls) == 8, "host-call table alignment changed on amd64");
@@ -85,7 +86,10 @@ static_assert(offsetof(gx_host_calls, play_pcm) > offsetof(gx_host_calls, develo
 static_assert(offsetof(gx_host_calls, play_pcm) == 240, "play_pcm slot changed");
 static_assert(offsetof(gx_host_calls, get_document_activation_path) == 248,
               "document activation slot changed");
-static_assert(sizeof(gx_host_calls) == 256, "v0.3 gx_host_calls prefix size changed");
+static_assert(offsetof(gx_host_calls, yield) == 256,
+              "scheduler yield must be appended after the v0.3 prefix");
+static_assert(sizeof(gx_host_calls) == 264,
+              "scheduler extension must preserve the v0.3 prefix");
 static_assert(sizeof(gx_development_run_request) == 72, "development run request size changed");
 static_assert(offsetof(gx_development_run_request, projectRoot) == 8, "development run request project root offset changed");
 static_assert(offsetof(gx_development_run_request, artifactSha256) == 56, "development run request artifact hash offset changed");
@@ -133,7 +137,10 @@ int main() {
                              offsetof(gx_host_calls, build_project_release);
     const bool audioAppended = offsetof(gx_host_calls, play_pcm) >
                                offsetof(gx_host_calls, development_debug);
-    if (!appended || !workspaceAppended || !buildAppended || !runAppended || !audioAppended) return 1;
+    const bool schedulerAppended = offsetof(gx_host_calls, yield) >
+                                   offsetof(gx_host_calls, get_document_activation_path);
+    if (!appended || !workspaceAppended || !buildAppended || !runAppended ||
+        !audioAppended || !schedulerAppended) return 1;
     std::cout << "Native ABI layout test PASS\n";
     return 0;
 }

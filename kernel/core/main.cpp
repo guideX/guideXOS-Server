@@ -14,6 +14,7 @@
 #include "include/kernel/process.h"
 #include "include/kernel/identity_runtime.h"
 #include "include/kernel/authentication.h"
+#include "include/kernel/managed_execution.h"
 #include "include/kernel/desktop.h"
 #include "include/kernel/desktop_gradient_persistence.h"
 #include "include/kernel/kernel_apps.h"
@@ -1047,6 +1048,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts(" result=");
         kernel::serial::puts(kernel::authentication::resultName(authenticationInit));
         kernel::serial::putc('\n');
+        kernel::managed_execution::runtime().initialize();
+        kernel::serial::puts("[MANAGED-EXECUTION] lifecycle registry initialized\n");
 #if defined(GXOS_SECURITY2_AUTH_SMOKE_TEST)
         kernel::runSecurity2AuthenticationGuestSmoke();
 #endif
@@ -1239,6 +1242,13 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[NATIVE-SCHEDULER] initialize result=");
         kernel::serial::puts(kernel::native_scheduler::resultName(schedulerInit));
         kernel::serial::puts(" contexts=8 stackBytes=65536 policy=cooperative owner=kernel-system\n");
+        kernel::serial::puts("[NATIVE-SCHEDULER] cpuState=xsave xcr0=0x");
+        kernel::serial::put_hex64(nativeScheduler.enabledXstateMask());
+        kernel::serial::puts(" bytes=0x");
+        kernel::serial::put_hex32(nativeScheduler.enabledXstateBytes());
+        kernel::serial::puts(" nativeElfSlots=");
+        serial_put_u32_decimal(kernel::native_scheduler::Runtime::kNativeElfTaskSlots);
+        kernel::serial::putc('\n');
         bool schedulerCanRun = schedulerInit == kernel::native_scheduler::Result::Ok;
 
 #if defined(GXOS_NATIVE_SCHEDULER_SELFTEST_ACTIVE)
@@ -1343,6 +1353,22 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         // own; the twin stays silent. Missile Command is exercised in a
         // follow-up run with monitor-driven input (it needs Escape to exit).
         kernel::native_elf::app_audio_app_proof();
+#endif
+#if defined(GXOS_SECURITY3F_SCHEDULED_NATIVE_ELF_GUEST_PROOF) && defined(ARCH_AMD64)
+        kernel::serial::puts("[SECURITY3F-GUEST-PROOF] production desktop launcher scheduled Native ELF begin\n");
+        const bool schedulerPilotLaunched = schedulerCanRun &&
+            kernel::desktop::launch_app("SECURITY3F Scheduler Pilot");
+        kernel::serial::puts("[SECURITY3F-GUEST-PROOF] production desktop launcher result=");
+        kernel::serial::puts(schedulerPilotLaunched ? "PASS" : "FAIL");
+        kernel::serial::putc('\n');
+        if (schedulerPilotLaunched) {
+            kernel::serial::puts("[SECURITY3F-GUEST-PROOF] legacy synchronous Native ELF launch begin\n");
+            const bool legacyNativeElfLaunched =
+                kernel::desktop::launch_app("Hello World");
+            kernel::serial::puts("[SECURITY3F-GUEST-PROOF] legacy synchronous Native ELF result=");
+            kernel::serial::puts(legacyNativeElfLaunched ? "PASS" : "FAIL");
+            kernel::serial::putc('\n');
+        }
 #endif
         kernel::serial::puts("[KERNEL] Entering main loop (waiting for input)...\n");
         

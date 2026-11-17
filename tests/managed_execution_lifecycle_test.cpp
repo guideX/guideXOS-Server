@@ -126,6 +126,21 @@ int main()
         executions.beginNativeElf("com.guidexos.concurrent", &concurrentHandle) ==
             managed_execution::Result::CapacityExhausted,
         "synchronous runtime refuses a second active execution record");
+    check(executions.markYielded(standardHandle) == managed_execution::Result::Ok &&
+        executions.activeCount() == 1u &&
+        executions.query(standardHandle, &snapshot) == managed_execution::Result::Ok &&
+        snapshot.state == managed_execution::State::Yielded,
+        "cooperatively yielded execution remains active and queryable");
+    check(executions.requestTermination(standardHandle) ==
+            managed_execution::Result::TerminationUnsupported &&
+        executions.query(standardHandle, &snapshot) == managed_execution::Result::Ok &&
+        snapshot.state == managed_execution::State::Yielded,
+        "yielded execution remains non-terminable and active");
+    check(executions.markRunning(standardHandle) == managed_execution::Result::Ok &&
+        executions.activeCount() == 1u &&
+        executions.query(standardHandle, &snapshot) == managed_execution::Result::Ok &&
+        snapshot.state == managed_execution::State::Running,
+        "yielded execution resumes through the existing lifecycle record");
     check(executions.markRunning(standardHandle) ==
             managed_execution::Result::InvalidTransition,
         "lifecycle rejects duplicate Running transition");

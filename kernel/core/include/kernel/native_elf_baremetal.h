@@ -17,6 +17,11 @@
 namespace kernel {
 namespace native_elf {
 
+enum class ExecutionModel : uint8_t {
+    Synchronous = 0,
+    CooperativeSchedulerV1
+};
+
 // Stable App Model metadata for a package that has passed manifest, target,
 // ABI, and VFS executable validation.  The strings point at the discovered
 // package table and remain valid until the next discovery pass.
@@ -40,6 +45,8 @@ struct PackageInfo {
     // Whether the manifest grants "audio.output". Parsed boundedly at
     // discovery; gates the play_pcm host call like the hosted runtime.
     bool hasAudioOutput;
+    // Optional manifest opt-in. Missing means the legacy synchronous path.
+    ExecutionModel executionModel;
 };
 
 enum class LaunchOwnerKind : uint8_t {
@@ -59,9 +66,8 @@ enum class LaunchLifecycleState : uint8_t {
     Rejected
 };
 
-// A Native ELF launch is synchronous and has no independent scheduler PID.
-// This is historical attribution for the launch instance, not a process
-// handle or an authorization capability.
+// This is historical attribution for one launch, not a process handle or an
+// authorization capability. Scheduler-backed launches retain the same record.
 struct LaunchAttributionV1 {
     uint16_t version;
     LaunchLifecycleState state;
@@ -102,7 +108,7 @@ bool queryLastLaunchAttribution(LaunchAttributionV1* output);
 
 // Bounded value-snapshot interface for actual managed Native ELF execution
 // instances. These records are distinct from launch attribution and do not
-// imply independent scheduling or safe termination.
+// scheduler handles, and do not imply safe termination.
 managed_execution::Result queryExecutionInstance(
     const managed_execution::Handle& handle,
     managed_execution::SnapshotV1* output);

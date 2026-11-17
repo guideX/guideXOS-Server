@@ -11,6 +11,8 @@
 #if defined(GXOS_NATIVE_SCHEDULER_SELFTEST_ACTIVE) && defined(ARCH_AMD64)
 
 extern "C" uint32_t gxos_scheduler_selftest_probe(void (*yieldCallback)());
+extern "C" uint32_t gxos_scheduler_selftest_xstate_probe(void (*yieldCallback)());
+extern "C" uint32_t gxos_scheduler_selftest_stack_abi_probe(void (*yieldCallback)());
 
 namespace kernel {
 namespace native_scheduler {
@@ -37,6 +39,8 @@ static YieldProof s_yieldProof = {};
 static YieldTaskArgument s_yieldArguments[2] = {};
 static CycleArgument s_cycleArgument = {};
 static uint32_t s_registerMask = 0u;
+static uint32_t s_xstateMask = 0u;
+static uint32_t s_stackAbiMask = 0u;
 
 static void register_probe_yield()
 {
@@ -85,6 +89,20 @@ static int32_t register_probe_task(void*)
     return s_registerMask == 0xFFu ? 9 : -9;
 }
 
+static int32_t xstate_probe_task(void*)
+{
+    s_xstateMask = gxos_scheduler_selftest_xstate_probe(register_probe_yield);
+    const uint32_t expected = (runtime().enabledXstateMask() & (1ull << 2u))
+        ? 0x7FFFFFu : 0x1FFFu;
+    return s_xstateMask == expected ? 10 : -10;
+}
+
+static int32_t stack_abi_probe_task(void*)
+{
+    s_stackAbiMask = gxos_scheduler_selftest_stack_abi_probe(register_probe_yield);
+    return s_stackAbiMask == 0xFu ? 11 : -11;
+}
+
 static int32_t repeated_cycle_task(void* opaque)
 {
     CycleArgument* argument = static_cast<CycleArgument*>(opaque);
@@ -131,14 +149,14 @@ bool runSelfTest()
 
     Handle first{};
     Handle second{};
-    const Result firstCreate = scheduler.createKernelTask(
+    const Result firstCreate = scheduler.createSelfTestTask(
         yielding_proof_task, &s_yieldArguments[0], &first);
     serial::puts("[NATIVE-SCHEDULER-SELFTEST] create_first=");
     serial::puts(resultName(firstCreate));
     serial::puts("\n");
     passed = passed && firstCreate == Result::Ok;
     GXOS_SELFTEST_CHECKPOINT("first-context-creation");
-    const Result secondCreate = scheduler.createKernelTask(
+    const Result secondCreate = scheduler.createSelfTestTask(
         yielding_proof_task, &s_yieldArguments[1], &second);
     serial::puts("[NATIVE-SCHEDULER-SELFTEST] create_second=");
     serial::puts(resultName(secondCreate));
@@ -197,9 +215,9 @@ bool runSelfTest()
     Handle registerProbe{};
     Handle registerPartner{};
     s_registerMask = 0u;
-    passed = passed && scheduler.createKernelTask(
+    passed = passed && scheduler.createSelfTestTask(
         register_probe_task, nullptr, &registerProbe) == Result::Ok;
-    passed = passed && scheduler.createKernelTask(
+    passed = passed && scheduler.createSelfTestTask(
         capacity_noop_task, nullptr, &registerPartner) == Result::Ok;
     for (uint32_t i = 0u; i < 4u &&
          (!is_state(registerProbe, State::Completed, false) ||
@@ -217,22 +235,58 @@ bool runSelfTest()
         is_state(registerPartner, State::Completed, false);
     GXOS_SELFTEST_CHECKPOINT("nonvolatile-gpr-preservation");
 
+    Handle xstateProbe{};
+    Handle xstatePartner{};
+    s_xstateMask = 0u;
+    passed = passed && scheduler.createSelfTestTask(
+        xstate_probe_task, nullptr, &xstateProbe) == Result::Ok;
+    passed = passed && scheduler.createSelfTestTask(
+        capacity_noop_task, nullptr, &xstatePartner) == Result::Ok;
+    for (uint32_t i = 0u; i < 6u &&
+         (!is_state(xstateProbe, State::Completed, false) ||
+          !is_state(xstatePartner, State::Completed, false)); ++i) {
+        bool dispatched = false;
+        if (scheduler.dispatchOne(&dispatched) != Result::Ok || !dispatched) {
+            passed = false;
+            break;
+        }
+    }
+    Snapshot xstateSnapshot{};
+    const uint32_t expectedXstateMask =
+        (scheduler.enabledXstateMask() & (1ull << 2u)) ? 0x7FFFFFu : 0x1FFFu;
+    passed = passed && scheduler.query(xstateProbe, &xstateSnapshot) &&
+        xstateSnapshot.state == State::Completed && xstateSnapshot.exitCode == 10 &&
+        xstateSnapshot.dispatchCount == 2u && s_xstateMask == expectedXstateMask &&
+        is_state(xstatePartner, State::Completed, false);
+    GXOS_SELFTEST_CHECKPOINT("xmm-x87-mxcsr-and-enabled-avx-state-preservation");
+
+    Handle stackAbi{};
+    s_stackAbiMask = 0u;
+    passed = passed && scheduler.createSelfTestTask(
+        stack_abi_probe_task, nullptr, &stackAbi) == Result::Ok;
+    passed = passed && run_until_complete(stackAbi, 2u);
+    Snapshot stackAbiSnapshot{};
+    passed = passed && scheduler.query(stackAbi, &stackAbiSnapshot) &&
+        stackAbiSnapshot.state == State::Completed && stackAbiSnapshot.exitCode == 11 &&
+        stackAbiSnapshot.dispatchCount == 2u && s_stackAbiMask == 0xFu;
+    GXOS_SELFTEST_CHECKPOINT("stack-alignment-and-shadow-space-after-resume");
+
     scheduler.failNextAllocationForTest();
     Handle allocationFailure{};
-    passed = passed && scheduler.createKernelTask(
+    passed = passed && scheduler.createSelfTestTask(
         capacity_noop_task, nullptr, &allocationFailure) == Result::AllocationFailed;
     GXOS_SELFTEST_CHECKPOINT("allocation-failure");
 
     Handle capacityHandles[Runtime::kMaximumContexts] = {};
     for (uint32_t i = 0u; i < Runtime::kMaximumContexts; ++i) {
-        if (scheduler.createKernelTask(capacity_noop_task, nullptr,
+        if (scheduler.createSelfTestTask(capacity_noop_task, nullptr,
                                        &capacityHandles[i]) != Result::Ok) {
             passed = false;
             break;
         }
     }
     Handle overCapacity{};
-    passed = passed && scheduler.createKernelTask(
+    passed = passed && scheduler.createSelfTestTask(
         capacity_noop_task, nullptr, &overCapacity) == Result::CapacityExhausted;
 
     bool staleFirstRejected = false;
@@ -257,7 +311,7 @@ bool runSelfTest()
     GXOS_SELFTEST_CHECKPOINT("capacity-completion-and-reaping");
 
     Handle damagedStack{};
-    passed = passed && scheduler.createKernelTask(
+    passed = passed && scheduler.createSelfTestTask(
         capacity_noop_task, nullptr, &damagedStack) == Result::Ok;
     passed = passed && scheduler.corruptStackGuardForTest(damagedStack);
     bool damagedDispatched = true;
@@ -273,7 +327,7 @@ bool runSelfTest()
     for (uint32_t cycle = 0u; cycle < 3u; ++cycle) {
         s_cycleArgument.yields = 0u;
         Handle repeated{};
-        if (scheduler.createKernelTask(
+        if (scheduler.createSelfTestTask(
                 repeated_cycle_task, &s_cycleArgument, &repeated) != Result::Ok ||
             !run_until_complete(repeated, 4u)) {
             passed = false;
@@ -289,9 +343,127 @@ bool runSelfTest()
     }
     GXOS_SELFTEST_CHECKPOINT("repeated-cycles");
 
+    Handle applicationCapacity[Runtime::kNativeElfTaskSlots] = {};
+    bool applicationSlotSeen[Runtime::kMaximumContexts] = {};
+    for (uint32_t i = 0u; i < Runtime::kNativeElfTaskSlots; ++i) {
+        if (scheduler.createNativeElfTask(capacity_noop_task, nullptr,
+                                          &applicationCapacity[i]) != Result::Ok) {
+            passed = false;
+            break;
+        }
+        if (applicationCapacity[i].slot == 0u ||
+            applicationCapacity[i].slot >= Runtime::kMaximumContexts ||
+            applicationSlotSeen[applicationCapacity[i].slot]) {
+            passed = false;
+        } else {
+            applicationSlotSeen[applicationCapacity[i].slot] = true;
+        }
+        Snapshot applicationSnapshot{};
+        if (!scheduler.query(applicationCapacity[i], &applicationSnapshot) ||
+            applicationSnapshot.ownerKind != OwnerKind::NativeElfApplication ||
+            applicationSnapshot.state != State::Ready ||
+            !applicationSnapshot.stackAllocated) passed = false;
+    }
+    Handle excessApplication{};
+    passed = passed && scheduler.createNativeElfTask(
+        capacity_noop_task, nullptr, &excessApplication) == Result::CapacityExhausted;
+    Handle reservedKernel{};
+    passed = passed && scheduler.createKernelTask(
+        capacity_noop_task, nullptr, &reservedKernel) == Result::Ok &&
+        reservedKernel.slot == 0u;
+    GXOS_SELFTEST_CHECKPOINT("reserved-system-capacity-and-application-slot-exhaustion");
+
+    for (uint32_t i = 0u; i < 16u; ++i) {
+        bool anyReady = false;
+        for (uint32_t j = 0u; j < Runtime::kNativeElfTaskSlots; ++j) {
+            Snapshot snapshot{};
+            if (!scheduler.query(applicationCapacity[j], &snapshot)) {
+                passed = false;
+            } else if (snapshot.state == State::Ready ||
+                       snapshot.state == State::Running) {
+                anyReady = true;
+            }
+        }
+        Snapshot systemSnapshot{};
+        if (!scheduler.query(reservedKernel, &systemSnapshot)) passed = false;
+        else if (systemSnapshot.state == State::Ready ||
+                 systemSnapshot.state == State::Running) anyReady = true;
+        if (!anyReady) break;
+        bool dispatched = false;
+        if (scheduler.dispatchOne(&dispatched) != Result::Ok || !dispatched) {
+            passed = false;
+            break;
+        }
+    }
+    for (uint32_t i = 0u; i < Runtime::kNativeElfTaskSlots; ++i) {
+        Snapshot snapshot{};
+        if (!scheduler.query(applicationCapacity[i], &snapshot) ||
+            snapshot.state != State::Completed || snapshot.exitCode != 0 ||
+            snapshot.stackAllocated) passed = false;
+    }
+    Snapshot reservedKernelSnapshot{};
+    passed = passed && scheduler.query(reservedKernel, &reservedKernelSnapshot) &&
+        reservedKernelSnapshot.state == State::Completed &&
+        !reservedKernelSnapshot.stackAllocated;
+    GXOS_SELFTEST_CHECKPOINT("application-slot-recovery-and-root-reaping");
+
+    Handle applicationReused[Runtime::kNativeElfTaskSlots] = {};
+    bool reusedSlotSeen[Runtime::kMaximumContexts] = {};
+    for (uint32_t i = 0u; i < Runtime::kNativeElfTaskSlots; ++i) {
+        if (scheduler.createNativeElfTask(capacity_noop_task, nullptr,
+                                          &applicationReused[i]) != Result::Ok) {
+            passed = false;
+            break;
+        }
+        const uint32_t slot = applicationReused[i].slot;
+        if (slot == 0u || slot >= Runtime::kMaximumContexts || reusedSlotSeen[slot]) {
+            passed = false;
+            continue;
+        }
+        reusedSlotSeen[slot] = true;
+        bool matchedPrior = false;
+        for (uint32_t prior = 0u; prior < Runtime::kNativeElfTaskSlots; ++prior) {
+            if (applicationCapacity[prior].slot != slot) continue;
+            matchedPrior = true;
+            Snapshot staleSnapshot{};
+            if (applicationReused[i].generation == applicationCapacity[prior].generation ||
+                applicationReused[i].runtimeId == applicationCapacity[prior].runtimeId ||
+                scheduler.query(applicationCapacity[prior], &staleSnapshot)) passed = false;
+            break;
+        }
+        if (!matchedPrior) passed = false;
+    }
+    for (uint32_t i = 0u; i < Runtime::kNativeElfTaskSlots; ++i) {
+        Snapshot snapshot{};
+        if (!scheduler.query(applicationReused[i], &snapshot) ||
+            snapshot.state != State::Ready || !snapshot.stackAllocated) passed = false;
+    }
+    for (uint32_t i = 0u; i < 16u; ++i) {
+        bool anyReady = false;
+        for (uint32_t j = 0u; j < Runtime::kNativeElfTaskSlots; ++j) {
+            Snapshot snapshot{};
+            if (!scheduler.query(applicationReused[j], &snapshot)) passed = false;
+            else if (snapshot.state == State::Ready || snapshot.state == State::Running)
+                anyReady = true;
+        }
+        if (!anyReady) break;
+        bool dispatched = false;
+        if (scheduler.dispatchOne(&dispatched) != Result::Ok || !dispatched) {
+            passed = false;
+            break;
+        }
+    }
+    for (uint32_t i = 0u; i < Runtime::kNativeElfTaskSlots; ++i) {
+        Snapshot snapshot{};
+        if (!scheduler.query(applicationReused[i], &snapshot) ||
+            snapshot.state != State::Completed || snapshot.exitCode != 0 ||
+            snapshot.stackAllocated) passed = false;
+    }
+    GXOS_SELFTEST_CHECKPOINT("application-slot-round-robin-generation-reuse");
+
     serial::puts("[NATIVE-SCHEDULER-SELFTEST] result=");
     serial::puts(passed ? "PASS" : "FAIL");
-    serial::puts(" proof=independent-stacks round-robin yield-resume local-state gpr-preservation completion reaping generation capacity allocation-failure unsupported-termination repeated-cycles\n");
+    serial::puts(" proof=independent-stacks round-robin yield-resume local-state gpr-preservation xmm-x87-mxcsr-avx-state stack-alignment shadow-space completion reaping generation reserved-system-capacity application-exhaustion allocation-failure unsupported-termination repeated-cycles\n");
 #undef GXOS_SELFTEST_CHECKPOINT
     return passed;
 }

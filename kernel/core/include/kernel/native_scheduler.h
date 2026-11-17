@@ -33,7 +33,8 @@ enum class Result : uint8_t {
 };
 
 enum class OwnerKind : uint8_t {
-    TrustedKernelSystem = 0
+    TrustedKernelSystem = 0,
+    NativeElfApplication
 };
 
 enum class FaultKind : uint8_t {
@@ -71,18 +72,30 @@ class Runtime {
 public:
     enum : uint32_t {
         kMaximumContexts = 8u,
-        kStackBytes = 64u * 1024u
+        kStackBytes = 64u * 1024u,
+        kMaximumXstateBytes = 16u * 1024u,
+        kKernelTaskSlots = 1u,
+        kNativeElfTaskSlots = kMaximumContexts - kKernelTaskSlots
     };
 
     Runtime();
 
     Result initialize();
     Result createKernelTask(Entry entry, void* argument, Handle* output);
+    Result createNativeElfTask(Entry entry, void* argument, Handle* output);
+#if defined(GXOS_NATIVE_SCHEDULER_SELFTEST_ACTIVE)
+    Result createSelfTestTask(Entry entry, void* argument, Handle* output);
+#endif
     Result dispatchOne(bool* dispatched);
     Result yieldCurrent();
 
     bool query(Handle handle, Snapshot* output) const;
     bool stacksAreSeparate(Handle first, Handle second) const;
+    bool executionStackBounds(Handle handle, uintptr_t* low, uintptr_t* top) const;
+    bool isCurrent(Handle handle) const;
+    uint64_t enabledXstateMask() const;
+    uint32_t enabledXstateBytes() const;
+    uint64_t trustedKernelDispatchCount() const;
 
     // Termination is deliberately unsupported. A cooperative context can
     // only finish by returning from its entry function.
@@ -106,15 +119,20 @@ private:
         uint64_t dispatchCount;
         uint32_t generation;
         uint32_t configuredStackBytes;
+        OwnerKind ownerKind;
         State state;
         FaultKind faultKind;
         Entry entry;
         void* argument;
         int32_t exitCode;
         bool retired;
+        alignas(64) uint8_t xstate[kMaximumXstateBytes];
     };
 
-    int32_t selectReusableSlot() const;
+    int32_t selectReusableSlot(bool nativeElfApplication,
+                               bool allKernelSlots = false) const;
+    Result createTask(Entry entry, void* argument, Handle* output,
+                      bool nativeElfApplication, bool allKernelSlots = false);
     bool validHandle(Handle handle) const;
     bool validSavedStack(const Context& context) const;
     bool intactStackGuards(const Context& context) const;
@@ -123,6 +141,7 @@ private:
 
     Context m_contexts[kMaximumContexts];
     uint64_t m_rootStackPointer;
+    alignas(64) uint8_t m_rootXstate[kMaximumXstateBytes];
     uint64_t m_nextRuntimeId;
     uint32_t m_nextSlot;
     uint32_t m_currentSlot;

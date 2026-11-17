@@ -150,6 +150,9 @@ typedef struct gx_host_calls {
     gx_result (GX_CALL *play_pcm)(gx_app_context* ctx, const void* pcmData, uint32_t pcmBytes, uint32_t sampleRateHz, uint32_t channels, uint32_t bitsPerSample);
     /* App Model activation is returned as an owned bounded path copy. */
     gx_result (GX_CALL *get_document_activation_path)(gx_app_context* ctx, char* path, uint32_t pathCapacity, uint32_t* requiredBytes);
+    /* Optional cooperative scheduling extension. Presence is negotiated by
+     * size and a non-null slot; legacy v0.3 table offsets remain unchanged. */
+    gx_result (GX_CALL *yield)(gx_app_context* ctx);
 } gx_host_calls;
 
 #ifdef __cplusplus

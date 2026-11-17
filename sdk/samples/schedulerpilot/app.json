@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "com.guidexos.schedulerpilot",
+  "displayName": "SECURITY3F Scheduler Pilot",
+  "version": "0.1.0",
+  "publisher": "guideXOS SDK",
+  "description": "A bounded Native ELF proof of cooperative scheduler yield, resume, and lifecycle completion.",
+  "category": "Samples",
+  "kind": "NativeElf",
+  "icon": "",
+  "minGuideXOSVersion": "0.1.0",
+  "supportedArchitectures": [
+    "amd64"
+  ],
+  "entries": [
+    {
+      "architecture": "amd64",
+      "path": "bin/amd64/schedulerpilot.elf",
+      "entryPoint": "gx_main",
+      "abi": "guidexos-c-abi-v1",
+      "runtime": "native-elf",
+      "executionModel": "cooperative-scheduler-v1"
+    }
+  ],
+  "permissions": [
+    "log",
+    "window"
+  ],
+  "fileAssociations": [],
+  "defaultWindow": {
+    "width": 560,
+    "height": 260,
+    "resizable": false
+  }
+}

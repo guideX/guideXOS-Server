@@ -46,8 +46,19 @@ static bool terminal(State state)
 
 Runtime::Runtime(authentication::Runtime* authorityRuntime)
     : m_authority(authorityRuntime), m_records{}, m_nextRuntimeId(1u),
-      m_nextStartSequence(1u), m_nextSlot(0u)
+      m_nextStartSequence(1u), m_nextSlot(0u), m_initialized(true)
 {
+}
+
+void Runtime::initialize()
+{
+    if (m_initialized) return;
+    for (uint32_t i = 0u; i < kMaximumRecords; ++i)
+        m_records[i] = Record{};
+    m_nextRuntimeId = 1u;
+    m_nextStartSequence = 1u;
+    m_nextSlot = 0u;
+    m_initialized = true;
 }
 
 authentication::Runtime& Runtime::authority() const
@@ -77,6 +88,7 @@ int Runtime::selectSlot() const
 
 Result Runtime::beginNativeElf(const char* canonicalAppId, Handle* output)
 {
+    if (!m_initialized) return Result::NotInitialized;
     if (!output || !application_policy::validCanonicalAppId(canonicalAppId))
         return Result::InvalidArgument;
     if (m_nextRuntimeId == 0u || m_nextStartSequence == 0u)
@@ -137,6 +149,7 @@ Result Runtime::beginNativeElf(const char* canonicalAppId, Handle* output)
 
 Result Runtime::find(const Handle& handle, Record** output)
 {
+    if (!m_initialized) return Result::NotInitialized;
     if (!output || handle.slot >= kMaximumRecords || handle.runtimeId == 0u ||
         handle.generation == 0u) return Result::InvalidArgument;
     Record& record = m_records[handle.slot];
@@ -148,6 +161,7 @@ Result Runtime::find(const Handle& handle, Record** output)
 
 Result Runtime::find(const Handle& handle, const Record** output) const
 {
+    if (!m_initialized) return Result::NotInitialized;
     if (!output || handle.slot >= kMaximumRecords || handle.runtimeId == 0u ||
         handle.generation == 0u) return Result::InvalidArgument;
     const Record& record = m_records[handle.slot];
@@ -162,8 +176,19 @@ Result Runtime::markRunning(const Handle& handle)
     Record* record = nullptr;
     const Result found = find(handle, &record);
     if (found != Result::Ok) return found;
-    if (record->state != State::Created) return Result::InvalidTransition;
+    if (record->state != State::Created && record->state != State::Yielded)
+        return Result::InvalidTransition;
     record->state = State::Running;
+    return Result::Ok;
+}
+
+Result Runtime::markYielded(const Handle& handle)
+{
+    Record* record = nullptr;
+    const Result found = find(handle, &record);
+    if (found != Result::Ok) return found;
+    if (record->state != State::Running) return Result::InvalidTransition;
+    record->state = State::Yielded;
     return Result::Ok;
 }
 
@@ -186,7 +211,8 @@ Result Runtime::complete(const Handle& handle, bool faultObserved,
     Record* record = nullptr;
     const Result found = find(handle, &record);
     if (found != Result::Ok) return found;
-    if (record->state != State::Running) return Result::InvalidTransition;
+    if (record->state != State::Running && record->state != State::Yielded)
+        return Result::InvalidTransition;
     record->state = faultObserved ? State::Faulted : State::Exited;
     record->faultObserved = faultObserved ? 1u : 0u;
     record->hasExitStatus = (!faultObserved && hasExitStatus) ? 1u : 0u;
@@ -239,6 +265,7 @@ Result Runtime::query(const Handle& handle, SnapshotV1* output) const
 Result Runtime::enumerate(SnapshotV1* output, size_t outputCapacity,
                           size_t* outputCount) const
 {
+    if (!m_initialized) return Result::NotInitialized;
     if (!outputCount || (outputCapacity != 0u && !output))
         return Result::InvalidArgument;
     SnapshotV1 staged[kMaximumRecords]{};
@@ -284,17 +311,20 @@ Result Runtime::requestTermination(const Handle& handle)
         return Result::Unauthorized;
     if (record->ownerKind == OwnerKind::KernelSystem)
         return Result::ProtectedExecution;
-    if (record->state != State::Running) return Result::NotRunning;
+    if (record->state != State::Running && record->state != State::Yielded)
+        return Result::NotRunning;
     return Result::TerminationUnsupported;
 }
 
 uint32_t Runtime::activeCount() const
 {
+    if (!m_initialized) return 0u;
     uint32_t count = 0u;
     for (uint32_t i = 0u; i < kMaximumRecords; ++i) {
         if (m_records[i].occupied &&
             (m_records[i].state == State::Created ||
-             m_records[i].state == State::Running)) ++count;
+             m_records[i].state == State::Running ||
+             m_records[i].state == State::Yielded)) ++count;
     }
     return count;
 }
@@ -314,6 +344,7 @@ const char* resultName(Result result)
         case Result::TerminationUnsupported: return "TerminationUnsupported";
         case Result::NotRunning: return "NotRunning";
         case Result::BufferTooSmall: return "BufferTooSmall";
+        case Result::NotInitialized: return "NotInitialized";
         default: return "Unknown";
     }
 }

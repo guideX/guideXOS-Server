@@ -10,11 +10,17 @@
 
 #if defined(ARCH_AMD64)
 extern "C" void gxos_context_switch(uint64_t* oldStackPointer,
-                                     uint64_t newStackPointer);
+                                     uint64_t newStackPointer,
+                                     void* oldXstate, const void* newXstate);
 extern "C" void gxos_context_entry_trampoline();
 extern "C" char __text_start[];
 extern "C" char __text_end[];
 #endif
+
+extern "C" {
+// Read by the switch assembly after initialize() configures XCR0.
+uint64_t gxos_native_scheduler_xstate_mask = 0u;
+}
 
 namespace kernel {
 namespace native_scheduler {
@@ -26,6 +32,7 @@ static const uint64_t kHighStackGuard = 0x47584F5348494748ull;
 static const uint32_t kStackAllocationBytes = Runtime::kStackBytes + 64u;
 static const uint32_t kSavedFrameWords = 9u;
 static const uint32_t kEntryShadowBytes = 40u;
+static uint32_t s_enabledXstateBytes = 0u;
 
 static uintptr_t align_up_16(uintptr_t value)
 {
@@ -38,6 +45,121 @@ static uintptr_t align_down_16(uintptr_t value)
 }
 
 #if defined(ARCH_AMD64)
+static void cpuid(uint32_t leaf, uint32_t subleaf, uint32_t* eax,
+                  uint32_t* ebx, uint32_t* ecx, uint32_t* edx)
+{
+    uint32_t a = leaf;
+    uint32_t b = 0u;
+    uint32_t c = subleaf;
+    uint32_t d = 0u;
+    asm volatile("cpuid" : "+a"(a), "=b"(b), "+c"(c), "=d"(d));
+    if (eax) *eax = a;
+    if (ebx) *ebx = b;
+    if (ecx) *ecx = c;
+    if (edx) *edx = d;
+}
+
+static uint64_t read_xcr0()
+{
+    uint32_t low = 0u;
+    uint32_t high = 0u;
+    asm volatile("xgetbv" : "=a"(low), "=d"(high) : "c"(0u));
+    return (static_cast<uint64_t>(high) << 32u) | low;
+}
+
+static void write_xcr0(uint64_t value)
+{
+    asm volatile("xsetbv" : : "c"(0u), "a"(static_cast<uint32_t>(value)),
+                 "d"(static_cast<uint32_t>(value >> 32u)) : "memory");
+}
+
+static uint64_t read_cr0()
+{
+    uint64_t value = 0u;
+    asm volatile("mov %%cr0, %0" : "=r"(value));
+    return value;
+}
+
+static void write_cr0(uint64_t value)
+{
+    asm volatile("mov %0, %%cr0" : : "r"(value) : "memory");
+}
+
+static uint64_t read_cr4()
+{
+    uint64_t value = 0u;
+    asm volatile("mov %%cr4, %0" : "=r"(value));
+    return value;
+}
+
+static void write_cr4(uint64_t value)
+{
+    asm volatile("mov %0, %%cr4" : : "r"(value) : "memory");
+}
+
+static bool initialize_xstate()
+{
+    uint32_t maxLeaf = 0u;
+    cpuid(0u, 0u, &maxLeaf, nullptr, nullptr, nullptr);
+    if (maxLeaf < 0xDu) return false;
+
+    uint32_t featureEcx = 0u;
+    cpuid(1u, 0u, nullptr, nullptr, &featureEcx, nullptr);
+    if ((featureEcx & (1u << 26u)) == 0u) return false; // XSAVE
+    const bool avxSupported = (featureEcx & (1u << 28u)) != 0u;
+
+    uint32_t supportedLow = 0u;
+    uint32_t supportedHigh = 0u;
+    cpuid(0xDu, 0u, &supportedLow, nullptr, nullptr, &supportedHigh);
+    const uint64_t supportedMask = (static_cast<uint64_t>(supportedHigh) << 32u) |
+                                   supportedLow;
+    if ((supportedMask & 0x3u) != 0x3u) return false;
+
+    uint64_t flags = 0u;
+    asm volatile("pushfq; popq %0" : "=r"(flags));
+    asm volatile("cli" : : : "memory");
+
+    uint64_t cr0 = read_cr0();
+    const uint64_t originalCr0 = cr0;
+    cr0 |= (1ull << 1u);       // MP
+    cr0 &= ~((1ull << 2u) |    // EM
+             (1ull << 3u));    // TS
+    write_cr0(cr0);
+
+    const uint64_t cr4 = read_cr4();
+    const bool osxsaveWasEnabled = (cr4 & (1ull << 18u)) != 0u;
+    write_cr4(cr4 | (1ull << 9u) | (1ull << 10u) | (1ull << 18u));
+
+    const uint64_t originalXcr0 = read_xcr0();
+    uint64_t xcr0 = osxsaveWasEnabled ? originalXcr0 : 0x3u;
+    xcr0 |= 0x3u; // x87 and SSE are the minimum application state contract.
+    if (avxSupported && (supportedMask & (1ull << 2u)) != 0u)
+        xcr0 |= 1ull << 2u;
+    if ((xcr0 & ~supportedMask) != 0u) {
+        write_xcr0(originalXcr0);
+        write_cr4(cr4);
+        write_cr0(originalCr0);
+        if (flags & (1ull << 9u)) asm volatile("sti" : : : "memory");
+        return false;
+    }
+    write_xcr0(xcr0);
+
+    uint32_t areaBytes = 0u;
+    cpuid(0xDu, 0u, nullptr, &areaBytes, nullptr, nullptr);
+    if (areaBytes < 576u || areaBytes > Runtime::kMaximumXstateBytes) {
+        write_xcr0(originalXcr0);
+        write_cr4(cr4);
+        write_cr0(originalCr0);
+        if (flags & (1ull << 9u)) asm volatile("sti" : : : "memory");
+        return false;
+    }
+    gxos_native_scheduler_xstate_mask = xcr0;
+    s_enabledXstateBytes = areaBytes;
+    (void)osxsaveWasEnabled;
+    if (flags & (1ull << 9u)) asm volatile("sti" : : : "memory");
+    return true;
+}
+
 static bool interrupts_enabled()
 {
     uint64_t flags = 0u;
@@ -72,6 +194,7 @@ Runtime::Runtime()
         m_contexts[i].dispatchCount = 0u;
         m_contexts[i].generation = 0u;
         m_contexts[i].configuredStackBytes = 0u;
+        m_contexts[i].ownerKind = OwnerKind::TrustedKernelSystem;
         m_contexts[i].state = State::Empty;
         m_contexts[i].faultKind = FaultKind::None;
         m_contexts[i].entry = nullptr;
@@ -91,6 +214,7 @@ Result Runtime::initialize()
 #endif
     if (m_initialized) return Result::InvalidState;
     if (!interrupts_enabled()) return Result::UnsafeContext;
+    if (!initialize_xstate()) return Result::Unsupported;
 
     // The AMD64 freestanding entry path does not run C++ .init_array
     // constructors. Treat initialize() as the authoritative BSS-object reset
@@ -101,6 +225,7 @@ Result Runtime::initialize()
     m_nextSlot = 0u;
     m_currentSlot = kInvalidSlot;
     m_dispatching = false;
+    for (uint32_t i = 0u; i < sizeof(m_rootXstate); ++i) m_rootXstate[i] = 0u;
     for (uint32_t i = 0u; i < kMaximumContexts; ++i) {
         Context& context = m_contexts[i];
         context.allocation = nullptr;
@@ -111,12 +236,14 @@ Result Runtime::initialize()
         context.dispatchCount = 0u;
         context.generation = 0u;
         context.configuredStackBytes = 0u;
+        context.ownerKind = OwnerKind::TrustedKernelSystem;
         context.state = State::Empty;
         context.faultKind = FaultKind::None;
         context.entry = nullptr;
         context.argument = nullptr;
         context.exitCode = 0;
         context.retired = false;
+        for (uint32_t j = 0u; j < sizeof(context.xstate); ++j) context.xstate[j] = 0u;
     }
 #if defined(GXOS_NATIVE_SCHEDULER_SELFTEST_ACTIVE)
     m_failNextAllocation = false;
@@ -126,10 +253,24 @@ Result Runtime::initialize()
 #endif
 }
 
-int32_t Runtime::selectReusableSlot() const
+int32_t Runtime::selectReusableSlot(bool nativeElfApplication,
+                                    bool allKernelSlots) const
 {
+    uint32_t firstSlot = 0u;
+    uint32_t slotCount = kKernelTaskSlots;
+#if defined(GXOS_NATIVE_SCHEDULER_SELFTEST_ACTIVE)
+    if (!nativeElfApplication && allKernelSlots) slotCount = kMaximumContexts;
+#else
+    (void)allKernelSlots;
+#endif
+    if (nativeElfApplication) {
+        firstSlot = kKernelTaskSlots;
+        slotCount = kNativeElfTaskSlots;
+    }
+    const uint32_t startSlot = m_nextSlot % kMaximumContexts;
     for (uint32_t offset = 0u; offset < kMaximumContexts; ++offset) {
-        const uint32_t slot = (m_nextSlot + offset) % kMaximumContexts;
+        const uint32_t slot = (startSlot + offset) % kMaximumContexts;
+        if (slot < firstSlot || slot >= firstSlot + slotCount) continue;
         const Context& context = m_contexts[slot];
         if (context.retired || context.allocation != nullptr) continue;
         if (context.state == State::Empty || context.state == State::Completed ||
@@ -184,6 +325,24 @@ bool Runtime::intactStackGuards(const Context& context) const
 
 Result Runtime::createKernelTask(Entry entry, void* argument, Handle* output)
 {
+    return createTask(entry, argument, output, false, false);
+}
+
+Result Runtime::createNativeElfTask(Entry entry, void* argument, Handle* output)
+{
+    return createTask(entry, argument, output, true, false);
+}
+
+#if defined(GXOS_NATIVE_SCHEDULER_SELFTEST_ACTIVE)
+Result Runtime::createSelfTestTask(Entry entry, void* argument, Handle* output)
+{
+    return createTask(entry, argument, output, false, true);
+}
+#endif
+
+Result Runtime::createTask(Entry entry, void* argument, Handle* output,
+                           bool nativeElfApplication, bool allKernelSlots)
+{
 #if !defined(ARCH_AMD64)
     (void)entry;
     (void)argument;
@@ -196,7 +355,8 @@ Result Runtime::createKernelTask(Entry entry, void* argument, Handle* output)
         return Result::UnsafeContext;
     if (m_nextRuntimeId == 0u) return Result::CapacityExhausted;
 
-    const int32_t selected = selectReusableSlot();
+    const int32_t selected = selectReusableSlot(nativeElfApplication,
+                                                allKernelSlots);
     if (selected < 0) return Result::CapacityExhausted;
 
 #if defined(GXOS_NATIVE_SCHEDULER_SELFTEST_ACTIVE)
@@ -256,12 +416,15 @@ Result Runtime::createKernelTask(Entry entry, void* argument, Handle* output)
     context.dispatchCount = 0u;
     context.generation = generation;
     context.configuredStackBytes = static_cast<uint32_t>(stackTop - stackLow);
+    context.ownerKind = nativeElfApplication ? OwnerKind::NativeElfApplication
+                                             : OwnerKind::TrustedKernelSystem;
     context.state = State::Ready;
     context.faultKind = FaultKind::None;
     context.entry = entry;
     context.argument = argument;
     context.exitCode = 0;
     context.retired = false;
+    for (uint32_t i = 0u; i < sizeof(context.xstate); ++i) context.xstate[i] = 0u;
     frame[3] = reinterpret_cast<uint64_t>(&context);
 
     ++m_nextRuntimeId;
@@ -329,7 +492,8 @@ Result Runtime::dispatchOne(bool* dispatched)
     m_dispatching = true;
     *dispatched = true;
 
-    gxos_context_switch(&m_rootStackPointer, context.savedStackPointer);
+    gxos_context_switch(&m_rootStackPointer, context.savedStackPointer,
+                        m_rootXstate, context.xstate);
 
     m_dispatching = false;
     if (m_currentSlot != kInvalidSlot) {
@@ -392,7 +556,8 @@ Result Runtime::yieldCurrent()
     if (context.state != State::Running) return Result::InvalidState;
     context.state = State::Ready;
     m_currentSlot = kInvalidSlot;
-    gxos_context_switch(&context.savedStackPointer, m_rootStackPointer);
+    gxos_context_switch(&context.savedStackPointer, m_rootStackPointer,
+                        context.xstate, m_rootXstate);
 
     if (m_currentSlot != slot || context.state != State::Running)
         return Result::InvalidState;
@@ -410,7 +575,8 @@ void Runtime::finishCurrent(Context& context, int32_t exitCode)
     context.exitCode = exitCode;
     context.state = State::Completed;
     m_currentSlot = kInvalidSlot;
-    gxos_context_switch(&context.savedStackPointer, m_rootStackPointer);
+    gxos_context_switch(&context.savedStackPointer, m_rootStackPointer,
+                        context.xstate, m_rootXstate);
     halt_forever();
 #else
     (void)context;
@@ -442,7 +608,7 @@ bool Runtime::query(Handle handle, Snapshot* output) const
     const Context& context = m_contexts[handle.slot];
     output->handle = handle;
     output->state = context.state;
-    output->ownerKind = OwnerKind::TrustedKernelSystem;
+    output->ownerKind = context.ownerKind;
     output->faultKind = context.faultKind;
     output->configuredStackBytes = context.configuredStackBytes;
     output->dispatchCount = context.dispatchCount;
@@ -461,6 +627,46 @@ bool Runtime::stacksAreSeparate(Handle first, Handle second) const
     const Context& right = m_contexts[second.slot];
     if (!left.allocation || !right.allocation) return false;
     return left.stackTop <= right.stackLow || right.stackTop <= left.stackLow;
+}
+
+bool Runtime::executionStackBounds(Handle handle, uintptr_t* low,
+                                  uintptr_t* top) const
+{
+    if (!low || !top || !validHandle(handle)) return false;
+    const Context& context = m_contexts[handle.slot];
+    if (!context.allocation || context.stackTop <= context.stackLow) return false;
+    *low = context.stackLow;
+    *top = context.stackTop;
+    return true;
+}
+
+bool Runtime::isCurrent(Handle handle) const
+{
+    return validHandle(handle) && m_dispatching &&
+           m_currentSlot == handle.slot &&
+           m_contexts[handle.slot].state == State::Running;
+}
+
+uint64_t Runtime::enabledXstateMask() const
+{
+    return gxos_native_scheduler_xstate_mask;
+}
+
+uint32_t Runtime::enabledXstateBytes() const
+{
+    return s_enabledXstateBytes;
+}
+
+uint64_t Runtime::trustedKernelDispatchCount() const
+{
+    uint64_t total = 0u;
+    for (uint32_t i = 0u; i < kMaximumContexts; ++i) {
+        const Context& context = m_contexts[i];
+        if (context.ownerKind != OwnerKind::TrustedKernelSystem) continue;
+        if (UINT64_MAX - total < context.dispatchCount) return UINT64_MAX;
+        total += context.dispatchCount;
+    }
+    return total;
 }
 
 Result Runtime::requestTermination(Handle handle) const

@@ -18,6 +18,7 @@
 #include "include/kernel/pci_audio.h"
 #include "include/kernel/app_audio_stream.h"
 #include "include/kernel/native_present_validation.h"
+#include "include/kernel/native_scheduler.h"
 
 #include "bitmap_font.h"
 #include "sdk/include/guidexos/abi.h"
@@ -68,7 +69,8 @@ enum class NativeAbiOperation : uint32_t {
     PresentFrame,
     PollEvent,
     CloseWindow,
-    RequestExit
+    RequestExit,
+    Yield
 };
 
 class NativeWindowOwner final : public app::KernelApp {
@@ -338,6 +340,19 @@ struct Runtime {
     uint64_t imageBytes;
     gx_result (GX_CALL *entry)(gx_app_context*);
     uint8_t* stack;
+    uintptr_t executionStackLow;
+    uintptr_t executionStackTop;
+    native_scheduler::Handle schedulerHandle;
+    managed_execution::Handle executionHandle;
+    bool schedulerManaged;
+    bool entryStarted;
+    bool entryReturned;
+    bool entryStackVerified;
+    bool schedulerFaulted;
+    native_scheduler::FaultKind schedulerFaultKind;
+    uint32_t schedulerServiceProgressObservations;
+    gx_result entryResult;
+    uint64_t yieldCount;
     bool exitRequested;
     gx_result exitCode;
     bool lastFocus;
@@ -543,6 +558,7 @@ static const char* abi_operation_name(NativeAbiOperation operation) {
     case NativeAbiOperation::PollEvent: return "PollEvent";
     case NativeAbiOperation::CloseWindow: return "CloseWindow";
     case NativeAbiOperation::RequestExit: return "RequestExit";
+    case NativeAbiOperation::Yield: return "Yield";
     case NativeAbiOperation::None: break;
     }
     return "None";
@@ -937,6 +953,7 @@ static bool parse_package(const char* directory, Package* package) {
     char runtime[32];
     char architecture[32];
     package->startMenuVisible = true;
+    package->executionModel = ExecutionModel::Synchronous;
     if (!json_string(s_manifest, "\"kind\"", kind, sizeof(kind)) ||
         !text_equal(kind, "NativeElf") ||
         !json_string(s_manifest, "\"runtime\"", runtime, sizeof(runtime)) ||
@@ -955,6 +972,12 @@ static bool parse_package(const char* directory, Package* package) {
     char startMenuVisible[16];
     if (json_string(s_manifest, "\"appearsInStartMenu\"", startMenuVisible, sizeof(startMenuVisible))) {
         package->startMenuVisible = !text_equal(startMenuVisible, "false");
+    }
+    char executionModel[48];
+    if (json_string(s_manifest, "\"executionModel\"", executionModel,
+                    sizeof(executionModel))) {
+        if (!text_equal(executionModel, "cooperative-scheduler-v1")) return false;
+        package->executionModel = ExecutionModel::CooperativeSchedulerV1;
     }
     if (!text_equal(package->entryPoint, "gx_main") || !text_equal(package->abi, GX_ABI_NAME)) return false;
     package->hasAudioOutput = json_array_contains(s_manifest, "\"permissions\"", "audio.output");
@@ -2036,7 +2059,58 @@ static gx_result GX_CALL host_draw_rect(gx_app_context* context, gx_handle windo
     return runtime->owner->draw_rect(x, y, width, height, color);
 }
 
+static gx_result yield_scheduler_context(Runtime* runtime) {
+    if (!runtime || !runtime->schedulerManaged ||
+        (runtime->currentAbiOperation != NativeAbiOperation::Yield &&
+         runtime->currentAbiOperation != NativeAbiOperation::PollEvent)) {
+        return GX_ERROR_UNSUPPORTED;
+    }
+    native_scheduler::Runtime& scheduler = native_scheduler::runtime();
+    if (!scheduler.isCurrent(runtime->schedulerHandle)) return GX_ERROR_UNSUPPORTED;
+
+    managed_execution::Runtime& executions = managed_execution::runtime();
+    const managed_execution::Result yielded =
+        executions.markYielded(runtime->executionHandle);
+    if (yielded != managed_execution::Result::Ok) return GX_ERROR_INTERNAL;
+
+    const native_scheduler::Result switchResult = scheduler.yieldCurrent();
+    if (switchResult != native_scheduler::Result::Ok) {
+        (void)executions.markRunning(runtime->executionHandle);
+        return GX_ERROR_INTERNAL;
+    }
+
+    if (executions.markRunning(runtime->executionHandle) !=
+        managed_execution::Result::Ok) {
+        serial::puts("[MANAGED-EXECUTION] lifecycle resume transition failed; kernel-fatal scheduler invariant\n");
+        for (;;) arch::halt();
+    }
+    ++runtime->yieldCount;
+    if (runtime->yieldCount <= 4u) {
+        serial::puts("[NATIVE-ELF-SCHEDULER] appId=");
+        serial::puts(runtime->package ? runtime->package->id : "(unknown)");
+        serial::puts(" event=yield-resume count=0x");
+        serial::put_hex64(runtime->yieldCount);
+        serial::puts(" schedulerId=0x");
+        serial::put_hex64(runtime->schedulerHandle.runtimeId);
+        serial::putc('\n');
+    }
+    return GX_OK;
+}
+
+static gx_result GX_CALL host_yield(gx_app_context* context) {
+    Runtime* runtime = runtime_from(context);
+    if (!runtime || !runtime->schedulerManaged) return GX_ERROR_UNSUPPORTED;
+    if (runtime->currentAbiOperation != NativeAbiOperation::None)
+        return GX_ERROR_BUSY;
+    abi_begin(runtime, NativeAbiOperation::Yield);
+    return abi_result(runtime, NativeAbiOperation::Yield,
+                      yield_scheduler_context(runtime));
+}
+
 static void pump_desktop(Runtime* runtime) {
+    static bool pumping = false;
+    if (pumping) return;
+    pumping = true;
     input::poll();
     const int8_t wheel = input::mouse_scroll_y();
     if (input::mouse_dirty()) {
@@ -2051,6 +2125,7 @@ static void pump_desktop(Runtime* runtime) {
     // keeps mixer lifetimes real-time and DMA descriptors refilled.
     app_audio::backend_instance().pump();
     (void)runtime;
+    pumping = false;
 }
 
 static gx_result GX_CALL host_poll_event(gx_app_context* context, gx_event* outEvent, int timeoutMs) {
@@ -2108,6 +2183,13 @@ static gx_result GX_CALL host_poll_event(gx_app_context* context, gx_event* outE
 
         if (timeoutMs <= 0 || pit::ticks() >= deadline) {
             return abi_result(runtime, NativeAbiOperation::PollEvent, GX_ERROR_TIMEOUT);
+        }
+        if (runtime->schedulerManaged) {
+            const gx_result yielded = yield_scheduler_context(runtime);
+            if (yielded != GX_OK) {
+                return abi_result(runtime, NativeAbiOperation::PollEvent, yielded);
+            }
+            continue;
         }
         arch::halt();
     }
@@ -2626,8 +2708,7 @@ extern "C" uint64_t gxos_native_exception_dispatch(const NativeExceptionFrame* f
     const uint64_t cr2 = arch::read_cr2();
     const uint64_t cr3 = arch::read_cr3();
     const bool stackInRuntime = runtime && address_in_range(interruptedRsp,
-        reinterpret_cast<uintptr_t>(runtime->stack),
-        reinterpret_cast<uintptr_t>(runtime->stack) + kRuntimeStackBytes);
+        runtime->executionStackLow, runtime->executionStackTop);
     const bool ripInApp = runtime && address_in_range(frame->rip,
         reinterpret_cast<uintptr_t>(runtime->image),
         reinterpret_cast<uintptr_t>(runtime->image) + runtime->imageBytes);
@@ -2694,8 +2775,8 @@ extern "C" uint64_t gxos_native_exception_dispatch(const NativeExceptionFrame* f
         serial::puts(" lastAbi="); serial::puts(abi_operation_name(runtime->lastCompletedAbiOperation));
         serial::puts(" abiCalls=0x"); serial::put_hex64(runtime->abiCallCount);
         serial::puts(" appFrames=0x"); serial::put_hex64(runtime->appFrameSequence);
-        serial::puts(" stackRange=0x"); serial::put_hex64(reinterpret_cast<uintptr_t>(runtime->stack));
-        serial::puts("..0x"); serial::put_hex64(reinterpret_cast<uintptr_t>(runtime->stack) + kRuntimeStackBytes);
+        serial::puts(" stackRange=0x"); serial::put_hex64(runtime->executionStackLow);
+        serial::puts("..0x"); serial::put_hex64(runtime->executionStackTop);
         serial::puts(" elfRange=0x"); serial::put_hex64(reinterpret_cast<uintptr_t>(runtime->image));
         serial::puts("..0x"); serial::put_hex64(reinterpret_cast<uintptr_t>(runtime->image) + runtime->imageBytes);
         serial::puts(" loadVaddr=0x"); serial::put_hex64(runtime->loadMinimum);
@@ -2711,16 +2792,21 @@ extern "C" uint64_t gxos_native_exception_dispatch(const NativeExceptionFrame* f
         const uint64_t* words = reinterpret_cast<const uint64_t*>(interruptedRsp);
         for (uint32_t i = 0; i < 16u && address_in_range(
             reinterpret_cast<uintptr_t>(words + i),
-            reinterpret_cast<uintptr_t>(runtime->stack),
-            reinterpret_cast<uintptr_t>(runtime->stack) + kRuntimeStackBytes); ++i) {
+            runtime->executionStackLow,
+            runtime->executionStackTop); ++i) {
             serial::puts(" ["); serial::put_hex32(i); serial::puts("]=0x"); serial::put_hex64(words[i]);
         }
         serial::putc('\n');
     }
 
-    // Recover only a fault that occurred while an active Native ELF owns the
-    // app stack.  A fault with no active runtime remains a kernel fault and is
-    // deliberately halted rather than attempting unsafe global recovery.
+    if (runtime && runtime->schedulerManaged && (ripInApp || stackInRuntime)) {
+        serial::puts("[NATIVE-ELF-FAULT] scheduled-context recovery=unsupported outcome=kernel-fatal\n");
+        for (;;) arch::halt();
+    }
+
+    // Recover only a fault that occurred while an active synchronous Native
+    // ELF owns its dedicated stack. Scheduled contexts have no verified fault
+    // unwind path and remain kernel-fatal.
     if (runtime && (ripInApp || stackInRuntime)) {
         serial::puts("[NATIVE-ELF-FAULT] containment=runtime-faulted recovery=return-to-desktop\n");
         return 1;
@@ -2749,12 +2835,110 @@ static void initialize_host_table(Runtime* runtime) {
     runtime->host.present_frame = host_present_frame;
     runtime->host.get_ticks_ms = host_get_ticks_ms;
     runtime->host.play_pcm = host_play_pcm;
+    if (runtime->schedulerManaged) runtime->host.yield = host_yield;
+}
+
+static int32_t scheduled_native_elf_entry(void* opaque) {
+    Runtime* runtime = static_cast<Runtime*>(opaque);
+    if (!runtime || !runtime->schedulerManaged || !runtime->entry) return GX_ERROR_INVALID_ARGUMENT;
+    managed_execution::Runtime& executions = managed_execution::runtime();
+    const managed_execution::Result start = executions.markRunning(runtime->executionHandle);
+    if (start != managed_execution::Result::Ok) {
+        serial::puts("[MANAGED-EXECUTION] scheduled entry rejected result=");
+        serial::puts(managed_execution::resultName(start));
+        serial::putc('\n');
+        return GX_ERROR_INTERNAL;
+    }
+    uintptr_t currentStack = 0u;
+    asm volatile("mov %%rsp, %0" : "=r"(currentStack));
+    runtime->entryStackVerified = currentStack >= runtime->executionStackLow &&
+        currentStack < runtime->executionStackTop;
+    if (!runtime->entryStackVerified) {
+        serial::puts("[NATIVE-ELF-SCHEDULER] entry stack verification failed before app entry; kernel-fatal\n");
+        for (;;) arch::halt();
+    }
+    runtime->entryStarted = true;
+    s_lastLaunchAttribution.state = LaunchLifecycleState::Running;
+    log_breadcrumb(runtime, "04 GX_MAIN_ENTER_SCHEDULER_STACK");
+    runtime->entryResult = runtime->entry(&runtime->context);
+    runtime->entryReturned = true;
+    log_breadcrumb(runtime, "21 GX_MAIN_RETURN_SCHEDULER_STACK");
+    return static_cast<int32_t>(runtime->entryResult);
+}
+
+static bool drive_scheduled_native_elf(Runtime* runtime,
+    native_scheduler::Snapshot* terminalSnapshot) {
+    if (!runtime || !terminalSnapshot || !runtime->schedulerManaged) return false;
+    native_scheduler::Runtime& scheduler = native_scheduler::runtime();
+    for (;;) {
+        pump_desktop(runtime);
+        native_scheduler::Snapshot beforeSnapshot{};
+        if (!scheduler.query(runtime->schedulerHandle, &beforeSnapshot)) {
+            serial::puts("[NATIVE-ELF-SCHEDULER] lost generation-safe scheduler handle; kernel-fatal\n");
+            for (;;) arch::halt();
+        }
+        if (beforeSnapshot.state == native_scheduler::State::Completed ||
+            beforeSnapshot.state == native_scheduler::State::Faulted) {
+            if (beforeSnapshot.stackAllocated) {
+                serial::puts("[NATIVE-ELF-SCHEDULER] terminal context retained active stack; kernel-fatal\n");
+                for (;;) arch::halt();
+            }
+            *terminalSnapshot = beforeSnapshot;
+            return beforeSnapshot.state == native_scheduler::State::Completed;
+        }
+        const bool applicationSuspended = runtime->entryStarted &&
+            !runtime->entryReturned && beforeSnapshot.state == native_scheduler::State::Ready &&
+            (runtime->currentAbiOperation == NativeAbiOperation::Yield ||
+             runtime->currentAbiOperation == NativeAbiOperation::PollEvent);
+        const uint64_t kernelDispatchesBefore =
+            scheduler.trustedKernelDispatchCount();
+        bool dispatched = false;
+        const native_scheduler::Result dispatch = scheduler.dispatchOne(&dispatched);
+        const uint64_t kernelDispatchesAfter =
+            scheduler.trustedKernelDispatchCount();
+        if (applicationSuspended && kernelDispatchesAfter > kernelDispatchesBefore &&
+            runtime->schedulerServiceProgressObservations < 4u) {
+            ++runtime->schedulerServiceProgressObservations;
+            serial::puts("[NATIVE-ELF-SCHEDULER] event=service-progress-during-app-suspension count=0x");
+            serial::put_hex32(runtime->schedulerServiceProgressObservations);
+            serial::puts(" trustedKernelDispatches=0x");
+            serial::put_hex64(kernelDispatchesAfter);
+            serial::puts(" appId=");
+            serial::puts(runtime->package ? runtime->package->id : "(unknown)");
+            serial::putc('\n');
+        }
+        native_scheduler::Snapshot snapshot{};
+        if (!scheduler.query(runtime->schedulerHandle, &snapshot)) {
+            serial::puts("[NATIVE-ELF-SCHEDULER] lost generation-safe scheduler handle; kernel-fatal\n");
+            for (;;) arch::halt();
+        }
+        if (snapshot.state == native_scheduler::State::Completed ||
+            snapshot.state == native_scheduler::State::Faulted) {
+            if (snapshot.stackAllocated) {
+                serial::puts("[NATIVE-ELF-SCHEDULER] terminal context retained active stack; kernel-fatal\n");
+                for (;;) arch::halt();
+            }
+            *terminalSnapshot = snapshot;
+            return snapshot.state == native_scheduler::State::Completed;
+        }
+        if (dispatch != native_scheduler::Result::Ok || !dispatched) {
+            serial::puts("[NATIVE-ELF-SCHEDULER] runnable context failed to dispatch result=");
+            serial::puts(native_scheduler::resultName(dispatch));
+            serial::puts(" state=");
+            serial::puts(native_scheduler::stateName(snapshot.state));
+            serial::puts("; refusing to free a resumable application\n");
+            for (;;) arch::halt();
+        }
+    }
 }
 
 static bool run_package(Package* package) {
     Runtime runtime{};
     runtime.package = package;
     runtime.exitCode = GX_OK;
+    runtime.entryResult = GX_ERROR_INTERNAL;
+    runtime.schedulerManaged = package && package->executionModel ==
+        ExecutionModel::CooperativeSchedulerV1;
     ++s_runtimeSequence;
     runtime.audioOwner = s_runtimeSequence;
     initialize_host_table(&runtime);
@@ -2770,7 +2954,9 @@ static bool run_package(Package* package) {
         return false;
     }
 #endif
-    log_runtime(&runtime, "launch begin path=package-relative runtime=native-elf abi=guidexos-c-abi-v1");
+    log_runtime(&runtime, runtime.schedulerManaged
+        ? "launch begin executionModel=cooperative-scheduler-v1 path=package-relative runtime=native-elf abi=guidexos-c-abi-v1"
+        : "launch begin executionModel=synchronous path=package-relative runtime=native-elf abi=guidexos-c-abi-v1");
     if (!load_image(&runtime)) {
         delete[] runtime.image;
         delete[] runtime.verifiedElf;
@@ -2778,20 +2964,24 @@ static bool run_package(Package* package) {
         runtime.verifiedElf = nullptr;
         return false;
     }
-    runtime.stack = new uint8_t[kRuntimeStackBytes];
-    if (!runtime.stack) {
-        delete[] runtime.image;
-        delete[] runtime.verifiedElf;
-        runtime.image = nullptr;
-        runtime.verifiedElf = nullptr;
-        log_runtime(&runtime, "launch FAIL=app-stack-allocation");
-        return false;
+    if (!runtime.schedulerManaged) {
+        runtime.stack = new uint8_t[kRuntimeStackBytes];
+        if (!runtime.stack) {
+            delete[] runtime.image;
+            delete[] runtime.verifiedElf;
+            runtime.image = nullptr;
+            runtime.verifiedElf = nullptr;
+            log_runtime(&runtime, "launch FAIL=app-stack-allocation");
+            return false;
+        }
+        runtime.executionStackLow = reinterpret_cast<uintptr_t>(runtime.stack);
+        runtime.executionStackTop = runtime.executionStackLow + kRuntimeStackBytes;
+        serial::puts("[NATIVE-ELF] runtime="); serial::put_hex64(s_runtimeSequence);
+        serial::puts(" synchronous-stack allocated bytes=0x"); serial::put_hex32(kRuntimeStackBytes);
+        serial::puts(" range=0x"); serial::put_hex64(runtime.executionStackLow);
+        serial::puts("..0x"); serial::put_hex64(runtime.executionStackTop);
+        serial::putc('\n');
     }
-    serial::puts("[NATIVE-ELF] runtime="); serial::put_hex64(s_runtimeSequence);
-    serial::puts(" stack allocated bytes=0x"); serial::put_hex32(kRuntimeStackBytes);
-    serial::puts(" range=0x"); serial::put_hex64(reinterpret_cast<uintptr_t>(runtime.stack));
-    serial::puts("..0x"); serial::put_hex64(reinterpret_cast<uintptr_t>(runtime.stack + kRuntimeStackBytes));
-    serial::putc('\n');
 
     uint8_t finalDigest[32]{};
     bool finalDigestAvailable = false;
@@ -2845,6 +3035,142 @@ static bool run_package(Package* package) {
         serial::puts(managed_execution::resultName(createExecution));
         serial::putc('\n');
         return false;
+    }
+    runtime.executionHandle = executionHandle;
+    if (runtime.schedulerManaged) {
+        const native_scheduler::Result schedulerCreate =
+            native_scheduler::runtime().createNativeElfTask(
+                scheduled_native_elf_entry, &runtime, &runtime.schedulerHandle);
+        if (schedulerCreate != native_scheduler::Result::Ok) {
+            (void)executions.discardBeforeEntry(runtime.executionHandle);
+            delete[] runtime.image;
+            delete[] runtime.verifiedElf;
+            runtime.image = nullptr;
+            runtime.verifiedElf = nullptr;
+            serial::puts("[NATIVE-ELF-SCHEDULER] launch rejected result=");
+            serial::puts(native_scheduler::resultName(schedulerCreate));
+            serial::puts(" fallback=synchronous-disabled\n");
+            return false;
+        }
+        if (!native_scheduler::runtime().executionStackBounds(
+                runtime.schedulerHandle, &runtime.executionStackLow,
+                &runtime.executionStackTop)) {
+            serial::puts("[NATIVE-ELF-SCHEDULER] fresh context has no stack range; kernel-fatal\n");
+            for (;;) arch::halt();
+        }
+        s_activeRuntime = &runtime;
+        gxos_native_set_fault_recovery(0u, 0u);
+        serial::puts("[NATIVE-ELF-SCHEDULER] create appId=");
+        serial::puts(package->id);
+        serial::puts(" schedulerId=0x");
+        serial::put_hex64(runtime.schedulerHandle.runtimeId);
+        serial::puts(" schedulerSlot=0x");
+        serial::put_hex32(runtime.schedulerHandle.slot);
+        serial::puts(" schedulerGeneration=0x");
+        serial::put_hex32(runtime.schedulerHandle.generation);
+        serial::puts(" managedId=0x");
+        serial::put_hex64(runtime.executionHandle.runtimeId);
+        serial::puts(" managedGeneration=0x");
+        serial::put_hex32(runtime.executionHandle.generation);
+        serial::puts(" appSlots=");
+        serial_put_u32_decimal(native_scheduler::Runtime::kNativeElfTaskSlots);
+        serial::puts(" stackBytes=0x");
+        serial::put_hex64(runtime.executionStackTop - runtime.executionStackLow);
+        serial::puts(" stack=0x");
+        serial::put_hex64(runtime.executionStackLow);
+        serial::puts("..");
+        serial::put_hex64(runtime.executionStackTop);
+        serial::puts(" owner=");
+        serial::puts(launch_owner_name(s_lastLaunchAttribution.ownerKind));
+        serial::puts(" sessionGeneration=0x");
+        serial::put_hex64(s_lastLaunchAttribution.sessionGeneration);
+        serial::putc('\n');
+
+        native_scheduler::Snapshot terminalSnapshot{};
+        const bool contextCompleted = drive_scheduled_native_elf(
+            &runtime, &terminalSnapshot);
+        runtime.schedulerFaulted = terminalSnapshot.state ==
+            native_scheduler::State::Faulted;
+        runtime.schedulerFaultKind = terminalSnapshot.faultKind;
+        runtime.entryStackVerified = runtime.entryStackVerified && runtime.entryStarted;
+        if (runtime.schedulerFaulted && runtime.entryStarted) runtime.faulted = true;
+        if (runtime.entryReturned && terminalSnapshot.exitCode !=
+            static_cast<int32_t>(runtime.entryResult)) {
+            runtime.schedulerFaulted = true;
+            runtime.schedulerFaultKind = native_scheduler::FaultKind::SchedulerInvariant;
+            runtime.faulted = true;
+        }
+        const gx_result scheduledResult = runtime.entryReturned
+            ? runtime.entryResult : GX_ERROR_INTERNAL;
+        serial::puts("[NATIVE-ELF] runtime="); serial::put_hex64(s_runtimeSequence);
+        serial::puts(" execution=scheduled entryStackVerified=");
+        serial::puts(runtime.entryStackVerified ? "yes" : "no");
+        serial::puts(" exit result=0x");
+        serial::put_hex32(static_cast<uint32_t>(scheduledResult));
+        serial::puts(" returned="); serial::puts(runtime.entryReturned ? "yes" : "no");
+        serial::puts(" schedulerState=");
+        serial::puts(native_scheduler::stateName(terminalSnapshot.state));
+        serial::puts(" dispatches=0x");
+        serial::put_hex64(terminalSnapshot.dispatchCount);
+        serial::puts(" stackReleased=");
+        serial::puts(terminalSnapshot.stackAllocated ? "no" : "yes");
+        serial::puts(" schedulerFaultKind=0x");
+        serial::put_hex32(static_cast<uint32_t>(runtime.schedulerFaultKind));
+        serial::puts(" yields=0x"); serial::put_hex64(runtime.yieldCount);
+        serial::puts(" inputEvents=0x"); serial::put_hex64(runtime.inputEventCount);
+        serial::putc('\n');
+
+        log_breadcrumb(&runtime, "22 RUNTIME_CLEANUP");
+        app_audio::backend_instance().stop_owner(runtime.audioOwner);
+        if (runtime.owner) {
+            abi_begin(&runtime, NativeAbiOperation::CloseWindow);
+            if (runtime.owner->window()) runtime.owner->requestClose();
+            delete runtime.owner;
+            runtime.owner = nullptr;
+            abi_complete(&runtime, NativeAbiOperation::CloseWindow);
+        }
+        delete[] runtime.image;
+        delete[] runtime.verifiedElf;
+        runtime.image = nullptr;
+        runtime.verifiedElf = nullptr;
+        s_activeRuntime = nullptr;
+        gxos_native_set_fault_recovery(0u, 0u);
+
+        const managed_execution::Result lifecycleResult = runtime.entryStarted
+            ? executions.complete(runtime.executionHandle, runtime.faulted,
+                !runtime.faulted, static_cast<uint32_t>(scheduledResult),
+                static_cast<uint32_t>(runtime.faultVector),
+                static_cast<uint32_t>(runtime.faultErrorCode), true)
+            : executions.discardBeforeEntry(runtime.executionHandle);
+        if (lifecycleResult != managed_execution::Result::Ok) {
+            serial::puts("[NATIVE-ELF-SCHEDULER] lifecycle finalization failed result=");
+            serial::puts(managed_execution::resultName(lifecycleResult));
+            serial::putc('\n');
+        } else if (runtime.entryStarted) {
+            serial::puts("[MANAGED-EXECUTION] id=0x");
+            serial::put_hex64(runtime.executionHandle.runtimeId);
+            serial::puts(" generation=0x");
+            serial::put_hex32(runtime.executionHandle.generation);
+            serial::puts(" state=");
+            serial::puts(runtime.faulted ? "Faulted" : "Exited");
+            serial::puts(" hasExitStatus=");
+            serial::puts(runtime.faulted ? "no" : "yes");
+            if (!runtime.faulted) {
+                serial::puts(" exitStatus=0x");
+                serial::put_hex32(static_cast<uint32_t>(scheduledResult));
+            }
+            serial::puts(" resourcesReleased=yes schedulerStackReaped=yes\n");
+        }
+        const bool cooperativeYieldProved = runtime.yieldCount != 0u;
+        log_runtime(&runtime, runtime.faulted
+            ? "scheduled lifecycle FAULT resources released after execution stopped"
+            : (contextCompleted && runtime.entryReturned && cooperativeYieldProved &&
+               scheduledResult == GX_OK
+                ? "scheduled lifecycle PASS yield/resume/return/cleanup"
+                : "scheduled lifecycle FAIL entry, yield, or scheduler result"));
+        return contextCompleted && runtime.entryReturned && cooperativeYieldProved &&
+            runtime.entryStackVerified && !runtime.faulted &&
+            scheduledResult == GX_OK;
     }
     const managed_execution::Result startExecution = executions.markRunning(executionHandle);
     if (startExecution != managed_execution::Result::Ok) {
