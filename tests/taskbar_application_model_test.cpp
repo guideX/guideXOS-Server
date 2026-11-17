@@ -29,6 +29,20 @@ gxos::gui::TaskbarWindowSnapshot window(uint64_t id, const char* title, const ch
 
 int main() {
     using namespace gxos::gui;
+    TaskbarPinStoreLoadGate pinLoadGate;
+    check(!pinLoadGate.loaded() && !pinLoadGate.shouldAttempt(false),
+        "taskbar pin loading waits while the settings volume is unmounted");
+    check(pinLoadGate.markUnavailableReported() && !pinLoadGate.markUnavailableReported(),
+        "deferred taskbar pin loading reports the unavailable volume once");
+    check(pinLoadGate.shouldAttempt(true),
+        "taskbar pin loading retries when a writable settings volume appears");
+    pinLoadGate.markLoaded();
+    check(pinLoadGate.loaded() && !pinLoadGate.shouldAttempt(true),
+        "taskbar pin store is loaded only once after mount readiness");
+    pinLoadGate.reset();
+    check(!pinLoadGate.loaded() && pinLoadGate.shouldAttempt(true),
+        "a fresh desktop initialization can load pins from its mounted volume");
+
     check(TaskbarThickness(TaskbarSizeMode::Compact, 1920, 1080) == 32 &&
           TaskbarThickness(TaskbarSizeMode::Standard, 1920, 1080) == 40 &&
           TaskbarThickness(TaskbarSizeMode::Expanded, 1920, 1080) == 56,

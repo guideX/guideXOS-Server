@@ -309,6 +309,7 @@ private:
     static char s_pinnedAppIds[MAX_TASKBAR_PINS][app::MAX_APP_ID];
     static int s_pinCount;
     static TaskbarPinPersistenceState s_pinPersistence;
+    static gxos::gui::TaskbarPinStoreLoadGate s_pinLoadGate;
     static bool s_pinStoreCorrupt;
     static gxos::gui::TaskbarActivityStore s_activityStore;
     static uint32_t s_fileOperationOwnerWindowId;
@@ -353,6 +354,7 @@ private:
     static char s_menuAppId[app::MAX_APP_ID];
 
     static void loadPinnedApplications();
+    static void ensurePinnedApplicationsLoaded();
     static bool savePinnedApplications();
     static bool pinApplication(const char* appId);
     static bool unpinApplication(const char* appId);

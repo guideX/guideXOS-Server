@@ -1294,6 +1294,7 @@ int32_t TaskbarManager::s_mouseY = -1;
 char TaskbarManager::s_pinnedAppIds[MAX_TASKBAR_PINS][app::MAX_APP_ID] = {};
 int TaskbarManager::s_pinCount = 0;
 TaskbarPinPersistenceState TaskbarManager::s_pinPersistence = TaskbarPinPersistenceState::Unsupported;
+gxos::gui::TaskbarPinStoreLoadGate TaskbarManager::s_pinLoadGate;
 bool TaskbarManager::s_pinStoreCorrupt = false;
 gxos::gui::TaskbarActivityStore TaskbarManager::s_activityStore;
 uint32_t TaskbarManager::s_fileOperationOwnerWindowId = 0;
@@ -1325,6 +1326,7 @@ void TaskbarManager::init(uint32_t screenW, uint32_t screenH, uint32_t taskbarH,
     s_menuItemCount = 0;
     s_pinCount = 0;
     s_pinStoreCorrupt = false;
+    s_pinLoadGate.reset();
     s_fileOperationOwnerWindowId = 0;
     loadPinnedApplications();
 }
@@ -1351,6 +1353,7 @@ void TaskbarManager::setPresentation(gxos::gui::TaskbarSizeMode size, bool showL
 }
 
 void TaskbarManager::updateButtons() {
+    ensurePinnedApplicationsLoaded();
     s_buttonCount = 0;
     for (int i = 0; i < s_pinCount && s_buttonCount < MAX_TASKBAR_BUTTONS; ++i) {
         TaskbarButton& button = s_buttons[s_buttonCount++];
@@ -2173,14 +2176,18 @@ void TaskbarManager::dispatchMenuItem(int index) {
 }
 
 void TaskbarManager::loadPinnedApplications() {
-    s_pinCount = 0;
+    if (s_pinLoadGate.loaded()) return;
     const vfs::MountPoint* mount = vfs::get_mount(kTaskbarPinStorePath);
     if (!mount || mount->readOnly) {
         s_pinPersistence = TaskbarPinPersistenceState::Unsupported;
-        serial::puts("[taskbar] pin persistence=unsupported reason=");
-        serial::puts(!mount ? "settings-volume-unmounted\n" : "settings-volume-read-only\n");
+        if (s_pinLoadGate.markUnavailableReported()) {
+            serial::puts("[taskbar] pin persistence=unsupported reason=");
+            serial::puts(!mount ? "settings-volume-unmounted\n" : "settings-volume-read-only\n");
+        }
         return;
     }
+    s_pinCount = 0;
+    s_pinLoadGate.markLoaded();
     vfs::FileInfo info{};
     const vfs::Status statStatus = vfs::stat(kTaskbarPinStorePath, &info);
     if (statStatus == vfs::VFS_ERR_NOT_FOUND) {
@@ -2246,6 +2253,12 @@ void TaskbarManager::loadPinnedApplications() {
                            : "[taskbar] pin persistence=loaded\n");
 }
 
+void TaskbarManager::ensurePinnedApplicationsLoaded() {
+    if (s_pinLoadGate.loaded()) return;
+    const vfs::MountPoint* mount = vfs::get_mount(kTaskbarPinStorePath);
+    if (s_pinLoadGate.shouldAttempt(mount && !mount->readOnly)) loadPinnedApplications();
+}
+
 bool TaskbarManager::savePinnedApplications() {
     const vfs::MountPoint* mount = vfs::get_mount(kTaskbarPinStorePath);
     if (!mount || mount->readOnly) {
@@ -2295,6 +2308,7 @@ bool TaskbarManager::savePinnedApplications() {
 }
 
 bool TaskbarManager::pinApplication(const char* appId) {
+    ensurePinnedApplicationsLoaded();
     if (!validTaskbarAppId(appId)) return false;
     const app::AppInfo* info = app::AppManager::getAppInfoById(appId);
     if (!info || !info->available || !info->factory) return false;
@@ -2306,6 +2320,7 @@ bool TaskbarManager::pinApplication(const char* appId) {
 }
 
 bool TaskbarManager::unpinApplication(const char* appId) {
+    ensurePinnedApplicationsLoaded();
     if (!gxos::gui::HasCanonicalTaskbarAppIdentity(appId)) return false;
     int found = -1;
     for (int i = 0; i < s_pinCount; ++i) {

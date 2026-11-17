@@ -15,6 +15,35 @@ enum class TaskbarCoreClickAction {
     ShowWindowChooser
 };
 
+// Native taskbar initialization can run before the writable root VFS mount is
+// ready. Keep the initial unavailable result retryable, then load the store
+// exactly once when a writable mount becomes available.
+struct TaskbarPinStoreLoadGate {
+    TaskbarPinStoreLoadGate() : m_loaded(false), m_unavailableReported(false) {}
+
+    void reset() {
+        m_loaded = false;
+        m_unavailableReported = false;
+    }
+
+    bool loaded() const { return m_loaded; }
+    bool shouldAttempt(bool writableStoreAvailable) const {
+        return !m_loaded && writableStoreAvailable;
+    }
+
+    bool markUnavailableReported() {
+        if (m_unavailableReported) return false;
+        m_unavailableReported = true;
+        return true;
+    }
+
+    void markLoaded() { m_loaded = true; }
+
+private:
+    bool m_loaded;
+    bool m_unavailableReported;
+};
+
 inline bool HasCanonicalTaskbarAppIdentity(const char* appId) {
     return appId != nullptr && appId[0] != '\0';
 }
