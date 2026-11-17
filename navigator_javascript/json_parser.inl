@@ -400,12 +400,11 @@ private:
             } while (cursor_ < input_.length &&
                 jsonIsAsciiDigit(input_.data[cursor_]));
         }
-        if (limits_.numberConverter == nullptr) {
-            setError(PortableJsonParseErrorCode::NumericConversionUnavailable);
-            return false;
-        }
-        if (!limits_.numberConverter(SourceView(input_.data + begin,
-                cursor_ - begin), result)) {
+        const SourceView token(input_.data + begin, cursor_ - begin);
+        const bool converted = limits_.numberConverter != nullptr
+            ? limits_.numberConverter(token, result)
+            : parsePortableJsonBinary64(token, result);
+        if (!converted) {
             setError(PortableJsonParseErrorCode::InvalidNumber);
             return false;
         }

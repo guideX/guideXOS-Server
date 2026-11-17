@@ -14306,3 +14306,40 @@ JS122 is **Outcome B — `JS122_PORTABLE_JSON_PARTIAL`**. See the [JS122 shared
 portable JSON report](NAVIGATOR_JAVASCRIPT_JS122_PORTABLE_JSON.md) for the J0–J7
 gate table, storage and stack bounds, freestanding command profile, semantic
 coverage, and recommended JS123 work.
+
+### JS123 portable JSON numbers and bounded writer — partial
+
+JS123 vendors and documents the MIT-licensed `ffc.h` converter and uses it as
+the shared decimal-to-binary64 implementation for strict JSON number tokens in
+the hosted and portable parser paths. Independently authored bit-pattern tests
+cover ties-to-even, signed zero, subnormals, normal boundaries, maximum finite,
+overflow, underflow, adjacent values, long tokens, and nested JSON.parse
+positions. The focused suite passes **70/70**; the JS122 parser suite remains
+**67/67**. Conversion now handles top-level, object, Array, and nested numeric
+values while retaining the shared parser's rollback and strict grammar.
+
+A caller-owned bounded JSON output writer now supplies checked byte/span
+appends, UTF-8 string escaping, sticky failure, complete-only-on-success, and
+reset/reuse. Hosted `JSON.stringify` uses it for output writing and string
+escaping. The serializer's Value traversal, object/Array semantics, cycle
+detection, callback-free portable entry point, and ECMAScript shortest number
+formatting are still unimplemented; portable callback behavior is not claimed.
+Hosted `toJSON` and reviver behavior remain operational, with JS109 **86/86**
+and JS110 **28/28** passing.
+
+The AMD64 freestanding parser/converter and writer-probe component relocatable
+links with zero undefined symbols and no hosted runtime dependency. Its
+113,045-byte COFF object reports a 3,696-byte converter slow-path frame and a
+224-byte recursive parser frame; this is not a whole-chain 16 KiB boot-stack
+safety claim. The JS123 qualification is **Outcome B —
+`JS123_PORTABLE_JSON_NUMERIC_SERIALIZER_PARTIAL`**. Its full JavaScript matrix
+passes **115/115 lanes** with **17,867/17,867 assertions across 73 reporting
+lanes**. JS109 and JS110 hosted pages both return HTTP 200 with no JavaScript
+errors. The hosted Navigator aggregate remains at **767/774**, with exactly
+the seven established CSS failures in phases 3C, 3G, 6A, three in 6B, and 6C.
+The production candidate was preserved separately (9,336,464 B,
+SHA-256 `6BD7E9CB9A1DFEBA1FA6A2D8B1332D283AFD87D760F6B9FD850C6BC2EC9E442B`); the
+protected original executable and all 42 fixtures were restored and verified,
+and `.phase` remains absent. No QEMU, QAC, guest execution, or kernel-format
+integration was run. See the [JS123 portable JSON report](NAVIGATOR_JAVASCRIPT_JS123_PORTABLE_JSON_NUMBERS_SERIALIZER.md)
+for detailed architecture, freestanding evidence, gate results, and JS124 scope.

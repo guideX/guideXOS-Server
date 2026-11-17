@@ -1,6 +1,8 @@
 #include "runtime.h"
 #include "json_parser.h"
 #include "json_number_host.h"
+#include "json_number_impl.inl"
+#include "json_writer.h"
 
 #include <algorithm>
 #include <array>
@@ -3022,21 +3024,46 @@ private:
         const std::size_t maximumDepth = std::min(
             context_.limits_.maxJsonNestingDepth,
             kDefaultMaxJavaScriptJsonNestingDepth);
-        std::string output;
+        const std::size_t outputCapacity = std::min<std::size_t>(
+            context_.limits_.maxRuntimeStringLength, 64u * 1024u);
+        std::vector<char> outputBuffer;
+        PortableJsonOutputWriter output;
         std::array<RuntimeObjectId,
             kDefaultMaxJavaScriptJsonNestingDepth> activeObjects{};
         std::size_t activeObjectCount = 0u;
 
-        const auto appendBytes = [&](const char* bytes, std::size_t length) {
-            if ((bytes == nullptr && length != 0u) ||
-                length > context_.limits_.maxRuntimeStringLength ||
-                output.size() > context_.limits_.maxRuntimeStringLength -
-                    length) {
+        struct OutputStepContext {
+            RuntimeContext* runtime = nullptr;
+            SourceLocation callSite;
+        } outputStepContext{&context_, callSite};
+        const PortableJsonWriteStepConsumer outputStep =
+            [](void* context) {
+                OutputStepContext* step =
+                    static_cast<OutputStepContext*>(context);
+                return step != nullptr && step->runtime != nullptr &&
+                    step->runtime->consumeStep(step->callSite);
+            };
+        const auto reportOutputFailure = [&]() {
+            switch (output.error()) {
+            case PortableJsonWriteErrorCode::None:
+                return true;
+            case PortableJsonWriteErrorCode::CapacityExceeded:
                 fail(RuntimeErrorCode::StringLimitExceeded, callSite);
                 return false;
+            case PortableJsonWriteErrorCode::InvalidUtf8:
+            case PortableJsonWriteErrorCode::InvalidBuffer:
+                fail(RuntimeErrorCode::TypeError, callSite);
+                return false;
+            case PortableJsonWriteErrorCode::StepBudgetExceeded:
+                return false;
             }
-            output.append(bytes == nullptr ? "" : bytes, length);
-            return true;
+            fail(RuntimeErrorCode::InvalidAstState, callSite);
+            return false;
+        };
+
+        const auto appendBytes = [&](const char* bytes, std::size_t length) {
+            return output.appendSpan(bytes, length)
+                ? true : reportOutputFailure();
         };
         const auto appendText = [&](const char* text) {
             std::size_t length = 0u;
@@ -3045,44 +3072,9 @@ private:
         };
         const auto appendQuotedBytes = [&](const char* text,
             std::size_t textLength) {
-            if (!appendText("\"")) return false;
-            std::size_t offset = 0u;
-            while (offset < textLength) {
-                if (!context_.consumeStep(callSite)) return false;
-                const std::size_t characterStart = offset;
-                std::uint32_t scalar = 0u;
-                if (!decodeJsonUtf8Scalar(text, textLength, offset,
-                        scalar)) {
-                    fail(RuntimeErrorCode::TypeError, callSite);
-                    return false;
-                }
-                if (scalar == '"') {
-                    if (!appendText("\\\"")) return false;
-                } else if (scalar == '\\') {
-                    if (!appendText("\\\\")) return false;
-                } else if (scalar == '\b') {
-                    if (!appendText("\\b")) return false;
-                } else if (scalar == '\f') {
-                    if (!appendText("\\f")) return false;
-                } else if (scalar == '\n') {
-                    if (!appendText("\\n")) return false;
-                } else if (scalar == '\r') {
-                    if (!appendText("\\r")) return false;
-                } else if (scalar == '\t') {
-                    if (!appendText("\\t")) return false;
-                } else if (scalar < 0x20u) {
-                    static const char hex[] = "0123456789abcdef";
-                    const char escaped[] = {
-                        '\\', 'u', '0', '0',
-                        hex[(scalar >> 4u) & 0x0fu],
-                        hex[scalar & 0x0fu]};
-                    if (!appendBytes(escaped, sizeof(escaped))) return false;
-                } else if (!appendBytes(text + characterStart,
-                        offset - characterStart)) {
-                    return false;
-                }
-            }
-            return appendText("\"");
+            return output.appendQuotedUtf8(SourceView(text, textLength),
+                    outputStep, &outputStepContext)
+                ? true : reportOutputFailure();
         };
         const auto appendQuoted = [&](const std::string& text) {
             return appendQuotedBytes(text.data(), text.size());
@@ -3366,10 +3358,16 @@ private:
             if (!prepareValue(source, std::string(), prepared, omitted))
                 return false;
             if (omitted) return true;
+            outputBuffer.resize(outputCapacity);
+            output.reset(outputBuffer.data(), outputBuffer.size());
             if (!emitValue(emitValue, prepared, 0u)) return false;
+            SourceView outputText;
+            if (!output.complete(outputText)) {
+                reportOutputFailure();
+                return false;
+            }
             RuntimeErrorCode error = RuntimeErrorCode::None;
-            if (!context_.createString(SourceView(output.data(), output.size()),
-                    result, error)) {
+            if (!context_.createString(outputText, result, error)) {
                 fail(error, callSite);
                 return false;
             }

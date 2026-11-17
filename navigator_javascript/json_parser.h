@@ -1,6 +1,7 @@
 #pragma once
 
 #include "object_storage.h"
+#include "json_number.h"
 #include "runtime_string_storage.h"
 #include "source.h"
 #include "value.h"

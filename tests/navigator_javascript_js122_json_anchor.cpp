@@ -1,4 +1,5 @@
 #include "navigator_javascript_js122_json_probe.h"
+#include "navigator_javascript/json_number_impl.inl"
 
 using namespace gxos::javascript;
 

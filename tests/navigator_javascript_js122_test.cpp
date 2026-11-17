@@ -1,5 +1,5 @@
 #include "navigator_javascript/json_parser.h"
-#include "navigator_javascript/json_number_host.h"
+#include "navigator_javascript/json_number_impl.inl"
 
 #include <algorithm>
 #include <cmath>
@@ -67,11 +67,8 @@ struct JsonFixture {
 
     bool parse(SourceView input, Value& value, PortableJsonParseError& error,
         PortableJsonParseLimits limits = PortableJsonParseLimits(),
-        PortableJsonParseStats* stats = nullptr,
-        bool hostedNumberConverter = true)
+        PortableJsonParseStats* stats = nullptr)
     {
-        if (hostedNumberConverter && limits.numberConverter == nullptr)
-            limits.numberConverter = &parseHostedJsonBinary64;
         std::vector<char> decoded(limits.maxStringLength);
         const std::size_t keyLimit = objects.limits().maxPropertyNameLength;
         std::vector<char> keys(limits.maxNestingDepth * keyLimit);
@@ -351,11 +348,10 @@ void testExplicitLimitsAndCapacityRecovery()
             fixture.objects.objectCount() == 0u,
             "step exhaustion fails explicitly and rolls back partial arrays");
         limits = PortableJsonParseLimits();
-        expect(!fixture.parse(SourceView("5", 1u), value, error, limits,
-                nullptr, false) &&
-            error.code ==
-                PortableJsonParseErrorCode::NumericConversionUnavailable,
-            "portable parser reports its hosted number-conversion dependency");
+        limits.numberConverter = [](SourceView, double&) { return false; };
+        expect(!fixture.parse(SourceView("5", 1u), value, error, limits) &&
+            error.code == PortableJsonParseErrorCode::InvalidNumber,
+            "a failing converter is reported as numeric conversion failure");
     }
 }
 

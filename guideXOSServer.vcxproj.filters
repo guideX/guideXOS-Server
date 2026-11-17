@@ -612,6 +612,18 @@
     <ClInclude Include="navigator_javascript\ast.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="navigator_javascript\json_number.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="navigator_javascript\json_number_host.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="navigator_javascript\json_parser.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="navigator_javascript\json_writer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="navigator_javascript\environment.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -637,6 +649,15 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="navigator_javascript\value.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\ffc\ffc.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\ffc\LICENSE-MIT">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\ffc\PROVENANCE.md">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="gxos_tls_prerequisites.h">
