@@ -191,6 +191,69 @@ bool read_equals(const char* path, const std::vector<uint8_t>& expected)
     return count == static_cast<int32_t>(expected.size()) &&
         std::equal(expected.begin(), expected.end(), actual.begin());
 }
+
+uint8_t fat_lfn_checksum(const char shortName[11])
+{
+    uint8_t checksum = 0;
+    for (uint32_t index = 0; index < 11; ++index) {
+        const uint8_t byte = static_cast<uint8_t>(shortName[index]);
+        checksum = static_cast<uint8_t>(((checksum & 1u) ? 0x80u : 0u) +
+            (checksum >> 1) + byte);
+    }
+    return checksum;
+}
+
+bool insert_lfn_at_root_end(const char* longName, const char shortName[11])
+{
+    const kernel::vfs::MountPoint* mount = kernel::vfs::get_mount("/Documents");
+    if (!mount) return false;
+    const kernel::fs_fat::FATVolume* volume =
+        kernel::fs_fat::get_volume(mount->fsVolumeIndex);
+    if (!volume || volume->type != kernel::fs_fat::FAT_TYPE_FAT32 ||
+        volume->bytesPerSector != kSectorSize || volume->rootCluster < 2u ||
+        !longName || !shortName) {
+        return false;
+    }
+
+    const size_t nameLength = std::strlen(longName);
+    if (nameLength == 0 || nameLength > 12u) return false;
+    const uint64_t rootSector = volume->partitionOffset + volume->firstDataSector +
+        static_cast<uint64_t>(volume->rootCluster - 2u) * volume->sectorsPerCluster;
+    uint8_t sector[kSectorSize];
+    for (uint32_t sectorInCluster = 0;
+         sectorInCluster < volume->sectorsPerCluster; ++sectorInCluster) {
+        const uint64_t lba = rootSector + sectorInCluster;
+        if (kernel::block::read_sectors(volume->blockDevIndex, lba, 1, sector) !=
+            kernel::block::BLOCK_OK) {
+            return false;
+        }
+        for (uint32_t offset = 0; offset + sizeof(kernel::fs_fat::FAT32_LFNEntry) <=
+             sizeof(sector); offset += sizeof(kernel::fs_fat::FAT32_DirEntry)) {
+            if (sector[offset] != 0x00u) continue;
+
+            kernel::fs_fat::FAT32_LFNEntry entry{};
+            entry.order = 0x41u;
+            entry.attr = kernel::fs_fat::ATTR_LFN;
+            entry.type = 0;
+            entry.checksum = fat_lfn_checksum(shortName);
+            entry.firstClusterLo = 0;
+            uint16_t characters[13];
+            for (uint32_t index = 0; index < 13; ++index) characters[index] = 0xFFFFu;
+            for (size_t index = 0; index < nameLength; ++index) {
+                characters[index] = static_cast<uint8_t>(longName[index]);
+            }
+            if (nameLength < 13u) characters[nameLength] = 0;
+            for (uint32_t index = 0; index < 5; ++index) entry.name1[index] = characters[index];
+            for (uint32_t index = 0; index < 6; ++index) entry.name2[index] = characters[index + 5];
+            for (uint32_t index = 0; index < 2; ++index) entry.name3[index] = characters[index + 11];
+            std::memcpy(sector + offset, &entry, sizeof(entry));
+            return kernel::block::write_sectors(volume->blockDevIndex, lba, 1, sector) ==
+                    kernel::block::BLOCK_OK &&
+                kernel::block::flush(volume->blockDevIndex) == kernel::block::BLOCK_OK;
+        }
+    }
+    return false;
+}
 }
 
 namespace kernel {
@@ -210,8 +273,40 @@ bool read_dir(uint8_t, Ext4DirEntry*) { return false; }
 
 int main(int argc, char** argv)
 {
+    if (argc == 3 && std::string(argv[1]) == "--prepare-fixture") {
+        if (!setup_device(argv[2])) {
+            std::cerr << "Could not open a writable, sector-aligned image copy.\n";
+            return 2;
+        }
+        kernel::vfs::init();
+        if (kernel::vfs::mount_type("/Documents", 0,
+                                    kernel::vfs::FS_TYPE_FAT32) == 0xFF) {
+            std::cerr << "Could not mount fixture at /Documents.\n";
+            return 2;
+        }
+        kernel::vfs::FileInfo info{};
+        if (kernel::vfs::stat("/Documents/APPDATA", &info) ==
+                kernel::vfs::VFS_ERR_NOT_FOUND &&
+            kernel::vfs::mkdir("/Documents/APPDATA") != kernel::vfs::VFS_OK) {
+            std::cerr << "Could not create fixture APPDATA directory.\n";
+            return 2;
+        }
+        if (kernel::vfs::stat("/Documents/UNTITLED.TXT", &info) ==
+                kernel::vfs::VFS_ERR_NOT_FOUND) {
+            static const char document[] = "Hosted FAT persistence fixture.\n";
+            if (kernel::vfs::create_file("/Documents/UNTITLED.TXT", document,
+                    static_cast<uint32_t>(sizeof(document) - 1u)) !=
+                    static_cast<int32_t>(sizeof(document) - 1u)) {
+                std::cerr << "Could not create fixture Notepad document.\n";
+                return 2;
+            }
+        }
+        std::cout << "Prepared writable FAT32 fixture with APPDATA and UNTITLED.TXT.\n";
+        return 0;
+    }
     if (argc != 2) {
-        std::cerr << "usage: fs_fat_persistence_test <writable-image-copy>\n";
+        std::cerr << "usage: fs_fat_persistence_test <writable-image-copy>\n"
+                  << "   or: fs_fat_persistence_test --prepare-fixture <writable-image-copy>\n";
         return 2;
     }
     if (!setup_device(argv[1])) {
@@ -340,6 +435,83 @@ int main(int argc, char** argv)
           "application restart reloads both settings from the same FAT32 image");
     check(kernel::vfs::unmount("/AppData") == kernel::vfs::VFS_OK,
           "AppData settings alias releases before the broader VFS teardown checks");
+
+    const char lfnTestShortName[11] = {'L','F','N','T','E','S','T',' ','T','M','P'};
+    check(insert_lfn_at_root_end("lfntest.tmp", lfnTestShortName),
+          "install a checksum-valid LFN entry before the root-directory end marker");
+    const char lfnRenameContents[] = "rename keeps the current long name valid";
+    const int32_t lfnRenameSize = static_cast<int32_t>(sizeof(lfnRenameContents) - 1u);
+    check(kernel::vfs::create_file("/Documents/LFNTEST.TMP", lfnRenameContents,
+                                   static_cast<uint32_t>(lfnRenameSize)) == lfnRenameSize &&
+              kernel::vfs::stat("/Documents/lfntest.tmp", &info) == kernel::vfs::VFS_OK,
+          "create and resolve a file through its checksum-valid long filename");
+    check(kernel::vfs::rename("/Documents/lfntest.tmp", "/Documents/renamed.tmp") ==
+              kernel::vfs::VFS_OK,
+          "same-directory rename updates the LFN text and short-name checksum together");
+    check(kernel::vfs::stat("/Documents/lfntest.tmp", &info) ==
+              kernel::vfs::VFS_ERR_NOT_FOUND &&
+              kernel::vfs::stat("/Documents/renamed.tmp", &info) == kernel::vfs::VFS_OK &&
+              info.size == static_cast<uint64_t>(lfnRenameSize),
+          "renamed entry rejects its old long name and resolves its new long name");
+    check(kernel::vfs::read_file("/Documents/renamed.tmp", savedDocumentAfter,
+                                 static_cast<uint32_t>(sizeof(savedDocumentAfter))) ==
+              lfnRenameSize &&
+              std::memcmp(savedDocumentAfter, lfnRenameContents,
+                          static_cast<size_t>(lfnRenameSize)) == 0,
+          "renamed LFN-backed file retains its original bytes");
+    const uint8_t renamedDirectory = kernel::vfs::opendir("/Documents");
+    bool sawOldLongName = false;
+    bool sawNewLongName = false;
+    if (renamedDirectory != 0xFF) {
+        kernel::vfs::DirEntry entry{};
+        while (kernel::vfs::readdir(renamedDirectory, &entry)) {
+            if (std::string(entry.name) == "lfntest.tmp") sawOldLongName = true;
+            if (std::string(entry.name) == "renamed.tmp") sawNewLongName = true;
+        }
+        kernel::vfs::closedir(renamedDirectory);
+    }
+    check(renamedDirectory != 0xFF && !sawOldLongName && sawNewLongName,
+          "directory enumeration shows the renamed LFN without the old name");
+    check(kernel::vfs::unlink("/Documents/renamed.tmp") == kernel::vfs::VFS_OK &&
+              kernel::vfs::stat("/Documents/renamed.tmp", &info) ==
+                  kernel::vfs::VFS_ERR_NOT_FOUND &&
+              kernel::vfs::stat("/Documents/lfntest.tmp", &info) ==
+                  kernel::vfs::VFS_ERR_NOT_FOUND,
+          "unlink removes the short entry and its associated long-name records");
+
+    const char staleLfnName[] = "stalex.tmp";
+    const char staleLfnChecksumName[11] = {'O','T','H','E','R',' ',' ',' ','T','M','P'};
+    const char staleLfnContents[] = "stale LFN checksum fixture";
+    const int32_t staleLfnSize = static_cast<int32_t>(sizeof(staleLfnContents) - 1u);
+    check(insert_lfn_at_root_end(staleLfnName, staleLfnChecksumName) &&
+              kernel::vfs::create_file("/Documents/STALE.TMP", staleLfnContents,
+                  static_cast<uint32_t>(staleLfnSize)) == staleLfnSize &&
+              kernel::vfs::stat("/Documents/stalex.tmp", &info) ==
+                  kernel::vfs::VFS_ERR_NOT_FOUND &&
+              kernel::vfs::stat("/Documents/STALE.TMP", &info) == kernel::vfs::VFS_OK,
+          "checksum-mismatched LFN is ignored while its short-name entry remains addressable");
+    check(kernel::vfs::rename("/Documents/STALE.TMP", "/Documents/renamed2.tmp") ==
+              kernel::vfs::VFS_OK,
+          "rename through a short name does not depend on a stale LFN association");
+    const uint8_t staleLfnDirectory = kernel::vfs::opendir("/Documents");
+    bool sawRenamedShortName = false;
+    bool sawStaleLongName = false;
+    if (staleLfnDirectory != 0xFF) {
+        kernel::vfs::DirEntry entry{};
+        while (kernel::vfs::readdir(staleLfnDirectory, &entry)) {
+            if (std::string(entry.name) == "RENAMED2.TMP") sawRenamedShortName = true;
+            if (std::string(entry.name) == staleLfnName) sawStaleLongName = true;
+        }
+        kernel::vfs::closedir(staleLfnDirectory);
+    }
+    check(staleLfnDirectory != 0xFF && sawRenamedShortName && !sawStaleLongName,
+          "rename ignores the checksum-mismatched LFN for directory enumeration");
+    check(kernel::vfs::unlink("/Documents/renamed2.tmp") == kernel::vfs::VFS_OK &&
+              kernel::vfs::stat("/Documents/renamed2.tmp", &info) ==
+                  kernel::vfs::VFS_ERR_NOT_FOUND &&
+              kernel::vfs::stat("/Documents/stalex.tmp", &info) ==
+                  kernel::vfs::VFS_ERR_NOT_FOUND,
+          "delete through a short name leaves no resolvable stale long-name alias");
 
     check(kernel::vfs::mkdir("/Documents/NOTES") == kernel::vfs::VFS_OK,
           "create a supported 8.3 document directory");

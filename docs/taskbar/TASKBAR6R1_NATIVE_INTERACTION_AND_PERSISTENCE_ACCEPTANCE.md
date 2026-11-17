@@ -1,96 +1,128 @@
 # TASKBAR6R1 — Native Interaction and Persistence Acceptance
 
-- **Outcome:** **`TASKBAR6R1_QUALIFICATION_BLOCKED`**
-- **Integration recommendation:** **Not ready for mainline integration**
-- **Branch:** `TASKBAR_IMPROVEMENTS`
-- **Baseline HEAD:** `ce996b1e4e0df5f778ad2299f82aff4dc2cca9f4`
+- **Outcome:** **TASKBAR6R1_NATIVE_PARTIAL**
+- **Integration recommendation:** **Not ready for controlled mainline integration**
+- **Branch:** TASKBAR_IMPROVEMENTS
+- **Baseline HEAD:** ce996b1e4e0df5f778ad2299f82aff4dc2cca9f4
+- **Baseline worktree:** clean at the requested repository and branch
 
 ## Disposition
 
-The AMD64 UEFI guest reached the real 1280×800 desktop. QMP/HMP mouse movement reached the configured PS/2 path, and a guest screenshot showed the pointer over Start. The HMP left-button press/release was accepted by QEMU, but the guest display did not change: the before/after PNGs at the Start target are byte-identical. No taskbar click or application action is claimed as passed. Because input did not produce a taskbar state change, this is Outcome C even though pointer movement itself was observed.
+Native input is now demonstrated from QEMU HMP through the guest PS/2 mouse, desktop dispatch, widget hit testing, and visible taskbar behavior. File Explorer launched, its taskbar entry minimized/restored it, its taskbar context menu opened, and Pin to Taskbar stored the canonical gxos.builtin.fileexplorer identity. A fresh QEMU boot using the same writable volume loaded the pin store; a separate clean cold-restart sequence also relaunched File Explorer from its restored pin.
 
-Boot diagnostics exposed a pin-restoration ordering defect: `TaskbarManager::init()` attempted to read `/desktop.taskbar.pins` before the root VFS mount existed, then did not retry. A retry-on-writable-mount gate and a focused regression were added. Hosted and native AMD64 builds pass, and the taskbar model suite passes 109 assertions. The fix has not yet been booted because the only QAC acceptance slot became occupied by another managed guest.
+The native Settings menu saved taskbarSize=expanded, and a fresh boot using that same volume loaded the expanded setting and both stored pins. A later attempt to save a top-docked position failed during QEMU 11's directory-backed VFAT rename handling. The guest process exited before that position value could be committed. The FAT long-name rename/delete defect found during this work is fixed and covered by a focused regression, but the second native settings-save failure remains unresolved.
 
-Native cold-restart persistence, taskbar actions, settings interaction, previews, overflow, auto-hide, and real File Explorer progress remain open. The branch should not be integrated until guest clicks and cold-restart persistence are demonstrated.
+This is a partial result: native interaction and a limited cold-restart path pass. Grouping, window selection/closing, overflow, auto-hide, complete settings coverage, and real File Explorer copy/move progress remain unqualified. Do not integrate the branch until the second-save behavior and remaining essential native scenarios are resolved or explicitly dispositioned.
 
 ## Repository and mainline preflight
 
-- Repository: `D:\dev\guideXOSServer_TASKBAR_IMPROVEMENTS`.
-- Branch: `TASKBAR_IMPROVEMENTS`; starting worktree was clean at baseline HEAD above and matched `origin/TASKBAR_IMPROVEMENTS`.
-- At completion, this task adds only the persistence-load fix, its focused regression, this report, and the listed local commit. No reset, rebase, merge, or push was performed.
-- A read-only HTTPS fetch refreshed `taskbar6r1/main` without changing the configured remote. The taskbar branch has **5 commits not in main** and **1 main-only commit**. The main-only commit `50c6cff0` adds three S22R26 release/audit documents; none of the paths overlap the taskbar branch changes, so direct file conflict risk is low in this snapshot.
-- The local branch remains equal to its configured `origin/TASKBAR_IMPROVEMENTS` upstream. `TASKBAR4` documentation was not present; TASKBAR1, TASKBAR2, TASKBAR3, TASKBAR5, and TASKBAR6 reports were reviewed.
+- Repository: D:\dev\guideXOSServer_TASKBAR_IMPROVEMENTS.
+- Initial branch/HEAD: TASKBAR_IMPROVEMENTS at ce996b1e4e0df5f778ad2299f82aff4dc2cca9f4; the starting worktree was clean.
+- The pre-existing local commit 4f2330faa27fc3bdf2183a5f2e71b59265c35735 fixes taskbar pin loading before the root VFS mount becomes writable. This delivery adds the FAT LFN fix, regression, and this report in a second local commit. No reset, rebase, merge, push, or release-artifact change was made.
+- The configured origin remains SSH (git@github.com:guideX/guideXOS-Server.git). A read-only HTTPS fetch to refs/remotes/taskbar6r1/main succeeded without changing that configuration. The fetched main snapshot is 50c6cff0993227de7c582b00eb1daabed62cf816 (docs: record S22R26 protected execution prerequisite, 2026-11-14). Before this delivery commit, the taskbar branch was 6 commits ahead and 1 commit behind that snapshot; the one main-only commit is documentation-only. After this delivery, the branch is 7 ahead and 1 behind. The local taskbar branch was also 1 commit ahead of origin/TASKBAR_IMPROVEMENTS before this delivery; it will be 2 ahead afterward.
+- Reviewed TASKBAR6_NATIVE_QUALIFICATION_AND_POLISH.md, the TASKBAR1, TASKBAR2, TASKBAR3, and TASKBAR5 reports, and searched for TASKBAR4 documentation; none was present. Existing hosted coverage was treated separately from native guest evidence.
 
 ## QAC and candidate identity
 
-- QAC 2.0.0 and its CLI were available. Initial preflight showed zero managed sessions and zero queued reservations.
-- QAC granted this run acceptance reservation `a3c2d5c644484745a57630db8ac8d306`, owner PID `35340`, direct QEMU child PID `27052`. Before input, QAC inspection showed `Running`, owner verified, and `degraded=false`; the QMP listener was confirmed to belong to PID 27052. The guest exited through QMP `quit`; QAC later reported `Released`, exit code 0, and `degraded=false`.
-- QAC stderr also recorded a transient shutdown warning that its QEMU process census was incomplete. The final reservation record remained released and non-degraded. This is retained as an environment caveat; no other guest was contacted or controlled.
-- After this run, a separate QAC-managed acceptance guest occupied the slot (reservation `0189d791aa3b4d40902143b020ce12a7`, child PID `30288`). This task's bounded queue probe (`9888a395344e4684b64f7ca335abbfac`) waited at position 1 and was canceled by this task. No unmanaged QEMU launch or attachment was attempted.
-- QEMU was `C:\Program Files\qemu\qemu-system-x86_64.exe`, version `11.0.0 (v11.0.0-12122-ga4bb4b10c9)`. The machine used `pc,usb=off`, 1024 MiB RAM, `-vga std`, GTK display, serial on stdio, loopback QMP, `-no-reboot`, `-no-shutdown`, and guest error logging. Firmware `OVMF.fd` was read-only; the guest root was a private directory-backed FAT volume, not a frozen release image.
-- Firmware SHA-256: `2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792`.
-- First-boot guest kernel SHA-256: `94919F28C48F771112AEC15BDE9EBE38D0ECA6C64F8244BA059411D2BD114B54`.
-- A separate unbooted test candidate was staged at `out/taskbar/TASKBAR6R1/guest-volume-pin-load/` with the fixed kernel SHA-256 `741FD64CED899D6DCCEB898D16B0736DFFD4CC8BC2866DDE8F15B10F6912475` and a preseeded `/desktop.taskbar.pins` containing the supported `com.guidexos.pacman` identity (file SHA-256 `BB2092AE977BC86AD811B4A8293E3DDDA4BCFAA2BA329B9DAA093CC04FBC1CD0`). This candidate has not been launched.
+- QAC CLI and coordinator were available. The coordinator reported version 2.0.0 and was online. The final status after guest shutdown was zero QEMU processes, zero managed sessions, and no queued or blocked reservations.
+- QEMU was C:\Program Files\qemu\qemu-system-x86_64.exe, version 11.0.0 (v11.0.0-12122-ga4bb4b10c9). Guests were started with qac run --project guideXOSServer --mode acceptance; QAC was QEMU's direct parent. The machine used pc,usb=off, 1024 MiB RAM, -vga std, GTK display, serial, loopback QMP, and -no-reboot -no-shutdown.
+- The final settings candidate was the isolated writable directory-backed FAT volume out/taskbar/TASKBAR6R1/guest-volume-size-save-lfnfix/. It was not the frozen ISO or a release artifact. QEMU used the QEMU fat:rw: backend for this directory.
+- Production guest kernel used for the first settings-save interaction SHA-256: F52626AB1B096B28F503564FD943F5A1AD389535FD2CA00B5CC5D1B86D4CA4.
+- Latest post-change production AMD64 kernel build and cold-boot candidate SHA-256: 73589D1C48FD1D564DFAB5A360B95724FCF1A46C465554A77EDE3CA5CE991023.
+- Qualification-only click-trace kernel SHA-256: D551829972681570F12DF961FEEC6C7852D7F1B5F28293F01BFC51F68E6D074C.
+- Firmware OVMF.fd SHA-256: 2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792.
+- The first settings-save session was QAC reservation 9f86fdf43e55464c819cf183e82745b4, QEMU PID 18320. It loaded pins and saved the expanded configuration, then QEMU exited with code 3 when the subsequent position save reached Error handling renames (-2). QAC released it; the reservation was marked degraded because its process census was incomplete.
+- The fresh same-volume boot used reservation 9680d67a82654c69a730b3c1eaf87131, QEMU PID 27956, loopback QMP port 49223. After capturing the desktop, this task sent QMP quit. QAC recorded Released, degraded=false, and zero remaining QEMU/session count.
+- After the final LFN-association change, the newly built kernel booted from a copy of the saved-state candidate at out/taskbar/TASKBAR6R1/guest-volume-latest-lfn-association/. Reservation d9fd87225bb244fc83b681933123fe36 used QEMU PID 35192 and QMP port 49224; QAC recorded Released, degraded=false, after QMP quit. Serial reported the saved config and pin store loaded; screenshot cold-size-pin-after-latest-lfn-fix.png shows both taskbar entries.
+- This final boot checked the post-change kernel's boot and saved-state load. The taskbar click sequence and the failed second preference save were exercised on the earlier F526 candidate.
+- Both relevant boots reached the real 1280×800 UEFI GOP desktop. The fresh-boot serial log opens /desktop.cfg on the writable FAT32 mount and reports [taskbar] pin persistence=loaded.
 
-## Native input investigation
+## Input path and graphical interaction
 
-The configured virtual device was a current, relative `QEMU PS/2 Mouse`. QEMU's device tree showed PS/2 mouse and keyboard on i8042. Guest serial reported PS/2 initialization, `Active mouse source: PS/2`, and IRQ12 registered/unmasked.
+The configured virtual input device was the QEMU PS/2 mouse. Guest serial reports PS/2 mouse initialization, Active mouse source: PS/2, and IRQ12 registration/unmasking. HMP mouse_move commands visibly moved the pointer, and serial recorded IRQ12 activity. QEMU 11 HMP help advertises mouse_button bits as left=1, middle=2, right=4. The guest trace showed HMP state 2 produced the PS/2 right-button bit, and state 4 produced the middle-button bit. The Files context-menu action used state 2; the guest trace and visible menu confirmed the right-click.
 
-The QMP `input-send-event` relative movement command returned success but did not provide independent proof of guest processing, so it is not credited. QEMU HMP `mouse_move` commands were accepted over this task-owned QMP connection; serial showed IRQ12 activity, and a genuine QMP screendump showed the guest cursor move about 40 pixels and later reach the Start button. This establishes pointer delivery through the guest PS/2 path.
+The qualification-only trace for a Start click records the chain:
 
-HMP `mouse_button 1` followed by `mouse_button 0` returned successfully, but the Start menu did not open. `guest-pointer-at-start.png` and `guest-start-menu-open.png` have the same SHA-256 (`F534A690CECB80CBCB0B44DA4D45790174229E510797C1BCD3DC4ECF5AA6BF81`). Therefore transport acceptance is not treated as a click pass. The first failing stage after button transport is unresolved; qualification-only `GXOS_PS2_CLICK_TRACE` diagnostics were not run in a guest.
+PS/2 byte/packet → pointer map → desktop dispatch → widget hit target=1 → click result=1.
 
-The original CUA host-window activation limitation remains; HMP avoided the need to focus the host window for pointer movement. QMP `query-input-devices` was unavailable in QEMU 11 (`CommandNotFound`), so device identity was checked through `query-mice`, HMP mouse listing, and the device tree.
+The Start target at (50,772) was a genuine PS/2 guest click. Subsequent native input opened the Settings menu, selected the Size row, launched File Explorer from the desktop, and interacted with the Files taskbar button. QMP transport acknowledgments are retained as supporting evidence; the guest trace and visible state changes establish delivery.
 
-## Native taskbar and desktop acceptance
-
-| Area | Result | Evidence / limit |
+| Native scenario | Result | Evidence and boundary |
 | --- | --- | --- |
-| UEFI boot and desktop | **PASS** | Serial reports one primary UEFI GOP framebuffer at 1280×800, B8G8R8A8. Genuine boot and desktop screenshots are saved under `out/taskbar/TASKBAR6R1/`. |
-| Pointer movement | **PASS, input-path only** | HMP movement produced PS/2 IRQ12 activity and visible cursor movement. The pointer reached Start. |
-| Basic taskbar click | **FAIL to demonstrate** | HMP button commands were accepted, but the desktop screenshot did not change and Start remained closed. No deeper button-stage trace was collected. |
-| Explorer launch, taskbar activation, minimize/restore, grouping, window selection/close, pin relaunch | **OPEN** | No successful guest click was established, so none of these actions was claimed. |
-| Context menus and dismissal | **OPEN** | No native right-click/menu action was established. |
-| Preview cards and overflow | **OPEN** | Not exercised in the guest. Existing hosted evidence documents the no-thumbnail-surface fallback; it is not native acceptance. |
-| Auto-hide and docking/layout settings | **OPEN** | No settings were changed through the guest. Hosted model coverage is not graphical guest acceptance. |
-| File Explorer progress | **OPEN** | No real guest copy/move operation was started; no progress values were fabricated. |
+| UEFI boot and desktop | PASS | Serial and genuine screenshots show the 1280×800 GOP desktop. |
+| Pointer and simple click | PASS | PS/2 IRQ12, click trace through widget hit testing, and visible menu/action changes. |
+| Launch File Explorer | PASS | Launched from the desktop; genuine screenshot shows the window. |
+| Taskbar activation, minimize, restore | PASS | The Files button minimized and restored File Explorer. |
+| Right-click taskbar context menu | PASS | Files button menu opened using the verified guest right-click. |
+| Pin to Taskbar and pin persistence | PASS | Store contains gxos.builtin.fileexplorer; fresh boot reports pins loaded; restored pin launched Explorer in the earlier clean cold-restart run. |
+| Preview behavior | PARTIAL | The minimized File Explorer fallback card showed title/state; no live thumbnail was produced. Popup movement, stale-state invalidation, and full grouped preview selection remain open. |
+| Grouping, individual selection, close one/final window, close-all | OPEN | No two-window same-app sequence was run. |
+| Context actions beyond Pin to Taskbar | OPEN | Activate/restore, minimize, maximize, close, unpin, close-all, dismissal, and popup-boundary cases were not qualified. |
+| Overflow | OPEN | No populated native overflow sequence was run. |
+| Auto-hide | OPEN | No native enable/reveal/button/menu/preview/overflow sequence was run. |
+| Real File Explorer copy/move progress | OPEN | No guest copy or move was started; no taskbar progress lifecycle is claimed. |
 
-## Persistence finding and change
+## Settings and cold-restart persistence
 
-The first guest serial log records `[taskbar] pin persistence=unsupported reason=settings-volume-unmounted` during desktop initialization. It later records a writable FAT32 root mount at `/` (`readonly=0`) and reads `/desktop.cfg`. The native taskbar pin loader was called only from `TaskbarManager::init()`, before that mount, so an existing pin file could not be restored on this boot.
+A genuine guest click opened taskbar settings and selected Expanded. The primary file in the isolated candidate contains these values:
 
-The production fix adds `TaskbarPinStoreLoadGate`. Initialization may defer when storage is unavailable; `TaskbarManager::updateButtons()`, pin, and unpin paths retry once a writable mount exists. It loads only once and reports the initial unavailable state once. The pin count is not cleared until storage is available. A focused shared-core regression covers waiting, one-time unavailable reporting, retry after mount, one-time load, and reset for a new desktop initialization.
+- version=2
+- taskbarPosition=bottom
+- taskbarSize=expanded
+- taskbarPresentation=icons-labels
+- taskbarAutoHide=0
+- taskbarShowPreviews=1
+- taskbarShowActivity=1
 
-The taskbar model suite now passes **109 assertions**, compared with the TASKBAR6 baseline of 104. The native kernel build includes this change. The changed kernel and preseeded pin volume are staged for a QAC run, but the slot became occupied before that run could be started. Native restoration, pin writes, settings writes, and survival across an actual cold shutdown/relaunch therefore remain **unverified**.
+The first save completed. The resulting primary desktop.cfg SHA-256 is 8C90064FC772973AC7B6392E4C7941C7B4BE7E4D0CB26902C6C52E8EB6A29898; the pin store SHA-256 is 1AE78B47F7679F1BD32371DDE04B2D892EF944D822D988595C74353B3D049CB6. The pin file retains the pre-existing com.guidexos.pacman identity and the newly saved gxos.builtin.fileexplorer identity.
 
-## Evidence files
+A new QEMU process booted the same candidate volume. Its serial log reports pin persistence=loaded, reads /desktop.cfg, and its genuine screenshot shows the restored Files and Missing app taskbar entries. An earlier clean cold-restart sequence on the same writable-volume setup also relaunched File Explorer from the restored pin. The latest settings restart followed QEMU's exit during the failed position save, so it proves the already-flushed size and pin values load after a fresh boot; it is not evidence of a graceful shutdown immediately after the failed transaction.
 
-- `out/taskbar/TASKBAR6R1/guest-boot.png` — genuine QMP screendump during boot.
-- `out/taskbar/TASKBAR6R1/guest-desktop.png` — genuine 1280×800 desktop screendump.
-- `out/taskbar/TASKBAR6R1/guest-pointer-after-hmp-move-1.png` — pointer movement evidence.
-- `out/taskbar/TASKBAR6R1/guest-pointer-at-start.png` — pointer over the Start target.
-- `out/taskbar/TASKBAR6R1/guest-start-menu-open.png` — post-click capture; identical to the pre-click target screenshot.
-- `out/taskbar/TASKBAR6R1/qac-run.stdout.log`, `qac-run.stderr.log`, `qac-after-first-guest-inspect.txt`, and QMP/HMP transcripts — guest, reservation, and input evidence.
-- `out/taskbar/TASKBAR6R1/qemu-launch.json` — exact first-run QEMU configuration.
-- `out/taskbar/TASKBAR6R1/guest-volume-first-boot-manifest.json` — first-run private root volume contents and hashes.
-- `out/taskbar/TASKBAR6R1/guest-volume-pin-load/` — separate prepared candidate; not booted.
+A subsequent guest click attempted to change position to Top. The config writer created /desktop.tmp, began /desktop.cfg → /desktop.bak, and QEMU's directory-backed VFAT layer printed Error handling renames (-2) and exited. The primary config remains taskbarPosition=bottom; the attempted top value is not committed. QEMU reports this at rename reconciliation, but the precise failing layer is not yet isolated between the guest FAT transaction and QEMU's directory-backed VFAT backend. Position persistence, auto-hide persistence, and presentation changes therefore remain open.
+
+## Production changes and regressions
+
+The prior local pin-load fix defers the one-time taskbar pin load until a writable VFS mount exists. Before the mount it preserves the pin state and reports the unavailable store; after mount it retries once. Its focused model coverage raised the taskbar suite from 104 to 109 assertions.
+
+This delivery fixes FAT long-name metadata handling needed by the existing same-directory rename/delete paths:
+
+- Directory enumeration and path lookup accept an LFN only when its entries have consistent metadata and checksum matching the associated short entry. Rename and delete receive LFN locations only when that association is valid, so stale LFN records are not mutated as if they belonged to the current short entry.
+- Same-directory rename writes a valid new LFN/checksum association and retires the old LFN entries; partial failures restore original entries where possible.
+- Delete retires the associated LFN entries with the short entry and restores them on partial write failure.
+- tests/fs_fat_persistence_test.cpp adds LFN rename/read/enumeration/delete regressions, including a checksum-mismatched stale LFN case, and a fixture-preparation mode. The test ran against a fresh disposable copy of E:\CodexArtifacts\S22R22\provisioning\guidexos-user-data-test.img; the source image was not modified. Result: 55 checks, 0 failures.
+
+The FAT regression resolves the reproduced LFN/checksum defect. It does not resolve the later QEMU directory-backed rename failure; that behavior remains a reported blocker rather than being represented as a pass.
 
 ## Verification
 
 | Check | Result | Evidence |
 | --- | --- | --- |
-| Taskbar application model | **PASS — 109 assertions** | `out/taskbar/TASKBAR6R1/taskbar-model-test-after-fix.log` |
-| Compositor pointer/buttons | **PASS** | `out/taskbar/TASKBAR6R1/pointer-test-after-fix.log` |
-| App Model identity | **PASS — 25/25** | `out/taskbar/TASKBAR6R1/app-model-identity-test-after-fix.log` |
-| App Model application actions | **PASS — 55/55** | `out/taskbar/TASKBAR6R1/appmodel-actions-test-after-fix.log` |
-| Window UI regression | **PASS** | `out/taskbar/TASKBAR6R1/window-ui-test-after-fix.log` |
-| Compositor resize regression | **PASS** | `out/taskbar/TASKBAR6R1/resize-test-after-fix.log` |
-| Hosted build | **PASS** | `out/taskbar/TASKBAR6R1/hosted-build-after-fix.log` |
-| Native AMD64 kernel build | **PASS** | `out/taskbar/TASKBAR6R1/native-build-after-fix.log`; fixed candidate hash above |
-| `git diff --check` | **PASS** | Final source/report diff check |
+| Taskbar application model | PASS — 109 assertions | taskbar-model-test-final.log |
+| FAT persistence regression | PASS — 55 checks, 0 failures | fs-fat-lfn-transaction/fs-fat-persistence-stale-lfn-55-checks.log |
+| Compositor pointer/buttons | PASS | pointer-test-final.log |
+| App Model identity | PASS — 25/25 | app-model-identity-test-final.log |
+| App Model application actions | PASS — 55/55 | appmodel-actions-test-final.log |
+| Window UI regression | PASS | window-ui-test-final.log |
+| Compositor resize regression | PASS | resize-test-final.log |
+| Hosted build | PASS | hosted-build-stale-lfn-fix.log; compiler warnings are recorded in the log |
+| Native AMD64 production kernel build | PASS | native-amd64-build-stale-lfn-fix.log; latest post-change candidate hash above |
+| git diff --check | PASS | Final source and report diff check before commit |
 
-## Mainline readiness and next actions
+## Evidence artifacts
 
-The code and deterministic verification are ready for review, and the refreshed mainline snapshot shows no overlapping taskbar paths. Native input has only reached pointer movement; the Start click did not activate its target. Pin restoration is fixed in source but has not been demonstrated in a guest. The branch is therefore **not yet ready for controlled mainline integration**.
+All generated guest and test evidence is under out/taskbar/TASKBAR6R1/; it is not part of the release image or the source commit.
 
-To close the remaining gates, obtain a fresh QAC acceptance reservation, boot the staged fixed candidate, use qualification-only click tracing to follow PS/2 button delivery through desktop dispatch and taskbar hit testing, and verify a real Start/taskbar action. Then change taskbar pins and preferences through the guest UI, shut it down fully, relaunch a fresh guest with the same writable volume, and verify the values and unrelated Start Menu settings. Only after those checks should native grouping, context menus, previews/overflow, auto-hide, docking, and real File Explorer progress be exercised and the integration recommendation revisited.
+- qac-run-click-trace.stdout.log and qac-run-click-trace-command.txt — qualification-only click chain and QAC direct-child command.
+- qmp-hmp-input-transcript.jsonl and qmp-transcript.jsonl — HMP/QMP requests and screenshot actions.
+- guest-files-context-menu-after-ps2-right.png — Files taskbar context menu after guest right-click.
+- guest-file-explorer-launched.png, guest-file-explorer-minimized.png, and guest-file-explorer-launched-from-restored-pin.png — native launch, taskbar state, and pin relaunch captures.
+- guest-taskbar-settings-lfn-fix.png and guest-expanded-taskbar-fixed.png — settings and expanded-state captures.
+- cold-size-pin-after-save.png and cold-size-pin-after-latest-lfn-fix.png — genuine cold-boot desktops with saved taskbar entries; paired serial evidence is in qac-cold-boot-size-after-save.log and qac-latest-lfn-association-boot.log.
+- qac-first-boot-lfn-fix.log — first save, second rename failure, and QEMU exit.
+- fs-fat-lfn-transaction/fs-fat-persistence-stale-lfn-55-checks.log — full fresh-copy regression output including the stale-checksum case.
+
+## Mainline recommendation and next actions
+
+The branch is not ready for controlled mainline integration. Native clicks and pin/size reload now have direct evidence, and the targeted FAT regression passes. The second preference save still terminates the QEMU guest during directory-backed FAT rename reconciliation, while key taskbar requirements remain untested natively.
+
+Next, isolate the rename failure on the supported writable volume path without changing the persistence architecture; repeat a second settings save and verify the resulting config after a clean cold shutdown and fresh boot. Then qualify settings for compact/standard/expanded, icon-only/labeled presentation, docking, previews, and auto-hide. Exercise genuine multi-window grouping and context actions, populate native overflow with supported windows, and run a bounded real File Explorer copy/move with taskbar progress. Keep the remote configured as-is and do not merge or push during this acceptance work.
