@@ -26,6 +26,8 @@ The admission controller had a blocking-order bug: after its deadline loop, it s
 
 Before guest shutdown, cleanup rechecked the exact reservation, QEMU PID 30288, executable, and loopback QMP listener. The approved QMP helper sent `quit`; QEMU PID 30288 and owner CLI PID 34632 exited. Final QAC status showed zero QEMU processes, zero managed sessions, zero queued or blocked requests, zero reservations, and no listeners on the owned QMP/VNC ports. No other project's guest was terminated.
 
+A later read-only closeout census at approximately `2026-11-17T05:39Z` found a **different** QAC reservation, `b3efbee849c74f2db5b05c56dc324188`, owned by PID 16252 with QEMU PID 18976. It was `Running`, verified, and had no queued work. That reservation started after R6's release and was left untouched. The current QAC coordinator therefore was not idle at the final closeout snapshot; R6's own reservation remains released. The later status/list/queue/inspect outputs are retained as `guest/qac-closeout-*.txt` and `guest/qac-closeout-inspect-observed-reservation-font15r4r6.json`.
+
 ## Pointer preflight and minimum-size observations
 
 The short pre-navigation pointer check passed with 108/108 cursor pixels at each measured position:
