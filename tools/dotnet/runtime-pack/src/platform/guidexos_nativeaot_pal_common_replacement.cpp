@@ -1,5 +1,6 @@
 #include "guidexos_nativeaot_pal_contract.h"
-#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS) || \
+    defined(GUIDEXOS_NATIVEAOT_C188R30_THREAD_ATTACHMENT_TRACE)
 #include "guidexos_nativeaot_threadstore_readiness.h"
 #endif
 
@@ -61,7 +62,8 @@ PalGetMaximumStackBounds(void** stack_low, void** stack_high) {
     }
     const int result = guidexos_nativeaot_pal_stack_bounds(&low, &high, &current);
     if (result != 0) {
-#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS) || \
+    defined(GUIDEXOS_NATIVEAOT_C188R30_THREAD_ATTACHMENT_TRACE)
         GuideXosNativeAotThreadReadinessMark(
             GX_THREADSTORE_EVENT_PAL_STACK_CURRENT,
             current, static_cast<uintptr_t>(result));
@@ -71,7 +73,8 @@ PalGetMaximumStackBounds(void** stack_low, void** stack_high) {
     *stack_low = reinterpret_cast<void*>(low);
     *stack_high = reinterpret_cast<void*>(high);
     const bool valid = low < high && current >= low && current < high;
-#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS) || \
+    defined(GUIDEXOS_NATIVEAOT_C188R30_THREAD_ATTACHMENT_TRACE)
     GuideXosNativeAotThreadReadinessMark(
         GX_THREADSTORE_EVENT_PAL_STACK_BOUNDS, low, high);
     GuideXosNativeAotThreadReadinessMark(

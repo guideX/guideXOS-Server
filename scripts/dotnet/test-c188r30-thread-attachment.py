@@ -13,6 +13,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 PLATFORM = ROOT / "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_platform.cpp"
+PAL_COMMON = ROOT / "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_pal_common_replacement.cpp"
+STARTUP_IMPORTS = ROOT / "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_startup_imports.cpp"
 FAILFAST = ROOT / "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_failfast_origin.h"
 R29_GUARD = ROOT / "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_r29_preallocation_guard.h"
 READINESS_HEADER = ROOT / "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_threadstore_readiness.h"
@@ -122,8 +124,22 @@ def verify_linked_candidate(candidate: Path) -> dict[str, int]:
             "InitializeModules", "RhpReversePInvoke", "RhpReversePInvokeReturn",
             "RhpNewArray", "guideXosStockRhpReversePInvoke",
             "guideXosStockRhpReversePInvokeReturn",
+                "?Construct@Thread@@AEAAXXZ",
+                "?AttachCurrentThread@ThreadStore@@SAX_N@Z",
+                "PalGetMaximumStackBounds",
         )
     }
+    if "Runtime.WorkstationGC:thread.cpp.obj.renamed.obj" not in map_text:
+        raise ValueError("candidate does not link the pinned stock Thread::Construct")
+    if "Runtime.WorkstationGC:threadstore.cpp.obj" not in map_text:
+        raise ValueError("candidate does not link pinned ThreadStore::AttachCurrentThread")
+    pal_bounds_lines = [
+        line for line in map_text.splitlines()
+        if re.search(r"\bPalGetMaximumStackBounds\b", line)
+    ]
+    if len(pal_bounds_lines) != 1 or \
+            "Runtime.WorkstationGC:guidexos_nativeaot_pal_common_replacement.threadstore.obj" not in pal_bounds_lines[0]:
+        raise ValueError("PalGetMaximumStackBounds does not resolve to the guideXOS replacement")
 
     initializer_calls = linked_call_sites(elf, addresses["InitializeModules"], 0x100)
     reverse_entry_call = require_call(
@@ -209,6 +225,29 @@ class ReverseEntrySourceTests(unittest.TestCase):
             r"(?s)IsCurrentThreadInCooperativeMode\(\).*?return\s*\(m_pTransitionFrame\s*==\s*NULL\)",
         )
 
+    def test_pinned_constructor_orders_pal_dependencies_and_fails_closed_on_stack_bounds(self) -> None:
+        thread_cpp = (RUNTIME_ROOT / "thread.cpp").read_text(encoding="utf-8")
+        constructor = thread_cpp[thread_cpp.index("void Thread::Construct()"):]
+        ordered = (
+            "m_pTransitionFrame = TOP_OF_STACK_MARKER",
+            "m_pDeferredTransitionFrame = TOP_OF_STACK_MARKER",
+            "m_hPalThread = INVALID_HANDLE_VALUE",
+            "m_threadId = PalGetCurrentOSThreadId()",
+            "PalGetCurrentProcess()",
+            "PalGetCurrentThread()",
+            "PalDuplicateHandle(",
+            "PalGetMaximumStackBounds(&m_pStackLow, &m_pStackHigh)",
+            "RhFailFast()",
+        )
+        offsets = [constructor.index(fragment) for fragment in ordered]
+        self.assertEqual(offsets, sorted(offsets))
+        duplicate = constructor[constructor.index("PalDuplicateHandle("):constructor.index(
+            "PalGetMaximumStackBounds(")
+        ]
+        duplicate_call = duplicate[:duplicate.index(";") + 1]
+        self.assertNotIn("if (", duplicate_call)
+        self.assertIn("This can fail!", constructor[constructor.index("// This can fail!"):][:80])
+
     def test_real_gc_reverse_entry_delegates_to_runtime_attachment(self) -> None:
         branch = self.entry.index("#elif defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)")
         branch_end = self.entry.index(
@@ -222,7 +261,41 @@ class ReverseEntrySourceTests(unittest.TestCase):
         self.assertIn("GUIDEXOS_NATIVEAOT_C188R30_THREAD_ATTACHMENT_TRACE", real_gc_branch)
         self.assertIn("Thread::TSF_Attached", real_gc_branch)
         self.assertIn("GX_THREADSTORE_EVENT_TRANSITION_ATTACH_FLS", real_gc_branch)
-        self.assertNotIn("LockThreadStore", real_gc_branch)
+        stock_return = real_gc_branch.index("guideXosStockRhpReversePInvoke(frame);")
+        verify_lock = real_gc_branch.index("currentStore->LockThreadStore();")
+        iterator = real_gc_branch.index("ThreadStore::Iterator")
+        unlock = real_gc_branch.index("currentStore->UnlockThreadStore();")
+        publication = real_gc_branch.index("GX_THREADSTORE_EVENT_THREADSTORE_PUBLICATION")
+        self.assertLess(stock_return, verify_lock)
+        self.assertLess(verify_lock, iterator)
+        self.assertLess(iterator, unlock)
+        self.assertLess(unlock, publication)
+        self.assertIn("attachedThreadFoundInStore", real_gc_branch)
+        self.assertIn("threadStoreReadLockAcquired && attachedThreadFoundInStore", real_gc_branch)
+
+    def test_r30_stack_bounds_replacement_uses_the_guidexos_hook(self) -> None:
+        common_pal = PAL_COMMON.read_text(encoding="utf-8")
+        runtime_pack = (ROOT / "tools/dotnet/runtime-pack/build-runtime-pack.ps1").read_text(
+            encoding="utf-8"
+        )
+        bounds = common_pal[common_pal.index("PalGetMaximumStackBounds("):]
+        self.assertIn("guidexos_nativeaot_pal_stack_bounds(&low, &high, &current)", bounds)
+        self.assertIn("current >= low && current < high", bounds)
+        self.assertNotIn("VirtualQuery", bounds)
+        self.assertIn("$C188R12R4R5R4ThreadStoreReadiness -or $C188R30ThreadAttachmentTrace", runtime_pack)
+        self.assertIn("$expectedPatchedArchiveMembers += [System.IO.Path]::GetFileName($threadStoreCommonPalObject)", runtime_pack)
+        self.assertIn("c188r30PalCommonReplacementSha256", runtime_pack)
+
+    def test_pal_failfast_is_captured_before_kernel_hook(self) -> None:
+        startup_imports = STARTUP_IMPORTS.read_text(encoding="utf-8")
+        platform = PLATFORM.read_text(encoding="utf-8")
+        capture = startup_imports.index("guideXosNativeAotCapturePalFailFast(0x43525402u);")
+        forward = startup_imports.index("guidexos_nativeaot_pal_fail_fast(0x43525402u);", capture)
+        self.assertLess(capture, forward)
+        capture_body = platform[platform.index('extern "C" void __cdecl guideXosNativeAotCapturePalFailFast('):]
+        capture_body = capture_body[:capture_body.index("\n}")]
+        self.assertIn("guideXosNativeAotR25CaptureCallerReturnAddress()", capture_body)
+        self.assertIn("captureR25PalFailFast(", capture_body)
 
     def test_r30_trace_profile_preserves_production_lifecycle_guard(self) -> None:
         runtime_pack = (ROOT / "tools/dotnet/runtime-pack/build-runtime-pack.ps1").read_text(
@@ -326,6 +399,10 @@ class ReverseEntrySourceTests(unittest.TestCase):
         self.assertIn("automaticRetry=$false", runner)
         self.assertIn("transition_attach_state", runner)
         self.assertIn("transition_attach_fls", runner)
+        self.assertIn("threadConstructEntered", runner)
+        self.assertIn("constructorPalDependenciesCompleted", runner)
+        self.assertIn("nativeStackBoundsValid", runner)
+        self.assertIn("r32ThreadConstructionMilestones=$r32Milestones", runner)
         self.assertIn("rhp_array_gc_state_valid", runner)
         self.assertIn("rhp_array_stock_enter", runner)
         self.assertIn("rhp_array_stock_return", runner)
@@ -349,6 +426,9 @@ class ReverseEntrySourceTests(unittest.TestCase):
         )
         self.assertIn("-C188R30ThreadAttachmentTrace", builder)
         self.assertIn("c188r30ThreadAttachmentTrace", builder)
+        self.assertIn("C188R30_THREAD_ATTACHMENT_TRACE", builder)
+        self.assertIn("archiveMemberCount", builder)
+        self.assertIn("palReplacement.replacementSha256", builder)
         self.assertIn("c188r12r4r5r4ThreadStoreReadiness -or", builder)
         self.assertIn("NOT_APPLICABLE_R30_LINKED_INITIALIZER_QUALIFICATION", r24_builder)
         self.assertIn("test-c188r30-thread-attachment.py", builder)
@@ -396,6 +476,10 @@ class LinkedCandidateTests(unittest.TestCase):
         self.assertTrue(manifest["c188r30ThreadAttachmentTrace"])
         self.assertFalse(manifest["c188r12r4r5r4ThreadStoreReadiness"])
         self.assertFalse(manifest["c188r12r4r5r2r3InitializeModulesAttribution"])
+        replacement = manifest["archiveValidation"]["threadStorePalCommonReplacement"]
+        self.assertEqual(replacement["profile"], "C188R30_THREAD_ATTACHMENT_TRACE")
+        self.assertEqual(replacement["removedCount"], 1)
+        self.assertEqual(replacement["archiveMemberCount"], 1)
         verify_linked_candidate(LINKED_CANDIDATE)
 
     def test_negative_case_rejects_a_tls_only_candidate(self) -> None:

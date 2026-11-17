@@ -40,6 +40,7 @@ $candidateManifest = Get-Content -LiteralPath $candidateManifestPath -Raw | Conv
 $integrity = Get-Content -LiteralPath $integrityPath -Raw | ConvertFrom-Json -ErrorAction Stop
 $runtimeManifestPath = [System.IO.Path]::GetFullPath([string]$candidateManifest.runtimePackManifest)
 $runtimeManifest = Get-Content -LiteralPath $runtimeManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
+$palReplacement = $runtimeManifest.archiveValidation.threadStorePalCommonReplacement
 if ([string]$r25Manifest.sourceHead -cne (& git -C $RepoRoot rev-parse HEAD).Trim() -or
     [string]$r25Manifest.branch -cne 'v1.1_DOTNET_SUPPORT' -or
     [string]$runtimeManifest.identity -cne 'guidexos-nativeaot-runtime-pack-amd64-c188r30-thread-attachment-trace-v1' -or
@@ -53,6 +54,15 @@ if ([string]$r25Manifest.sourceHead -cne (& git -C $RepoRoot rev-parse HEAD).Tri
     -not [bool]$runtimeManifest.c188r25FailFastOriginCapture -or
     -not [bool]$runtimeManifest.c188r28GcStateGuardDiscriminator -or
     -not [bool]$runtimeManifest.c188r29PreallocationGcStateGuard -or
+    $null -eq $palReplacement -or
+    [string]$palReplacement.profile -cne 'C188R30_THREAD_ATTACHMENT_TRACE' -or
+    [int]$palReplacement.removedCount -ne 1 -or
+    [int]$palReplacement.archiveMemberCount -ne 1 -or
+    [string]$runtimeManifest.c188r30PalCommonStockMember -cne [string]$palReplacement.stockMember -or
+    [string]$runtimeManifest.c188r30PalCommonReplacementObject -cne [string]$palReplacement.replacementObject -or
+    [string]$runtimeManifest.c188r30PalCommonReplacementSha256 -ine [string]$palReplacement.replacementSha256 -or
+    -not (Test-Path -LiteralPath ([string]$palReplacement.replacementObject) -PathType Leaf) -or
+    (Get-FileHash -LiteralPath ([string]$palReplacement.replacementObject) -Algorithm SHA256).Hash -ine [string]$palReplacement.replacementSha256 -or
     [int]$runtimeManifest.failFastOriginRecordSchema -ne 3 -or
     [int]$runtimeManifest.failFastOriginRecordBytes -ne 192 -or
     [string]$candidateManifest.actualManagedSettingsFactory -cne 'GuideXosApplicationRegistry selector 5 -> ManagedSettingsCenter' -or
@@ -61,7 +71,7 @@ if ([string]$r25Manifest.sourceHead -cne (& git -C $RepoRoot rev-parse HEAD).Tri
     [string]$candidateManifest.unwindPrimitive.sourceSha256 -ine '9F94B5388535F2224D94318AC30D69260944ADB942C5F77FF5C90F0CDA9A3D3E' -or
     [bool]$integrity.unverifiedRootObjectInputsConsumed -or
     [string]$candidateManifest.runtimePackManifest -cne $runtimeManifestPath) {
-    throw 'R30 candidate failed source-head, pinned runtime, Workstation GC, selector-5 factory, accepted R20 unwind, or schema-3 checks.'
+    throw 'R30 candidate failed source-head, pinned runtime, Workstation GC, guideXOS stack-bounds replacement, selector-5 factory, accepted R20 unwind, or schema-3 checks.'
 }
 foreach ($name in @(
     'c188r12r4r5r4r5r2r2_native_alloc_operator_new_test.obj',
@@ -106,6 +116,8 @@ $sourcePaths = @(
     'tools/dotnet/runtime-pack/runtime-pack.lock.json',
     'tools/dotnet/runtime-pack/build-runtime-pack.ps1',
     'tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_platform.cpp',
+    'tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_pal_common_replacement.cpp',
+    'tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_startup_imports.cpp',
     'tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_pal_minwin_replacement.cpp',
     'tools/dotnet/runtime-pack/src/probes/guidexos_nativeaot_c188r12r4r5_gc_startup_adapter.cpp',
     'tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_threadstore_readiness.h')

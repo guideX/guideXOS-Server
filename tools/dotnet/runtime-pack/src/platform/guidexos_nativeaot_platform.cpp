@@ -32860,52 +32860,54 @@ void guideXosR25TryEmitCapturedMarker() {
 }
 }
 
+void captureR25PalFailFast(uint32_t reason, uintptr_t callerCaptureReturnAddress) {
+    if (_InterlockedCompareExchange(&g_guideXosR25FailFastClaim, 1, 0) != 0) {
+        return;
+    }
+
+    auto& record = g_guideXosR25FailFastOriginRecord;
+    record.magic = kGuideXosR25FailFastOriginMagic;
+    record.schemaVersion = kGuideXosR25FailFastOriginSchema;
+    record.recordBytes = kGuideXosR25FailFastOriginRecordBytes;
+    record.originalReason = reason;
+    record.fastFailCode = kGuideXosR25FailFastFastFailCode;
+    record.callerCaptureReturnAddress = callerCaptureReturnAddress;
+    record.failFastImplementationAddress = reinterpret_cast<uintptr_t>(
+        &guideXosFailFastImpl);
+    record.initializationStage = g_guideXosR25InitializationStage;
+    record.flags = 0x7u;
+#if defined(GUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR)
+    record.guardFailureSubcondition = kGuideXosR28GuardSubconditionNone;
+    record.gcStateReadStatus = 0u;
+    record.threadIdentityResult = kGuideXosR28PredicateNotEvaluated;
+    record.heapIdentityResult = kGuideXosR28PredicateNotEvaluated;
+    record.expectedCurrentThread = 0u;
+    record.observedCurrentThread = 0u;
+    record.expectedGcHeap = 0u;
+    record.observedGcHeap = 0u;
+#if defined(GUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD)
+    record.r29GuardLocation = kGuideXosR29GuardLocationNone;
+    record.r29PrerequisiteEvaluationMask = 0u;
+    record.r29ThreadStoreResult = kGuideXosR29CheckNotEvaluated;
+    record.r29AllocationContextResult = kGuideXosR29CheckNotEvaluated;
+    record.r29GcHeapInitializationResult = kGuideXosR29CheckNotEvaluated;
+    record.r29SafeReadResult = kGuideXosR29CheckNotEvaluated;
+#endif
+#endif
+    _InterlockedExchange64(
+        reinterpret_cast<volatile __int64*>(&record.published),
+        static_cast<__int64>(kGuideXosR25FailFastOriginPublished));
+    guideXosR25TryEmitCapturedMarker();
+}
+
+extern "C" void __cdecl guideXosNativeAotCapturePalFailFast(uint32_t reason) {
+    captureR25PalFailFast(
+        reason, guideXosNativeAotR25CaptureCallerReturnAddress());
+}
+
 [[noreturn]] __declspec(noinline) void __cdecl guideXosNativeAotR25FailFast(
     uint32_t reason, uintptr_t callerCaptureReturnAddress) {
-    if (_InterlockedCompareExchange(&g_guideXosR25FailFastClaim, 1, 0) == 0) {
-        auto& record = g_guideXosR25FailFastOriginRecord;
-        record.magic = kGuideXosR25FailFastOriginMagic;
-        record.schemaVersion = kGuideXosR25FailFastOriginSchema;
-        record.recordBytes = kGuideXosR25FailFastOriginRecordBytes;
-        record.originalReason = reason;
-        record.fastFailCode = kGuideXosR25FailFastFastFailCode;
-        record.callerCaptureReturnAddress = callerCaptureReturnAddress;
-        record.failFastImplementationAddress = reinterpret_cast<uintptr_t>(
-            &guideXosFailFastImpl);
-        record.initializationStage = g_guideXosR25InitializationStage;
-        record.flags = 0x7u;
-#if defined(GUIDEXOS_NATIVEAOT_C188R28_GC_STATE_GUARD_DISCRIMINATOR)
-#if defined(GUIDEXOS_NATIVEAOT_C188R29_PREALLOCATION_GC_STATE_GUARD)
-        record.guardFailureSubcondition = kGuideXosR29GuardSubconditionNone;
-        record.gcStateReadStatus = 0u;
-        record.threadIdentityResult = kGuideXosR28PredicateNotEvaluated;
-        record.heapIdentityResult = kGuideXosR28PredicateNotEvaluated;
-        record.expectedCurrentThread = 0u;
-        record.observedCurrentThread = 0u;
-        record.expectedGcHeap = 0u;
-        record.observedGcHeap = 0u;
-        record.r29GuardLocation = kGuideXosR29GuardLocationNone;
-        record.r29PrerequisiteEvaluationMask = 0u;
-        record.r29ThreadStoreResult = kGuideXosR29CheckNotEvaluated;
-        record.r29AllocationContextResult = kGuideXosR29CheckNotEvaluated;
-        record.r29GcHeapInitializationResult = kGuideXosR29CheckNotEvaluated;
-        record.r29SafeReadResult = kGuideXosR29CheckNotEvaluated;
-#else
-        record.guardFailureSubcondition = kGuideXosR28GuardSubconditionNone;
-        record.gcStateReadStatus = 0u;
-        record.threadIdentityResult = kGuideXosR28PredicateNotEvaluated;
-        record.heapIdentityResult = kGuideXosR28PredicateNotEvaluated;
-        record.expectedCurrentThread = 0u;
-        record.observedCurrentThread = 0u;
-        record.expectedGcHeap = 0u;
-        record.observedGcHeap = 0u;
-#endif
-#endif
-        _InterlockedExchange64(
-            reinterpret_cast<volatile __int64*>(&record.published),
-            static_cast<__int64>(kGuideXosR25FailFastOriginPublished));
-        guideXosR25TryEmitCapturedMarker();
-    }
+    captureR25PalFailFast(reason, callerCaptureReturnAddress);
     guideXosFailFastImpl(reason);
 }
 
@@ -32990,6 +32992,12 @@ guideXosNativeAotR28FailFastGcStateGuard(
     guideXosFailFastImpl(reason);
 }
 #endif
+#endif
+
+#if !defined(GUIDEXOS_NATIVEAOT_C188R25_FAILFAST_ORIGIN)
+extern "C" void __cdecl guideXosNativeAotCapturePalFailFast(uint32_t reason) {
+    (void)reason;
+}
 #endif
 
 unsigned char* currentTlsBlock() {
@@ -36295,8 +36303,29 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
     Thread* currentAfterTransition = ThreadStore::GetCurrentThreadIfAvailable();
     RuntimeThreadLocals* attachedLocals =
         reinterpret_cast<RuntimeThreadLocals*>(currentAfterTransition);
+    RuntimeInstance* currentRuntime = GetRuntimeInstance();
+    ThreadStore* currentStore = currentRuntime == nullptr
+        ? nullptr : currentRuntime->GetThreadStore();
+    bool attachedThreadFoundInStore = false;
+    bool threadStoreReadLockAcquired = false;
+    if (currentAfterTransition != nullptr && currentStore != nullptr) {
+        currentStore->LockThreadStore();
+        threadStoreReadLockAcquired = true;
+        {
+            ThreadStore::Iterator iterator;
+            Thread* entry = nullptr;
+            while ((entry = iterator.GetNext()) != nullptr) {
+                if (entry == currentAfterTransition) {
+                    attachedThreadFoundInStore = true;
+                    break;
+                }
+            }
+        }
+        currentStore->UnlockThreadStore();
+    }
     const bool attachedAndPublished = currentAfterTransition != nullptr &&
-        (attachedLocals->m_ThreadStateFlags & Thread::TSF_Attached) != 0u;
+        (attachedLocals->m_ThreadStateFlags & Thread::TSF_Attached) != 0u &&
+        threadStoreReadLockAcquired && attachedThreadFoundInStore;
     GuideXosNativeAotThreadReadinessMark(
         GX_THREADSTORE_EVENT_THREADSTORE_PUBLICATION,
         reinterpret_cast<uintptr_t>(currentAfterTransition),

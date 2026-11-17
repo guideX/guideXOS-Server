@@ -314,6 +314,8 @@ $transitionAttachIncompleteEvent = Get-R30ThreadEvent $serialText 'transition_at
 $transitionAttachStateEvent = Get-R30ThreadEvent $serialText 'transition_attach_state'
 $transitionAttachFlsEvent = Get-R30ThreadEvent $serialText 'transition_attach_fls'
 $palThreadIdEvent = Get-R30ThreadEvent $serialText 'pal_thread_id'
+$palStackBoundsEvent = Get-R30ThreadEvent $serialText 'pal_stack_bounds'
+$palStackCurrentEvent = Get-R30ThreadEvent $serialText 'pal_stack_current'
 $arrayStateValidEvent = Get-R30ThreadEvent $serialText 'rhp_array_gc_state_valid'
 $arrayStockEnterEvent = Get-R30ThreadEvent $serialText 'rhp_array_stock_enter'
 $arrayStockReturnEvent = Get-R30ThreadEvent $serialText 'rhp_array_stock_return'
@@ -347,6 +349,20 @@ $m4ThreadStore = $null -ne $threadStoreEvent -and $threadStoreEvent.Raw0 -ne 0 -
     $threadStoreEvent.Raw1 -eq 1
 $threadAttachmentContractVerified = $m4Pointer -and $m4State -and $m4Fls -and
     $m4OsThread -and $m4ThreadStore -and $serialIntegrityValid
+$threadConstructEntered = $null -ne $palAttachCompleteEvent -and
+    $null -ne $palThreadIdEvent -and
+    $palThreadIdEvent.Sequence -gt $palAttachCompleteEvent.Sequence -and
+    $palThreadIdEvent.Raw0 -ne 0 -and $palThreadIdEvent.Raw1 -eq 0
+$constructorPalDependenciesCompleted = $threadConstructEntered -and
+    $null -ne $palStackBoundsEvent -and
+    $palStackBoundsEvent.Sequence -gt $palThreadIdEvent.Sequence
+$nativeStackBoundsValid = $constructorPalDependenciesCompleted -and
+    $null -ne $palStackCurrentEvent -and
+    $palStackCurrentEvent.Sequence -gt $palStackBoundsEvent.Sequence -and
+    $palStackBoundsEvent.Raw0 -lt $palStackBoundsEvent.Raw1 -and
+    $palStackCurrentEvent.Raw1 -eq 0 -and
+    $palStackCurrentEvent.Raw0 -ge $palStackBoundsEvent.Raw0 -and
+    $palStackCurrentEvent.Raw0 -lt $palStackBoundsEvent.Raw1
 $initializationStage = 0
 if ($null -ne $analysis -and [bool]$analysis.recordValid -and
     @($analysis.recordWords).Count -gt 7) {
@@ -379,6 +395,27 @@ $r30Milestones = [ordered]@{
     M11=(Test-R25Milestone $r25Milestones 'M11')
     M12=($threadAttachmentContractVerified -and
         $null -ne $runEvidence -and [bool]$runEvidence.qacReleaseVerified)
+}
+$r32Milestones = [ordered]@{
+    M1=$r30Milestones.M1
+    M2=$r30Milestones.M2
+    M3=$r30Milestones.M3
+    M4=$threadConstructEntered
+    M5=$constructorPalDependenciesCompleted
+    M6=$nativeStackBoundsValid
+    # Stock AttachCurrentThread sets TSF_Attached and publishes the Thread only
+    # while holding its lock. The post-return verifier acquires a separate
+    # read lock and confirms that the same Thread is in the list.
+    M7=($null -ne $threadStorePublicationEvent -and $threadStorePublicationEvent.Raw1 -eq 1)
+    M8=($m4State -and $m4Pointer -and $m4ThreadStore)
+    M9=($null -ne $transitionAttachCompleteEvent -and
+        $transitionAttachCompleteEvent.Raw0 -ne 0 -and $m4State)
+    M10=($null -ne $arrayStateValidEvent)
+    M11=($null -ne $arrayStockEnterEvent)
+    M12=($null -ne $moduleInitializeCompleteEvent -or
+        (Test-R25Milestone $r25Milestones 'M7'))
+    M13=(Test-R25Milestone $r25Milestones 'M9')
+    M14=($null -ne $runEvidence -and [bool]$runEvidence.qacReleaseVerified)
 }
 $factorySuccess = [bool]$r30Milestones.M10 -and [bool]$r30Milestones.M11
 $nativeRepairVerified = [bool]$r30Milestones.M4 -and
@@ -479,6 +516,7 @@ $nativeOutcome = [ordered]@{
     }
     settingsFactoryEntered=[bool]$r30Milestones.M10
     milestones=$r30Milestones
+    r32ThreadConstructionMilestones=$r32Milestones
     r25Milestones=$r25Milestones
     qacPostRunEvidencePath=$qacPostRunPath
     qacPostRunClear=[bool]$qacPostRunClear

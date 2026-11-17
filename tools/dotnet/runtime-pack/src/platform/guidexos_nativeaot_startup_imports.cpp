@@ -7,6 +7,8 @@
 #include <windows.h>
 
 #include <stdint.h>
+
+extern "C" void __cdecl guideXosNativeAotCapturePalFailFast(uint32_t reason);
 #include <new>
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
 #include <intrin.h>
@@ -560,6 +562,10 @@ extern "C" int WINAPI guidexos_nativeaot_startup_WideCharToMultiByte(
 
 extern "C" BOOL WINAPI guidexos_nativeaot_startup_RaiseFailFastException(
     PEXCEPTION_RECORD, PCONTEXT, DWORD) {
+    // NativeAOT's RhFailFast path reaches the kernel PAL fail-fast hook
+    // directly. Capture the first failure in the runtime record before that
+    // hook halts the machine; the hook itself cannot access runtime storage.
+    guideXosNativeAotCapturePalFailFast(0x43525402u);
     guidexos_nativeaot_pal_fail_fast(0x43525402u);
 }
 

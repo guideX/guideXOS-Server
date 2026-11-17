@@ -378,6 +378,8 @@ if ($C188R12R4R5R4ThreadStoreReadiness -or $C188R30ThreadAttachmentTrace) {
     }
     $threadStoreProfileDefine = if ($C188R12R4R5R4ThreadStoreReadiness) {
         '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS'
+    } elseif ($C188R30ThreadAttachmentTrace) {
+        '/DGUIDEXOS_NATIVEAOT_C188R30_THREAD_ATTACHMENT_TRACE'
     } else {
         ''
     }
@@ -484,7 +486,7 @@ if ($C188R12R4R5R1InitDiagnostics) {
     $removedRuntimeMembers += 'nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\GCHelpers.cpp.obj'
     $removedRuntimeMembers += 'nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\RuntimeInstance.cpp.obj'
 }
-if ($C188R12R4R5R4ThreadStoreReadiness) {
+if ($C188R12R4R5R4ThreadStoreReadiness -or $C188R30ThreadAttachmentTrace) {
     $removedRuntimeMembers += $threadStoreCommonPalMember
 }
 if ($C188R12R4R5R4R5GcInitProbes) {
@@ -1368,7 +1370,14 @@ HRESULT GCHeap::Initialize()
     }
 }
 $threadStoreCommonPalObjectArgument = ''
-if ($C188R12R4R5R4ThreadStoreReadiness) {
+$threadStoreCommonPalProfileDefine = if ($C188R12R4R5R4ThreadStoreReadiness) {
+    '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS'
+} elseif ($C188R30ThreadAttachmentTrace) {
+    '/DGUIDEXOS_NATIVEAOT_C188R30_THREAD_ATTACHMENT_TRACE'
+} else {
+    ''
+}
+if ($C188R12R4R5R4ThreadStoreReadiness -or $C188R30ThreadAttachmentTrace) {
     if (-not (Test-Path -LiteralPath $threadStoreCommonPalSource -PathType Leaf)) {
         throw "ThreadStore readiness PAL common replacement source is missing: $threadStoreCommonPalSource"
     }
@@ -1378,7 +1387,7 @@ if ($C188R12R4R5R4ThreadStoreReadiness) {
         'setlocal'
         "call `"$vcvars`" >nul"
         'if errorlevel 1 exit /b %errorlevel%'
-        "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_WINDOWS /DTARGET_WINDOWS /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DNATIVEAOT /DFEATURE_NATIVEAOT /D_LIB /DGUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$threadStoreCommonPalObject`" `"$threadStoreCommonPalSource`""
+        "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_WINDOWS /DTARGET_WINDOWS /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DNATIVEAOT /DFEATURE_NATIVEAOT /D_LIB $threadStoreCommonPalProfileDefine /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$threadStoreCommonPalObject`" `"$threadStoreCommonPalSource`""
         'if errorlevel 1 exit /b %errorlevel%'
         'exit /b 0'
     ) | Set-Content -LiteralPath $threadStoreCommonPalBatch -Encoding ASCII
@@ -1428,7 +1437,7 @@ if ($NativeAotFpRepair) {
         [System.IO.Path]::GetFileName($fpCoffObject)
     )
 }
-if ($C188R12R4R5R4ThreadStoreReadiness) {
+if ($C188R12R4R5R4ThreadStoreReadiness -or $C188R30ThreadAttachmentTrace) {
     $expectedPatchedMembers += $threadStoreCommonPalMember
     $expectedPatchedArchiveMembers += [System.IO.Path]::GetFileName($threadStoreCommonPalObject)
 }
@@ -1466,7 +1475,7 @@ $archiveValidation = [ordered]@{
     patchedMemberCounts = $patchedMemberCounts
     removedMemberCounts = $removedMemberCounts
     duplicatePatchedMembers = (@($patchedMemberCounts.Values | Where-Object { $_ -gt 1 }).Count)
-    threadStorePalCommonReplacement = if ($C188R12R4R5R4ThreadStoreReadiness) { [ordered]@{ stockMember = $threadStoreCommonPalMember; removedCount = $removedMemberCounts[$threadStoreCommonPalMember]; replacementObject = $threadStoreCommonPalObject; replacementSha256 = Get-Hash $threadStoreCommonPalObject; archiveMemberCount = $patchedMemberCounts[$threadStoreCommonPalMember] } } else { $null }
+    threadStorePalCommonReplacement = if ($C188R12R4R5R4ThreadStoreReadiness -or $C188R30ThreadAttachmentTrace) { [ordered]@{ stockMember = $threadStoreCommonPalMember; removedCount = $removedMemberCounts[$threadStoreCommonPalMember]; replacementObject = $threadStoreCommonPalObject; replacementSha256 = Get-Hash $threadStoreCommonPalObject; profile = if ($C188R12R4R5R4ThreadStoreReadiness) { 'C188R12R4R5R4_THREADSTORE_READINESS' } else { 'C188R30_THREAD_ATTACHMENT_TRACE' }; archiveMemberCount = $patchedMemberCounts[$threadStoreCommonPalMember] } } else { $null }
     c188r12r4r5r4r5GcInitReplacement = if ($C188R12R4R5R4R5GcInitProbes) { [ordered]@{ stockMember = $gcwksMember; removedCount = $removedMemberCounts[$gcwksMember]; replacementObject = $gcInitProbeObject; replacementSha256 = Get-Hash $gcInitProbeObject; sourceCommit = $lock.ilCompiler.commit; sourceGcWksSha256 = Get-Hash $gcWksSource; instrumentedGcSha256 = Get-Hash $gcInitPatchedSource; recordHeaderSha256 = Get-Hash $gcInitRecordHeader; recordImplementationSha256 = Get-Hash $gcInitRecordImplementation; recordSizeBytes = 64; archiveMemberCount = $patchedMemberCounts[$gcwksMember] } } else { $null }
 }
 
@@ -1804,6 +1813,9 @@ $manifest = [ordered]@{
     c188r12r4r5r4PalCommonStockMember = if ($C188R12R4R5R4ThreadStoreReadiness) { $threadStoreCommonPalMember } else { $null }
     c188r12r4r5r4PalCommonReplacementObject = if ($C188R12R4R5R4ThreadStoreReadiness) { $threadStoreCommonPalObject } else { $null }
     c188r12r4r5r4PalCommonReplacementSha256 = if ($C188R12R4R5R4ThreadStoreReadiness) { Get-Hash $threadStoreCommonPalObject } else { $null }
+    c188r30PalCommonStockMember = if ($C188R30ThreadAttachmentTrace) { $threadStoreCommonPalMember } else { $null }
+    c188r30PalCommonReplacementObject = if ($C188R30ThreadAttachmentTrace) { $threadStoreCommonPalObject } else { $null }
+    c188r30PalCommonReplacementSha256 = if ($C188R30ThreadAttachmentTrace) { Get-Hash $threadStoreCommonPalObject } else { $null }
     c188r12r4r5r1RuntimeVersionHeader = $runtimeVersionHeader
     c188r12r4r5r1RuntimeVersionHeaderSha256 = $runtimeVersionHeaderSha256
     initializationTraceRecordCapacity = if ($C188R12R4R5R1InitDiagnostics) { 64 } else { 0 }
