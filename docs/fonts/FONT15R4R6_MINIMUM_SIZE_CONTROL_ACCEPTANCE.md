@@ -7,6 +7,7 @@
 - Repository: `D:\dev\guideXOSServer_FONT_SUPPORT`; branch: `FONT_SUPPORT`.
 - Starting HEAD: `9570fdbd41d6a9ed8cf322cd2249d003a18ab37d`.
 - The completed [R1 diagnostic report](FONT15R4R5R1_INSTRUMENTED_GUEST_POINTER_PIPELINE.md) was reviewed and committed alone as `207f41f2e347a5ffdf340fdac08d56aa7a7e8dcf` (`docs: close out FONT15R4R5R1 report`).
+- This R4R6 report was introduced in `1d6c7e993b2f6e00c1e33fba6159b58cc65e50d3`; its later QAC census note was committed in `a12b5cd905f6d1ccda7eb4c7a72fc6844c3625fa`.
 - At task start, `tests/test_font15r2r1_qmp_safety.py` had a pre-existing modification and `docs/fonts/FONT15R4R5_POINTER_EVENT_PIPELINE_DIAGNOSIS.md` was untracked. Both were preserved. The test run modified its previously clean `__pycache__` file; that cache is restored to the committed bytes before finalizing this report. No production source files were changed.
 - No phase marker was closed or advanced. The minimum-size acceptance gate remains open.
 
