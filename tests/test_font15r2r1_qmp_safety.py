@@ -68,6 +68,7 @@ class FakeSocket:
         self.timeout: float | None = None
         self.reads = [b'{"QMP":{"version":{},"capabilities":[]}}\r\n']
         self.requests: list[dict[str, Any]] = []
+        self.request_times: list[float] = []
         self.closed = False
         self.peer = ("127.0.0.1", 63800)
         self.local = ("127.0.0.1", 50123)
@@ -87,6 +88,7 @@ class FakeSocket:
             raise OSError("socket is closed")
         request = json.loads(payload.decode("ascii"))
         self.requests.append(request)
+        self.request_times.append(self.clock.monotonic())
         responses = self.handler(request, self)
         if responses is None:
             return
@@ -331,6 +333,63 @@ class QMPDragSafetyTests(unittest.TestCase):
                 )
             )
             self.assertTrue(all(check[1] == 4242 for check in self.verifier.connection_checks))
+        finally:
+            qmp.close()
+
+    def test_six_event_relative_replay_preserves_order_pacing_and_screenshot_state(self) -> None:
+        qmp = self.make_qmp(self.screenshot_handler())
+        screenshot = Path(self.temp.name) / "six-event-replay.ppm"
+        try:
+            started = self.clock.now
+            qmp.relative(-123, -41, 0.2)
+            events_before_screenshot = self.input_events(self.sockets[0])
+            qmp.screenshot(screenshot)
+
+            expected = [
+                {"type": "rel", "data": {"axis": "x", "value": -35}},
+                {"type": "rel", "data": {"axis": "x", "value": -35}},
+                {"type": "rel", "data": {"axis": "x", "value": -35}},
+                {"type": "rel", "data": {"axis": "x", "value": -18}},
+                {"type": "rel", "data": {"axis": "y", "value": -35}},
+                {"type": "rel", "data": {"axis": "y", "value": -6}},
+            ]
+            self.assertEqual(events_before_screenshot, expected)
+            self.assertEqual(self.input_events(self.sockets[0]), expected)
+            self.assertTrue(all(event["type"] == "rel" for event in expected))
+            self.assertEqual(qmp._active_drag_button, None)
+            self.assertEqual(qmp._uncertain_buttons, {})
+
+            move_requests = [
+                (request, request_time)
+                for request, request_time in zip(
+                    self.sockets[0].requests, self.sockets[0].request_times
+                )
+                if request["execute"] == "input-send-event"
+            ]
+            self.assertEqual(len(move_requests), 6)
+            for (_, previous_time), (_, current_time) in zip(move_requests, move_requests[1:]):
+                self.assertAlmostEqual(current_time - previous_time, 0.2)
+            self.assertAlmostEqual(self.clock.now - started, 1.2)
+
+            movement_ids = [request["id"] for request, _ in move_requests]
+            trace = [
+                json.loads(line)
+                for line in self.trace.read_text(encoding="utf-8").splitlines()
+            ]
+            acknowledged_ids = [
+                record["request_id"]
+                for record in trace
+                if record.get("kind") == "qmp-response"
+                and record.get("request_id") in movement_ids
+                and "return" in record.get("response", {})
+            ]
+            self.assertEqual(acknowledged_ids, movement_ids)
+            self.assertEqual(self.connect_calls, 1)
+            self.assertTrue(all(check[1] == 4242 for check in self.verifier.connection_checks))
+            self.assertEqual(screenshot.read_bytes(), VALID_PPM)
+            self.assertTrue(
+                any(record.get("kind") == "screenshot-verified" for record in trace)
+            )
         finally:
             qmp.close()
 
