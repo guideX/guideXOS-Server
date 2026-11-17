@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 import sys
 import time
 from typing import Any
@@ -545,7 +546,9 @@ def analyze_cooperative_switch_frontiers(
         samples: list[dict[str, int]], register_states: list[dict[str, Any]],
         snapshots: list[dict[str, Any]], breakpoints: tuple[tuple[int, str], ...],
         expected_bsp: int, ivt_range: tuple[int, int],
-        context_pointers: tuple[int, int] | None = None) -> dict[str, Any]:
+        context_pointers: tuple[int, int] | None = None,
+        context_stack_ranges: dict[str, tuple[int, int]] | None = None,
+        disassembly_text: str | None = None) -> dict[str, Any]:
     """Match the six runtime frontiers to saved register and event evidence."""
     observations = {
         label: [sample for sample in samples if sample["ip"] == address]
@@ -572,7 +575,7 @@ def analyze_cooperative_switch_frontiers(
     b_bounds = one("Context B BSP bounds passed")
     a_resume_first = one("Context A first resumption")
     b_resume_second = one("Context B second resumption")
-    a_resume_final = one("Context A final resumption")
+    assertion_failure_hit = one("first assertion failure loop")
     flushrs = observations.get("context-switch flushrs", [])
     bsp_registers = state(b_bounds)
     bsp_check_valid = bool(
@@ -585,12 +588,12 @@ def analyze_cooperative_switch_frontiers(
         left["instructions"] < right["instructions"]
         for left, right in zip(flushrs[:3], flushrs[1:4], strict=True))
     ordered_frontiers = bool(
-        b_entry and b_bounds and a_resume_first and b_resume_second and a_resume_final and
+        b_entry and b_bounds and a_resume_first and b_resume_second and
         len(flushrs) >= 4 and
         flushrs[0]["instructions"] < b_entry["instructions"] < b_bounds["instructions"] <
         flushrs[1]["instructions"] < a_resume_first["instructions"] <
         flushrs[2]["instructions"] < b_resume_second["instructions"] <
-        flushrs[3]["instructions"] < a_resume_final["instructions"]
+        flushrs[3]["instructions"]
     )
     flushrs_event_counts = [event_count(sample) for sample in flushrs[:4]]
     switch_events_match = flushrs_event_counts == [1, 3, 5, 7]
@@ -605,7 +608,7 @@ def analyze_cooperative_switch_frontiers(
         ("context-switch flushrs", flushrs[-1] if flushrs else None),
         ("Context A first resumption", a_resume_first),
         ("Context B second resumption", b_resume_second),
-        ("Context A final resumption", a_resume_final),
+        ("first assertion failure loop", assertion_failure_hit),
     )
     furthest = max(
         ((label, sample["instructions"]) for label, sample in named_frontiers if sample),
@@ -643,6 +646,9 @@ def analyze_cooperative_switch_frontiers(
             "saved_ipsr": saved_ipsr,
             "saved_slot": saved_slot,
             "faulting_instruction_address": fault_address,
+            "faulting_instruction": (disassembly_instruction_at(disassembly_text, fault_address)
+                                     if disassembly_text is not None and
+                                     fault_address is not None else None),
             "isr": saved_isr,
             "isr_code": isr_code,
             "isr_classification": isr_classification,
@@ -677,13 +683,44 @@ def analyze_cooperative_switch_frontiers(
         }
         break
 
-    full_sequence = bool(
+    failure_registers = state(assertion_failure_hit)
+    failure_snapshot = (snapshots_by_sample.get(assertion_failure_hit.get("sample"), {})
+                        if assertion_failure_hit is not None else {})
+    failure_sp = failure_registers.get("sp")
+    failure_context = None
+    if failure_sp is not None and context_stack_ranges is not None:
+        failure_context = next((identity for identity, (low, high) in
+                                context_stack_ranges.items()
+                                if low <= failure_sp <= high), None)
+    assertion_failure = None
+    if assertion_failure_hit is not None:
+        assertion_failure = {
+            "symbol": "ia64_coop_test_fail",
+            "ip": assertion_failure_hit["ip"],
+            "instructions": assertion_failure_hit["instructions"],
+            "active_context_from_sp": failure_context,
+            "sp": failure_sp,
+            "actual_operand_r14": failure_registers.get("r14"),
+            "expected_operand_r15": failure_registers.get("r15"),
+            "rsc": failure_registers.get("rsc"),
+            "bsp": failure_registers.get("bsp"),
+            "gp": failure_registers.get("gp"),
+            "failure_loop_instruction": (
+                disassembly_instruction_at(disassembly_text, assertion_failure_hit["ip"])
+                if disassembly_text is not None else None),
+            "context_a_snapshot": failure_snapshot.get("context_a"),
+            "context_b_snapshot": failure_snapshot.get("context_b"),
+            "event_snapshot": failure_snapshot.get("probe_record"),
+            "registers_captured_before_failure_loop_mutation": True,
+        }
+
+    switch_sequence_pre_final_verified = bool(
         bsp_check_valid and ordered_flushrs and ordered_frontiers and switch_events_match and
         len(flushrs) == 4 and
         len(observations.get("Context B first-entry bootstrap", [])) == 1 and
         len(observations.get("Context A first resumption", [])) == 1 and
         len(observations.get("Context B second resumption", [])) == 1 and
-        len(observations.get("Context A final resumption", [])) == 1
+        assertion_failure_hit is None
     )
     return {
         "breakpoint_observations": observations,
@@ -694,7 +731,10 @@ def analyze_cooperative_switch_frontiers(
         "flushrs_event_counts": flushrs_event_counts,
         "flushrs_event_sequence_valid": switch_events_match,
         "frontier_order_valid": ordered_frontiers,
-        "full_switch_sequence_verified": full_sequence,
+        "switch_sequence_pre_final_verified": switch_sequence_pre_final_verified,
+        "full_switch_sequence_verified": False,
+        "final_context_a_resume_verified": False,
+        "first_assertion_failure": assertion_failure,
         "first_unexpected_exception": first_exception,
         "furthest_proven_frontier": furthest[0] if furthest else None,
         "furthest_proven_instruction_count": furthest[1] if furthest else None,
@@ -705,8 +745,8 @@ def analyze_cooperative_switch_frontiers(
             "Context A first resumption", [])),
         "context_b_second_resume_hits": len(observations.get(
             "Context B second resumption", [])),
-        "context_a_final_resume_hits": len(observations.get(
-            "Context A final resumption", [])),
+        "first_assertion_failure_hits": len(observations.get(
+            "first assertion failure loop", [])),
     }
 
 
@@ -759,7 +799,7 @@ def cooperative_breakpoints(frontiers: dict[str, int]) -> tuple[tuple[int, str],
         (frontiers["context_a_save"], "context-switch flushrs"),
         (frontiers["context_a_resume_first"], "Context A first resumption"),
         (frontiers["context_b_resume_second"], "Context B second resumption"),
-        (frontiers["context_a_resume_final"], "Context A final resumption"),
+        (frontiers["test_fail"], "first assertion failure loop"),
     )
 
 
@@ -1014,6 +1054,7 @@ def preflight(args: argparse.Namespace) -> tuple[Any, Path, dict[str, Any], dict
         "context_a_resume_first": ski_breakpoint_ip(symbols["a_resume_first"]),
         "context_b_resume_second": ski_breakpoint_ip(symbols["b_resume_second"]),
         "context_a_resume_final": ski_breakpoint_ip(symbols["a_resume_final"]),
+        "test_fail": ski_breakpoint_ip(symbols["test_fail"]),
         "context_a_final_exit": ski_breakpoint_ip(symbols["a_final_exit"]),
         "context_b_unexpected_resume": ski_breakpoint_ip(symbols["b_unexpected_resume"]),
         "switch_return": ski_breakpoint_ip(symbols["switch_return"]),
@@ -1244,6 +1285,13 @@ def main(argv: list[str] | None = None) -> int:
         smoke = run_no_guest_parser_smoke(runner, simulator, args.capture_dir)
         for subdir in ("registers", "contexts", "records"):
             (args.capture_dir / subdir).mkdir()
+        capture_disassembly_path = args.capture_dir / "candidate.disassembly.txt"
+        disassembly_result = subprocess.run(
+            [str(args.objdump), "-dr", str(args.artifact)],
+            check=True, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        capture_disassembly_path.write_text(
+            disassembly_result.stdout, encoding="utf-8", newline="\n")
+        capture_disassembly_sha256 = sha256(capture_disassembly_path)
         command_file = args.capture_dir / "debugger-commands.txt"
         command_file.write_text(command_text, encoding="ascii", newline="\n")
         auth_path = args.capture_dir / "authorization-consumed.json"
@@ -1254,6 +1302,8 @@ def main(argv: list[str] | None = None) -> int:
             "manifest_sha256": args.expected_manifest_sha256,
             "simulator_sha256": args.simulator_sha256,
             "command_file_sha256": sha256(command_file),
+            "candidate_disassembly_path": str(capture_disassembly_path),
+            "candidate_disassembly_sha256": capture_disassembly_sha256,
             "breakpoint_plan": debugger_plan,
             "no_guest_parser_smoke": smoke,
             "initial_startup_step": INITIAL_STEP_BUDGET,
@@ -1326,21 +1376,23 @@ def main(argv: list[str] | None = None) -> int:
             symbols["context_a"], symbols["context_b"], symbols["probe_record"],
             symbols["probe_record_size"])
         breakpoints = cooperative_breakpoints(symbols["frontiers"])
+        disassembly_text = capture_disassembly_path.read_text(
+            encoding="utf-8", errors="replace")
         runtime_frontiers = analyze_cooperative_switch_frontiers(
             samples, register_states, memory_analysis["snapshots"], breakpoints,
             symbols["bsp_expected_value"], (symbols["ivt"], 0x108000),
-            (symbols["context_a"], symbols["context_b"]))
+            (symbols["context_a"], symbols["context_b"]),
+            {"A": tuple(symbols["stack_a"]), "B": tuple(symbols["stack_b"])},
+            disassembly_text)
         first_exception = runtime_frontiers["first_unexpected_exception"]
-        disassembly_path = args.artifact.with_name(
-            f"{args.artifact.stem}.disassembly.txt")
-        if first_exception is not None and disassembly_path.is_file():
-            disassembly_text = disassembly_path.read_text(encoding="utf-8", errors="replace")
+        disassembly_path = capture_disassembly_path
+        if first_exception is not None:
             fault_address = first_exception.get("faulting_instruction_address")
             first_exception["faulting_instruction"] = (
                 disassembly_instruction_at(disassembly_text, fault_address)
                 if fault_address is not None else None)
             first_exception["disassembly_path"] = str(disassembly_path)
-            first_exception["disassembly_sha256"] = sha256(disassembly_path)
+            first_exception["disassembly_sha256"] = capture_disassembly_sha256
         debugger_initialization = analyze_debugger_initialization(
             stderr_text, command_text, samples, elf_facts["elf_entry"])
         analysis = {
@@ -1392,6 +1444,8 @@ def main(argv: list[str] | None = None) -> int:
                      "a_resume_first"),
                     ("second_context_b_resumption",
                      symbols["frontiers"]["context_b_resume_second"], "b_resume_second"),
+                    ("first_assertion_failure_loop",
+                     symbols["frontiers"]["test_fail"], "test_fail"),
                     ("final_context_a_exit", symbols["frontiers"]["context_a_final_exit"],
                      "a_final_exit"),
                 )
@@ -1400,6 +1454,8 @@ def main(argv: list[str] | None = None) -> int:
                 {"address": address, "label": label}
                 for address, label in breakpoints
             ],
+            "candidate_disassembly_path": str(capture_disassembly_path),
+            "candidate_disassembly_sha256": capture_disassembly_sha256,
             "probe_stdout_bytes": len(stdout_text.encode("utf-8", errors="replace")),
             "debugger_progress_samples": samples,
             "debugger_progress_error": progress_error,
@@ -1415,11 +1471,25 @@ def main(argv: list[str] | None = None) -> int:
             "captured_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
         try:
-            output = runner.validate_cooperative_context_probe_output(stdout_text)
+            output = runner.validate_cooperative_context_probe_output(
+                stdout_text, runner.cooperative_context_probe_expected_layout(symbols))
             analysis["probe_output_validation"] = output
         except runner.GateError as exc:
             analysis["probe_output_validation_error"] = str(exc)
         output_valid = "probe_output_validation" in analysis
+        final_a_resume_verified = bool(
+            output_valid and
+            analysis["probe_output_validation"]["events"][-1]["event"] == "A_RESUMED_FINAL")
+        runtime_frontiers["final_context_a_resume_verified"] = final_a_resume_verified
+        runtime_frontiers["full_switch_sequence_verified"] = bool(
+            runtime_frontiers["switch_sequence_pre_final_verified"] and
+            final_a_resume_verified and
+            runtime_frontiers["first_assertion_failure"] is None)
+        if final_a_resume_verified:
+            runtime_frontiers["furthest_proven_frontier"] = "Context A final resumption"
+            if result.get("ski_instruction_count") is not None:
+                runtime_frontiers["furthest_proven_instruction_count"] = \
+                    result["ski_instruction_count"]
         intentional_exit = (
             result.get("classification") == "GUEST_EXIT_ZERO" and
             result.get("ski_fault_count") == 0 and
@@ -1431,6 +1501,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         analysis["intentional_exit_verified"] = intentional_exit
         analysis["first_unexpected_exception"] = first_exception
+        analysis["first_assertion_failure"] = runtime_frontiers["first_assertion_failure"]
         analysis["furthest_proven_frontier"] = (
             debugger_initialization["failure_frontier"]
             if debugger_initialization is not None else
@@ -1438,11 +1509,19 @@ def main(argv: list[str] | None = None) -> int:
         if output_valid and intentional_exit and installed_breakpoints_match_plan and \
                 runtime_frontiers["full_switch_sequence_verified"]:
             analysis["outcome"] = "IA64_COOPERATIVE_PROBE_QUALIFIED"
-        elif runtime_frontiers["context_b_bsp_check_valid"] and \
-                runtime_frontiers["context_b_to_a_first_observed"]:
-            analysis["outcome"] = "IA64_COOPERATIVE_FRONTIER_ADVANCED"
         else:
-            analysis["outcome"] = "IA64_COOPERATIVE_DEBUGGER_BLOCKED"
+            bounds_hits = runtime_frontiers["breakpoint_observations"].get(
+                "Context B BSP bounds passed", [])
+            bounds_instruction = bounds_hits[0]["instructions"] if bounds_hits else -1
+            failure = runtime_frontiers["first_assertion_failure"]
+            exception = runtime_frontiers["first_unexpected_exception"]
+            advanced_after_bsp = runtime_frontiers["context_b_to_a_first_observed"] or (
+                failure is not None and failure["instructions"] > bounds_instruction) or (
+                exception is not None and exception["instructions"] > bounds_instruction)
+            if runtime_frontiers["context_b_bsp_check_valid"] and advanced_after_bsp:
+                analysis["outcome"] = "IA64_COOPERATIVE_FRONTIER_ADVANCED"
+            else:
+                analysis["outcome"] = "IA64_COOPERATIVE_DEBUGGER_BLOCKED"
         write_json_new(args.capture_dir / "analysis.json", analysis)
         print(json.dumps({"analysis": str(args.capture_dir / "analysis.json"),
                           "outcome": analysis["outcome"],

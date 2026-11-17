@@ -1695,6 +1695,55 @@ def validate_cooperative_probe_setup_source(sequence_source: str) -> None:
     if missing:
         raise GateError("probe setup lost required A/B initialization: " + ", ".join(missing))
 
+    storage_contracts = (
+        (
+            "A",
+            (
+                "movlr14=ia64_coop_context_a;;",
+                "movlr15=ia64_coop_stack_a_bottom;;",
+                "set64r14,c_stack_base,r15",
+                "movlr15=ia64_coop_stack_a_top;;",
+                "set64r14,c_stack_limit,r15",
+                "movlr15=ia64_coop_rbs_a_base;;",
+                "set64r14,c_rbs_base,r15",
+                "movlr15=ia64_coop_rbs_a_limit;;",
+                "set64r14,c_rbs_limit,r15",
+                "movlr15=ia64_coop_stack_a_top;;",
+                "set64r14,c_sp,r15",
+                "movlr15=ia64_coop_rbs_a_base;;",
+                "set64r14,c_bsp,r15",
+                "set64r14,c_bspstore,r15",
+            ),
+        ),
+        (
+            "B",
+            (
+                "movlr14=ia64_coop_context_b;;",
+                "movlr15=ia64_coop_stack_b_bottom;;",
+                "set64r14,c_stack_base,r15",
+                "movlr15=ia64_coop_stack_b_top;;",
+                "set64r14,c_stack_limit,r15",
+                "set64r14,c_sp,r15",
+                "movlr15=ia64_coop_rbs_b_base;;",
+                "set64r14,c_rbs_base,r15",
+                "set64r14,c_bsp,r15",
+                "set64r14,c_bspstore,r15",
+                "movlr15=ia64_coop_rbs_b_limit;;",
+                "set64r14,c_rbs_limit,r15",
+            ),
+        ),
+    )
+    for identity, instructions in storage_contracts:
+        cursor = 0
+        for instruction in instructions:
+            position = compact.find(instruction, cursor)
+            if position < 0:
+                raise GateError(
+                    f"Context {identity} setup does not bind its stack and RBS fields "
+                    "to the matching linker symbols"
+                )
+            cursor = position + len(instruction)
+
 
 def validate_cooperative_probe_setup_disassembly(disassembly: str) -> None:
     """Check the linked IA-64 instructions preserve setup's return link and PFS."""
@@ -1937,7 +1986,7 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
         "ia64_coop_a_test", "ia64_coop_a_resumed_first",
         "ia64_coop_a_resumed_final", "ia64_coop_a_final_exit",
         "ia64_coop_b_first_entry", "ia64_coop_b_test", "ia64_coop_b_resumed",
-        "ia64_coop_b_unexpected_resume", "ia64_coop_b_bsp_check",
+        "ia64_coop_b_unexpected_resume", "ia64_coop_test_fail", "ia64_coop_b_bsp_check",
         "ia64_coop_b_bsp_bounds_valid",
         "__text_start", "__text_end",
         "ia64_coop_context_a", "ia64_coop_context_b", "ia64_coop_probe_record",
@@ -2130,6 +2179,7 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
             "b_resume_second": symbol("ia64_coop_b_resumed"),
             "bsp_check_instruction": bsp_read_instruction,
             "bsp_bounds_valid": symbol("ia64_coop_b_bsp_bounds_valid"),
+            "test_fail": symbol("ia64_coop_test_fail"),
             "bsp_current_frame_offset": bsp_expected_offset,
             "bsp_expected_value": bsp_base + bsp_expected_offset,
             "bsp_frame_bytes": bsp_frame_bytes,
@@ -2144,7 +2194,22 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
             "switch_source": str((script_dir / "context_switch.s").resolve())}
 
 
-def validate_cooperative_context_probe_output(stdout_text: str) -> dict[str, Any]:
+def cooperative_context_probe_expected_layout(
+        static_symbols: dict[str, Any]) -> dict[str, dict[str, tuple[int, int]]]:
+    """Bind runtime context maps to the stack/RBS ranges in the selected ELF."""
+    return {
+        identity: {
+            "stack": tuple(static_symbols[f"stack_{identity.lower()}"]),
+            "rbs": tuple(static_symbols[f"rbs_{identity.lower()}"]),
+        }
+        for identity in ("A", "B")
+    }
+
+
+def validate_cooperative_context_probe_output(
+        stdout_text: str,
+        expected_layout: dict[str, dict[str, tuple[int, int]]] | None = None
+        ) -> dict[str, Any]:
     def parse_hex_fields(text: str, record_name: str) -> dict[str, int]:
         pairs = re.findall(r"([a-z][a-z0-9_]*)=0x([0-9a-fA-F]+)", text)
         values: dict[str, int] = {}
@@ -2178,6 +2243,8 @@ def validate_cooperative_context_probe_output(stdout_text: str) -> dict[str, Any
         context_records[match.group(1)] = values
     if set(context_records) != {"A", "B"}:
         raise GateError("cooperative probe did not report both final context maps")
+    if expected_layout is not None and set(expected_layout) != {"A", "B"}:
+        raise GateError("selected ELF context layout must define exactly contexts A and B")
 
     required_context_fields = {
         "stack_base", "stack_limit", "sp", "rp", "code_base", "code_limit",
@@ -2200,6 +2267,14 @@ def validate_cooperative_context_probe_output(stdout_text: str) -> dict[str, Any
         if rbs_base >= rbs_limit or rbs_base & 511 or rbs_limit & 511 or \
                 not rbs_base <= bsp <= rbs_limit or bsp != bspstore:
             raise GateError(f"context {identity} has invalid backing-store bounds or pointers")
+        if expected_layout is not None:
+            expected_stack = tuple(expected_layout[identity].get("stack", ()))
+            expected_rbs = tuple(expected_layout[identity].get("rbs", ()))
+            if (stack_base, stack_limit) != expected_stack or \
+                    (rbs_base, rbs_limit) != expected_rbs:
+                raise GateError(
+                    f"context {identity} stack or RBS identity does not match the selected ELF"
+                )
         if not values["code_base"] <= values["rp"] < values["code_limit"] or values["rp"] & 15:
             raise GateError(f"context {identity} has an invalid saved return continuation")
         if values["switches"] != 2 or values["observed_psr"] & 0x4000:
@@ -2302,7 +2377,8 @@ def run_cooperative_context_probe(args: argparse.Namespace) -> int:
         stdout_text = stdout_path.read_text(encoding="utf-8", errors="replace")
         stderr_text = stderr_path.read_text(encoding="utf-8", errors="replace")
         observations = capture_cooperative_context_probe_observations(stdout_text, stderr_text)
-        runtime = validate_cooperative_context_probe_output(stdout_text)
+        runtime = validate_cooperative_context_probe_output(
+            stdout_text, cooperative_context_probe_expected_layout(static_symbols))
     except (OSError, GateError) as exc:
         runtime = None
         observations = {"transition_record_lines": [], "transition_records": [],

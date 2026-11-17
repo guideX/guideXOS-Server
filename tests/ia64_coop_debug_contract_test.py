@@ -225,19 +225,19 @@ class InstalledBreakpointListTests(unittest.TestCase):
    2  P 000000000010dcb4  IA-64
    3  P 000000000010b250  IA-64
    4  P 000000000010c850  IA-64
-   5  P 000000000010b930  IA-64
+   5  P 000000000010df60  IA-64
 """
         installed = diagnostic.parse_installed_program_breakpoints(text)
         self.assertEqual([item["number"] for item in installed], list(range(6)))
         self.assertEqual([item["address"] for item in installed], [
-            0x10AEC0, 0x10AED0, 0x10DCB4, 0x10B250, 0x10C850, 0x10B930,
+            0x10AEC0, 0x10AED0, 0x10DCB4, 0x10B250, 0x10C850, 0x10DF60,
         ])
         self.assertTrue(all(item["address_mode"] == "physical" and
                             item["address_exact"] and
                             item["architecture"] == "IA-64" for item in installed))
         comparison = diagnostic.compare_installed_program_breakpoints(
             installed,
-            [0x10AEC0, 0x10AED0, 0x10DCB4, 0x10B250, 0x10C850, 0x10B930],
+            [0x10AEC0, 0x10AED0, 0x10DCB4, 0x10B250, 0x10C850, 0x10DF60],
             6)
         self.assertEqual(comparison, {
             "count_matches": True,
@@ -253,19 +253,19 @@ class InstalledBreakpointListTests(unittest.TestCase):
    2  P ia64_coop_conte* IA-64
    3  P ia64_coop_a_res* IA-64
    4  P ia64_coop_b_res* IA-64
-   5  P ia64_coop_a_res* IA-64
+   5  P ia64_coop_test_f* IA-64
 """
         installed = diagnostic.parse_installed_program_breakpoints(text)
         self.assertEqual([item["number"] for item in installed], list(range(6)))
         self.assertEqual([item["location"] for item in installed], [
             "ia64_coop_b_fir*", "ia64_coop_b_bsp*", "ia64_coop_conte*",
-            "ia64_coop_a_res*", "ia64_coop_b_res*", "ia64_coop_a_res*",
+            "ia64_coop_a_res*", "ia64_coop_b_res*", "ia64_coop_test_f*",
         ])
         self.assertTrue(all(item["address"] is None and not item["address_exact"]
                             for item in installed))
         comparison = diagnostic.compare_installed_program_breakpoints(
             installed, [0x10AEC0, 0x10AED0, 0x10DCB4,
-                        0x10B250, 0x10C850, 0x10B930], 6)
+                        0x10B250, 0x10C850, 0x10DF60], 6)
         self.assertEqual(comparison, {
             "count_matches": True,
             "slots_match": True,
@@ -304,6 +304,7 @@ class CommandFileContractTests(unittest.TestCase):
                 "context_a_resume_first": 0x10B250,
                 "context_b_resume_second": 0x10C850,
                 "context_a_resume_final": 0x10B930,
+                "test_fail": 0x10DF60,
                 "context_a_final_exit": 0x10C060,
                 "context_b_unexpected_resume": 0x10CF50,
                 "switch_return": 0x10E1C8,
@@ -317,7 +318,7 @@ class CommandFileContractTests(unittest.TestCase):
         self.assertEqual([label for _, label in selected], [
             "Context B first-entry bootstrap", "Context B BSP bounds passed",
             "context-switch flushrs", "Context A first resumption",
-            "Context B second resumption", "Context A final resumption",
+            "Context B second resumption", "first assertion failure loop",
         ])
         text = diagnostic.make_command_file(Path("/tmp/coop-debug"), symbols)
         plan = diagnostic.validate_command_file(
@@ -353,7 +354,6 @@ class RuntimeSwitchFrontierAnalysisTests(unittest.TestCase):
             ("context-switch flushrs", 0x10DCB4, 60, 5),
             ("Context B second resumption", 0x10C850, 70, 6),
             ("context-switch flushrs", 0x10DCB4, 80, 7),
-            ("Context A final resumption", 0x10B930, 90, 8),
         )
         samples = [
             {"sample": index, "instructions": instructions, "ip": address,
@@ -375,7 +375,7 @@ class RuntimeSwitchFrontierAnalysisTests(unittest.TestCase):
         ]
         return samples, registers, snapshots
 
-    def test_all_six_frontiers_and_four_switch_events_verify_full_sequence(self) -> None:
+    def test_switch_frontiers_verify_through_second_context_b_return(self) -> None:
         samples, registers, snapshots = self.evidence()
         result = diagnostic.analyze_cooperative_switch_frontiers(
             samples, registers, snapshots, self.breakpoints, self.expected_bsp,
@@ -383,7 +383,8 @@ class RuntimeSwitchFrontierAnalysisTests(unittest.TestCase):
         self.assertTrue(result["context_b_bsp_check_valid"])
         self.assertTrue(result["context_b_to_a_first_observed"])
         self.assertEqual(result["flushrs_event_counts"], [1, 3, 5, 7])
-        self.assertTrue(result["full_switch_sequence_verified"])
+        self.assertTrue(result["switch_sequence_pre_final_verified"])
+        self.assertFalse(result["full_switch_sequence_verified"])
 
     def test_bad_bsp_value_blocks_frontier_and_full_qualification(self) -> None:
         samples, registers, snapshots = self.evidence()
@@ -394,6 +395,57 @@ class RuntimeSwitchFrontierAnalysisTests(unittest.TestCase):
         self.assertFalse(result["context_b_bsp_check_valid"])
         self.assertFalse(result["context_b_to_a_first_observed"])
         self.assertFalse(result["full_switch_sequence_verified"])
+
+    def test_out_of_range_bsp_blocks_context_b_bounds_frontier(self) -> None:
+        samples, registers, snapshots = self.evidence()
+        registers[2]["registers"]["r14"] = 0x170008
+        registers[2]["registers"]["r15"] = 0x170008
+        registers[2]["registers"]["bsp"] = 0x170008
+        result = diagnostic.analyze_cooperative_switch_frontiers(
+            samples, registers, snapshots, self.breakpoints, self.expected_bsp,
+            (0x100000, 0x108000))
+        self.assertFalse(result["context_b_bsp_check_valid"])
+        self.assertFalse(result["context_b_to_a_first_observed"])
+        self.assertFalse(result["full_switch_sequence_verified"])
+
+    def test_correct_bsp_followed_by_failure_loop_does_not_claim_a_switch(self) -> None:
+        samples, registers, snapshots = self.evidence()
+        failure_loop_ip = 0x10DF60
+        samples = samples[:3] + [
+            {"sample": 4, "instructions": 31, "ip": failure_loop_ip,
+             "iip": failure_loop_ip, "slot": 0},
+            {"sample": 5, "instructions": 543, "ip": failure_loop_ip,
+             "iip": failure_loop_ip, "slot": 0},
+        ]
+        registers.append({"instructions": 31, "registers": {
+            "r14": 0xDEADBEEF, "r15": 0xBEEF, "sp": 0x12F000,
+            "rsc": 3, "bsp": self.expected_bsp, "gp": 0x200000,
+        }})
+        snapshots.append({"sample": 4,
+                          "context_a": {"context_id": 0xA, "switch_count": 1},
+                          "context_b": {"context_id": 0xB, "switch_count": 1},
+                          "probe_record": {"event_count": 2, "errors": 0}})
+        failure_disassembly = (
+            "  10df60:\t00 00 00\t[MII]       movl r14=0x113000;;\n")
+        result = diagnostic.analyze_cooperative_switch_frontiers(
+            samples, registers, snapshots, self.breakpoints, self.expected_bsp,
+            (0x100000, 0x108000), (0x112600, 0x112200),
+            {"A": (0x100000, 0x110000), "B": (0x120000, 0x130000)},
+            failure_disassembly)
+        self.assertEqual([sample["ip"] for sample in samples[-2:]],
+                         [failure_loop_ip, failure_loop_ip])
+        self.assertTrue(result["context_b_bsp_check_valid"])
+        self.assertFalse(result["context_b_to_a_first_observed"])
+        self.assertFalse(result["full_switch_sequence_verified"])
+        self.assertFalse(result["switch_sequence_pre_final_verified"])
+        self.assertEqual(result["furthest_proven_frontier"],
+                         "first assertion failure loop")
+        failure = result["first_assertion_failure"]
+        self.assertEqual(failure["active_context_from_sp"], "B")
+        self.assertEqual(failure["actual_operand_r14"], 0xDEADBEEF)
+        self.assertEqual(failure["expected_operand_r15"], 0xBEEF)
+        self.assertTrue(failure["registers_captured_before_failure_loop_mutation"])
+        self.assertIn("movl r14=0x113000", failure["failure_loop_instruction"])
 
     def test_first_ivt_checkpoint_retains_saved_exception_state(self) -> None:
         sample = {"sample": 1, "instructions": 50, "ip": 0x105400,

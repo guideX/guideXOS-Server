@@ -76,6 +76,13 @@ class CooperativeContextOutputTests(unittest.TestCase):
         with self.assertRaises(runner.GateError):
             runner.validate_cooperative_context_probe_output(output)
 
+    @staticmethod
+    def expected_layout() -> dict[str, dict[str, tuple[int, int]]]:
+        return {
+            "A": {"stack": (0x100000, 0x110000), "rbs": (0x140000, 0x150000)},
+            "B": {"stack": (0x120000, 0x130000), "rbs": (0x160000, 0x170000)},
+        }
+
     def test_valid_two_context_record(self) -> None:
         result = runner.validate_cooperative_context_probe_output(valid_output())
         self.assertEqual(len(result["events"]), 8)
@@ -116,9 +123,22 @@ class CooperativeContextOutputTests(unittest.TestCase):
             1,
         )
         self.assert_rejected(duplicate)
+        missing = output.replace(
+            "IA64_COOP_EVENT sequence=0x4 context=0xa event=A_RESUMED_FIRST\n", "", 1)
+        self.assert_rejected(missing)
         restarted = replace_once(output, "first_entries=0x1 resumes=0x1",
                                  "first_entries=0x2 resumes=0x0")
         self.assert_rejected(restarted)
+
+    def test_missing_or_duplicate_context_transition_records_are_rejected(self) -> None:
+        lines = valid_output().splitlines()
+        missing_context = "\n".join(
+            line for line in lines if not line.startswith("IA64_COOP_CONTEXT_STATE id=B "))
+        self.assert_rejected(missing_context)
+        context_b = next(line for line in lines
+                         if line.startswith("IA64_COOP_CONTEXT_STATE id=B "))
+        duplicate_context = "\n".join((*lines, context_b))
+        self.assert_rejected(duplicate_context)
 
     def test_malformed_or_duplicate_record_fields_are_rejected(self) -> None:
         malformed = valid_output().replace(
@@ -143,6 +163,23 @@ class CooperativeContextOutputTests(unittest.TestCase):
         self.assert_rejected(misaligned)
         out_of_bounds = replace_once(valid_output(), "sp=0x12f000", "sp=0x130010")
         self.assert_rejected(out_of_bounds)
+
+    def test_out_of_range_context_b_bsp_is_rejected(self) -> None:
+        out_of_range = replace_once(
+            valid_output(), "bsp=0x160000 bspstore=0x160000",
+            "bsp=0x170008 bspstore=0x170008")
+        self.assert_rejected(out_of_range)
+
+    def test_context_b_backing_store_must_match_selected_elf_identity(self) -> None:
+        wrong_identity = replace_once(
+            valid_output(), "rbs_base=0x160000 rbs_limit=0x170000 gp=0x0",
+            "rbs_base=0x150000 rbs_limit=0x160000 gp=0x0")
+        wrong_identity = replace_once(
+            wrong_identity, "bsp=0x160000 bspstore=0x160000",
+            "bsp=0x150000 bspstore=0x150000")
+        with self.assertRaisesRegex(runner.GateError, "does not match the selected ELF"):
+            runner.validate_cooperative_context_probe_output(
+                wrong_identity, self.expected_layout())
 
     def test_corrupted_return_continuation_is_rejected(self) -> None:
         output = replace_once(valid_output(), "rp=0x200100", "rp=0x210000")
@@ -293,6 +330,24 @@ class CooperativeContextRseModeTests(unittest.TestCase):
         with self.assertRaises(runner.GateError):
             runner.validate_cooperative_bsp_bounds_source(bad_span)
 
+        b_start = self.sequence.index("ia64_coop_b_test:")
+        b_end = self.sequence.index(".endp ia64_coop_b_test", b_start)
+        b_body = self.sequence[b_start:b_end]
+        bad_allocation = self.sequence[:b_start] + b_body.replace(
+            "alloc r16 = ar.pfs, 6, 4, 2, 0 ;;",
+            "alloc r16 = ar.pfs, 6, 3, 2, 0 ;;", 1) + self.sequence[b_end:]
+        with self.assertRaises(runner.GateError):
+            runner.validate_cooperative_bsp_bounds_source(bad_allocation)
+
+        bad_advance, replacements = re.subn(
+            r"movl\s+r15\s*=\s*ia64_coop_rbs_b_base\s*;;\s*"
+            r"cmp\.eq\s+p6,\s*p7\s*=\s*r14,\s*r15\s*;;",
+            "movl r15 = ia64_coop_rbs_b_base + B_TEST_BSP_FRAME_BYTES ;;\n"
+            "    cmp.eq p6, p7 = r14, r15 ;;", self.sequence, count=1)
+        self.assertEqual(replacements, 1)
+        with self.assertRaises(runner.GateError):
+            runner.validate_cooperative_bsp_bounds_source(bad_advance)
+
     def test_mode_sensitive_accesses_keep_the_qualified_freeze_and_handoff_order(self) -> None:
         runner.validate_cooperative_rse_mode_accesses(self.entry, self.sequence, self.switch)
         bad_entry = self.entry.replace("mov ar.rsc = r14 ;;", "mov ar.rsc = 3 ;;", 1)
@@ -337,6 +392,13 @@ class CooperativeSetupReturnLinkTests(unittest.TestCase):
             "br.ret.sptk.many b0 ;;\n.endp ia64_coop_probe_setup",
             "br.ret.sptk.many b1 ;;\n.endp ia64_coop_probe_setup", 1)
         with self.assertRaises(runner.GateError):
+            runner.validate_cooperative_probe_setup_source(damaged)
+
+    def test_context_b_setup_rejects_context_a_backing_store_identity(self) -> None:
+        damaged = self.source.replace(
+            "movl r15 = ia64_coop_rbs_b_base ;;",
+            "movl r15 = ia64_coop_rbs_a_base ;;", 1)
+        with self.assertRaisesRegex(runner.GateError, "Context B setup"):
             runner.validate_cooperative_probe_setup_source(damaged)
 
 
