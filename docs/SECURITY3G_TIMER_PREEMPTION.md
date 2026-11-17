@@ -5,11 +5,11 @@
 **Branch:** `SECURITY_SETTINGS`
 
 **Starting source:** `f63be397b5bad9ea07d0d45feaa5ef55896d744f`
-**Qualification status:** implementation and hosted regressions are complete; QAC guest reservation `df1272707f8242f49639ccb1ea333a8f` is queued behind an unrelated acceptance reservation. The guest result and final outcome are pending until the reservation is granted and the boot evidence is collected.
+**Outcome:** `SECURITY3G_TIMER_PREEMPTION_PARTIAL`. The implementation, builds, and hosted regressions are complete. Guest qualification was not run because QAC kept the development request queued behind an unrelated acceptance reservation; the owned request was cancelled before launch. No guest preemption result is claimed.
 
 ## Scope and baseline
 
-SECURITY3F added the bounded AMD64 scheduler and authentic scheduled Native ELF execution, but an application still had to yield. SECURITY3G extends that scheduler for one qualified Native ELF pilot. It does not make all kernel or Native ELF execution preemptible and does not provide process isolation or forced termination.
+SECURITY3F added the bounded AMD64 scheduler and authentic scheduled Native ELF execution, but an application still had to yield. SECURITY3G extends that scheduler for one controlled Native ELF proof pilot. Guest qualification remains outstanding. It does not make all kernel or Native ELF execution preemptible and does not provide process isolation or forced termination.
 
 The scheduler remains single CPU and round robin. It has eight context slots, one reserved for a trusted kernel task, seven slots for managed Native ELF work, 64 KiB stacks with guards, generation checked handles, and root stack reaping. The PIT runs at approximately 100 Hz, giving a 10 ms interrupt interval.
 
@@ -89,11 +89,11 @@ Relevant hosted regressions completed:
 - System service bridge: device 14/14, storage 15/15, combined 82/82.
 - Native debugger runtime: one run failed at the Step Out breakpoint assertion; a subsequent standalone rerun passed. No debugger sources were changed.
 
-The guest scheduler self-test, SECURITY3F app, legacy synchronous app, SECURITY3G pilot, unsupported CPU result, and QMP interaction are not reported as passed until QAC produces serial and lifecycle evidence.
+The positive and negative guest images are prepared but were not launched. The guest scheduler self-test, SECURITY3F app, legacy synchronous app, SECURITY3G pilot, unsupported CPU result, and QMP interaction remain unqualified.
 
 ## Guest candidate and artifact identity
 
-The candidate is assembled only under `out/validation/security3g/guest-candidate/ESP`. The repository root `ESP` was not modified. The guest uses a zero-byte scratch `ramdisk.img` because the inherited UEFI build script passes null bytes to `WriteAllBytes`; the isolated candidate keeps the required file and avoids changing unrelated release tooling. It contains the freshly built bootloader, current guest proof kernel, and 46 application files including the existing SECURITY3F scheduler pilot, legacy Hello World, and the new SECURITY3G pilot. Positive and negative QEMU runs use separate writable scratch ESP copies.
+The candidate is assembled only under `out/validation/security3g/guest-candidate/ESP`. The repository root `ESP` was not modified. The guest uses a zero-byte scratch `ramdisk.img` because the inherited UEFI build script passes null bytes to `WriteAllBytes`; the isolated candidate keeps the required file and avoids changing unrelated release tooling. It contains the freshly built bootloader, current guest proof kernel, and 46 application files including the existing SECURITY3F scheduler pilot, legacy Hello World, and the new SECURITY3G pilot. Separate writable positive and negative QEMU ESP copies were prepared; neither was run.
 
 | Artifact | SHA-256 |
 |---|---|
@@ -103,11 +103,11 @@ The candidate is assembled only under `out/validation/security3g/guest-candidate
 | QEMU 11.0.0 executable | `A930E028F93D0FA47E4D58BDAD2432F7466DC2B6AF0AE376F77EF7A298FFDD02` |
 | OVMF x64 code firmware | `33090CC07675BAA5190D9F1E84BF5176B33BCBFA9BACAC522961150CDB6DBB2A` |
 
-Guest kernel flags: `-DGXOS_NATIVE_SCHEDULER_SELFTEST_ACTIVE -DGXOS_SECURITY3F_SCHEDULED_NATIVE_ELF_GUEST_PROOF -DGXOS_SECURITY3G_TIMER_PREEMPTION_GUEST_PROOF`. The implementation was built from the source tree based on `f63be397b5bad9ea07d0d45feaa5ef55896d744f`; its local implementation commit will be recorded in the final artifact manifest after qualification.
+Guest kernel flags: `-DGXOS_NATIVE_SCHEDULER_SELFTEST_ACTIVE -DGXOS_SECURITY3F_SCHEDULED_NATIVE_ELF_GUEST_PROOF -DGXOS_SECURITY3G_TIMER_PREEMPTION_GUEST_PROOF`. The implementation source commit is `4f8d7c48c7a386f47c85123aa0402fc44b35a9bb`, based on `f63be397b5bad9ea07d0d45feaa5ef55896d744f`. The out-of-tree artifact manifest records the source and binary hashes.
 
 Kernel builds used MinGW-w64 GCC 15.2.0. The pilot was emitted as AMD64 ELF64 with Clang/LLD 22.1.8. The UEFI bootloader used the repository's x64 Release MSBuild project in an isolated output directory.
 
-QEMU uses `pc,accel=tcg,smp=1`, OVMF code firmware as a read only pflash device, 1024 MiB RAM, a FAT-backed scratch ESP, and a QMP endpoint. Positive CPU configuration is `-cpu max`; negative configuration is `-cpu qemu64`. QAC is online. As of this report, the development reservation is waiting at queue position 1 behind reservation `09730975edc945f1a9dfc7f4556ba97a`; only reservation `df1272707f8242f49639ccb1ea333a8f` will be operated by this work.
+The planned QEMU configuration is `pc,accel=tcg,smp=1`, OVMF code firmware as a read only pflash device, 1024 MiB RAM, a FAT-backed scratch ESP, and a QMP endpoint. Positive CPU configuration is `-cpu max`; negative configuration is `-cpu qemu64`. QAC was online, with unrelated acceptance reservation `09730975edc945f1a9dfc7f4556ba97a` running. This work's development request `df1272707f8242f49639ccb1ea333a8f` waited at queue position 1 for over 15 minutes and was cancelled before launch. QAC confirmed the request as `Cancelled` and retained the other reservation; no guest QEMU process was started by this work.
 
 ## Capability matrix
 
@@ -115,11 +115,11 @@ QEMU uses `pc,accel=tcg,smp=1`, OVMF code firmware as a read only pflash device,
 |---|---|
 | Cooperative scheduler contexts | Implemented; SECURITY3F foundation retained |
 | Scheduled Native ELF execution | Implemented; production launcher and managed lifecycle |
-| Timer driven context switching | Implemented for eligible Native ELF; guest proof pending |
-| Non-yielding workload preemption | Implemented in pilot; guest proof pending |
-| Desktop and trusted service progress during preemption | Instrumented; guest proof pending |
-| Deferred preemption | Implemented with bounded nesting and a real-PIT self-test; guest proof pending |
-| Safe nested preemption guards | Implemented to depth 32; self-test is in guest proof build |
+| Timer driven context switching | Implemented for eligible Native ELF; not guest qualified |
+| Non-yielding workload preemption | Implemented in pilot; not guest qualified |
+| Desktop and trusted service progress during preemption | Instrumented; not guest qualified |
+| Deferred preemption | Implemented with bounded nesting and a real-PIT self-test; not guest qualified |
+| Safe nested preemption guards | Implemented to depth 32; self-test is in guest proof build but was not run |
 | Forced termination of a running Native ELF | Not implemented |
 | User mode isolation | Not implemented; code remains ring 0 |
 | Address-space isolation | Not implemented; contexts share the kernel address space |
@@ -127,6 +127,6 @@ QEMU uses `pc,accel=tcg,smp=1`, OVMF code firmware as a read only pflash device,
 
 ## Qualification outcome and SECURITY3H
 
-The final outcome is pending QAC. Outcome A may be recorded only after the positive guest shows repeated timer switches, another context's progress, correct resume and checksum/SIMD state, normal completion and reaping, desktop responsiveness, and clean QAC release. If QAC cannot grant the queued reservation, record Outcome B with the guest evidence still pending. A negative `-cpu qemu64` boot should show scheduler initialization rejected as unsupported and no pilot launch.
+The result is `SECURITY3G_TIMER_PREEMPTION_PARTIAL` because QAC did not grant a guest slot. The source implements the bounded timer switch path and the guest-proof build succeeds, but the behavior, CPU-state proof, negative CPU path, and QMP desktop interaction remain unverified in a guest. Do not claim Outcome A from this report. Re-run the prepared positive and negative candidates under QAC to qualify the hardware interrupt path and confirm that `-cpu qemu64` rejects scheduler initialization without launching the pilot.
 
 Recommended SECURITY3H scope: add multicore-safe per-CPU state and an APIC timer only after a clear SMP requirement; define safe cancellation and fault recovery for a suspended context; add user-mode execution and address-space isolation as a separate design; audit additional kernel critical paths before broadening eligibility; and measure latency/fairness under sustained load. Do not describe SECURITY3G preemption as process isolation.
