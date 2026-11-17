@@ -322,7 +322,8 @@ try {
     } else {
         $active = Get-Content -LiteralPath $activePath -Raw | ConvertFrom-Json
         $serialText = Read-C188R12R1SharedText $serialPath
-        $readinessFailure = Get-C188R11ReadinessFailureReason $serialText
+        $readinessFailure = Get-C188R11ReadinessFailureReason $serialText `
+            ([uint32]$readinessProfile.expectedDescriptorCount)
         if (-not [string]::IsNullOrWhiteSpace($readinessFailure)) {
             throw "C188R11 read-only readiness audit failed: $readinessFailure"
         }

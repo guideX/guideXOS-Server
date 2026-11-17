@@ -31,6 +31,21 @@ if (-not (Test-C188R33SettingsClickGate $r32Serial $r30Profile 2 1280 800)) {
     throw 'R32 real Notes readiness and surface state did not open the verified Settings-click gate.'
 }
 $passed++
+$legacyReadinessFailure = Get-C188R11ReadinessFailureReason $r32Serial
+if ($legacyReadinessFailure -cne 'managed-return-state-missing-or-invalid') {
+    throw 'The legacy five-descriptor readiness audit no longer rejects the R30 two-descriptor profile.'
+}
+$passed++
+if (-not [string]::IsNullOrEmpty((Get-C188R11ReadinessFailureReason $r32Serial 2))) {
+    throw 'The profile-bound post-readiness audit rejected the valid R30 two-descriptor state.'
+}
+$passed++
+$settingsRunnerPath = Join-Path $PSScriptRoot 'run-c188r12r1-settings-handoff.ps1'
+$settingsRunnerSource = Get-Content -LiteralPath $settingsRunnerPath -Raw
+if ($settingsRunnerSource -notmatch 'Get-C188R11ReadinessFailureReason\s+\$serialText\s+\x60?\s*\(\[uint32\]\$readinessProfile\.expectedDescriptorCount\)') {
+    throw 'The nested Settings runner post-readiness audit is not bound to its candidate readiness profile.'
+}
+$passed++
 if (Test-C188R33SettingsClickGate $r32Serial $r30Profile 5 1280 800) {
     throw 'R30 two-descriptor managed return was accepted under the five-descriptor profile.'
 }
