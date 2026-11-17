@@ -18,17 +18,25 @@ from typing import Any
 sys.dont_write_bytecode = True
 
 ROOT = Path(__file__).resolve().parents[1]
-PROBE = Path("/home/guidex/src/ia64-5ar8-coop-probe-20261115-r2-static/ia64-cooperative-context-probe.elf")
+PROBE = Path("/home/guidex/src/ia64-5ar10-coop-probe-20261117-r1-static/ia64-cooperative-context-probe.elf")
 MANIFEST = PROBE.with_name("ia64-cooperative-context-probe.manifest.json")
 KERNEL = Path("/home/guidex/src/ia64-4g-stacked-nat-rse-kernel-20261111-r3/bin/kernel.elf")
 SKI_PREFIX = Path("/home/guidex/opt/ski-dfc2902")
 OBJDUMP = Path("/home/guidex/src/ia64-2-toolchain-shim/ia64-linux-objdump")
-CAPTURE = Path("/home/guidex/src/ia64-5ar8-cooperative-qualification-20261115-r2")
+CAPTURE = Path("/home/guidex/src/ia64-5ar10-cooperative-qualification-20261117-r1-run-01")
 
-EXPECTED_PROBE_SHA256 = "dec92c95c500bd70b058540fcbf44e490629c31c451906f8acba9af86fc469f3"
-EXPECTED_MANIFEST_SHA256 = "4addffab0102076d74ae23704bcea46f87517e18abf45f50cbdffeba666254b1"
+EXPECTED_PROBE_SHA256 = "98c7bbf8604fa1443e1b9af9200592aa4d4a21f214b384b667ebbb494b05bb4c"
+EXPECTED_MANIFEST_SHA256 = "d43458f66978df73c910a3da28db900daf28467e53bb2f9c327e6fcd1da8dbcd"
 EXPECTED_KERNEL_SHA256 = "ab13fabb6a92ebe039afa2afd9729f6f6ceb2529b63be2b47b0c87cf264d960c"
 EXPECTED_SKI_SHA256 = "ff6b19cb87dbf2db39cda4478d0e49995c9a5ec9ddd05aac83191f4ba1e40b45"
+EXPECTED_BRANCH_REGISTERS = {
+    "A": {"b1": 0x4252314141413031, "b2": 0x4252324141413031,
+          "b3": 0x4252334141413031, "b4": 0x4252344141413031,
+          "b5": 0x4252354141413031},
+    "B": {"b1": 0x4252314242423032, "b2": 0x4252324242423032,
+          "b3": 0x4252334242423032, "b4": 0x4252344242423032,
+          "b5": 0x4252354242423032},
+}
 
 MAX_SIMULTANEOUS_PROGRAM_BREAKPOINTS = 6
 SKI_PROGRAM_BREAKPOINT_CAPACITY = 10
@@ -154,8 +162,9 @@ def parse_progress_samples(stderr_text: str,
 
 
 def parse_eval_register_samples(stderr_text: str) -> list[dict[str, Any]]:
-    requested = ("iva", "psr", "rsc", "bsp", "bspst", "rnat", "unat", "pfs", "sp",
-                 "gp", "b0", "r14", "r15", "r32", "r33", "r42", "r43",
+    requested = ("iva", "psr", "rsc", "bsp", "rnat", "unat", "pfs", "sp",
+                 "gp", "b0", "b1", "b2", "b3", "b4", "b5", "r14", "r15",
+                 "r32", "r33", "r42", "r43",
                  "iip", "ipsr", "isr", "ifs", "iipa")
     count_matches = list(re.finditer(r"(?m)^\s*\$insts\$\s*=\s*(\d+)\s*$", stderr_text))
     observations: list[dict[str, Any]] = []
@@ -166,7 +175,7 @@ def parse_eval_register_samples(stderr_text: str) -> list[dict[str, Any]]:
         segment = re.split(r"(?m)^\s*Hex:", segment, maxsplit=1)[0]
         state: dict[str, int] = {}
         for alias, raw in re.findall(
-                r"(?mi)^\s*(iva|psr|rsc|bsp|bspst|rnat|unat|pfs|sp|gp|b0|r14|r15|"
+                r"(?mi)^\s*(iva|psr|rsc|bsp|rnat|unat|pfs|sp|gp|b0|b1|b2|b3|b4|b5|r14|r15|"
                 r"r32|r33|r42|r43|iip|ipsr|isr|ifs|iipa)"
                 r"\s*=\s*(?:0x)?([0-9a-f]+)\s*$", segment):
             key = alias.lower()
@@ -290,6 +299,11 @@ def validate_context_words(words: list[int], expected_id: int) -> dict[str, int]
         raise DiagnosticError(f"context identity {identity:#x} does not match {expected_id:#x}")
     return {
         "context_id": identity,
+        "br1": words[160 // 8],
+        "br2": words[168 // 8],
+        "br3": words[176 // 8],
+        "br4": words[184 // 8],
+        "br5": words[192 // 8],
         "rp": words[64 // 8],
         "pfs": words[72 // 8],
         "rsc": words[80 // 8],
@@ -572,42 +586,101 @@ def analyze_cooperative_switch_frontiers(
         return hits[0] if hits else None
 
     b_entry = one("Context B first-entry bootstrap")
-    b_bounds = one("Context B BSP bounds passed")
+    b_branch_passed = one("Context B branch-register checks passed")
+    b_to_a_first = one("first B-to-A switch call")
     a_resume_first = one("Context A first resumption")
     b_resume_second = one("Context B second resumption")
     assertion_failure_hit = one("first assertion failure loop")
-    flushrs = observations.get("context-switch flushrs", [])
-    bsp_registers = state(b_bounds)
+
+    def branch_registers(registers: dict[str, int], identity: str) -> dict[str, int | None]:
+        return {name: registers.get(name) for name in EXPECTED_BRANCH_REGISTERS[identity]}
+
+    def context_branch_registers(snapshot: dict[str, Any] | None,
+                                 identity: str) -> dict[str, int] | None:
+        if not snapshot:
+            return None
+        state_name = "context_a" if identity == "A" else "context_b"
+        context_state = snapshot.get(state_name)
+        if not context_state:
+            return None
+        return {f"b{reg}": context_state.get(f"br{reg}") for reg in range(1, 6)}
+
+    def matches_expected(values: dict[str, int | None] | None, identity: str) -> bool:
+        return values is not None and values == EXPECTED_BRANCH_REGISTERS[identity]
+
+    def snapshot_at(sample: dict[str, int] | None) -> dict[str, Any] | None:
+        return snapshots_by_sample.get(sample.get("sample")) if sample else None
+
+    b_branch_registers = branch_registers(state(b_branch_passed), "B")
+    a_resume_registers = branch_registers(state(a_resume_first), "A")
+    b_resume_registers = branch_registers(state(b_resume_second), "B")
+    a_saved_at_b_entry = context_branch_registers(snapshot_at(b_entry), "A")
+    b_initial_at_b_entry = context_branch_registers(snapshot_at(b_entry), "B")
+    b_saved_after_first_switch = context_branch_registers(snapshot_at(a_resume_first), "B")
+    a_saved_after_second_switch = context_branch_registers(snapshot_at(b_resume_second), "A")
+    b_sp = state(b_branch_passed).get("sp")
+    b_stack = context_stack_ranges.get("B") if context_stack_ranges is not None else None
+    context_b_stack_valid = bool(b_sp is not None and b_stack is not None and
+                                 b_stack[0] <= b_sp <= b_stack[1])
+    bsp_registers = state(b_branch_passed)
     bsp_check_valid = bool(
-        b_bounds and bsp_registers.get("r14") == expected_bsp and
-        bsp_registers.get("r15") == expected_bsp and
-        bsp_registers.get("bsp") == expected_bsp and
-        (bsp_registers.get("rsc", -1) & 0x3) == 0x3
+        b_branch_passed and bsp_registers.get("bsp") == expected_bsp and
+        (bsp_registers.get("rsc", -1) & 0x3) == 0x3 and context_b_stack_valid
     )
-    ordered_flushrs = len(flushrs) >= 4 and all(
-        left["instructions"] < right["instructions"]
-        for left, right in zip(flushrs[:3], flushrs[1:4], strict=True))
-    ordered_frontiers = bool(
-        b_entry and b_bounds and a_resume_first and b_resume_second and
-        len(flushrs) >= 4 and
-        flushrs[0]["instructions"] < b_entry["instructions"] < b_bounds["instructions"] <
-        flushrs[1]["instructions"] < a_resume_first["instructions"] <
-        flushrs[2]["instructions"] < b_resume_second["instructions"] <
-        flushrs[3]["instructions"]
-    )
-    flushrs_event_counts = [event_count(sample) for sample in flushrs[:4]]
-    switch_events_match = flushrs_event_counts == [1, 3, 5, 7]
+    b_branch_registers_match = matches_expected(b_branch_registers, "B")
+    first_resume_registers_match = matches_expected(a_resume_registers, "A")
+    second_resume_registers_match = matches_expected(b_resume_registers, "B")
+    b_initial_slots_match = matches_expected(b_initial_at_b_entry, "B")
+    b_saved_after_first_switch_match = matches_expected(b_saved_after_first_switch, "B")
+    a_saved_after_second_switch_match = matches_expected(a_saved_after_second_switch, "A")
+    branch_registers_match = all((
+        b_branch_registers_match,
+        first_resume_registers_match,
+        second_resume_registers_match,
+        matches_expected(a_saved_at_b_entry, "A"),
+        b_initial_slots_match,
+        b_saved_after_first_switch_match,
+        a_saved_after_second_switch_match,
+    ))
+    b_branch_frontier_valid = bool(
+        b_entry and b_branch_passed and b_initial_slots_match and
+        b_branch_registers_match and bsp_check_valid and
+        event_count(b_entry) == 1 and event_count(b_branch_passed) == 1 and
+        b_entry["instructions"] < b_branch_passed["instructions"])
     context_b_to_a_first_observed = bool(
-        bsp_check_valid and len(flushrs) >= 2 and
-        flushrs[1]["instructions"] > (b_bounds or {}).get("instructions", -1) and
-        event_count(flushrs[1]) == 3
-    )
+        b_to_a_first and b_branch_frontier_valid and
+        event_count(b_to_a_first) == 3 and
+        b_to_a_first["instructions"] > b_branch_passed["instructions"])
+    context_a_first_resume_verified = bool(
+        context_b_to_a_first_observed and a_resume_first and
+        first_resume_registers_match and b_saved_after_first_switch_match and
+        event_count(a_resume_first) == 3 and
+        a_resume_first["instructions"] > b_to_a_first["instructions"])
+    context_b_second_resume_verified = bool(
+        context_a_first_resume_verified and b_resume_second and
+        second_resume_registers_match and a_saved_after_second_switch_match and
+        event_count(b_resume_second) == 5 and
+        b_resume_second["instructions"] > a_resume_first["instructions"])
+    ordered_frontiers = bool(
+        b_entry and b_branch_passed and b_to_a_first and a_resume_first and b_resume_second and
+        b_entry["instructions"] < b_branch_passed["instructions"] <
+        b_to_a_first["instructions"] < a_resume_first["instructions"] <
+        b_resume_second["instructions"])
+    switch_events_match = bool(
+        b_entry and event_count(b_entry) == 1 and
+        b_branch_passed and event_count(b_branch_passed) == 1 and
+        b_to_a_first and event_count(b_to_a_first) == 3 and
+        a_resume_first and event_count(a_resume_first) == 3 and
+        b_resume_second and event_count(b_resume_second) == 5)
     named_frontiers = (
         ("Context B first-entry bootstrap", b_entry),
-        ("Context B BSP bounds passed", b_bounds if bsp_check_valid else None),
-        ("context-switch flushrs", flushrs[-1] if flushrs else None),
-        ("Context A first resumption", a_resume_first),
-        ("Context B second resumption", b_resume_second),
+        ("Context B branch-register checks passed",
+         b_branch_passed if b_branch_frontier_valid else None),
+        ("first B-to-A switch call", b_to_a_first if context_b_to_a_first_observed else None),
+        ("Context A first resumption",
+         a_resume_first if context_a_first_resume_verified else None),
+        ("Context B second resumption",
+         b_resume_second if context_b_second_resume_verified else None),
         ("first assertion failure loop", assertion_failure_hit),
     )
     furthest = max(
@@ -660,7 +733,6 @@ def analyze_cooperative_switch_frontiers(
             "rsc_mode": ((registers["rsc"] & 0x3)
                          if registers.get("rsc") is not None else None),
             "bsp": registers.get("bsp"),
-            "bspstore_debugger_value": registers.get("bspst"),
             "rnat": registers.get("rnat"),
             "sp": registers.get("sp"),
             "gp": registers.get("gp"),
@@ -715,21 +787,38 @@ def analyze_cooperative_switch_frontiers(
         }
 
     switch_sequence_pre_final_verified = bool(
-        bsp_check_valid and ordered_flushrs and ordered_frontiers and switch_events_match and
-        len(flushrs) == 4 and
-        len(observations.get("Context B first-entry bootstrap", [])) == 1 and
-        len(observations.get("Context A first resumption", [])) == 1 and
-        len(observations.get("Context B second resumption", [])) == 1 and
-        assertion_failure_hit is None
+        b_branch_frontier_valid and branch_registers_match and
+        context_b_to_a_first_observed and context_a_first_resume_verified and
+        context_b_second_resume_verified and ordered_frontiers and
+        switch_events_match and assertion_failure_hit is None
     )
     return {
         "breakpoint_observations": observations,
-        "context_b_bounds_registers": bsp_registers,
+        "context_b_branch_registers": b_branch_registers,
+        "branch_register_evidence": {
+            "context_a_saved_at_first_b_entry": a_saved_at_b_entry,
+            "context_b_initial_slots_at_first_b_entry": b_initial_at_b_entry,
+            "context_b_saved_after_first_b_to_a": b_saved_after_first_switch,
+            "context_a_saved_after_second_a_to_b": a_saved_after_second_switch,
+            "context_b_live_at_branch_assertion_frontier": b_branch_registers,
+            "context_a_live_at_first_resume": a_resume_registers,
+            "context_b_live_at_second_resume": b_resume_registers,
+            "expected": EXPECTED_BRANCH_REGISTERS,
+            "context_b_initial_and_live_values_match": (
+                b_initial_slots_match and b_branch_registers_match),
+            "context_a_first_resume_and_saved_b_match": (
+                first_resume_registers_match and b_saved_after_first_switch_match),
+            "context_b_second_resume_and_saved_a_match": (
+                second_resume_registers_match and a_saved_after_second_switch_match),
+            "all_observed_values_match": branch_registers_match,
+        },
         "expected_context_b_bsp": expected_bsp,
         "context_b_bsp_check_valid": bsp_check_valid,
+        "context_b_branch_frontier_valid": b_branch_frontier_valid,
+        "context_a_first_resume_verified": context_a_first_resume_verified,
+        "context_b_second_resume_verified": context_b_second_resume_verified,
         "context_b_to_a_first_observed": context_b_to_a_first_observed,
-        "flushrs_event_counts": flushrs_event_counts,
-        "flushrs_event_sequence_valid": switch_events_match,
+        "event_counts_at_captured_frontiers_match": switch_events_match,
         "frontier_order_valid": ordered_frontiers,
         "switch_sequence_pre_final_verified": switch_sequence_pre_final_verified,
         "full_switch_sequence_verified": False,
@@ -738,9 +827,12 @@ def analyze_cooperative_switch_frontiers(
         "first_unexpected_exception": first_exception,
         "furthest_proven_frontier": furthest[0] if furthest else None,
         "furthest_proven_instruction_count": furthest[1] if furthest else None,
-        "context_switch_flushrs_hits": len(flushrs),
         "context_b_first_entry_hits": len(observations.get(
             "Context B first-entry bootstrap", [])),
+        "context_b_branch_register_pass_hits": len(observations.get(
+            "Context B branch-register checks passed", [])),
+        "context_b_to_a_first_call_hits": len(observations.get(
+            "first B-to-A switch call", [])),
         "context_a_first_resume_hits": len(observations.get(
             "Context A first resumption", [])),
         "context_b_second_resume_hits": len(observations.get(
@@ -778,7 +870,7 @@ def _format_eval_and_snapshot(lines: list[str], index: int, label: str,
                               root: Path, context_a: int, context_b: int,
                               probe_record: int, probe_record_size: int) -> None:
     lines.append("eval ip+0 $insts$")
-    lines.append("eval iva psr rsc bsp bspst rnat unat pfs sp gp b0 r14 r15 "
+    lines.append("eval iva psr rsc bsp rnat unat pfs sp gp b0 b1 b2 b3 b4 b5 r14 r15 "
                  "r32 r33 r42 r43 iip ipsr isr ifs iipa")
     register_path = root / "registers" / f"{index:04d}-{label}.txt"
     context_a_path = root / "contexts" / f"{index:04d}-{label}-a.txt"
@@ -795,8 +887,9 @@ def _format_eval_and_snapshot(lines: list[str], index: int, label: str,
 def cooperative_breakpoints(frontiers: dict[str, int]) -> tuple[tuple[int, str], ...]:
     return (
         (frontiers["context_b_first"], "Context B first-entry bootstrap"),
-        (frontiers["bsp_bounds_valid"], "Context B BSP bounds passed"),
-        (frontiers["context_a_save"], "context-switch flushrs"),
+        (frontiers["b_branch_registers_passed"],
+         "Context B branch-register checks passed"),
+        (frontiers["b_to_a_first_switch"], "first B-to-A switch call"),
         (frontiers["context_a_resume_first"], "Context A first resumption"),
         (frontiers["context_b_resume_second"], "Context B second resumption"),
         (frontiers["test_fail"], "first assertion failure loop"),
@@ -906,7 +999,7 @@ def validate_command_file(command_text: str,
 
     allowed_eval = {
         "eval ip+0 $insts$",
-        "eval iva psr rsc bsp bspst rnat unat pfs sp gp b0 r14 r15 "
+        "eval iva psr rsc bsp rnat unat pfs sp gp b0 b1 b2 b3 b4 b5 r14 r15 "
         "r32 r33 r42 r43 iip ipsr isr ifs iipa",
     }
     steps: list[str] = []
@@ -1020,9 +1113,9 @@ def preflight(args: argparse.Namespace) -> tuple[Any, Path, dict[str, Any], dict
         if actual != expected:
             raise DiagnosticError(f"{label} identity mismatch: {actual}")
     if args.expected_sha256 != EXPECTED_PROBE_SHA256:
-        raise DiagnosticError("this diagnostic is pinned to the corrected IA64-5AR8 probe")
+        raise DiagnosticError("this diagnostic is pinned to the corrected IA64-5AR10 probe")
     if args.expected_manifest_sha256 != EXPECTED_MANIFEST_SHA256:
-        raise DiagnosticError("this diagnostic is pinned to the corrected IA64-5AR8 manifest")
+        raise DiagnosticError("this diagnostic is pinned to the corrected IA64-5AR10 manifest")
     if args.simulator_sha256 != EXPECTED_SKI_SHA256:
         raise DiagnosticError("this diagnostic is pinned to the qualified Ski 1.5.1 executable")
     if sha256(args.manifest) != args.expected_manifest_sha256:
@@ -1037,6 +1130,10 @@ def preflight(args: argparse.Namespace) -> tuple[Any, Path, dict[str, Any], dict
                                    for region in load_ranges)
     symbols["switch_entry"] = elf.symbols["ia64_coop_context_switch"]["value"]
     symbols["context_b_first_entry"] = elf.symbols["ia64_coop_b_first_entry"]["value"]
+    symbols["b_branch_registers_passed"] = elf.symbols[
+        "ia64_coop_b_branch_registers_passed"]["value"]
+    symbols["b_to_a_first_switch"] = elf.symbols[
+        "ia64_coop_b_to_a_first_switch"]["value"]
     symbols["probe_record"] = elf.symbols["ia64_coop_probe_record"]["value"]
     if not load_ranges or not (symbols["text"][0] <= elf.entry < symbols["text"][1]):
         raise DiagnosticError("ELF entry does not match the probe text range")
@@ -1051,6 +1148,9 @@ def preflight(args: argparse.Namespace) -> tuple[Any, Path, dict[str, Any], dict
         "rbs_handoff": ski_breakpoint_ip(symbols["switch_bspstore"]),
         "context_b_first": ski_breakpoint_ip(symbols["context_b_first_entry"]),
         "bsp_bounds_valid": ski_breakpoint_ip(symbols["bsp_bounds_valid"]),
+        "b_branch_registers_passed": ski_breakpoint_ip(
+            symbols["b_branch_registers_passed"]),
+        "b_to_a_first_switch": ski_breakpoint_ip(symbols["b_to_a_first_switch"]),
         "context_a_resume_first": ski_breakpoint_ip(symbols["a_resume_first"]),
         "context_b_resume_second": ski_breakpoint_ip(symbols["b_resume_second"]),
         "context_a_resume_final": ski_breakpoint_ip(symbols["a_resume_final"]),
@@ -1081,7 +1181,7 @@ def run_no_guest_parser_smoke(runner: Any, simulator: Path, root: Path) -> dict[
     register_file = smoke_root / "registers.txt"
     commands = "\n".join((
         "eval ip+0 $insts$",
-        "eval iva psr rsc bsp bspst rnat unat pfs sp gp b0 r14 r15 "
+        "eval iva psr rsc bsp rnat unat pfs sp gp b0 b1 b2 b3 b4 b5 r14 r15 "
         "r32 r33 r42 r43 iip ipsr isr ifs iipa",
         "bs 0x108000",
         f"rd {register_file}",
@@ -1111,8 +1211,9 @@ def run_no_guest_parser_smoke(runner: Any, simulator: Path, root: Path) -> dict[
     # separate smoke validates command syntax and output formatting only.
     progress = parse_progress_samples(stderr_text, ((0, 1),), 0)
     register_states = parse_eval_register_samples(stderr_text)
-    required_registers = {"iva", "psr", "rsc", "bsp", "bspst", "rnat", "unat", "pfs",
-                          "sp", "gp", "b0", "r14", "r15", "r32", "r33", "r42",
+    required_registers = {"iva", "psr", "rsc", "bsp", "rnat", "unat", "pfs",
+                          "sp", "gp", "b0", "b1", "b2", "b3", "b4", "b5",
+                          "r14", "r15", "r32", "r33", "r42",
                           "r43", "iip", "ipsr", "isr", "ifs", "iipa"}
     if len(progress) != 1 or len(register_states) != 1 or \
             not required_registers <= register_states[0]["registers"].keys():
@@ -1212,8 +1313,8 @@ def run_no_guest_breakpoint_smokes(runner: Any, simulator: Path,
 
 
 def validate_smoke_command_file(command_text: str) -> None:
-    required = ("eval ip+0 $insts$", "eval iva psr rsc bsp bspst rnat unat pfs sp gp b0 "
-                "r14 r15 r32 r33 r42 r43 iip ipsr isr ifs iipa", "bs 0x108000", "rd ",
+    required = ("eval ip+0 $insts$", "eval iva psr rsc bsp rnat unat pfs sp gp b0 "
+                "b1 b2 b3 b4 b5 r14 r15 r32 r33 r42 r43 iip ipsr isr ifs iipa", "bs 0x108000", "rd ",
                 "dd 0x0 0xf ", "if 1 quit", "quit")
     if any(command not in command_text for command in required):
         raise DiagnosticError("no-guest parser smoke is missing a required pinned command")
@@ -1396,7 +1497,7 @@ def main(argv: list[str] | None = None) -> int:
         debugger_initialization = analyze_debugger_initialization(
             stderr_text, command_text, samples, elf_facts["elf_entry"])
         analysis = {
-            "outcome": "IA64_COOPERATIVE_DEBUGGER_BLOCKED",
+            "outcome": "IA64_COOPERATIVE_REQUALIFICATION_BLOCKED",
             "probe_sha256": args.expected_sha256,
             "manifest_sha256": args.expected_manifest_sha256,
             "simulator_sha256": args.simulator_sha256,
@@ -1438,6 +1539,12 @@ def main(argv: list[str] | None = None) -> int:
                      "switch_flushrs"),
                     ("context_b_first_entry", symbols["frontiers"]["context_b_first"],
                      "context_b_first_entry"),
+                    ("context_b_branch_register_checks_passed",
+                     symbols["frontiers"]["b_branch_registers_passed"],
+                     "b_branch_registers_passed"),
+                    ("first_context_b_to_a_switch_call",
+                     symbols["frontiers"]["b_to_a_first_switch"],
+                     "b_to_a_first_switch"),
                     ("context_b_bsp_bounds_valid", symbols["frontiers"]["bsp_bounds_valid"],
                      "bsp_bounds_valid"),
                     ("return_to_context_a", symbols["frontiers"]["context_a_resume_first"],
@@ -1510,18 +1617,25 @@ def main(argv: list[str] | None = None) -> int:
                 runtime_frontiers["full_switch_sequence_verified"]:
             analysis["outcome"] = "IA64_COOPERATIVE_PROBE_QUALIFIED"
         else:
-            bounds_hits = runtime_frontiers["breakpoint_observations"].get(
-                "Context B BSP bounds passed", [])
-            bounds_instruction = bounds_hits[0]["instructions"] if bounds_hits else -1
+            branch_pass_hits = runtime_frontiers["breakpoint_observations"].get(
+                "Context B branch-register checks passed", [])
+            branch_pass_instruction = (
+                branch_pass_hits[0]["instructions"] if branch_pass_hits else -1)
             failure = runtime_frontiers["first_assertion_failure"]
             exception = runtime_frontiers["first_unexpected_exception"]
-            advanced_after_bsp = runtime_frontiers["context_b_to_a_first_observed"] or (
-                failure is not None and failure["instructions"] > bounds_instruction) or (
-                exception is not None and exception["instructions"] > bounds_instruction)
-            if runtime_frontiers["context_b_bsp_check_valid"] and advanced_after_bsp:
+            advanced_after_branch_check = (
+                runtime_frontiers["context_b_to_a_first_observed"] or
+                runtime_frontiers["context_a_first_resume_verified"] or
+                runtime_frontiers["context_b_second_resume_verified"] or
+                (failure is not None and
+                 failure["instructions"] > branch_pass_instruction) or
+                (exception is not None and
+                 exception["instructions"] > branch_pass_instruction))
+            if (runtime_frontiers["context_b_branch_frontier_valid"] and
+                    advanced_after_branch_check):
                 analysis["outcome"] = "IA64_COOPERATIVE_FRONTIER_ADVANCED"
             else:
-                analysis["outcome"] = "IA64_COOPERATIVE_DEBUGGER_BLOCKED"
+                analysis["outcome"] = "IA64_COOPERATIVE_REQUALIFICATION_BLOCKED"
         write_json_new(args.capture_dir / "analysis.json", analysis)
         print(json.dumps({"analysis": str(args.capture_dir / "analysis.json"),
                           "outcome": analysis["outcome"],

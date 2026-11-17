@@ -55,6 +55,16 @@ def load_validator() -> Any:
     return module
 
 
+def load_cooperative_branch_register_validator() -> Any:
+    path = ROOT / "scripts" / "ia64_coop_branch_register_contract.py"
+    spec = importlib.util.spec_from_file_location("ia64_coop_branch_register_contract", path)
+    if spec is None or spec.loader is None:
+        raise GateError(f"cannot load cooperative branch-register validator: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 ELF_VALIDATOR = load_validator()
 
 
@@ -1986,6 +1996,7 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
         "ia64_coop_a_test", "ia64_coop_a_resumed_first",
         "ia64_coop_a_resumed_final", "ia64_coop_a_final_exit",
         "ia64_coop_b_first_entry", "ia64_coop_b_test", "ia64_coop_b_resumed",
+        "ia64_coop_b_branch_registers_passed", "ia64_coop_b_to_a_first_switch",
         "ia64_coop_b_unexpected_resume", "ia64_coop_test_fail", "ia64_coop_b_bsp_check",
         "ia64_coop_b_bsp_bounds_valid",
         "__text_start", "__text_end",
@@ -2039,6 +2050,7 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
     script_dir = ROOT / "tests" / "ia64_cooperative_context_switch"
     switch_source = (script_dir / "context_switch.s").read_text(encoding="utf-8")
     sequence_source = (script_dir / "probe_sequence.s").read_text(encoding="utf-8")
+    context_header = (script_dir / "context.h").read_text(encoding="utf-8")
     entry_source = (script_dir / "entry.s").read_text(encoding="utf-8")
     build_source = (script_dir / "build.sh").read_text(encoding="utf-8")
     required_switch_terms = (
@@ -2160,6 +2172,17 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
         setup_body, r"\bbr\.call[^\n]*ia64_coop_set_nat8", "setup nested call")
     setup_return_instruction = cooperative_disassembly_instruction_address(
         setup_body, r"\bbr\.ret\.sptk\.many\s+b0\b", "setup return")
+    try:
+        target_result = subprocess.run([str(objdump_path), "-dr", str(artifact)],
+                                       check=True, capture_output=True, text=True)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise GateError(f"cannot inspect complete cooperative target disassembly: {exc}") from exc
+    branch_validator = load_cooperative_branch_register_validator()
+    try:
+        branch_register_contract = branch_validator.validate_branch_register_contract(
+            sequence_source, switch_source, context_header, target_result.stdout)
+    except branch_validator.BranchRegisterContractError as exc:
+        raise GateError(f"cooperative branch-register contract failed: {exc}") from exc
     return {"ivt": ivt["addr"], "text": [symbol("__text_start"), symbol("__text_end")],
             "context_a": symbol("ia64_coop_context_a"),
             "context_b": symbol("ia64_coop_context_b"),
@@ -2177,6 +2200,8 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
             "probe_after_a_test": symbol("ia64_coop_probe_after_a_test"),
             "a_resume_first": symbol("ia64_coop_a_resumed_first"),
             "b_resume_second": symbol("ia64_coop_b_resumed"),
+            "b_branch_registers_passed": symbol("ia64_coop_b_branch_registers_passed"),
+            "b_to_a_first_switch": symbol("ia64_coop_b_to_a_first_switch"),
             "bsp_check_instruction": bsp_read_instruction,
             "bsp_bounds_valid": symbol("ia64_coop_b_bsp_bounds_valid"),
             "test_fail": symbol("ia64_coop_test_fail"),
@@ -2190,6 +2215,7 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
             "switch_flushrs": switch_flushrs,
             "switch_bspstore": switch_bspstore,
             "switch_return": switch_return,
+            "branch_register_contract": branch_register_contract,
             "setup_disassembly": setup_disassembly,
             "switch_source": str((script_dir / "context_switch.s").resolve())}
 

@@ -129,6 +129,14 @@ static_assert(offsetof(Context, spill_unat) == 120, "spill UNAT offset changed")
 static_assert(offsetof(Context, lc) == 128, "LC offset changed");
 static_assert(offsetof(Context, pr) == 152, "PR offset changed");
 static_assert(offsetof(Context, br1_to_br5) == 160, "BR offset changed");
+static_assert(offsetof(Context, br1_to_br5) + 1 * sizeof(uint64_t) == 168,
+              "BR2 offset changed");
+static_assert(offsetof(Context, br1_to_br5) + 2 * sizeof(uint64_t) == 176,
+              "BR3 offset changed");
+static_assert(offsetof(Context, br1_to_br5) + 3 * sizeof(uint64_t) == 184,
+              "BR4 offset changed");
+static_assert(offsetof(Context, br1_to_br5) + 4 * sizeof(uint64_t) == 192,
+              "BR5 offset changed");
 static_assert(offsetof(Context, fpsr) == 200, "FPSR offset changed");
 static_assert(offsetof(Context, fp2_to_fp5_and_fp16_to_fp31) == 208,
               "preserved FP image offset changed");

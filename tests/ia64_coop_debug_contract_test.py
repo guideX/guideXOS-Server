@@ -301,8 +301,10 @@ class CommandFileContractTests(unittest.TestCase):
                 "rbs_handoff": 0x10DE44,
                 "context_b_first": 0x10AEC0,
                 "bsp_bounds_valid": 0x10AED0,
-                "context_a_resume_first": 0x10B250,
-                "context_b_resume_second": 0x10C850,
+                "b_branch_registers_passed": 0x10D0A0,
+                "b_to_a_first_switch": 0x10D6B0,
+                "context_a_resume_first": 0x10BBE0,
+                "context_b_resume_second": 0x10D6C0,
                 "context_a_resume_final": 0x10B930,
                 "test_fail": 0x10DF60,
                 "context_a_final_exit": 0x10C060,
@@ -316,8 +318,9 @@ class CommandFileContractTests(unittest.TestCase):
         frontiers = symbols["frontiers"]
         selected = diagnostic.cooperative_breakpoints(frontiers)
         self.assertEqual([label for _, label in selected], [
-            "Context B first-entry bootstrap", "Context B BSP bounds passed",
-            "context-switch flushrs", "Context A first resumption",
+            "Context B first-entry bootstrap",
+            "Context B branch-register checks passed", "first B-to-A switch call",
+            "Context A first resumption",
             "Context B second resumption", "first assertion failure loop",
         ])
         text = diagnostic.make_command_file(Path("/tmp/coop-debug"), symbols)
@@ -328,8 +331,9 @@ class CommandFileContractTests(unittest.TestCase):
         self.assertEqual(plan["unused_slots_at_peak"], 4)
         self.assertEqual(sum(line.startswith("bs ") for line in text.splitlines()), 6)
         self.assertIn("bl\nstep 64", text)
-        self.assertIn("eval iva psr rsc bsp bspst rnat unat pfs sp gp b0 r14 r15 "
-                      "r32 r33 r42 r43 iip ipsr isr ifs iipa", text)
+        self.assertIn("eval iva psr rsc bsp rnat unat pfs sp gp b0 b1 b2 b3 b4 b5 "
+                      "r14 r15 r32 r33 r42 r43 iip ipsr isr ifs iipa", text)
+        self.assertNotIn("bspst", text)
         self.assertEqual(text.splitlines()[-1], "quit")
 
 
@@ -346,85 +350,99 @@ class RuntimeSwitchFrontierAnalysisTests(unittest.TestCase):
     def evidence(self) -> tuple[list[dict[str, int]], list[dict[str, object]],
                                 list[dict[str, object]]]:
         stages = (
-            ("context-switch flushrs", 0x10DCB4, 10, 1),
             ("Context B first-entry bootstrap", 0x10AEC0, 20, 1),
-            ("Context B BSP bounds passed", 0x10AED0, 30, 2),
-            ("context-switch flushrs", 0x10DCB4, 40, 3),
-            ("Context A first resumption", 0x10B250, 50, 4),
-            ("context-switch flushrs", 0x10DCB4, 60, 5),
-            ("Context B second resumption", 0x10C850, 70, 6),
-            ("context-switch flushrs", 0x10DCB4, 80, 7),
+            ("Context B branch-register checks passed", 0x10D0A0, 30, 1),
+            ("first B-to-A switch call", 0x10D6B0, 40, 3),
+            ("Context A first resumption", 0x10BBE0, 50, 3),
+            ("Context B second resumption", 0x10D6C0, 60, 5),
         )
+        values = diagnostic.EXPECTED_BRANCH_REGISTERS
         samples = [
             {"sample": index, "instructions": instructions, "ip": address,
              "iip": address & ~0xF, "slot": (address & 0xF) // 4}
             for index, (_, address, instructions, _) in enumerate(stages, start=1)
         ]
-        registers = [
-            {"instructions": instructions, "registers": {
-                "rsc": 3,
-                "bsp": self.expected_bsp if label == "Context B BSP bounds passed" else 0,
-                "r14": self.expected_bsp if label == "Context B BSP bounds passed" else 0,
-                "r15": self.expected_bsp if label == "Context B BSP bounds passed" else 0,
-            }}
-            for label, _, instructions, _ in stages
-        ]
-        snapshots = [
-            {"sample": index, "probe_record": {"event_count": event_count}}
-            for index, (_, _, _, event_count) in enumerate(stages, start=1)
-        ]
+        registers = []
+        for label, _, instructions, _ in stages:
+            identity = "A" if label == "Context A first resumption" else "B"
+            state = dict(values[identity])
+            state.update({"rsc": 3, "sp": 0x12F000})
+            if label == "Context B branch-register checks passed":
+                state["bsp"] = self.expected_bsp
+            registers.append({"instructions": instructions, "registers": state})
+
+        def context(identity: str) -> dict[str, object]:
+            return {f"br{reg}": value for reg, value in enumerate(values[identity].values(), 1)}
+
+        snapshots = []
+        for index, (label, _, _, event_count) in enumerate(stages, start=1):
+            snapshot = {"sample": index, "probe_record": {"event_count": event_count}}
+            if label == "Context B first-entry bootstrap":
+                snapshot["context_a"] = context("A")
+                snapshot["context_b"] = context("B")
+            elif label == "Context A first resumption":
+                snapshot["context_b"] = context("B")
+            elif label == "Context B second resumption":
+                snapshot["context_a"] = context("A")
+            snapshots.append(snapshot)
         return samples, registers, snapshots
 
     def test_switch_frontiers_verify_through_second_context_b_return(self) -> None:
         samples, registers, snapshots = self.evidence()
         result = diagnostic.analyze_cooperative_switch_frontiers(
             samples, registers, snapshots, self.breakpoints, self.expected_bsp,
-            (0x100000, 0x108000))
+            (0x100000, 0x108000), (0x112600, 0x112200),
+            {"A": (0x100000, 0x110000), "B": (0x120000, 0x130000)})
         self.assertTrue(result["context_b_bsp_check_valid"])
+        self.assertTrue(result["context_b_branch_frontier_valid"])
         self.assertTrue(result["context_b_to_a_first_observed"])
-        self.assertEqual(result["flushrs_event_counts"], [1, 3, 5, 7])
+        self.assertTrue(result["context_a_first_resume_verified"])
+        self.assertTrue(result["context_b_second_resume_verified"])
+        self.assertTrue(result["event_counts_at_captured_frontiers_match"])
         self.assertTrue(result["switch_sequence_pre_final_verified"])
         self.assertFalse(result["full_switch_sequence_verified"])
 
     def test_bad_bsp_value_blocks_frontier_and_full_qualification(self) -> None:
         samples, registers, snapshots = self.evidence()
-        registers[2]["registers"]["r14"] += 8
+        registers[1]["registers"]["bsp"] += 8
         result = diagnostic.analyze_cooperative_switch_frontiers(
             samples, registers, snapshots, self.breakpoints, self.expected_bsp,
-            (0x100000, 0x108000))
+            (0x100000, 0x108000), (0x112600, 0x112200),
+            {"A": (0x100000, 0x110000), "B": (0x120000, 0x130000)})
         self.assertFalse(result["context_b_bsp_check_valid"])
+        self.assertFalse(result["context_b_branch_frontier_valid"])
         self.assertFalse(result["context_b_to_a_first_observed"])
         self.assertFalse(result["full_switch_sequence_verified"])
 
     def test_out_of_range_bsp_blocks_context_b_bounds_frontier(self) -> None:
         samples, registers, snapshots = self.evidence()
-        registers[2]["registers"]["r14"] = 0x170008
-        registers[2]["registers"]["r15"] = 0x170008
-        registers[2]["registers"]["bsp"] = 0x170008
+        registers[1]["registers"]["sp"] = 0x170008
         result = diagnostic.analyze_cooperative_switch_frontiers(
             samples, registers, snapshots, self.breakpoints, self.expected_bsp,
-            (0x100000, 0x108000))
+            (0x100000, 0x108000), (0x112600, 0x112200),
+            {"A": (0x100000, 0x110000), "B": (0x120000, 0x130000)})
         self.assertFalse(result["context_b_bsp_check_valid"])
+        self.assertFalse(result["context_b_branch_frontier_valid"])
         self.assertFalse(result["context_b_to_a_first_observed"])
         self.assertFalse(result["full_switch_sequence_verified"])
 
     def test_correct_bsp_followed_by_failure_loop_does_not_claim_a_switch(self) -> None:
         samples, registers, snapshots = self.evidence()
         failure_loop_ip = 0x10DF60
-        samples = samples[:3] + [
-            {"sample": 4, "instructions": 31, "ip": failure_loop_ip,
+        samples = samples[:2] + [
+            {"sample": 3, "instructions": 31, "ip": failure_loop_ip,
              "iip": failure_loop_ip, "slot": 0},
-            {"sample": 5, "instructions": 543, "ip": failure_loop_ip,
+            {"sample": 4, "instructions": 543, "ip": failure_loop_ip,
              "iip": failure_loop_ip, "slot": 0},
         ]
         registers.append({"instructions": 31, "registers": {
             "r14": 0xDEADBEEF, "r15": 0xBEEF, "sp": 0x12F000,
             "rsc": 3, "bsp": self.expected_bsp, "gp": 0x200000,
         }})
-        snapshots.append({"sample": 4,
+        snapshots.append({"sample": 3,
                           "context_a": {"context_id": 0xA, "switch_count": 1},
                           "context_b": {"context_id": 0xB, "switch_count": 1},
-                          "probe_record": {"event_count": 2, "errors": 0}})
+                          "probe_record": {"event_count": 1, "errors": 0}})
         failure_disassembly = (
             "  10df60:\t00 00 00\t[MII]       movl r14=0x113000;;\n")
         result = diagnostic.analyze_cooperative_switch_frontiers(
@@ -435,6 +453,7 @@ class RuntimeSwitchFrontierAnalysisTests(unittest.TestCase):
         self.assertEqual([sample["ip"] for sample in samples[-2:]],
                          [failure_loop_ip, failure_loop_ip])
         self.assertTrue(result["context_b_bsp_check_valid"])
+        self.assertTrue(result["context_b_branch_frontier_valid"])
         self.assertFalse(result["context_b_to_a_first_observed"])
         self.assertFalse(result["full_switch_sequence_verified"])
         self.assertFalse(result["switch_sequence_pre_final_verified"])

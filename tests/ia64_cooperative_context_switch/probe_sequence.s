@@ -18,6 +18,10 @@
 .equ C_CCV, 144
 .equ C_PR, 152
 .equ C_BR1, 160
+.equ C_BR2, 168
+.equ C_BR3, 176
+.equ C_BR4, 184
+.equ C_BR5, 192
 .equ C_FPSR, 200
 .equ C_FP2, 208
 .equ C_STACK_BASE, 528
@@ -96,6 +100,16 @@
 .equ BR3_B, 0x4252334242423032
 .equ BR4_B, 0x4252344242423032
 .equ BR5_B, 0x4252354242423032
+.equ BR1_A_INITIAL, 0x4252314141413031
+.equ BR2_A_INITIAL, 0x4252324141413031
+.equ BR3_A_INITIAL, 0x4252334141413031
+.equ BR4_A_INITIAL, 0x4252344141413031
+.equ BR5_A_INITIAL, 0x4252354141413031
+.equ BR1_B_INITIAL, 0x4252314242423032
+.equ BR2_B_INITIAL, 0x4252324242423032
+.equ BR3_B_INITIAL, 0x4252334242423032
+.equ BR4_B_INITIAL, 0x4252344242423032
+.equ BR5_B_INITIAL, 0x4252354242423032
 .equ LC_A, 0x31
 .equ LC_B, 0x42
 .equ EC_A, 0x51
@@ -367,8 +381,16 @@ ia64_coop_setup_nested_return:
     SET64 r14, C_CCV, r15
     movl r15 = PR_TEST ;;
     SET64 r14, C_PR, r15
-    movl r15 = BR1_B ;;
+    movl r15 = BR1_B_INITIAL ;;
     SET64 r14, C_BR1, r15
+    movl r15 = BR2_B_INITIAL ;;
+    SET64 r14, C_BR2, r15
+    movl r15 = BR3_B_INITIAL ;;
+    SET64 r14, C_BR3, r15
+    movl r15 = BR4_B_INITIAL ;;
+    SET64 r14, C_BR4, r15
+    movl r15 = BR5_B_INITIAL ;;
+    SET64 r14, C_BR5, r15
     movl r15 = FPSR_TEST ;;
     SET64 r14, C_FPSR, r15
     movl r15 = 1 ;;
@@ -399,15 +421,6 @@ ia64_coop_setup_nested_return:
     SET64 r14, 16, r15
     movl r15 = 0x4758373742423032 ;;
     SET64 r14, 24, r15
-    movl r15 = BR1_B ;;
-    SET64 r14, 168, r15
-    movl r15 = 0x4252324242423032 ;;
-    SET64 r14, 176, r15
-    movl r15 = 0x4252334242423032 ;;
-    SET64 r14, 184, r15
-    movl r15 = 0x4252344242423032 ;;
-    SET64 r14, 192, r15
-
     /* Seed every ABI-preserved FP image for the first Context B entry. */
     movl r28 = ia64_coop_fp_seed_b ;;
     adds r29 = C_FP2, r14 ;;
@@ -600,15 +613,15 @@ ia64_coop_a_test:
     movl r5 = GR5_A ;;
     movl r6 = GR6_A ;;
     movl r7 = GR7_A ;;
-    movl r14 = BR1_A ;;
+    movl r14 = BR1_A_INITIAL ;;
     mov b1 = r14 ;;
-    movl r14 = BR2_A ;;
+    movl r14 = BR2_A_INITIAL ;;
     mov b2 = r14 ;;
-    movl r14 = BR3_A ;;
+    movl r14 = BR3_A_INITIAL ;;
     mov b3 = r14 ;;
-    movl r14 = BR4_A ;;
+    movl r14 = BR4_A_INITIAL ;;
     mov b4 = r14 ;;
-    movl r14 = BR5_A ;;
+    movl r14 = BR5_A_INITIAL ;;
     mov b5 = r14 ;;
     movl r14 = PR_TEST ;;
     mov pr = r14, -1 ;;
@@ -812,6 +825,8 @@ ia64_coop_b_bsp_check:
 .global ia64_coop_b_bsp_bounds_valid
 ia64_coop_b_bsp_bounds_valid:
     CHECK_PRESERVED_REGS GR4_B, GR5_B, GR6_B, GR7_B, BR1_B, BR2_B, BR3_B, BR4_B, BR5_B
+.global ia64_coop_b_branch_registers_passed
+ia64_coop_b_branch_registers_passed:
     CHECK_APP_STATE LC_B, EC_B, CCV_B
     mov r14 = r32 ;;
     ASSERT_EQ r14, SENTINEL_B
@@ -841,6 +856,8 @@ ia64_coop_b_bsp_bounds_valid:
     movl r14 = ia64_coop_context_a ;;
     mov out1 = r14 ;;
     RECORD_EVENT EVENT_B_TO_A_FIRST, CTX_B_ID
+.global ia64_coop_b_to_a_first_switch
+ia64_coop_b_to_a_first_switch:
     br.call.sptk.many b0 = ia64_coop_context_switch ;;
 
 .global ia64_coop_b_resumed

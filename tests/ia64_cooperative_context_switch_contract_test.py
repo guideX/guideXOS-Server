@@ -270,8 +270,8 @@ class CooperativeContextRunnerConfigurationTests(unittest.TestCase):
     def test_command_uses_headless_batch_console_and_explicit_system_mode(self) -> None:
         self.assertEqual(runner.cooperative_context_probe_command(
             Path("/opt/ski/bin/bskinc"), Path("/tmp/selected.elf")), [
-                "/opt/ski/bin/bskinc", "-noconsole", "-forcesystem",
-                "/tmp/selected.elf",
+                str(Path("/opt/ski/bin/bskinc")), "-noconsole", "-forcesystem",
+                str(Path("/tmp/selected.elf")),
             ])
 
     def test_cooperative_batch_run_supplies_a_pty_stdin(self) -> None:
@@ -291,6 +291,8 @@ class CooperativeContextSwitchCallerTests(unittest.TestCase):
             r"movl r14 = ia64_coop_context_([ab]) ;;\s*"
             r"mov out1 = r14 ;;\s*"
             r"(?:RECORD_EVENT [^\n]*\s*)?"
+            r"(?:\.global [^\n]*\s*)?"
+            r"(?:[A-Za-z_][A-Za-z0-9_]*:\s*)?"
             r"br\.call\.sptk\.many b0 = ia64_coop_context_switch ;;"
         )
         callers = (
@@ -403,6 +405,47 @@ class CooperativeSetupReturnLinkTests(unittest.TestCase):
 
 
 class CooperativeDiagnosticFrontierTests(unittest.TestCase):
+    def test_debugger_plan_keeps_six_branch_and_switch_frontiers(self) -> None:
+        frontiers = {
+            "context_b_first": 0x10B7C0,
+            "b_branch_registers_passed": 0x10D0A0,
+            "b_to_a_first_switch": 0x10D6B0,
+            "context_a_resume_first": 0x10BBE0,
+            "context_b_resume_second": 0x10D6C0,
+            "test_fail": 0x10DF60,
+        }
+        plan = diagnostic.cooperative_breakpoints(frontiers)
+        self.assertEqual(len(plan), 6)
+        self.assertEqual([label for _, label in plan], [
+            "Context B first-entry bootstrap",
+            "Context B branch-register checks passed",
+            "first B-to-A switch call",
+            "Context A first resumption",
+            "Context B second resumption",
+            "first assertion failure loop",
+        ])
+        self.assertEqual(len({address for address, _ in plan}), 6)
+
+    def test_register_capture_includes_b1_through_b5_without_bspstore(self) -> None:
+        sample = """$insts$ = 12
+iva=0x100000
+psr=0x0
+rsc=0x3
+bsp=0x144a00
+b1=0x4252314242423032
+b2=0x4252324242423032
+b3=0x4252334242423032
+b4=0x4252344242423032
+b5=0x4252354242423032
+Hex:
+"""
+        parsed = diagnostic.parse_eval_register_samples(sample)
+        self.assertEqual([parsed[0]["registers"][f"b{reg}"] for reg in range(1, 6)], [
+            0x4252314242423032, 0x4252324242423032, 0x4252334242423032,
+            0x4252344242423032, 0x4252354242423032,
+        ])
+        self.assertNotIn("bspst", parsed[0]["registers"])
+
     def test_objdump_slots_map_to_ski_breakpoint_ips(self) -> None:
         self.assertEqual(diagnostic.ski_breakpoint_ip(0x10DC86), 0x10DC84)
         self.assertEqual(diagnostic.ski_breakpoint_ip(0x10E19C), 0x10E198)

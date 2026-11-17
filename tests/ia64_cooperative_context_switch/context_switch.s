@@ -22,6 +22,10 @@
 .equ C_CCV, 144
 .equ C_PR, 152
 .equ C_BR1, 160
+.equ C_BR2, 168
+.equ C_BR3, 176
+.equ C_BR4, 184
+.equ C_BR5, 192
 .equ C_FPSR, 200
 .equ C_FP2, 208
 .equ C_STACK_BASE, 528
@@ -321,13 +325,13 @@ ia64_coop_context_switch:
     mov r27 = b1 ;;
     STORE64 C_BR1, r27
     mov r27 = b2 ;;
-    STORE64 168, r27
+    STORE64 C_BR2, r27
     mov r27 = b3 ;;
-    STORE64 176, r27
+    STORE64 C_BR3, r27
     mov r27 = b4 ;;
-    STORE64 184, r27
+    STORE64 C_BR4, r27
     mov r27 = b5 ;;
-    STORE64 192, r27
+    STORE64 C_BR5, r27
     mov r27 = ar.fpsr ;;
     STORE64 C_FPSR, r27
 
@@ -429,13 +433,13 @@ ia64_coop_context_switch:
 
     LOAD64 C_BR1, r28, r20
     mov b1 = r20 ;;
-    LOAD64 168, r28, r20
+    LOAD64 C_BR2, r28, r20
     mov b2 = r20 ;;
-    LOAD64 176, r28, r20
+    LOAD64 C_BR3, r28, r20
     mov b3 = r20 ;;
-    LOAD64 184, r28, r20
+    LOAD64 C_BR4, r28, r20
     mov b4 = r20 ;;
-    LOAD64 192, r28, r20
+    LOAD64 C_BR5, r28, r20
     mov b5 = r20 ;;
     LOAD64 C_PR, r28, r20
     mov pr = r20, -1 ;;
