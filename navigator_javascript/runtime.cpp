@@ -2,6 +2,7 @@
 #include "json_parser.h"
 #include "json_number_host.h"
 #include "json_number_impl.inl"
+#include "json_serializer.h"
 #include "json_writer.h"
 
 #include <algorithm>
@@ -3012,6 +3013,150 @@ private:
     }
 
     bool stringifyJson(const std::vector<Value>& arguments,
+        SourceLocation callSite, Value& result)
+    {
+        result = Value::undefined();
+        if (arguments.size() > 1u) {
+            fail(RuntimeErrorCode::UnsupportedFeature, callSite);
+            return false;
+        }
+
+        const Value source = arguments.empty() ? Value::undefined()
+            : arguments[0];
+        const std::size_t maximumDepth = std::min(
+            context_.limits_.maxJsonNestingDepth,
+            kDefaultMaxJavaScriptJsonNestingDepth);
+        const std::size_t outputCapacity = std::min<std::size_t>(
+            context_.limits_.maxRuntimeStringLength, 64u * 1024u);
+        const std::size_t previousExecutionSteps = context_.executionSteps_;
+
+        std::vector<char> outputBuffer;
+        std::vector<PortableJsonTraversalFrame> traversalFrames;
+        try {
+            outputBuffer.resize(outputCapacity);
+            traversalFrames.resize(maximumDepth);
+        } catch (const std::bad_alloc&) {
+            fail(RuntimeErrorCode::AllocationFailure, callSite);
+            return false;
+        }
+
+        struct SerializeStepContext {
+            RuntimeContext* runtime = nullptr;
+            SourceLocation callSite;
+        } stepContext{&context_, callSite};
+        const auto consumeStep = [](void* context) {
+            SerializeStepContext* step =
+                static_cast<SerializeStepContext*>(context);
+            return step != nullptr && step->runtime != nullptr &&
+                step->runtime->consumeStep(step->callSite);
+        };
+        const auto objectValidator = [](void* context,
+            RuntimeObjectId objectId) {
+            RuntimeContext* runtime = static_cast<RuntimeContext*>(context);
+            if (runtime == nullptr) return
+                PortableJsonObjectDisposition::HostedOperationRequired;
+            const RuntimeContext::RuntimeObject* object =
+                runtime->objectAt(objectId);
+            if (object == nullptr || object->arrayIterator ||
+                objectId == runtime->objectPrototype_ ||
+                objectId == runtime->arrayPrototype_ ||
+                objectId == runtime->mathObject_ ||
+                objectId == runtime->eventConstantsObject_ ||
+                objectId == runtime->eventObject_) {
+                return PortableJsonObjectDisposition::HostedOperationRequired;
+            }
+            return PortableJsonObjectDisposition::Supported;
+        };
+
+        PortableJsonSerializeLimits limits;
+        limits.maxOutputBytes = outputCapacity;
+        limits.maxNestingDepth = maximumDepth;
+        limits.maxArrayLength = maximumSupportedArrayLength(context_.limits_);
+        limits.maxSteps = context_.executionSteps_ >=
+                context_.limits_.maxExecutionSteps
+            ? 0u : context_.limits_.maxExecutionSteps -
+                context_.executionSteps_;
+
+        PortableJsonOutputWriter output(outputBuffer.data(),
+            outputBuffer.size());
+        char numberScratch[384] = {};
+        const PortableJsonSerializeResult serialized = serializePortableJson(
+            source, context_.objectStore_, context_.stringStore_, output,
+            PortableJsonSerializeStorageView{traversalFrames.data(),
+                traversalFrames.size(), numberScratch, sizeof(numberScratch)},
+            limits, consumeStep, &stepContext, objectValidator, &context_);
+
+        if (serialized.status == PortableJsonSerializeStatus::Error &&
+            (serialized.error.code ==
+                    PortableJsonSerializeErrorCode::UnsupportedCallback ||
+                serialized.error.code ==
+                    PortableJsonSerializeErrorCode::HostedOperationRequired)) {
+            // The shared pass used direct, callback-free store reads. Restore
+            // its budget use before the one hosted callback-capable pass so
+            // callbacks run exactly once.
+            context_.executionSteps_ = previousExecutionSteps;
+            std::vector<char>().swap(outputBuffer);
+            std::vector<PortableJsonTraversalFrame>().swap(traversalFrames);
+            return stringifyJsonHostedCallbacks(arguments, callSite, result);
+        }
+
+        if (serialized.status == PortableJsonSerializeStatus::NoResult)
+            return true;
+        if (serialized.status == PortableJsonSerializeStatus::Error) {
+            switch (serialized.error.code) {
+            case PortableJsonSerializeErrorCode::OutputCapacityExceeded:
+                fail(RuntimeErrorCode::StringLimitExceeded, callSite);
+                break;
+            case PortableJsonSerializeErrorCode::ArrayLimitExceeded:
+                fail(RuntimeErrorCode::ArrayLimitExceeded, callSite);
+                break;
+            case PortableJsonSerializeErrorCode::DepthLimitExceeded:
+                fail(RuntimeErrorCode::JsonNestingLimitExceeded, callSite);
+                break;
+            case PortableJsonSerializeErrorCode::TraversalCapacityExceeded:
+                fail(RuntimeErrorCode::PortableCapacityExceeded, callSite);
+                break;
+            case PortableJsonSerializeErrorCode::StepBudgetExceeded:
+                fail(RuntimeErrorCode::ExecutionBudgetExceeded, callSite);
+                break;
+            case PortableJsonSerializeErrorCode::CycleDetected:
+            case PortableJsonSerializeErrorCode::StaleObjectHandle:
+            case PortableJsonSerializeErrorCode::UnsupportedValue:
+            case PortableJsonSerializeErrorCode::InvalidValue:
+                fail(RuntimeErrorCode::TypeError, callSite);
+                break;
+            case PortableJsonSerializeErrorCode::UnsupportedPropertyAttributes:
+                fail(RuntimeErrorCode::UnsupportedFeature, callSite);
+                break;
+            case PortableJsonSerializeErrorCode::StaleStringHandle:
+            case PortableJsonSerializeErrorCode::InvalidStringState:
+            case PortableJsonSerializeErrorCode::NumericFormattingFailure:
+            case PortableJsonSerializeErrorCode::InvalidInput:
+            case PortableJsonSerializeErrorCode::InternalInvariantFailure:
+                fail(RuntimeErrorCode::InvalidAstState, callSite);
+                break;
+            case PortableJsonSerializeErrorCode::ObjectStoreFailure:
+                fail(context_.mapPortableObjectError(
+                    serialized.error.objectError), callSite);
+                break;
+            case PortableJsonSerializeErrorCode::None:
+            case PortableJsonSerializeErrorCode::UnsupportedCallback:
+            case PortableJsonSerializeErrorCode::HostedOperationRequired:
+                fail(RuntimeErrorCode::InvalidAstState, callSite);
+                break;
+            }
+            return false;
+        }
+
+        RuntimeErrorCode stringError = RuntimeErrorCode::None;
+        if (!context_.createString(serialized.output, result, stringError)) {
+            fail(stringError, callSite);
+            return false;
+        }
+        return true;
+    }
+
+    bool stringifyJsonHostedCallbacks(const std::vector<Value>& arguments,
         SourceLocation callSite, Value& result)
     {
         result = Value::undefined();

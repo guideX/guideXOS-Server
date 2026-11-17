@@ -102,6 +102,19 @@ struct PortablePropertyEntry {
     bool isArrayLength = false;
 };
 
+// Iterates ordinary-object own string properties in ECMAScript property
+// order: canonical array-index keys first, followed by remaining strings in
+// insertion order. Symbols are excluded. The iterator is read-only and does
+// not retain pointers to property-name storage.
+struct PortableObjectPropertyCursor {
+    RuntimeObjectId object = kInvalidRuntimeObjectId;
+    std::uint32_t lastArrayIndex = 0u;
+    std::uint32_t nextStringProperty = kInvalidPortablePropertySlot;
+    std::size_t inspectedStringProperties = 0u;
+    bool hasLastArrayIndex = false;
+    bool stringsStarted = false;
+};
+
 struct PortableArrayEntry {
     std::uint32_t index = 0u;
     Value value = Value::undefined();
@@ -181,6 +194,12 @@ public:
     bool getOwnPropertyAt(RuntimeObjectId object, std::size_t ordinal,
         PortablePropertyEntry& result, bool& found,
         PortableObjectError& error) const;
+    bool beginOwnStringPropertyIteration(RuntimeObjectId object,
+        PortableObjectPropertyCursor& cursor,
+        PortableObjectError& error) const;
+    bool nextOwnStringProperty(PortableObjectPropertyCursor& cursor,
+        PortablePropertyEntry& result, bool& found,
+        std::size_t& inspections, PortableObjectError& error) const;
 
     bool hasOwnArrayElement(RuntimeObjectId object, std::size_t index,
         bool& found, PortableObjectError& error) const;

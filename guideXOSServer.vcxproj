@@ -343,7 +343,11 @@
     <ClInclude Include="navigator_javascript\host.h" />
     <ClInclude Include="navigator_javascript\json_number.h" />
     <ClInclude Include="navigator_javascript\json_number_host.h" />
+    <ClInclude Include="navigator_javascript\json_number_format.h" />
+    <ClInclude Include="navigator_javascript\json_number_format.inl" />
     <ClInclude Include="navigator_javascript\json_parser.h" />
+    <ClInclude Include="navigator_javascript\json_serializer.h" />
+    <ClInclude Include="navigator_javascript\json_serializer.inl" />
     <ClInclude Include="navigator_javascript\json_writer.h" />
     <ClInclude Include="navigator_javascript\lexer.h" />
     <ClInclude Include="navigator_javascript\navigator_script_host.h" />
@@ -355,6 +359,15 @@
     <ClInclude Include="third_party\ffc\ffc.h" />
     <ClInclude Include="third_party\ffc\LICENSE-MIT" />
     <ClInclude Include="third_party\ffc\PROVENANCE.md" />
+    <ClInclude Include="third_party\ryu\common.h" />
+    <ClInclude Include="third_party\ryu\d2s.h" />
+    <ClInclude Include="third_party\ryu\d2s_full_table.h" />
+    <ClInclude Include="third_party\ryu\d2s_intrinsics.h" />
+    <ClInclude Include="third_party\ryu\digit_table.h" />
+    <ClInclude Include="third_party\ryu\ryu.h" />
+    <ClInclude Include="third_party\ryu\d2s.c" />
+    <ClInclude Include="third_party\ryu\LICENSE-Boost" />
+    <ClInclude Include="third_party\ryu\PROVENANCE.md" />
     <ClInclude Include="navigator.h" />
     <ClInclude Include="gxos_tls_foundation.h" />
     <ClInclude Include="gxos_tls_prerequisites.h" />

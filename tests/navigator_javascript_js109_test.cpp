@@ -611,7 +611,9 @@ void testStringificationSemantics()
         "toJSON runtime failures propagate through stringify");
 
     RuntimeLimits outputLimit;
-    outputLimit.maxRuntimeStringLength = 4u;
+    // ECMAScript canonical formatting spells 1e-7 as four bytes ("1e-7").
+    // Keep the capacity-failure assertion with a bound below that output.
+    outputLimit.maxRuntimeStringLength = 3u;
     expect(runRuntimeError("JSON.stringify(JSON.parse(\"1e-7\"));",
             RuntimeErrorCode::StringLimitExceeded, outputLimit),
         "JSON.stringify rejects output beyond the runtime String limit without returning partial text");

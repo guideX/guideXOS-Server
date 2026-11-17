@@ -14343,3 +14343,30 @@ protected original executable and all 42 fixtures were restored and verified,
 and `.phase` remains absent. No QEMU, QAC, guest execution, or kernel-format
 integration was run. See the [JS123 portable JSON report](NAVIGATOR_JAVASCRIPT_JS123_PORTABLE_JSON_NUMBERS_SERIALIZER.md)
 for detailed architecture, freestanding evidence, gate results, and JS124 scope.
+
+### JS124 shared portable JSON serializer — verified
+
+JS124 adds a single iterative, bounded callback-free JSON serializer over the
+shared `Value`, `PortableObjectStore`, and `RuntimeStringStore`, and routes
+hosted callback-free `JSON.stringify` through that same core. It supports
+ECMAScript property ordering, omission/null rules, sparse and nested Arrays,
+shortest binary64 formatting with ECMAScript presentation, active-ancestor
+cycle detection, explicit errors, and reset after failure. Ryu v2.0 is pinned
+and attributed in the [Ryu provenance record](../third_party/ryu/PROVENANCE.md).
+Hosted `toJSON` fallback and JS110 reviver behavior remain intact; portable
+callback execution and guest execution are not claimed.
+
+The focused JS124 suite passes **1,179/1,179**, including 555 independent Node
+number-output fixtures and finite-value parser bit round-trips. The actual
+shared serializer and formatter pass the AMD64 C++17 freestanding link and
+zero-undefined-symbol audit. The full matrix passes **116/116 lanes**, with
+**19,046/19,046 reported assertions across 74 lanes**. The production build
+passes; JS109 and JS110 hosted pages pass against its 9,374,467-byte candidate
+(SHA-256 `CE50BA38A5C9D2AF90E09471E2298C2C87C5461430038D479147C0B5DF158317`).
+The hosted aggregate remains at **767/774** with only the seven established
+CSS failures in phases 3C, 3G, 6A, three checks in 6B, and 6C. The original
+8,398,274-byte executable was restored with its protected SHA-256; all 42
+generated fixtures still match the baseline and `.phase` remains absent. No
+QEMU, QAC, guest execution, or kernel-format integration was run. See the
+[JS124 portable JSON serializer report](NAVIGATOR_JAVASCRIPT_JS124_PORTABLE_JSON_SERIALIZER.md)
+for S0–S8 gates, memory and stack bounds, implementation details, and evidence.

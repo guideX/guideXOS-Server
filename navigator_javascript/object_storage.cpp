@@ -1252,6 +1252,124 @@ bool PortableObjectStore::getOwnPropertyAt(RuntimeObjectId object,
     return true;
 }
 
+bool PortableObjectStore::beginOwnStringPropertyIteration(
+    RuntimeObjectId object, PortableObjectPropertyCursor& cursor,
+    PortableObjectError& error) const
+{
+    error.code = PortableObjectErrorCode::None;
+    cursor = PortableObjectPropertyCursor();
+    PortableObjectRecord* record = nullptr;
+    if (!objectRecord(object, record, error)) return false;
+    if (record->array) {
+        error.code = PortableObjectErrorCode::InvalidArray;
+        return false;
+    }
+    cursor.object = object;
+    return true;
+}
+
+bool PortableObjectStore::nextOwnStringProperty(
+    PortableObjectPropertyCursor& cursor, PortablePropertyEntry& result,
+    bool& found, std::size_t& inspections,
+    PortableObjectError& error) const
+{
+    error.code = PortableObjectErrorCode::None;
+    result = PortablePropertyEntry();
+    found = false;
+    inspections = 0u;
+    if (cursor.object == kInvalidRuntimeObjectId) {
+        error.code = PortableObjectErrorCode::InvalidObject;
+        return false;
+    }
+
+    PortableObjectRecord* record = nullptr;
+    if (!objectRecord(cursor.object, record, error)) return false;
+    if (record->array) {
+        error.code = PortableObjectErrorCode::InvalidArray;
+        return false;
+    }
+
+    if (!cursor.stringsStarted) {
+        bool selectedFound = false;
+        std::uint32_t selectedSlot = kInvalidPortablePropertySlot;
+        std::uint32_t selectedIndex = 0u;
+        std::uint32_t property = record->firstProperty;
+        std::size_t inspected = 0u;
+        while (property != kInvalidPortablePropertySlot) {
+            if (property >= limits_.maxProperties ||
+                !storage_.properties[property].active ||
+                inspected >= limits_.maxProperties) {
+                error.code = PortableObjectErrorCode::InternalInvariantFailure;
+                return false;
+            }
+            ++inspected;
+            ++inspections;
+            const PortablePropertyRecord& current =
+                storage_.properties[property];
+            if (current.symbol == WellKnownSymbol::None) {
+                const char* keyBytes = storage_.propertyNameBytes == nullptr
+                    ? nullptr : storage_.propertyNameBytes + current.keyOffset;
+                std::uint32_t numericIndex = 0u;
+                if (parseArrayIndex(SourceView(keyBytes, current.keyLength),
+                        numericIndex) &&
+                    (!cursor.hasLastArrayIndex ||
+                        numericIndex > cursor.lastArrayIndex) &&
+                    (!selectedFound || numericIndex < selectedIndex)) {
+                    selectedFound = true;
+                    selectedSlot = property;
+                    selectedIndex = numericIndex;
+                }
+            }
+            property = current.next;
+        }
+        if (selectedFound) {
+            const PortablePropertyRecord& current =
+                storage_.properties[selectedSlot];
+            const char* keyBytes = storage_.propertyNameBytes == nullptr
+                ? nullptr : storage_.propertyNameBytes + current.keyOffset;
+            result.key = SourceView(keyBytes, current.keyLength);
+            result.value = current.value;
+            result.attributes = current.attributes;
+            result.arrayIndex = selectedIndex;
+            found = true;
+            cursor.lastArrayIndex = selectedIndex;
+            cursor.hasLastArrayIndex = true;
+            return true;
+        }
+
+        cursor.stringsStarted = true;
+        cursor.nextStringProperty = record->firstProperty;
+        cursor.inspectedStringProperties = 0u;
+    }
+
+    while (cursor.nextStringProperty != kInvalidPortablePropertySlot) {
+        const std::uint32_t property = cursor.nextStringProperty;
+        if (property >= limits_.maxProperties ||
+            !storage_.properties[property].active ||
+            cursor.inspectedStringProperties >= limits_.maxProperties) {
+            error.code = PortableObjectErrorCode::InternalInvariantFailure;
+            return false;
+        }
+        ++cursor.inspectedStringProperties;
+        ++inspections;
+        const PortablePropertyRecord& current =
+            storage_.properties[property];
+        cursor.nextStringProperty = current.next;
+        if (current.symbol != WellKnownSymbol::None) continue;
+        const char* keyBytes = storage_.propertyNameBytes == nullptr
+            ? nullptr : storage_.propertyNameBytes + current.keyOffset;
+        std::uint32_t numericIndex = 0u;
+        if (parseArrayIndex(SourceView(keyBytes, current.keyLength),
+                numericIndex)) continue;
+        result.key = SourceView(keyBytes, current.keyLength);
+        result.value = current.value;
+        result.attributes = current.attributes;
+        found = true;
+        return true;
+    }
+    return true;
+}
+
 bool PortableObjectStore::hasOwnArrayElement(RuntimeObjectId object,
     std::size_t index, bool& found, PortableObjectError& error) const
 {

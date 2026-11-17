@@ -30,9 +30,11 @@ public:
 
     void reset(char* buffer, std::size_t capacity);
     void reset();
+    void setLimit(std::size_t limit);
 
     std::size_t size() const { return size_; }
     std::size_t capacity() const { return capacity_; }
+    std::size_t limit() const { return limit_; }
     std::size_t remaining() const;
     bool failed() const
     {
@@ -52,6 +54,7 @@ private:
 
     char* buffer_ = nullptr;
     std::size_t capacity_ = 0u;
+    std::size_t limit_ = 0u;
     std::size_t size_ = 0u;
     PortableJsonWriteErrorCode error_ = PortableJsonWriteErrorCode::None;
 };

@@ -8,10 +8,19 @@ inline void PortableJsonOutputWriter::reset(char* buffer,
 {
     buffer_ = buffer;
     capacity_ = capacity;
+    limit_ = capacity;
     size_ = 0u;
+    limit_ = capacity_;
     error_ = (buffer == nullptr && capacity != 0u)
         ? PortableJsonWriteErrorCode::InvalidBuffer
         : PortableJsonWriteErrorCode::None;
+}
+
+inline void PortableJsonOutputWriter::setLimit(std::size_t limit)
+{
+    limit_ = limit <= capacity_ ? limit : capacity_;
+    if (size_ > limit_)
+        fail(PortableJsonWriteErrorCode::CapacityExceeded);
 }
 
 inline void PortableJsonOutputWriter::reset()
@@ -24,7 +33,7 @@ inline void PortableJsonOutputWriter::reset()
 
 inline std::size_t PortableJsonOutputWriter::remaining() const
 {
-    return size_ <= capacity_ ? capacity_ - size_ : 0u;
+    return size_ <= limit_ ? limit_ - size_ : 0u;
 }
 
 inline bool PortableJsonOutputWriter::fail(
@@ -37,7 +46,7 @@ inline bool PortableJsonOutputWriter::fail(
 inline bool PortableJsonOutputWriter::appendByte(char value)
 {
     if (failed()) return false;
-    if (size_ >= capacity_) return fail(
+    if (size_ >= limit_) return fail(
         PortableJsonWriteErrorCode::CapacityExceeded);
     if (buffer_ == nullptr) return fail(
         PortableJsonWriteErrorCode::InvalidBuffer);
