@@ -12,6 +12,7 @@
 #include "include/kernel/ps2mouse.h"
 #include "include/kernel/arch.h"
 #include "include/kernel/mouse_input_trace.h"
+#include "include/kernel/ps2keyboard.h"
 #include "include/kernel/serial_debug.h"
 
 namespace kernel {
@@ -41,6 +42,7 @@ static uint8_t  s_packet[4] = {0};   // 4-byte packet buffer (IntelliMouse)
 static bool     s_hasWheel  = false;
 static uint32_t s_packetSequence = 0;
 static uint32_t s_candidatePacketId = 0;
+static volatile uint32_t s_keyboardBytesRoutedFromIrq12 = 0;
 
 static int32_t  s_screenW   = 1024;
 static int32_t  s_screenH   = 768;
@@ -137,6 +139,7 @@ void init(uint32_t screen_width, uint32_t screen_height)
     s_phase   = 0;
     s_packetSequence = 0;
     s_candidatePacketId = 0;
+    s_keyboardBytesRoutedFromIrq12 = 0;
     s_buttons = 0;
     s_dirty = false;
 
@@ -234,10 +237,14 @@ void irq_handler()
     uint8_t status = arch::inb(kCommandPort);
     if ((status & 0x01) == 0) return;  // no data available
     if ((status & 0x20) == 0) {
-        // Data is from keyboard, not mouse — read and discard to clear buffer
+        // The output buffer belongs to the keyboard even though this is the
+        // mouse IRQ path. Route the byte into the same decoder instead of
+        // discarding a make, break, or scancode prefix.
         uint8_t keyboardByte = arch::inb(kDataPort);
         mouse_trace::record_irq(0, mouse_trace::Ps2Byte, s_mouseX, s_mouseY,
                             s_buttons, status, keyboardByte, 0, -1);
+        ++s_keyboardBytesRoutedFromIrq12;
+        ps2keyboard::handle_data_byte(keyboardByte);
         return;
     }
 
@@ -358,6 +365,7 @@ int32_t get_x()       { return s_mouseX; }
 int32_t get_y()       { return s_mouseY; }
 uint8_t get_buttons() { return s_buttons; }
 uint32_t get_packet_sequence() { return s_packetSequence; }
+uint32_t get_keyboard_bytes_routed_from_irq12() { return s_keyboardBytesRoutedFromIrq12; }
 int8_t  get_scroll_delta() { int8_t z = s_scrollZ; s_scrollZ = 0; return z; }
 bool    is_dirty()    { return s_dirty; }
 void    clear_dirty() { s_dirty = false; }
@@ -371,6 +379,7 @@ int32_t get_x()                 { return 0; }
 int32_t get_y()                 { return 0; }
 uint8_t get_buttons()           { return 0; }
 uint32_t get_packet_sequence()  { return 0; }
+uint32_t get_keyboard_bytes_routed_from_irq12() { return 0; }
 int8_t  get_scroll_delta()      { return 0; }
 bool    is_dirty()              { return false; }
 void    clear_dirty()           { }

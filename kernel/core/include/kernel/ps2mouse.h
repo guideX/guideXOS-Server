@@ -41,6 +41,10 @@ uint8_t get_buttons();
 // Monotonic identifier for the last complete packet, including rejected motion.
 uint32_t get_packet_sequence();
 
+// Count keyboard bytes recovered by IRQ12 when controller status bit 5 marks
+// its output-buffer data as keyboard-owned.
+uint32_t get_keyboard_bytes_routed_from_irq12();
+
 // Get scroll wheel delta (reset after read)
 int8_t get_scroll_delta();
 

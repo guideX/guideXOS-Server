@@ -20,25 +20,73 @@ static const uint16_t kDataPort    = 0x60;
 static const uint16_t kStatusPort  = 0x64;
 
 // Key state
-static uint32_t s_lastKey = 0;
-static uint32_t s_lastKeyModifiers = 0;
-static bool s_hasKey = false;
 static ShiftState s_shiftState;
 static bool s_ctrlDown = false;
 static bool s_altDown = false;
 static bool s_rightAltDown = false;
 static bool s_f4Down = false;
+static bool s_capsLock = false;
+static const uint8_t kEventQueueCapacity = 64;
+static const uint16_t kPairingKeyCapacity = 512;
+
+struct EventQueue {
+    KeyEvent events[kEventQueueCapacity];
+    volatile uint8_t head;
+    volatile uint8_t tail;
+    volatile uint32_t receivedEvents;
+    volatile uint32_t enqueuedEvents;
+    volatile uint32_t dequeuedEvents;
+    volatile uint32_t droppedEvents;
+    volatile uint32_t overflowDrops;
+    volatile uint32_t overflowKeyDownDrops;
+    volatile uint32_t overflowKeyUpDrops;
+    volatile uint32_t maximumOccupancy;
+    volatile uint32_t wraparounds;
+    volatile uint32_t keyDownEnqueued;
+    volatile uint32_t keyUpEnqueued;
+    volatile uint32_t keyDownDequeued;
+    volatile uint32_t keyUpDequeued;
+    volatile uint32_t pairedKeyTransitions;
+    volatile uint32_t unmatchedKeyUps;
+    volatile uint32_t outstandingKeyDowns;
+    volatile uint32_t lastDequeuedSequence;
+    volatile uint32_t sequenceGaps;
+    bool deliveredKeyDown[kPairingKeyCapacity];
+};
+
+static EventQueue s_legacyQueue = {};
+static EventQueue s_nativeQueue = {};
+static uint32_t s_nextEventSequence = 1u;
 static bool s_lastKeyAltF4Candidate = false;
 static bool s_lastKeyAltLeftDown = false;
 static bool s_lastKeyAltRightDown = false;
-static bool s_capsLock = false;
-static const uint8_t kEventQueueCapacity = 64;
-static KeyEvent s_eventQueue[kEventQueueCapacity];
-static volatile uint8_t s_eventHead = 0;
-static volatile uint8_t s_eventTail = 0;
-static KeyEvent s_nativeEventQueue[kEventQueueCapacity];
-static volatile uint8_t s_nativeEventHead = 0;
-static volatile uint8_t s_nativeEventTail = 0;
+
+static void compiler_memory_barrier()
+{
+#if defined(__GNUC__) || defined(__clang__)
+    __asm__ __volatile__("" ::: "memory");
+#endif
+}
+
+static uint8_t queue_load_index(const volatile uint8_t* index)
+{
+#if defined(__GNUC__) || defined(__clang__)
+    return __atomic_load_n(index, __ATOMIC_ACQUIRE);
+#else
+    compiler_memory_barrier();
+    return *index;
+#endif
+}
+
+static void queue_store_index(volatile uint8_t* index, uint8_t value)
+{
+#if defined(__GNUC__) || defined(__clang__)
+    __atomic_store_n(index, value, __ATOMIC_RELEASE);
+#else
+    compiler_memory_barrier();
+    *index = value;
+#endif
+}
 
 static bool shift_down()
 {
@@ -52,30 +100,166 @@ static uint32_t modifier_state()
         ((s_altDown || s_rightAltDown) ? KEY_MOD_ALT : 0u);
 }
 
-static void enqueue_event(uint32_t key, bool keyUp)
+static uint8_t queue_occupancy(const EventQueue& queue)
+{
+    const uint8_t head = queue_load_index(&queue.head);
+    const uint8_t tail = queue_load_index(&queue.tail);
+    return head >= tail
+        ? static_cast<uint8_t>(head - tail)
+        : static_cast<uint8_t>(kEventQueueCapacity - tail + head);
+}
+
+static void update_dequeued_pairing(EventQueue& queue, const KeyEvent& event)
+{
+    if (event.key >= kPairingKeyCapacity) return;
+    if (event.action == KeyAction::Down) {
+        ++queue.keyDownDequeued;
+        if (!queue.deliveredKeyDown[event.key]) {
+            queue.deliveredKeyDown[event.key] = true;
+            ++queue.outstandingKeyDowns;
+        }
+    } else {
+        ++queue.keyUpDequeued;
+        if (queue.deliveredKeyDown[event.key]) {
+            queue.deliveredKeyDown[event.key] = false;
+            if (queue.outstandingKeyDowns > 0u) --queue.outstandingKeyDowns;
+            ++queue.pairedKeyTransitions;
+        } else {
+            ++queue.unmatchedKeyUps;
+        }
+    }
+}
+
+static void enqueue_to_queue(EventQueue& queue, const KeyEvent& event)
+{
+    ++queue.receivedEvents;
+    const uint8_t head = queue_load_index(&queue.head);
+    const uint8_t tail = queue_load_index(&queue.tail);
+    const uint8_t next = static_cast<uint8_t>((head + 1u) % kEventQueueCapacity);
+    if (next == tail) {
+        // Drop-new preserves the order and contents of older pending events.
+        // If a release arrives while full and the newest pending entry is a
+        // make for the same key, replace that final make with its release.
+        // This is the one bounded recovery exception that reduces stuck-key
+        // risk without displacing an unrelated key; the lost make remains
+        // visible in overflow and sequence-gap counters.
+        ++queue.overflowDrops;
+        ++queue.droppedEvents;
+        if (event.action == KeyAction::Up && head != tail) {
+            const uint8_t last = static_cast<uint8_t>(
+                (head + kEventQueueCapacity - 1u) % kEventQueueCapacity);
+            if (queue.events[last].action == KeyAction::Down &&
+                queue.events[last].key == event.key) {
+                ++queue.overflowKeyDownDrops;
+                queue.events[last] = event;
+                compiler_memory_barrier();
+                ++queue.enqueuedEvents;
+                ++queue.keyUpEnqueued;
+                return;
+            }
+        }
+        if (event.action == KeyAction::Down) ++queue.overflowKeyDownDrops;
+        else ++queue.overflowKeyUpDrops;
+        return;
+    }
+
+    queue.events[head] = event;
+    compiler_memory_barrier();
+    queue_store_index(&queue.head, next);
+    ++queue.enqueuedEvents;
+    if (event.action == KeyAction::Down) ++queue.keyDownEnqueued;
+    else ++queue.keyUpEnqueued;
+    if (next == 0u) ++queue.wraparounds;
+    const uint8_t occupancy = queue_occupancy(queue);
+    if (occupancy > queue.maximumOccupancy) queue.maximumOccupancy = occupancy;
+}
+
+static void enqueue_event(uint32_t key, bool keyUp, bool altF4Candidate,
+                          bool altF4LeftDown, bool altF4RightDown)
 {
     if (key == 0) return;
-    const KeyAction action = keyUp ? KeyAction::Up : KeyAction::Down;
-    const uint32_t modifiers = modifier_state();
+    KeyEvent event;
+    event.key = key;
+    event.action = keyUp ? KeyAction::Up : KeyAction::Down;
+    event.modifiers = modifier_state();
+    event.sequence = s_nextEventSequence++;
+    event.altF4Candidate = altF4Candidate;
+    event.altLeftDown = altF4LeftDown;
+    event.altRightDown = altF4RightDown;
 
-    const uint8_t legacyNext = static_cast<uint8_t>((s_eventHead + 1u) % kEventQueueCapacity);
-    if (legacyNext != s_eventTail) {
-        s_eventQueue[s_eventHead].key = key;
-        s_eventQueue[s_eventHead].action = action;
-        s_eventQueue[s_eventHead].modifiers = modifiers;
-        s_eventHead = legacyNext;
-    }
+    enqueue_to_queue(s_legacyQueue, event);
+    // Native ELF transitions remain independent from the legacy desktop
+    // consumer and have separate overflow and delivery diagnostics.
+    enqueue_to_queue(s_nativeQueue, event);
+}
 
-    // Keep Native ELF transitions independent from the legacy desktop
-    // get_key() compatibility path, which may consume key-downs while the
-    // desktop dispatcher is servicing other UI work.
-    const uint8_t nativeNext = static_cast<uint8_t>((s_nativeEventHead + 1u) % kEventQueueCapacity);
-    if (nativeNext != s_nativeEventTail) {
-        s_nativeEventQueue[s_nativeEventHead].key = key;
-        s_nativeEventQueue[s_nativeEventHead].action = action;
-        s_nativeEventQueue[s_nativeEventHead].modifiers = modifiers;
-        s_nativeEventHead = nativeNext;
+static bool dequeue_event(EventQueue& queue, KeyEvent* outEvent)
+{
+    const uint8_t tail = queue_load_index(&queue.tail);
+    if (tail == queue_load_index(&queue.head)) return false;
+    compiler_memory_barrier();
+    const KeyEvent event = queue.events[tail];
+    compiler_memory_barrier();
+    queue_store_index(&queue.tail,
+                      static_cast<uint8_t>((tail + 1u) % kEventQueueCapacity));
+    ++queue.dequeuedEvents;
+    if (queue.lastDequeuedSequence != 0u && event.sequence > queue.lastDequeuedSequence + 1u) {
+        queue.sequenceGaps += event.sequence - queue.lastDequeuedSequence - 1u;
     }
+    queue.lastDequeuedSequence = event.sequence;
+    update_dequeued_pairing(queue, event);
+    if (outEvent) *outEvent = event;
+    return true;
+}
+
+static void reset_queue(EventQueue& queue)
+{
+    queue_store_index(&queue.head, 0u);
+    queue_store_index(&queue.tail, 0u);
+    queue.receivedEvents = 0u;
+    queue.enqueuedEvents = 0u;
+    queue.dequeuedEvents = 0u;
+    queue.droppedEvents = 0u;
+    queue.overflowDrops = 0u;
+    queue.overflowKeyDownDrops = 0u;
+    queue.overflowKeyUpDrops = 0u;
+    queue.maximumOccupancy = 0u;
+    queue.wraparounds = 0u;
+    queue.keyDownEnqueued = 0u;
+    queue.keyUpEnqueued = 0u;
+    queue.keyDownDequeued = 0u;
+    queue.keyUpDequeued = 0u;
+    queue.pairedKeyTransitions = 0u;
+    queue.unmatchedKeyUps = 0u;
+    queue.outstandingKeyDowns = 0u;
+    queue.lastDequeuedSequence = 0u;
+    queue.sequenceGaps = 0u;
+    for (uint16_t key = 0u; key < kPairingKeyCapacity; ++key) {
+        queue.deliveredKeyDown[key] = false;
+    }
+}
+
+static void copy_diagnostics(const EventQueue& queue, QueueDiagnostics* outDiagnostics)
+{
+    if (!outDiagnostics) return;
+    outDiagnostics->receivedEvents = queue.receivedEvents;
+    outDiagnostics->enqueuedEvents = queue.enqueuedEvents;
+    outDiagnostics->dequeuedEvents = queue.dequeuedEvents;
+    outDiagnostics->droppedEvents = queue.droppedEvents;
+    outDiagnostics->overflowDrops = queue.overflowDrops;
+    outDiagnostics->overflowKeyDownDrops = queue.overflowKeyDownDrops;
+    outDiagnostics->overflowKeyUpDrops = queue.overflowKeyUpDrops;
+    outDiagnostics->maximumOccupancy = queue.maximumOccupancy;
+    outDiagnostics->currentOccupancy = queue_occupancy(queue);
+    outDiagnostics->wraparounds = queue.wraparounds;
+    outDiagnostics->keyDownEnqueued = queue.keyDownEnqueued;
+    outDiagnostics->keyUpEnqueued = queue.keyUpEnqueued;
+    outDiagnostics->keyDownDequeued = queue.keyDownDequeued;
+    outDiagnostics->keyUpDequeued = queue.keyUpDequeued;
+    outDiagnostics->pairedKeyTransitions = queue.pairedKeyTransitions;
+    outDiagnostics->unmatchedKeyUps = queue.unmatchedKeyUps;
+    outDiagnostics->outstandingKeyDowns = queue.outstandingKeyDowns;
+    outDiagnostics->sequenceGaps = queue.sequenceGaps;
 }
 
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
@@ -184,9 +368,6 @@ void init()
         arch::inb(kDataPort);
     }
     
-    s_lastKey = 0;
-    s_lastKeyModifiers = 0;
-    s_hasKey = false;
     s_shiftState = ShiftState();
     s_ctrlDown = false;
     s_altDown = false;
@@ -198,10 +379,9 @@ void init()
     s_capsLock = false;
     s_extendedKey = false;
     s_breakCode = false;
-    s_eventHead = 0;
-    s_eventTail = 0;
-    s_nativeEventHead = 0;
-    s_nativeEventTail = 0;
+    s_nextEventSequence = 1u;
+    reset_queue(s_legacyQueue);
+    reset_queue(s_nativeQueue);
     
     serial::puts("[PS2KB] Keyboard initialized (scancode set 2)\n");
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
@@ -209,16 +389,8 @@ void init()
 #endif
 }
 
-void irq_handler()
+static void process_scancode(uint8_t scancode)
 {
-    uint8_t status = arch::inb(kStatusPort);
-    
-    // Check if data is available and it's from keyboard (not mouse)
-    if (!(status & 0x01)) return;
-    if (status & 0x20) return;  // Bit 5 = mouse data, skip it
-    
-    uint8_t scancode = arch::inb(kDataPort);
-
     // Scancode set 2: Handle special prefixes
     // 0xE0 = extended key prefix
     // 0xF0 = break (key release) prefix
@@ -336,92 +508,109 @@ void irq_handler()
             case 0x07: key = KEY_F12; break;
             default:
                 // Regular ASCII keys
-                if (scancode < 256) {
-                    bool shift = shift_down();
-                    char c = s_scancodeToAscii[scancode];
-                    if (s_capsLock && c >= 'a' && c <= 'z') {
-                        shift = !shift;
-                    }
-                    key = shift ? s_scancodeToAsciiShift[scancode] : s_scancodeToAscii[scancode];
+                bool shift = shift_down();
+                char c = s_scancodeToAscii[scancode];
+                if (s_capsLock && c >= 'a' && c <= 'z') {
+                    shift = !shift;
                 }
+                key = shift ? s_scancodeToAsciiShift[scancode] : s_scancodeToAscii[scancode];
                 break;
         }
     }
     
     if (key != 0) {
-        enqueue_event(key, keyUp);
-        if (keyUp) return;
-        s_lastKey = key;
-        s_lastKeyModifiers = modifier_state();
-        s_hasKey = true;
-        s_lastKeyAltF4Candidate = altF4Candidate;
-        s_lastKeyAltLeftDown = altF4LeftDown;
-        s_lastKeyAltRightDown = altF4RightDown;
+        enqueue_event(key, keyUp, altF4Candidate, altF4LeftDown, altF4RightDown);
     }
+}
+
+void handle_data_byte(uint8_t scancode)
+{
+    process_scancode(scancode);
+}
+
+void irq_handler()
+{
+    const uint8_t status = arch::inb(kStatusPort);
+    if (!(status & 0x01u)) return;
+    if (status & 0x20u) return; // IRQ1 leaves auxiliary data for IRQ12.
+    process_scancode(arch::inb(kDataPort));
 }
 
 bool has_key()
 {
-    return s_hasKey;
+    uint8_t index = queue_load_index(&s_legacyQueue.tail);
+    const uint8_t head = queue_load_index(&s_legacyQueue.head);
+    compiler_memory_barrier();
+    while (index != head) {
+        if (s_legacyQueue.events[index].action == KeyAction::Down) return true;
+        index = static_cast<uint8_t>((index + 1u) % kEventQueueCapacity);
+    }
+    return false;
 }
 
 uint32_t get_key()
 {
-    if (!s_hasKey) return 0;
-    s_hasKey = false;
-    // Keep the legacy one-key API and the lossless transition queue in sync.
-    // The desktop consumes key-downs only; discard queued release transitions
-    // until the corresponding legacy key-down is reached.
-    while (s_eventTail != s_eventHead) {
-        const KeyEvent event = s_eventQueue[s_eventTail];
-        s_eventTail = static_cast<uint8_t>((s_eventTail + 1u) % kEventQueueCapacity);
-        if (event.action == KeyAction::Down) break;
-    }
-    return s_lastKey;
+    return get_key_with_modifiers(nullptr);
 }
 
 uint32_t get_key_with_modifiers(uint32_t* outModifiers)
 {
-    if (!s_hasKey) {
-        if (outModifiers) *outModifiers = 0u;
-        return 0u;
+    if (outModifiers) *outModifiers = 0u;
+    KeyEvent event;
+    while (dequeue_event(s_legacyQueue, &event)) {
+        if (event.action == KeyAction::Up) continue;
+
+        s_lastKeyAltF4Candidate = event.altF4Candidate;
+        s_lastKeyAltLeftDown = event.altLeftDown;
+        s_lastKeyAltRightDown = event.altRightDown;
+        if (outModifiers) *outModifiers = event.modifiers;
+
+        // The legacy desktop API dispatches key-downs only. Drain releases
+        // that follow this make now so idle typing cannot fill the ring with
+        // ignored breaks. Stop before a later make to preserve FIFO order.
+        while (queue_load_index(&s_legacyQueue.tail) !=
+               queue_load_index(&s_legacyQueue.head)) {
+            const uint8_t tail = queue_load_index(&s_legacyQueue.tail);
+            compiler_memory_barrier();
+            if (s_legacyQueue.events[tail].action != KeyAction::Up) break;
+            dequeue_event(s_legacyQueue, nullptr);
+        }
+        return event.key;
     }
-    const uint32_t key = s_lastKey;
-    const uint32_t modifiers = s_lastKeyModifiers;
-    s_hasKey = false;
-    while (s_eventTail != s_eventHead) {
-        const KeyEvent event = s_eventQueue[s_eventTail];
-        s_eventTail = static_cast<uint8_t>((s_eventTail + 1u) % kEventQueueCapacity);
-        if (event.action == KeyAction::Down) break;
-    }
-    if (outModifiers) *outModifiers = modifiers;
-    return key;
+    return 0u;
 }
 
 bool has_event()
 {
-    return s_nativeEventTail != s_nativeEventHead;
+    return queue_load_index(&s_nativeQueue.tail) !=
+        queue_load_index(&s_nativeQueue.head);
 }
 
 bool get_event(KeyEvent* outEvent)
 {
-    if (!outEvent || s_nativeEventTail == s_nativeEventHead) return false;
-    *outEvent = s_nativeEventQueue[s_nativeEventTail];
-    s_nativeEventTail = static_cast<uint8_t>((s_nativeEventTail + 1u) % kEventQueueCapacity);
-    return true;
+    if (!outEvent) return false;
+    return dequeue_event(s_nativeQueue, outEvent);
 }
 
 void clear()
 {
-    s_hasKey = false;
-    s_lastKey = 0;
+    s_legacyQueue.droppedEvents += queue_occupancy(s_legacyQueue);
+    queue_store_index(&s_legacyQueue.tail, queue_load_index(&s_legacyQueue.head));
+    s_nativeQueue.droppedEvents += queue_occupancy(s_nativeQueue);
+    queue_store_index(&s_nativeQueue.tail, queue_load_index(&s_nativeQueue.head));
     s_lastKeyAltF4Candidate = false;
     s_lastKeyAltLeftDown = false;
     s_lastKeyAltRightDown = false;
-    s_eventHead = 0;
-    s_eventTail = 0;
-    s_nativeEventHead = 0;
-    s_nativeEventTail = 0;
+}
+
+void get_legacy_queue_diagnostics(QueueDiagnostics* outDiagnostics)
+{
+    copy_diagnostics(s_legacyQueue, outDiagnostics);
+}
+
+void get_native_queue_diagnostics(QueueDiagnostics* outDiagnostics)
+{
+    copy_diagnostics(s_nativeQueue, outDiagnostics);
 }
 
 bool is_ctrl_down()
@@ -473,11 +662,14 @@ bool last_key_alt_right_down()
 // Stub implementation for non-x86 architectures
 void init() {}
 void irq_handler() {}
+void handle_data_byte(uint8_t) {}
 bool has_key() { return false; }
 uint32_t get_key() { return 0; }
 uint32_t get_key_with_modifiers(uint32_t* outModifiers) { if (outModifiers) *outModifiers = 0u; return 0; }
 bool has_event() { return false; }
 bool get_event(KeyEvent*) { return false; }
+void get_legacy_queue_diagnostics(QueueDiagnostics* out) { if (out) *out = QueueDiagnostics{}; }
+void get_native_queue_diagnostics(QueueDiagnostics* out) { if (out) *out = QueueDiagnostics{}; }
 void clear() {}
 bool is_ctrl_down() { return false; }
 bool is_shift_down() { return false; }

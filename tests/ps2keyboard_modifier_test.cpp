@@ -130,7 +130,9 @@ int main()
 
     feed(0x12u); feed(0x0Du); feed(0x0Du);
     readKey('\t', kernel::ps2keyboard::KEY_MOD_SHIFT,
-            "repeated Tab make keeps Shift active without toggling key state");
+            "first repeated Tab make keeps Shift active without toggling key state");
+    readKey('\t', kernel::ps2keyboard::KEY_MOD_SHIFT,
+            "second repeated Tab make preserves CLI key-repeat delivery");
     feed(0xF0u); feed(0x12u); feed(0xF0u); feed(0x12u);
     check(!kernel::ps2keyboard::is_shift_down(),
           "duplicate Shift break remains a safe released state");

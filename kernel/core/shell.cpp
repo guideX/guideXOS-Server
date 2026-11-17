@@ -21,6 +21,8 @@
 #include "include/kernel/kernel_app.h"
 #include "include/kernel/app_launch_target_resolver.h"
 #include "include/kernel/serial_debug.h"
+#include "include/kernel/ps2keyboard.h"
+#include "include/kernel/ps2mouse.h"
 
 // Forward declarations for power functions (defined in desktop.cpp, outside any namespace)
 extern void perform_shutdown();
@@ -367,6 +369,7 @@ static void cmd_help() {
     output_string("  lspci          - List PCI devices\n");
     output_string("  lsusb          - List USB devices\n");
     output_string("  lsblk          - List block devices\n");
+    output_string("  input.stats    - Show keyboard queue and IRQ12 routing counters\n");
     output_string("\n");
     output_string("Network:\n");
     output_string("  ping <ip>      - Send ICMP echo request\n");
@@ -1945,6 +1948,95 @@ static void uint_to_str(uint32_t n, char* buf) {
     buf[i] = '\0';
 }
 
+static void output_input_counter(const char* label, uint32_t value) {
+    char number[12];
+    output_string(label);
+    uint_to_str(value, number);
+    output_string(number);
+    output_string("\n");
+}
+
+static void output_keyboard_queue_diagnostics(const char* name,
+                                               const ps2keyboard::QueueDiagnostics& stats) {
+    output_string(name);
+    output_string(" queue: received=");
+    output_input_counter("", stats.receivedEvents);
+    output_string(name);
+    output_string(" queue: enqueued=");
+    output_input_counter("", stats.enqueuedEvents);
+    output_string(name);
+    output_string(" queue: dequeued=");
+    output_input_counter("", stats.dequeuedEvents);
+    output_string(name);
+    output_string(" queue: occupancy=");
+    char current[12];
+    char maximum[12];
+    uint_to_str(stats.currentOccupancy, current);
+    uint_to_str(stats.maximumOccupancy, maximum);
+    output_string(current);
+    output_string("/63 maximum=");
+    output_string(maximum);
+    output_string(" wraps=");
+    uint_to_str(stats.wraparounds, current);
+    output_string(current);
+    output_string("\n");
+    output_string(name);
+    output_string(" queue: dropped=");
+    uint_to_str(stats.droppedEvents, current);
+    output_string(current);
+    output_string(" overflow=");
+    uint_to_str(stats.overflowDrops, current);
+    output_string(current);
+    output_string(" (make=");
+    uint_to_str(stats.overflowKeyDownDrops, current);
+    output_string(current);
+    output_string(" break=");
+    uint_to_str(stats.overflowKeyUpDrops, current);
+    output_string(current);
+    output_string(")\n");
+    output_string(name);
+    output_string(" queue: make enqueued/dequeued=");
+    uint_to_str(stats.keyDownEnqueued, current);
+    output_string(current);
+    output_string("/");
+    uint_to_str(stats.keyDownDequeued, current);
+    output_string(current);
+    output_string(" break enqueued/dequeued=");
+    uint_to_str(stats.keyUpEnqueued, current);
+    output_string(current);
+    output_string("/");
+    uint_to_str(stats.keyUpDequeued, current);
+    output_string(current);
+    output_string("\n");
+    output_string(name);
+    output_string(" queue: paired=");
+    uint_to_str(stats.pairedKeyTransitions, current);
+    output_string(current);
+    output_string(" unmatched-break=");
+    uint_to_str(stats.unmatchedKeyUps, current);
+    output_string(current);
+    output_string(" outstanding-makes=");
+    uint_to_str(stats.outstandingKeyDowns, current);
+    output_string(current);
+    output_string(" sequence-gaps=");
+    uint_to_str(stats.sequenceGaps, current);
+    output_string(current);
+    output_string("\n");
+}
+
+static void cmd_input_stats() {
+    ps2keyboard::QueueDiagnostics legacy{};
+    ps2keyboard::QueueDiagnostics native{};
+    ps2keyboard::get_legacy_queue_diagnostics(&legacy);
+    ps2keyboard::get_native_queue_diagnostics(&native);
+    output_string("SIR2 input diagnostics: guideXOS Server / PS/2 Set 2 / AMD64\n");
+    output_string("Controller: data 0x60, status 0x64, keyboard IRQ1, mouse IRQ12\n");
+    output_input_counter("keyboard bytes recovered from IRQ12: ",
+                         ps2mouse::get_keyboard_bytes_routed_from_irq12());
+    output_keyboard_queue_diagnostics("legacy", legacy);
+    output_keyboard_queue_diagnostics("native", native);
+}
+
 static void cmd_nicinfo() {
     output_string("=== NIC Diagnostic Information ===\n\n");
     
@@ -2938,6 +3030,8 @@ static void execute_command(const char* cmd) {
         cmd_ps();
     } else if (str_eq(command, "date") || str_eq(command, "time")) {
         cmd_date();
+    } else if (str_eq(command, "input.stats")) {
+        cmd_input_stats();
     } else if (str_eq(command, "mkdir") || str_eq(command, "md")) {
         cmd_mkdir(arg1);
     } else if (str_eq(command, "touch")) {
