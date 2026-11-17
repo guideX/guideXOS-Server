@@ -40,7 +40,7 @@ $candidateManifest = Get-Content -LiteralPath $candidateManifestPath -Raw | Conv
 $integrity = Get-Content -LiteralPath $integrityPath -Raw | ConvertFrom-Json -ErrorAction Stop
 $runtimeManifestPath = [System.IO.Path]::GetFullPath([string]$candidateManifest.runtimePackManifest)
 $runtimeManifest = Get-Content -LiteralPath $runtimeManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
-$palReplacement = $runtimeManifest.archiveValidation.threadStorePalCommonReplacement
+$palReplacement = $runtimeManifest.archiveMembership.threadStorePalCommonReplacement
 if ([string]$r25Manifest.sourceHead -cne (& git -C $RepoRoot rev-parse HEAD).Trim() -or
     [string]$r25Manifest.branch -cne 'v1.1_DOTNET_SUPPORT' -or
     [string]$runtimeManifest.identity -cne 'guidexos-nativeaot-runtime-pack-amd64-c188r30-thread-attachment-trace-v1' -or
@@ -56,7 +56,7 @@ if ([string]$r25Manifest.sourceHead -cne (& git -C $RepoRoot rev-parse HEAD).Tri
     -not [bool]$runtimeManifest.c188r29PreallocationGcStateGuard -or
     $null -eq $palReplacement -or
     [string]$palReplacement.profile -cne 'C188R30_THREAD_ATTACHMENT_TRACE' -or
-    [int]$palReplacement.removedCount -ne 1 -or
+    [int]$palReplacement.removedCount -ne 0 -or
     [int]$palReplacement.archiveMemberCount -ne 1 -or
     [string]$runtimeManifest.c188r30PalCommonStockMember -cne [string]$palReplacement.stockMember -or
     [string]$runtimeManifest.c188r30PalCommonReplacementObject -cne [string]$palReplacement.replacementObject -or
@@ -71,7 +71,7 @@ if ([string]$r25Manifest.sourceHead -cne (& git -C $RepoRoot rev-parse HEAD).Tri
     [string]$candidateManifest.unwindPrimitive.sourceSha256 -ine '9F94B5388535F2224D94318AC30D69260944ADB942C5F77FF5C90F0CDA9A3D3E' -or
     [bool]$integrity.unverifiedRootObjectInputsConsumed -or
     [string]$candidateManifest.runtimePackManifest -cne $runtimeManifestPath) {
-    throw 'R30 candidate failed source-head, pinned runtime, Workstation GC, guideXOS stack-bounds replacement, selector-5 factory, accepted R20 unwind, or schema-3 checks.'
+    throw 'R30 candidate failed source-head, pinned runtime, Workstation GC, stock PAL removal/guideXOS stack-bounds replacement, selector-5 factory, accepted R20 unwind, or schema-3 checks.'
 }
 foreach ($name in @(
     'c188r12r4r5r4r5r2r2_native_alloc_operator_new_test.obj',

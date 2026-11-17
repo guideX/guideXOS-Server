@@ -429,6 +429,7 @@ class ReverseEntrySourceTests(unittest.TestCase):
         self.assertIn("C188R30_THREAD_ATTACHMENT_TRACE", builder)
         self.assertIn("archiveMemberCount", builder)
         self.assertIn("palReplacement.replacementSha256", builder)
+        self.assertIn("archiveMembership.threadStorePalCommonReplacement", builder)
         self.assertIn("c188r12r4r5r4ThreadStoreReadiness -or", builder)
         self.assertIn("NOT_APPLICABLE_R30_LINKED_INITIALIZER_QUALIFICATION", r24_builder)
         self.assertIn("test-c188r30-thread-attachment.py", builder)
@@ -476,9 +477,9 @@ class LinkedCandidateTests(unittest.TestCase):
         self.assertTrue(manifest["c188r30ThreadAttachmentTrace"])
         self.assertFalse(manifest["c188r12r4r5r4ThreadStoreReadiness"])
         self.assertFalse(manifest["c188r12r4r5r2r3InitializeModulesAttribution"])
-        replacement = manifest["archiveValidation"]["threadStorePalCommonReplacement"]
+        replacement = manifest["archiveMembership"]["threadStorePalCommonReplacement"]
         self.assertEqual(replacement["profile"], "C188R30_THREAD_ATTACHMENT_TRACE")
-        self.assertEqual(replacement["removedCount"], 1)
+        self.assertEqual(replacement["removedCount"], 0)
         self.assertEqual(replacement["archiveMemberCount"], 1)
         verify_linked_candidate(LINKED_CANDIDATE)
 
