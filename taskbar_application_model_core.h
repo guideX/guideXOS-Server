@@ -44,6 +44,30 @@ private:
     bool m_unavailableReported;
 };
 
+// Desktop initialization can precede the persistent VFS mount. Keep persisted
+// taskbar preferences retryable until a root mount exists, then consume one
+// configuration snapshot for the desktop lifetime.
+struct TaskbarSettingsLoadGate {
+    TaskbarSettingsLoadGate() : m_loaded(false) {}
+
+    void reset() { m_loaded = false; }
+    bool loaded() const { return m_loaded; }
+    bool shouldAttempt(bool settingsVolumeMounted) const {
+        return !m_loaded && settingsVolumeMounted;
+    }
+    void markLoaded() { m_loaded = true; }
+
+private:
+    bool m_loaded;
+};
+
+// A popup that overlaps the dock owns pointer input over the taskbar surface.
+// This matters for top-docked auto-hide, where the Start menu can begin at the
+// same screen edge as the taskbar and otherwise lose clicks to dock hit-testing.
+inline bool ShouldRoutePointerToTaskbar(bool pointerInsideTaskbar, bool popupOwnsPointer) {
+    return pointerInsideTaskbar && !popupOwnsPointer;
+}
+
 inline bool HasCanonicalTaskbarAppIdentity(const char* appId) {
     return appId != nullptr && appId[0] != '\0';
 }

@@ -1185,7 +1185,11 @@ void KernelCompositor::drawTextCentered(uint32_t x, uint32_t y, uint32_t w, uint
 // TaskbarManager implementation
 // ============================================================
 
-static const char* kTaskbarPinStorePath = "/desktop.taskbar.pins";
+// Keep the active store name within FAT's supported 8.3 create-name contract.
+// Existing installations may still have the earlier long-name store, so load
+// it as a fallback and write future updates to the short path.
+static const char* kTaskbarPinStorePath = "/taskbar.pin";
+static const char* kLegacyTaskbarPinStorePath = "/desktop.taskbar.pins";
 static const int kTaskbarButtonMaxWidth = 176;
 static const int kTaskbarMenuWidth = 220;
 static const int kTaskbarMenuRowHeight = 20;
@@ -2189,10 +2193,15 @@ void TaskbarManager::loadPinnedApplications() {
     s_pinCount = 0;
     s_pinLoadGate.markLoaded();
     vfs::FileInfo info{};
-    const vfs::Status statStatus = vfs::stat(kTaskbarPinStorePath, &info);
+    const char* loadPath = kTaskbarPinStorePath;
+    vfs::Status statStatus = vfs::stat(loadPath, &info);
     if (statStatus == vfs::VFS_ERR_NOT_FOUND) {
-        s_pinPersistence = TaskbarPinPersistenceState::Ready;
-        return;
+        loadPath = kLegacyTaskbarPinStorePath;
+        statStatus = vfs::stat(loadPath, &info);
+        if (statStatus == vfs::VFS_ERR_NOT_FOUND) {
+            s_pinPersistence = TaskbarPinPersistenceState::Ready;
+            return;
+        }
     }
     if (statStatus != vfs::VFS_OK || info.type != vfs::FILE_TYPE_REGULAR ||
         info.size == 0 || info.size > 512u) {
@@ -2202,7 +2211,7 @@ void TaskbarManager::loadPinnedApplications() {
         return;
     }
     char text[513];
-    const int32_t count = vfs::read_file(kTaskbarPinStorePath, text, 512u);
+    const int32_t count = vfs::read_file(loadPath, text, 512u);
     if (count <= 0 || static_cast<uint64_t>(count) != info.size) {
         s_pinStoreCorrupt = true;
         s_pinPersistence = TaskbarPinPersistenceState::StorageFailure;
@@ -2283,7 +2292,23 @@ bool TaskbarManager::savePinnedApplications() {
         text[position++] = '\n';
     }
     text[position] = '\0';
-    const int32_t written = vfs::write_file(kTaskbarPinStorePath, text, static_cast<uint32_t>(position));
+    int32_t written = vfs::write_file(kTaskbarPinStorePath, text, static_cast<uint32_t>(position));
+    const bool sawIoTimeout = written == vfs::VFS_ERR_IO_TIMEOUT;
+    if (sawIoTimeout) {
+        // The first FAT create can publish the directory entry before the ATA
+        // cache flush times out. Retrying this complete, idempotent snapshot
+        // updates the now-visible file and lets transient device timeouts recover.
+        serial::puts("[taskbar] pin persistence retry attempt=2 reason=io-timeout\n");
+        written = vfs::write_file(kTaskbarPinStorePath, text, static_cast<uint32_t>(position));
+    }
+    if (sawIoTimeout &&
+        (written == vfs::VFS_ERR_IO_TIMEOUT || written == vfs::VFS_ERR_EXISTS)) {
+        // A just-published FAT entry can briefly be missed by open() while the
+        // create path reports that the same entry already exists. Make one
+        // final attempt to rewrite the snapshot through the normal lookup path.
+        serial::puts("[taskbar] pin persistence retry attempt=3 reason=transient-fat-state\n");
+        written = vfs::write_file(kTaskbarPinStorePath, text, static_cast<uint32_t>(position));
+    }
     if (written != position) {
         s_pinPersistence = TaskbarPinPersistenceState::StorageFailure;
         serial::puts("[taskbar] pin persistence=storage-failure reason=write\n");
@@ -2301,7 +2326,9 @@ bool TaskbarManager::savePinnedApplications() {
         return false;
     }
     s_pinPersistence = TaskbarPinPersistenceState::Ready;
-    serial::puts("[taskbar] pin persistence=saved path=/desktop.taskbar.pins pins=");
+    serial::puts("[taskbar] pin persistence=saved path=");
+    serial::puts(kTaskbarPinStorePath);
+    serial::puts(" pins=");
     serial::put_hex32(static_cast<uint32_t>(s_pinCount));
     serial::putc('\n');
     return true;

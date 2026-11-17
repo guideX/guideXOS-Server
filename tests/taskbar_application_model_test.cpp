@@ -43,6 +43,20 @@ int main() {
     check(!pinLoadGate.loaded() && pinLoadGate.shouldAttempt(true),
         "a fresh desktop initialization can load pins from its mounted volume");
 
+    TaskbarSettingsLoadGate settingsLoadGate;
+    check(!settingsLoadGate.loaded() && !settingsLoadGate.shouldAttempt(false),
+        "taskbar preferences remain retryable before the persistent mount exists");
+    check(settingsLoadGate.shouldAttempt(true),
+        "taskbar preferences load once the persistent mount is available");
+    settingsLoadGate.markLoaded();
+    check(settingsLoadGate.loaded() && !settingsLoadGate.shouldAttempt(true),
+        "taskbar preferences are not reapplied after their mounted load");
+
+    check(!ShouldRoutePointerToTaskbar(true, true) &&
+          ShouldRoutePointerToTaskbar(true, false) &&
+          !ShouldRoutePointerToTaskbar(false, false),
+        "taskbar popup hit-testing keeps overlapping Start menu clicks with the popup");
+
     check(TaskbarThickness(TaskbarSizeMode::Compact, 1920, 1080) == 32 &&
           TaskbarThickness(TaskbarSizeMode::Standard, 1920, 1080) == 40 &&
           TaskbarThickness(TaskbarSizeMode::Expanded, 1920, 1080) == 56,

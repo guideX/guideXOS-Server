@@ -1653,7 +1653,16 @@ Status rename(const char* oldPath, const char* newPath)
     const char* relNewPath = resolve_relative_path(newPath, newMount, resolvedNewPath, sizeof(resolvedNewPath));
     switch (oldMount->fsType) {
         case FS_TYPE_FAT32:
-            return fs_fat::rename_path(oldMount->fsVolumeIndex, relOldPath, relNewPath) ? VFS_OK : VFS_ERR_NOT_SUPPORTED;
+            if (fs_fat::rename_path(oldMount->fsVolumeIndex, relOldPath, relNewPath)) {
+                return VFS_OK;
+            }
+            switch (fs_fat::last_io_status()) {
+                case block::BLOCK_ERR_TIMEOUT: return VFS_ERR_IO_TIMEOUT;
+                case block::BLOCK_ERR_IO:
+                case block::BLOCK_ERR_NO_MEDIA:
+                case block::BLOCK_ERR_NOT_READY: return VFS_ERR_IO;
+                default: return VFS_ERR_NOT_SUPPORTED;
+            }
 
         default:
             break;

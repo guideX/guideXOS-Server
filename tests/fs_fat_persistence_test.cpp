@@ -17,7 +17,8 @@ constexpr uint32_t kSectorSize = 512;
 std::fstream g_image;
 uint64_t g_sectorCount = 0;
 uint64_t g_writesUntilFailure = UINT64_MAX;
-bool g_failFlush = false;
+uint32_t g_flushFailuresRemaining = 0;
+kernel::block::Status g_flushFailureStatus = kernel::block::BLOCK_ERR_IO;
 uint32_t g_fatStart = 0;
 uint32_t g_fatSectors = 0;
 uint8_t g_fatCopies = 0;
@@ -108,7 +109,10 @@ kernel::block::Status refuse_full_fat_write(uint8_t, uint64_t, uint32_t, const v
 
 kernel::block::Status image_flush(uint8_t)
 {
-    if (g_failFlush) return kernel::block::BLOCK_ERR_IO;
+    if (g_flushFailuresRemaining != 0u) {
+        --g_flushFailuresRemaining;
+        return g_flushFailureStatus;
+    }
     g_image.flush();
     return g_image.good() ? kernel::block::BLOCK_OK : kernel::block::BLOCK_ERR_IO;
 }
@@ -513,6 +517,42 @@ int main(int argc, char** argv)
                   kernel::vfs::VFS_ERR_NOT_FOUND,
           "delete through a short name leaves no resolvable stale long-name alias");
 
+    static const char renameRollbackContents[] = "preserve settings before retry";
+    const int32_t renameRollbackSize =
+        static_cast<int32_t>(sizeof(renameRollbackContents) - 1u);
+    check(kernel::vfs::create_file("/Documents/RETRY.TMP", renameRollbackContents,
+                                   static_cast<uint32_t>(renameRollbackSize)) ==
+              renameRollbackSize,
+          "create a settings-like file before an injected rename flush failure");
+    g_flushFailureStatus = kernel::block::BLOCK_ERR_TIMEOUT;
+    g_flushFailuresRemaining = 1;
+    const kernel::vfs::Status renameFlushFailure = kernel::vfs::rename(
+        "/Documents/RETRY.TMP", "/Documents/RETRY.NEW");
+    g_flushFailuresRemaining = 0;
+    (void)image_flush(0);
+    check(renameFlushFailure == kernel::vfs::VFS_ERR_IO_TIMEOUT &&
+              kernel::fs_fat::last_io_status() == kernel::block::BLOCK_ERR_TIMEOUT,
+          "rename preserves the original flush timeout after a successful rollback");
+    char renameRollbackReadback[64]{};
+    check(kernel::vfs::stat("/Documents/RETRY.TMP", &info) == kernel::vfs::VFS_OK &&
+              info.size == static_cast<uint64_t>(renameRollbackSize) &&
+              kernel::vfs::stat("/Documents/RETRY.NEW", &info) ==
+                  kernel::vfs::VFS_ERR_NOT_FOUND &&
+              kernel::vfs::read_file("/Documents/RETRY.TMP", renameRollbackReadback,
+                                     sizeof(renameRollbackReadback)) == renameRollbackSize &&
+              std::memcmp(renameRollbackReadback, renameRollbackContents,
+                          static_cast<size_t>(renameRollbackSize)) == 0,
+          "failed rename preserves the original settings file and bytes for retry");
+    g_flushFailureStatus = kernel::block::BLOCK_ERR_IO;
+    check(kernel::vfs::rename("/Documents/RETRY.TMP", "/Documents/RETRY.NEW") ==
+              kernel::vfs::VFS_OK &&
+              kernel::vfs::stat("/Documents/RETRY.NEW", &info) == kernel::vfs::VFS_OK &&
+              kernel::vfs::stat("/Documents/RETRY.TMP", &info) ==
+                  kernel::vfs::VFS_ERR_NOT_FOUND,
+          "the settings-like rename succeeds after the transient flush fault clears");
+    check(kernel::vfs::unlink("/Documents/RETRY.NEW") == kernel::vfs::VFS_OK,
+          "remove the settings rename retry fixture after requalification");
+
     check(kernel::vfs::mkdir("/Documents/NOTES") == kernel::vfs::VFS_OK,
           "create a supported 8.3 document directory");
     check(kernel::vfs::stat("/Documents/NOTES", &info) == kernel::vfs::VFS_OK &&
@@ -548,6 +588,30 @@ int main(int argc, char** argv)
                                  static_cast<uint32_t>(payload.size())) == 26 &&
               std::memcmp(payload.data(), "short replacement appended", 26) == 0,
           "appended content is readable in the expected order");
+
+    static const char pinStoreInitial[] = "version=1\n";
+    static const char pinStoreFirst[] = "version=1\nappId=com.guidexos.pacman\n";
+    static const char pinStoreSecond[] =
+        "version=1\nappId=com.guidexos.pacman\nappId=gxos.builtin.fileexplorer\n";
+    check(kernel::vfs::create_file("/Documents/taskbar.pin", pinStoreInitial,
+                                   sizeof(pinStoreInitial) - 1) ==
+              static_cast<int32_t>(sizeof(pinStoreInitial) - 1),
+          "create the taskbar pin store using a FAT-supported 8.3 path");
+    check(kernel::vfs::write_file("/Documents/taskbar.pin", pinStoreFirst,
+                                  sizeof(pinStoreFirst) - 1) ==
+              static_cast<int32_t>(sizeof(pinStoreFirst) - 1),
+          "write a taskbar pin through the supported short-name path");
+    check(kernel::vfs::write_file("/Documents/taskbar.pin", pinStoreSecond,
+                                  sizeof(pinStoreSecond) - 1) ==
+              static_cast<int32_t>(sizeof(pinStoreSecond) - 1),
+          "replace the taskbar pin store repeatedly without changing its path");
+    std::vector<char> pinStoreReadback(sizeof(pinStoreSecond));
+    check(kernel::vfs::read_file("/Documents/taskbar.pin", pinStoreReadback.data(),
+                                 static_cast<uint32_t>(pinStoreReadback.size())) ==
+              static_cast<int32_t>(sizeof(pinStoreSecond) - 1) &&
+              std::memcmp(pinStoreReadback.data(), pinStoreSecond,
+                          sizeof(pinStoreSecond) - 1) == 0,
+          "reopened taskbar pin store contains the complete latest pin set");
 
     for (int iteration = 0; iteration < 12; ++iteration) {
         const uint8_t handle = kernel::vfs::open("/Documents/NOTES/REPORT.BIN",
@@ -628,10 +692,11 @@ int main(int argc, char** argv)
         kernel::vfs::seek(flushHandle, 0, static_cast<kernel::vfs::SeekOrigin>(0)) ==
             kernel::vfs::VFS_OK &&
         kernel::vfs::write(flushHandle, "S", 1) == 1;
-    g_failFlush = true;
+    g_flushFailureStatus = kernel::block::BLOCK_ERR_IO;
+    g_flushFailuresRemaining = 1;
     const kernel::vfs::Status failedClose = flushHandle == 0xFF
         ? kernel::vfs::VFS_ERR_INVALID : kernel::vfs::close(flushHandle);
-    g_failFlush = false;
+    g_flushFailuresRemaining = 0;
     check(wroteBeforeFlushFailure && failedClose == kernel::vfs::VFS_ERR_IO,
           "close surfaces a failed device flush instead of reporting a saved file");
 

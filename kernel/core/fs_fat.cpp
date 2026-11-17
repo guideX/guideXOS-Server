@@ -2870,6 +2870,11 @@ static bool hide_directory_entry(const FATVolume& vol, uint32_t sector, uint32_t
 
 bool rename_path(uint8_t volumeIndex, const char* oldPath, const char* newPath)
 {
+    // Expose the block result for callers that need to distinguish a transient
+    // media timeout from an unsupported or invalid rename request.
+    s_lastIoStatus = block::BLOCK_OK;
+    s_lastTraversalStatus = TRAVERSAL_OK;
+    s_lastPathLookupStatus = PATH_LOOKUP_NOT_ATTEMPTED;
     if (volumeIndex >= MAX_FAT_VOLUMES) return false;
     if (!s_volumes[volumeIndex].mounted) return false;
     if (!oldPath || !newPath) return false;
@@ -2951,10 +2956,23 @@ bool rename_path(uint8_t volumeIndex, const char* oldPath, const char* newPath)
             return false;
         }
         if (flush_volume_io(vol) == block::BLOCK_OK) return true;
+        const block::Status renameFailureStatus = s_lastIoStatus;
         serial::puts("LFPASTE_RENAME_ROLLBACK_BEGIN same-parent\n");
-        restore_directory_entry(vol, oldSector, oldOffset, originalEntry);
-        if (lfnState.locationCount) restore_lfn_entries(vol, lfnState, originalLfnEntries);
-        flush_volume_io(vol);
+        bool rollbackWritesOk = restore_directory_entry(vol, oldSector, oldOffset, originalEntry);
+        if (lfnState.locationCount) {
+            rollbackWritesOk = restore_lfn_entries(vol, lfnState, originalLfnEntries) && rollbackWritesOk;
+        }
+        const block::Status rollbackWriteStatus = s_lastIoStatus;
+        const block::Status rollbackFlushStatus = flush_volume_io(vol);
+        if (rollbackFlushStatus == block::BLOCK_OK && rollbackWritesOk) {
+            // A successful rollback must not erase the original failure from
+            // the VFS result. Callers use it to distinguish a retryable media
+            // timeout from an unsupported rename.
+            s_lastIoStatus = renameFailureStatus;
+        } else if (rollbackFlushStatus == block::BLOCK_OK &&
+                   rollbackWriteStatus != block::BLOCK_OK) {
+            s_lastIoStatus = rollbackWriteStatus;
+        }
         serial::puts("LFPASTE_RENAME_ROLLBACK_END same-parent\n");
         return false;
     }
