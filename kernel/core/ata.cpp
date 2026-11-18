@@ -27,6 +27,14 @@
 #include "include/kernel/serial_debug.h"
 #endif
 
+#if defined(ATA_QUALIFICATION_DIAGNOSTICS) && ARCH_HAS_PORT_IO && \
+    (defined(__GNUC__) || defined(__clang__))
+#include "include/kernel/pit.h"
+#define ATA_QUAL_DIAG 1
+#else
+#define ATA_QUAL_DIAG 0
+#endif
+
 namespace kernel {
 namespace ata {
 
@@ -36,6 +44,125 @@ namespace ata {
 
 static ATADevice s_devices[MAX_ATA_DEVICES];
 static uint8_t   s_deviceCount = 0;
+
+#if ATA_QUAL_DIAG
+struct ATAFlushPollSample {
+    uint32_t iteration;
+    uint8_t status;
+};
+
+static uint32_t s_writeCommandSequence = 0;
+static uint32_t s_flushCommandSequence = 0;
+static uint32_t s_lastWriteIssued[MAX_ATA_DEVICES] = {};
+static uint32_t s_lastWriteCompleted[MAX_ATA_DEVICES] = {};
+static uint64_t s_lastWriteLba[MAX_ATA_DEVICES] = {};
+static bool s_lastWriteValid[MAX_ATA_DEVICES] = {};
+static uint32_t s_flushDiagnosticRecordCount = 0;
+static bool s_flushDiagnosticCapReported = false;
+static const uint32_t ATA_FLUSH_POLL_LIMIT = 500000;
+static const uint32_t ATA_FLUSH_SAMPLE_INTERVAL = 62500;
+static const uint32_t ATA_FLUSH_MAX_SAMPLES = 8;
+static const uint32_t ATA_FLUSH_MAX_RECORDS = 128;
+
+static void ata_diag_print_bool(const char* name, bool value)
+{
+    serial::puts(name);
+    serial::putc(value ? '1' : '0');
+}
+
+static void ata_diag_print_flush(uint32_t sequence,
+                                 const ATADevice& dev,
+                                 uint8_t opcode,
+                                 uint8_t deviceHeadBefore,
+                                 uint8_t statusBefore,
+                                 uint8_t statusAfterIssue,
+                                 uint8_t statusFinal,
+                                 uint8_t errorAfter,
+                                 uint32_t polls,
+                                 uint64_t startTicks,
+                                 uint64_t endTicks,
+                                 const ATAFlushPollSample* samples,
+                                 uint32_t sampleCount,
+                                 bool timedOut,
+                                 uint8_t devIdx)
+{
+    if (s_flushDiagnosticRecordCount >= ATA_FLUSH_MAX_RECORDS) {
+        if (!s_flushDiagnosticCapReported) {
+            serial::puts("[ATA-DIAG] flush trace cap reached; later records suppressed\n");
+            s_flushDiagnosticCapReported = true;
+        }
+        return;
+    }
+    ++s_flushDiagnosticRecordCount;
+
+    serial::puts("[ATA-DIAG] flush seq=0x");
+    serial::put_hex32(sequence);
+    serial::puts(" device=");
+    serial::puts(dev.name);
+    serial::puts(" controller=legacy-ide-pio io=0x");
+    serial::put_hex16(dev.ioBase);
+    serial::puts(" target=");
+    serial::puts(dev.isMaster ? "master" : "slave");
+    serial::puts(" opcode=0x");
+    serial::put_hex8(opcode);
+    serial::puts(" device_head_before=0x");
+    serial::put_hex8(deviceHeadBefore);
+    serial::puts(" selected_drive_matches_target=");
+    serial::putc(((deviceHeadBefore & 0x10) == (dev.isMaster ? 0 : 0x10)) ? '1' : '0');
+    serial::puts(" operation=cache-flush completion=poll-status-bsy\n");
+    serial::puts("[ATA-DIAG] status_before=0x");
+    serial::put_hex8(statusBefore);
+    serial::puts(" status_after_issue=0x");
+    serial::put_hex8(statusAfterIssue);
+    serial::puts(" status_final=0x");
+    serial::put_hex8(statusFinal);
+    serial::puts(" error_after=0x");
+    serial::put_hex8(errorAfter);
+    serial::puts(" final_bits=");
+    ata_diag_print_bool("BSY", (statusFinal & ATA_SR_BSY) != 0);
+    serial::putc(',');
+    ata_diag_print_bool("DRQ", (statusFinal & ATA_SR_DRQ) != 0);
+    serial::putc(',');
+    ata_diag_print_bool("DRDY", (statusFinal & ATA_SR_DRDY) != 0);
+    serial::putc(',');
+    ata_diag_print_bool("ERR", (statusFinal & ATA_SR_ERR) != 0);
+    serial::putc(',');
+    ata_diag_print_bool("DF", (statusFinal & ATA_SR_DF) != 0);
+    serial::puts("\n[ATA-DIAG] poll_count=0x");
+    serial::put_hex32(polls);
+    serial::puts(" poll_limit=0x");
+    serial::put_hex32(ATA_FLUSH_POLL_LIMIT);
+    serial::puts(" timeout_model=iteration-count start_pit_ticks=0x");
+    serial::put_hex64(startTicks);
+    serial::puts(" end_pit_ticks=0x");
+    serial::put_hex64(endTicks);
+    serial::puts(" elapsed_pit_ticks=0x");
+    serial::put_hex64(endTicks - startTicks);
+    serial::puts(" monotonic_deadline=not-defined\n[ATA-DIAG] last_write_valid=");
+    serial::putc(s_lastWriteValid[devIdx] ? '1' : '0');
+    serial::puts(" issued_seq=0x");
+    serial::put_hex32(s_lastWriteIssued[devIdx]);
+    serial::puts(" completed_seq=0x");
+    serial::put_hex32(s_lastWriteCompleted[devIdx]);
+    serial::puts(" lba=0x");
+    serial::put_hex64(s_lastWriteLba[devIdx]);
+    serial::puts(" writes_complete=");
+    serial::putc(s_lastWriteValid[devIdx] &&
+                 s_lastWriteIssued[devIdx] == s_lastWriteCompleted[devIdx] ? '1' : '0');
+    serial::puts(" recovery=none result=");
+    serial::puts(timedOut ? "BLOCK_ERR_TIMEOUT\n" : "BLOCK_OK\n");
+
+    for (uint32_t i = 0; i < sampleCount; ++i) {
+        serial::puts("[ATA-DIAG] flush_sample seq=0x");
+        serial::put_hex32(sequence);
+        serial::puts(" iteration=0x");
+        serial::put_hex32(samples[i].iteration);
+        serial::puts(" status=0x");
+        serial::put_hex8(samples[i].status);
+        serial::putc('\n');
+    }
+}
+#endif
 
 // ================================================================
 // Helpers
@@ -270,6 +397,13 @@ static block::Status ata_pio_write(uint8_t devIdx,
     for (uint32_t sec = 0; sec < count; ++sec) {
         uint64_t curLBA = lba + sec;
 
+#if ATA_QUAL_DIAG
+        const uint32_t writeSequence = ++s_writeCommandSequence;
+        s_lastWriteIssued[devIdx] = writeSequence;
+        s_lastWriteLba[devIdx] = curLBA;
+        s_lastWriteValid[devIdx] = true;
+#endif
+
         if (dev.lba48 && curLBA >= 0x10000000ULL) {
             uint8_t drv = dev.isMaster ? 0x40 : 0x50;
             arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_DRIVE_HEAD), drv);
@@ -323,6 +457,10 @@ static block::Status ata_pio_write(uint8_t devIdx,
         if (!ata_wait_command_idle(dev.ioBase, 500000))
             return block::BLOCK_ERR_TIMEOUT;
 
+#if ATA_QUAL_DIAG
+        s_lastWriteCompleted[devIdx] = writeSequence;
+#endif
+
     }
 
     return block::BLOCK_OK;
@@ -337,12 +475,52 @@ static block::Status ata_pio_flush(uint8_t devIdx)
         return block::BLOCK_ERR_INVALID;
 
     ATADevice& dev = s_devices[devIdx];
+#if ATA_QUAL_DIAG
+    const uint32_t flushSequence = ++s_flushCommandSequence;
+    const uint8_t opcode = dev.lba48 ? ATA_CMD_CACHE_FLUSH_EXT : ATA_CMD_CACHE_FLUSH;
+    const uint8_t deviceHeadBefore = arch::inb(
+        static_cast<uint16_t>(dev.ioBase + ATA_REG_DRIVE_HEAD));
+    const uint8_t statusBefore = arch::inb(
+        static_cast<uint16_t>(dev.ioBase + ATA_REG_STATUS));
+    const uint64_t startTicks = pit::ticks();
+    ATAFlushPollSample samples[ATA_FLUSH_MAX_SAMPLES] = {};
+    uint32_t sampleCount = 0;
+    uint32_t polls = 0;
+    uint8_t status = 0;
+
+    arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_COMMAND), opcode);
+    const uint8_t statusAfterIssue = arch::inb(
+        static_cast<uint16_t>(dev.ioBase + ATA_REG_STATUS));
+    status = statusAfterIssue;
+    while ((status & ATA_SR_BSY) && polls < ATA_FLUSH_POLL_LIMIT) {
+        ++polls;
+        status = arch::inb(static_cast<uint16_t>(dev.ioBase + ATA_REG_STATUS));
+        if (polls % ATA_FLUSH_SAMPLE_INTERVAL == 0 &&
+            sampleCount < ATA_FLUSH_MAX_SAMPLES) {
+            samples[sampleCount].iteration = polls;
+            samples[sampleCount].status = status;
+            ++sampleCount;
+        }
+    }
+
+    const bool timedOut = (status & ATA_SR_BSY) != 0;
+    const uint8_t errorAfter = arch::inb(
+        static_cast<uint16_t>(dev.ioBase + ATA_REG_ERROR));
+    const uint64_t endTicks = pit::ticks();
+    ata_diag_print_flush(flushSequence, dev, opcode, deviceHeadBefore, statusBefore,
+                         statusAfterIssue, status, errorAfter, polls,
+                         startTicks, endTicks, samples, sampleCount,
+                         timedOut, devIdx);
+    if (timedOut) return block::BLOCK_ERR_TIMEOUT;
+    return block::BLOCK_OK;
+#else
     arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_COMMAND),
                dev.lba48 ? ATA_CMD_CACHE_FLUSH_EXT : ATA_CMD_CACHE_FLUSH);
     if (!ata_wait_bsy(dev.ioBase, 500000))
         return block::BLOCK_ERR_TIMEOUT;
 
     return block::BLOCK_OK;
+#endif
 }
 
 // ================================================================
@@ -396,6 +574,20 @@ static void probe_channel(uint16_t ioBase, uint16_t ctrlBase,
 
         // LBA48 support: word 83 bit 10
         dev.lba48 = (id.commandSets83 & (1 << 10)) != 0;
+
+#if ATA_QUAL_DIAG
+        serial::puts("[ATA-DIAG] identify device=");
+        serial::puts(dev.name);
+        serial::puts(" identify_word83=0x");
+        serial::put_hex16(id.commandSets83);
+        serial::puts(" lba48=");
+        serial::putc(dev.lba48 ? '1' : '0');
+        serial::puts(" flush_cache_ext_supported=");
+        serial::putc((id.commandSets83 & (1 << 12)) ? '1' : '0');
+        serial::puts(" flush_opcode=0x");
+        serial::put_hex8(dev.lba48 ? ATA_CMD_CACHE_FLUSH_EXT : ATA_CMD_CACHE_FLUSH);
+        serial::putc('\n');
+#endif
 
         if (dev.lba48) {
             dev.totalSectors = id.lba48Sectors;
@@ -476,6 +668,16 @@ void init()
 {
     memzero(s_devices, sizeof(s_devices));
     s_deviceCount = 0;
+#if ATA_QUAL_DIAG
+    s_writeCommandSequence = 0;
+    s_flushCommandSequence = 0;
+    memzero(s_lastWriteIssued, sizeof(s_lastWriteIssued));
+    memzero(s_lastWriteCompleted, sizeof(s_lastWriteCompleted));
+    memzero(s_lastWriteLba, sizeof(s_lastWriteLba));
+    memzero(s_lastWriteValid, sizeof(s_lastWriteValid));
+    s_flushDiagnosticRecordCount = 0;
+    s_flushDiagnosticCapReported = false;
+#endif
 
 #if defined(__GNUC__) || defined(__clang__)
     serial::puts("[ATA] Initializing ATA driver...\n");
