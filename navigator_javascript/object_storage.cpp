@@ -1445,6 +1445,117 @@ bool PortableObjectStore::getArrayElementAt(RuntimeObjectId object,
     return true;
 }
 
+bool PortableObjectStore::snapshotOwnEnumerableStringProperties(
+    RuntimeObjectId object, PortablePropertyKeySnapshotEntry* entries,
+    std::size_t entryCapacity, char* keyBytes,
+    std::size_t keyByteCapacity, std::size_t& entryCount,
+    std::size_t& keyBytesUsed, PortableObjectError& error) const
+{
+    error.code = PortableObjectErrorCode::None;
+    entryCount = 0u;
+    keyBytesUsed = 0u;
+    if ((entries == nullptr && entryCapacity != 0u) ||
+        (keyBytes == nullptr && keyByteCapacity != 0u)) {
+        error.code = PortableObjectErrorCode::InvalidStorage;
+        return false;
+    }
+
+    // PortableObjectStore contains only ordinary data properties. Its reads
+    // are side-effect free, so this capacity pass followed by a copy pass
+    // cannot invoke a getter or repeat an observable operation.
+    std::size_t requiredEntries = 0u;
+    std::size_t requiredBytes = 0u;
+    for (std::size_t ordinal = 0u;; ++ordinal) {
+        PortablePropertyEntry property;
+        bool found = false;
+        if (!getOwnPropertyAt(object, ordinal, property, found, error))
+            return false;
+        if (!found) break;
+        if (property.symbol != WellKnownSymbol::None ||
+            property.isArrayLength ||
+            (property.attributes & 0x02u) == 0u) continue;
+        std::size_t keyLength = property.key.length;
+        if (property.isArrayElement) {
+            keyLength = 1u;
+            for (std::uint32_t index = property.arrayIndex; index >= 10u;
+                index /= 10u) ++keyLength;
+        } else if (property.key.data == nullptr && keyLength != 0u) {
+            error.code = PortableObjectErrorCode::InternalInvariantFailure;
+            return false;
+        }
+        if (requiredEntries == static_cast<std::size_t>(-1) ||
+            keyLength > static_cast<std::size_t>(-1) - requiredBytes ||
+            requiredBytes > 0xffffffffu ||
+            keyLength > 0xffffffffu - requiredBytes) {
+            error.code = PortableObjectErrorCode::ArithmeticOverflow;
+            return false;
+        }
+        ++requiredEntries;
+        requiredBytes += keyLength;
+    }
+
+    if (requiredEntries > entryCapacity) {
+        error.code = PortableObjectErrorCode::PropertyCapacityExceeded;
+        return false;
+    }
+    if (requiredBytes > keyByteCapacity) {
+        error.code = PortableObjectErrorCode::NameStorageExhausted;
+        return false;
+    }
+
+    std::size_t copiedEntries = 0u;
+    std::size_t copiedBytes = 0u;
+    for (std::size_t ordinal = 0u;; ++ordinal) {
+        PortablePropertyEntry property;
+        bool found = false;
+        if (!getOwnPropertyAt(object, ordinal, property, found, error))
+            return false;
+        if (!found) break;
+        if (property.symbol != WellKnownSymbol::None ||
+            property.isArrayLength ||
+            (property.attributes & 0x02u) == 0u) continue;
+        std::size_t keyLength = property.key.length;
+        if (property.isArrayElement) {
+            keyLength = 1u;
+            for (std::uint32_t index = property.arrayIndex; index >= 10u;
+                index /= 10u) ++keyLength;
+        }
+        if (copiedEntries >= requiredEntries ||
+            copiedBytes > requiredBytes ||
+            keyLength > requiredBytes - copiedBytes ||
+            (!property.isArrayElement && keyLength != 0u &&
+                property.key.data == nullptr)) {
+            error.code = PortableObjectErrorCode::InternalInvariantFailure;
+            return false;
+        }
+        PortablePropertyKeySnapshotEntry& entry = entries[copiedEntries++];
+        entry.byteOffset = static_cast<std::uint32_t>(copiedBytes);
+        entry.byteLength = static_cast<std::uint32_t>(keyLength);
+        if (property.isArrayElement) {
+            std::uint32_t divisor = 1u;
+            while (divisor <= property.arrayIndex / 10u) divisor *= 10u;
+            std::uint32_t remainder = property.arrayIndex;
+            for (std::size_t index = 0u; index < keyLength; ++index) {
+                keyBytes[copiedBytes + index] = static_cast<char>(
+                    '0' + (remainder / divisor) % 10u);
+                remainder %= divisor;
+                if (divisor > 1u) divisor /= 10u;
+            }
+        } else {
+            for (std::size_t index = 0u; index < keyLength; ++index)
+                keyBytes[copiedBytes + index] = property.key.data[index];
+        }
+        copiedBytes += keyLength;
+    }
+    if (copiedEntries != requiredEntries || copiedBytes != requiredBytes) {
+        error.code = PortableObjectErrorCode::InternalInvariantFailure;
+        return false;
+    }
+    entryCount = copiedEntries;
+    keyBytesUsed = copiedBytes;
+    return true;
+}
+
 bool PortableObjectStore::setArrayElement(RuntimeObjectId object,
     std::size_t index, Value value, PortableObjectError& error,
     std::uint8_t attributes)

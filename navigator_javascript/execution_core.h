@@ -179,6 +179,7 @@ public:
             return finish(result, finalValue);
         }
         currentEnvironment_ = globalEnvironment;
+        globalEnvironment_ = globalEnvironment;
         currentThis_ = Value::undefined();
         finalValue_ = Value::undefined();
         callDepth_ = 0u;
@@ -204,6 +205,113 @@ public:
         result = result_;
         finalValue = finalValue_;
         return true;
+    }
+
+    // Callable identification for portable callback clients. Native and host
+    // records remain callable Values, but this freestanding core reports them
+    // as unsupported at invocation until an accepted shared implementation is
+    // available.
+    bool isCallable(Value value, bool& callable,
+        PortableExecutionError& error) const
+    {
+        callable = false;
+        error = PortableExecutionError();
+        if (!value.isFunction()) return true;
+
+        FunctionStoreError functionError;
+        const FunctionRecord* function = functions_.get(
+            value.functionId(), functionError);
+        if (function == nullptr) {
+            error.code = functionError.code ==
+                    FunctionStoreErrorCode::StaleGeneration
+                ? PortableExecutionErrorCode::StaleReference
+                : functionError.code ==
+                    FunctionStoreErrorCode::InvalidReference
+                    ? PortableExecutionErrorCode::InvalidFunctionReference
+                    : PortableExecutionErrorCode::InternalInvariantFailure;
+            return false;
+        }
+        switch (function->kind) {
+        case FunctionRecord::Kind::User:
+        case FunctionRecord::Kind::Native:
+        case FunctionRecord::Kind::Host:
+            callable = true;
+            return true;
+        }
+        error.code = PortableExecutionErrorCode::InternalInvariantFailure;
+        return false;
+    }
+
+    // Invoke a retained callable in this execution context. Ordinary
+    // functions receive the explicit receiver; arrows retain lexical this.
+    // The argument span is borrowed only for this synchronous call and is
+    // checked against the same depth, argument, and execution budgets used by
+    // script calls.
+    bool invokeCallable(Value callable, Value receiver,
+        const Value* arguments, std::size_t argumentCount,
+        PortableExecutionResult& result,
+        SourceLocation callSite = SourceLocation())
+    {
+        result_ = PortableExecutionResult();
+        finalValue_ = Value::undefined();
+        result = PortableExecutionResult();
+        if (!environments_.configured() || !functions_.configured() ||
+            (objects_ != nullptr && !objects_->configured()) ||
+            globalEnvironment_ == kInvalidEnvironmentId ||
+            (storage_.frameCapacity != 0u && storage_.frames == nullptr)) {
+            fail(PortableExecutionErrorCode::InternalInvariantFailure,
+                callSite);
+            result = result_;
+            return false;
+        }
+        EnvironmentError environmentError;
+        if (!environments_.valid(globalEnvironment_, environmentError)) {
+            fail(mapEnvironmentError(environmentError.code), callSite);
+            result = result_;
+            return false;
+        }
+        currentEnvironment_ = globalEnvironment_;
+        currentThis_ = Value::undefined();
+
+        bool callableValue = false;
+        PortableExecutionError callableError;
+        if (!isCallable(callable, callableValue, callableError)) {
+            fail(callableError.code, callSite);
+        } else if (!callableValue) {
+            fail(PortableExecutionErrorCode::TypeError, callSite);
+        } else if (argumentCount > limits_.maxCallArguments) {
+            fail(PortableExecutionErrorCode::InvalidInvocationTarget,
+                callSite);
+        } else if (argumentCount != 0u && arguments == nullptr) {
+            fail(PortableExecutionErrorCode::InternalInvariantFailure,
+                callSite);
+        } else {
+            result_.argumentValuesHighWater = argumentCount;
+            FunctionStoreError functionError;
+            const FunctionRecord* function = functions_.get(
+                callable.functionId(), functionError);
+            if (function == nullptr) {
+                fail(functionError.code ==
+                        FunctionStoreErrorCode::StaleGeneration
+                    ? PortableExecutionErrorCode::StaleReference
+                    : PortableExecutionErrorCode::InvalidFunctionReference,
+                    callSite);
+            } else if (function->kind != FunctionRecord::Kind::User) {
+                fail(PortableExecutionErrorCode::UnsupportedOperation,
+                    callSite);
+            } else {
+                Value returned = Value::undefined();
+                if (invokeFunction(callable.functionId(), arguments,
+                        argumentCount, callSite, returned, receiver)) {
+                    finalValue_ = returned;
+                    result_.completed = true;
+                    result_.finalValue = returned;
+                }
+            }
+        }
+        result_.executionSteps = sharedExecutionSteps_;
+        result = result_;
+        return result_.completed;
     }
 
 private:
@@ -1769,7 +1877,8 @@ private:
     }
 
     bool invokeFunction(RuntimeFunctionId id, const Value* arguments,
-        std::size_t argumentCount, SourceLocation callSite, Value& result)
+        std::size_t argumentCount, SourceLocation callSite, Value& result,
+        Value receiver = Value::undefined())
     {
         if (argumentCount != 0u && arguments == nullptr) {
             fail(PortableExecutionErrorCode::InternalInvariantFailure,
@@ -1843,7 +1952,7 @@ private:
         ++result_.environmentsCreated;
         frame.environment = callEnvironment;
         currentEnvironment_ = callEnvironment;
-        currentThis_ = arrow ? function.lexicalThis : Value::undefined();
+        currentThis_ = arrow ? function.lexicalThis : receiver;
         for (std::size_t index = 0u; index < declaration.childCount; ++index) {
             const AstNodeId parameter = ast_.childAt(function.declaration, index);
             SourceView name;
@@ -1887,6 +1996,7 @@ private:
     std::size_t& sharedExecutionSteps_;
     PortableExecutionResult result_;
     EnvironmentId currentEnvironment_ = kInvalidEnvironmentId;
+    EnvironmentId globalEnvironment_ = kInvalidEnvironmentId;
     Value currentThis_ = Value::undefined();
     Value finalValue_ = Value::undefined();
     std::size_t callDepth_ = 0u;

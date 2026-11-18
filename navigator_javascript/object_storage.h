@@ -102,6 +102,15 @@ struct PortablePropertyEntry {
     bool isArrayLength = false;
 };
 
+// Caller-owned copy of an own enumerable string key. The byte range points
+// into the key arena supplied to snapshotOwnEnumerableStringProperties, so a
+// later property deletion, insertion, or name-arena compaction cannot change
+// the captured key set.
+struct PortablePropertyKeySnapshotEntry {
+    std::uint32_t byteOffset = 0u;
+    std::uint32_t byteLength = 0u;
+};
+
 // Iterates ordinary-object own string properties in ECMAScript property
 // order: canonical array-index keys first, followed by remaining strings in
 // insertion order. Symbols are excluded. The iterator is read-only and does
@@ -200,6 +209,11 @@ public:
     bool nextOwnStringProperty(PortableObjectPropertyCursor& cursor,
         PortablePropertyEntry& result, bool& found,
         std::size_t& inspections, PortableObjectError& error) const;
+    bool snapshotOwnEnumerableStringProperties(RuntimeObjectId object,
+        PortablePropertyKeySnapshotEntry* entries, std::size_t entryCapacity,
+        char* keyBytes, std::size_t keyByteCapacity,
+        std::size_t& entryCount, std::size_t& keyBytesUsed,
+        PortableObjectError& error) const;
 
     bool hasOwnArrayElement(RuntimeObjectId object, std::size_t index,
         bool& found, PortableObjectError& error) const;

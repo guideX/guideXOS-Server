@@ -14370,3 +14370,40 @@ generated fixtures still match the baseline and `.phase` remains absent. No
 QEMU, QAC, guest execution, or kernel-format integration was run. See the
 [JS124 portable JSON serializer report](NAVIGATOR_JAVASCRIPT_JS124_PORTABLE_JSON_SERIALIZER.md)
 for S0–S8 gates, memory and stack bounds, implementation details, and evidence.
+
+### JS125 shared portable callback foundation — partial
+
+JS125 adds a bounded public invocation path to the shared portable execution
+core and an ordered, caller-backed own-property key snapshot to
+PortableObjectStore. It qualifies ordinary and arrow user functions with an
+explicit receiver, ordered arguments, retained closure environments, typed
+return/error results, and the existing depth and step budgets. Property reads
+distinguish own, inherited, missing, and undefined-valued data properties;
+mutation, deletion, Array holes/length, snapshots, and live reads use the
+authoritative shared object store.
+
+The JS125 focused suite passes **121/121**. The AMD64 C++17 freestanding
+component links with zero undefined symbols and no runtime/platform imports,
+TLS, or constructor sections. This does not qualify guest execution. Native
+and Host records stored in the supplied FunctionStore are recognized, but
+their portable invocation returns explicit UnsupportedOperation. RuntimeContext
+keeps its existing hosted dispatcher, and pre-existing hosted native/host
+function records are outside the portable store view. General member-call
+syntax also remains outside the portable execution preflight; future callback
+clients provide the resolved callable and receiver directly.
+
+JS125 remains **Outcome B — JS125_PORTABLE_CALLBACK_FOUNDATION_PARTIAL**.
+Portable JSON toJSON/reviver execution is not enabled. The measured
+depth-64 invocation frame alone totals 23,552 bytes, above the known 16 KiB
+guest stack before evaluator frames, so stack readiness is unfinished. A
+follow-up must unify generation-checked lookup of hosted prefix records and
+address the recursive stack path before JSON callback integration. See the
+[JS125 portable callback foundation report](NAVIGATOR_JAVASCRIPT_JS125_PORTABLE_CALLBACK_FOUNDATION.md)
+for the dependency map, gate table, memory accounting, stack evidence, and
+final regression results. The complete matrix passes **117/117 lanes** with
+**19,167/19,167 reported assertions**; JS109/JS110 hosted pages pass; the
+strict production build passes with a saved 9,375,699-byte candidate. The
+hosted aggregate remains at **767/774**, with only the seven established CSS
+failures. The protected executable and all 42 generated fixtures were
+restored and verified; `.phase` remains absent. No QEMU, QAC, or guest
+execution was performed.
