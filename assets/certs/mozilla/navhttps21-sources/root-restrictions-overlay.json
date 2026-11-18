@@ -30,6 +30,42 @@
       "sha256": "0e39e12a7251b5011c86cbc83355eb63dd0b82ca33019f5ccafad6cc7ffb59db",
       "license": "CC-BY-SA-3.0-or-later per NAVHTTPS20 source lock",
       "coverage": "Program-wide requirements; not a fingerprint-keyed no-restrictions assertion."
+    },
+    {
+      "source_id": "mozilla-nss-certdata",
+      "owner": "Mozilla NSS built-in root store",
+      "url": "https://github.com/nss-dev/nss/blob/8c60e757c30b1b239bae46532b4f6d4ebb1e1cad/lib/ckfw/builtins/certdata.txt",
+      "revision": "8c60e757c30b1b239bae46532b4f6d4ebb1e1cad",
+      "sha256": "6d177e33ab54b338edfee24dc3868585833636716a320a725137ab4a15927292",
+      "license": "MPL-2.0",
+      "coverage": "Exact DER identity, Mozilla policy membership, purpose trust values, and server/email distrust-after attributes; not a custom-domain restriction catalog."
+    },
+    {
+      "source_id": "mozilla-bugzilla-1764392",
+      "owner": "Mozilla Bugzilla public record",
+      "url": "https://bugzilla.mozilla.org/show_bug.cgi?id=1764392",
+      "revision": "last_change_time=2022-07-13T20:54:10Z",
+      "sha256": "c13a9ddd1538d1a63c705c58b21c347288fc9eefa080c274a7cf2d627ecfc237",
+      "license": "Public Bugzilla record; no separate content license asserted.",
+      "coverage": "Root inclusion request and stated trust flags for DigiCert TLS ECC P384 Root G5; not a complete restrictions registry."
+    },
+    {
+      "source_id": "mozilla-bugzilla-1764397",
+      "owner": "Mozilla Bugzilla public record",
+      "url": "https://bugzilla.mozilla.org/show_bug.cgi?id=1764397",
+      "revision": "last_change_time=2022-07-20T17:25:35Z",
+      "sha256": "0e5d584e22de1af043b9eee9ad78647f3ff35dbe87bedfe66b81733499d592a6",
+      "license": "Public Bugzilla record; no separate content license asserted.",
+      "coverage": "EV treatment and OID metadata for DigiCert TLS ECC P384 Root G5; does not impose an EV policy requirement on ordinary TLS server authentication."
+    },
+    {
+      "source_id": "mozilla-bugzilla-2031732",
+      "owner": "Mozilla Bugzilla public record",
+      "url": "https://bugzilla.mozilla.org/show_bug.cgi?id=2031732",
+      "revision": "last_change_time=2026-11-16T17:05:26Z",
+      "sha256": "318d215feb08457afcb4af980224591773040586c3f75488c6098f9c61b662be",
+      "license": "Public Bugzilla record; no separate content license asserted.",
+      "coverage": "DigiCert's Mozilla root-purpose transition plan updated 2026-11-16; not a complete domain restriction inventory."
     }
   ],
   "coverage_notes": [
@@ -37,7 +73,47 @@
     "A CCADB blank field or absent technical-constraint indicator does not establish absence of Mozilla code-level restrictions.",
     "EV OID metadata describes EV treatment; it does not establish general TLS certificate-policy requirements or full RFC 5280 policy processing.",
     "OneCRL and intermediate revocation remain outside root restrictions and are not represented here.",
-    "No candidate root currently has a complete, fingerprint-keyed assessment for all applicable restrictions."
+    "No candidate root currently has a complete, fingerprint-keyed assessment for all applicable restrictions.",
+    "DigiCert TLS ECC P384 Root G5 has complete identity, Mozilla inclusion, trust-purpose, distrust, root Name Constraints, and ordinary non-EV certificate-policy/issuance-evidence findings; Mozilla-specific domain restrictions and program compliance remain unknown."
   ],
-  "records": {}
+  "records": {
+    "018e13f0772532cf809bd1b17281867283fc48c6e13be9c69812854a490c1b05": {
+      "certificate_sha256": "018e13f0772532cf809bd1b17281867283fc48c6e13be9c69812854a490c1b05",
+      "effective_date": "2026-11-17",
+      "qualification_scope": "ordinary TLS server authentication; Extended Validation presentation and policy processing are excluded",
+      "source_ids": [
+        "mozilla-additional-trust-changes",
+        "ccadb-v5",
+        "mozilla-root-store-policy",
+        "mozilla-nss-certdata",
+        "mozilla-bugzilla-1764392",
+        "mozilla-bugzilla-1764397",
+        "mozilla-bugzilla-2031732"
+      ],
+      "root_restrictions_status": "incomplete",
+      "trust_purpose": "tls-server-auth",
+      "explicit_distrust": "not-distrusted",
+      "server_distrust_after": {"status": "none", "utc": null},
+      "email_distrust_after": {"status": "none", "utc": null},
+      "domain_restrictions": {"status": "unknown", "domains": []},
+      "name_constraints": {"status": "none"},
+      "certificate_policy": {"status": "not-required", "required_oids": []},
+      "issuance_evidence": {"status": "not-required", "types": []},
+      "program_policy_status": "unknown",
+      "supported_enforcement_mechanisms": ["mbedtls-4.1.0-navhttps19"],
+      "attribute_coverage": {
+        "certificate_identity": {"status": "complete", "source_ids": ["mozilla-nss-certdata", "ccadb-v5", "mozilla-bugzilla-1764392"]},
+        "root_inclusion": {"status": "complete", "source_ids": ["mozilla-nss-certdata", "ccadb-v5", "mozilla-bugzilla-1764392"]},
+        "trust_purpose": {"status": "complete", "source_ids": ["mozilla-nss-certdata", "mozilla-bugzilla-1764392"]},
+        "explicit_distrust": {"status": "complete", "source_ids": ["mozilla-nss-certdata", "mozilla-bugzilla-2031732"]},
+        "server_distrust_after": {"status": "complete", "source_ids": ["mozilla-nss-certdata", "mozilla-bugzilla-2031732"]},
+        "email_distrust_after": {"status": "complete", "source_ids": ["mozilla-nss-certdata", "mozilla-bugzilla-2031732"]},
+        "domain_restrictions": {"status": "unknown", "source_ids": ["mozilla-additional-trust-changes", "mozilla-root-store-policy", "ccadb-v5", "mozilla-bugzilla-1764392"]},
+        "name_constraints": {"status": "complete", "source_ids": ["mozilla-nss-certdata", "ccadb-v5"]},
+        "certificate_policy": {"status": "complete", "source_ids": ["mozilla-root-store-policy", "ccadb-v5", "mozilla-bugzilla-1764397"]},
+        "issuance_evidence": {"status": "complete", "source_ids": ["mozilla-nss-certdata", "mozilla-additional-trust-changes", "mozilla-root-store-policy"]},
+        "program_policy": {"status": "unknown", "source_ids": ["mozilla-root-store-policy", "ccadb-v5", "mozilla-bugzilla-1764392"]}
+      }
+    }
+  }
 }

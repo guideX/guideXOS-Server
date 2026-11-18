@@ -27,12 +27,25 @@ SOURCE_LOCK_V2_VERSION = "guidexos.mozilla-trust-source-lock.v2"
 OVERLAY_VERSION = "guidexos.mozilla-root-restrictions.v1"
 OVERLAY_V2_VERSION = "guidexos.mozilla-root-restrictions.v2"
 DISTRUST_AFTER_POLICY_VERSION = "guidexos.mozilla-server-distrust-after.v2"
+RESTRICTION_COVERAGE_FIELDS = (
+    "certificate_identity",
+    "root_inclusion",
+    "trust_purpose",
+    "explicit_distrust",
+    "server_distrust_after",
+    "email_distrust_after",
+    "domain_restrictions",
+    "name_constraints",
+    "certificate_policy",
+    "issuance_evidence",
+    "program_policy",
+)
 NSS_SOURCE_REVISION = "8c60e757c30b1b239bae46532b4f6d4ebb1e1cad"
 NAVHTTPS21_DISTRUST_AFTER = {
-    "2530cc8e98321502bad96f9b1fba1b099e2d299e0f4548bb914f363bc0d4531f": "2604-01-05T23:59:59Z",
-    "40f6af0346a99aa1cd1d555a4e9cce62c7f9634603ee406615833dc8c8d00367": "2611-01-06T23:59:59Z",
-    "552f7bdcf1a7af9e6ce672017f4f12abf77240c78e761ac203d1d9d20ac89988": "2609-01-04T23:59:59Z",
-    "57de0583efd2b26e0361da99da9df4648def7ee8441c3b728afa9bcde0f9b26a": "2608-06-07T01:00:00Z",
+    "2530cc8e98321502bad96f9b1fba1b099e2d299e0f4548bb914f363bc0d4531f": "2026-04-15T23:59:59Z",
+    "40f6af0346a99aa1cd1d555a4e9cce62c7f9634603ee406615833dc8c8d00367": "2026-11-16T23:59:59Z",
+    "552f7bdcf1a7af9e6ce672017f4f12abf77240c78e761ac203d1d9d20ac89988": "2026-09-14T23:59:59Z",
+    "57de0583efd2b26e0361da99da9df4648def7ee8441c3b728afa9bcde0f9b26a": "2026-08-06T07:01:00Z",
 }
 SUPPORTED_NSS_TRUST = {
     "CKT_NSS_TRUSTED_DELEGATOR",
@@ -224,7 +237,16 @@ def _distrust_after(value: Any) -> str | None:
         text = value.decode("ascii")
     except UnicodeDecodeError as exc:
         raise ImportErrorDetail("NSS distrust-after timestamp is not ASCII") from exc
-    formats = ("%Y%m%d%H%M%SZ", "%y%m%d%H%M%SZ")
+    # NSS certdata uses UTCTime (YYMMDDhhmmssZ) for current cutoffs and
+    # GeneralizedTime (YYYYMMDDhhmmssZ) when an extended year is required.
+    # Select by exact width: strptime accepts under-width fields for %Y and
+    # otherwise misreads 12-digit values such as 261116235959Z as year 2611.
+    if re.fullmatch(r"\d{12}Z", text):
+        formats = ("%y%m%d%H%M%SZ",)
+    elif re.fullmatch(r"\d{14}Z", text):
+        formats = ("%Y%m%d%H%M%SZ",)
+    else:
+        formats = ()
     for fmt in formats:
         try:
             parsed = dt.datetime.strptime(text, fmt).replace(tzinfo=dt.timezone.utc)
@@ -367,6 +389,31 @@ def validate_restrictions_overlay_v2(overlay: dict[str, Any]) -> None:
         supported = record.get("supported_enforcement_mechanisms")
         if not isinstance(supported, list) or any(not isinstance(item, str) or not item for item in supported):
             raise ImportErrorDetail(f"NAVHTTPS21 restriction record {fingerprint} has malformed enforcement mechanisms")
+        attribute_coverage = record.get("attribute_coverage")
+        if not isinstance(attribute_coverage, dict) or set(attribute_coverage) != set(RESTRICTION_COVERAGE_FIELDS):
+            raise ImportErrorDetail(f"NAVHTTPS21 restriction record {fingerprint} lacks complete attribute coverage metadata")
+        for attribute in RESTRICTION_COVERAGE_FIELDS:
+            coverage = attribute_coverage[attribute]
+            if not isinstance(coverage, dict) or coverage.get("status") not in (
+                "complete", "incomplete", "unknown", "unsupported"
+            ):
+                raise ImportErrorDetail(
+                    f"NAVHTTPS21 restriction record {fingerprint} has invalid coverage for {attribute}"
+                )
+            coverage_refs = coverage.get("source_ids")
+            if not isinstance(coverage_refs, list) or not coverage_refs or any(
+                ref not in refs for ref in coverage_refs
+            ):
+                raise ImportErrorDetail(
+                    f"NAVHTTPS21 restriction record {fingerprint} has unresolved authority references for {attribute}"
+                )
+        if record["root_restrictions_status"] == "complete" and any(
+            attribute_coverage[attribute]["status"] != "complete"
+            for attribute in RESTRICTION_COVERAGE_FIELDS
+        ):
+            raise ImportErrorDetail(
+                f"NAVHTTPS21 restriction record {fingerprint} claims complete coverage with unresolved attributes"
+            )
 
 
 def parse_ccadb_v5(data: bytes) -> dict[str, dict[str, Any]]:
@@ -426,6 +473,58 @@ def _pem_certificate(der: bytes) -> bytes:
     return f"-----BEGIN CERTIFICATE-----\n{lines}\n-----END CERTIFICATE-----\n".encode("ascii")
 
 
+def _root_certificate_extension_facts(der: bytes) -> dict[str, Any]:
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", CryptographyDeprecationWarning)
+            certificate = x509.load_der_x509_certificate(der)
+    except ValueError:
+        return {
+            "parse_status": "invalid-der",
+            "name_constraints": {"status": "unknown", "critical": None},
+            "certificate_policies": {"status": "unknown", "oids": []},
+            "extended_key_usage": {"status": "unknown", "oids": []},
+        }
+    try:
+        extensions = tuple(certificate.extensions)
+    except x509.DuplicateExtension:
+        return {
+            "parse_status": "duplicate-extension-invalid",
+            "name_constraints": {"status": "unknown", "critical": None},
+            "certificate_policies": {"status": "unknown", "oids": []},
+            "extended_key_usage": {"status": "unknown", "oids": []},
+        }
+
+    def extension_facts(oid: x509.ObjectIdentifier, label: str) -> dict[str, Any]:
+        matching = [extension for extension in extensions if extension.oid == oid]
+        if not matching:
+            result: dict[str, Any] = {"status": "absent"}
+            if label == "name_constraints":
+                result["critical"] = None
+            else:
+                result["oids"] = []
+            return result
+        if len(matching) != 1:
+            return {"status": "duplicate-invalid", "critical": None, "oids": []}
+        extension = matching[0]
+        result = {"status": "present", "critical": extension.critical}
+        if label == "name_constraints":
+            result["permitted_subtrees_count"] = len(extension.value.permitted_subtrees or ())
+            result["excluded_subtrees_count"] = len(extension.value.excluded_subtrees or ())
+        elif label == "certificate_policies":
+            result["oids"] = [policy.policy_identifier.dotted_string for policy in extension.value]
+        else:
+            result["oids"] = [purpose.dotted_string for purpose in extension.value]
+        return result
+
+    return {
+        "parse_status": "parsed",
+        "name_constraints": extension_facts(x509.ExtensionOID.NAME_CONSTRAINTS, "name_constraints"),
+        "certificate_policies": extension_facts(x509.ExtensionOID.CERTIFICATE_POLICIES, "certificate_policies"),
+        "extended_key_usage": extension_facts(x509.ExtensionOID.EXTENDED_KEY_USAGE, "extended_key_usage"),
+    }
+
+
 def evaluate_root_eligibility(
     root: dict[str, Any],
     overlay: dict[str, Any],
@@ -469,6 +568,9 @@ def evaluate_root_eligibility(
         if not isinstance(policy, dict):
             reasons.append("root-specific-external-restrictions-missing")
             return sorted(set(reasons))
+        for attribute, coverage in policy["attribute_coverage"].items():
+            if coverage["status"] != "complete":
+                reasons.append(f"root-{attribute.replace('_', '-')}-coverage-{coverage['status']}")
         if policy.get("root_restrictions_status") != "complete":
             reasons.append("root-specific-restrictions-incomplete")
         if policy.get("trust_purpose") != "tls-server-auth":
@@ -572,6 +674,7 @@ def _root_record(
     enforced_distrust_after: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     fingerprint = sha256(der)
+    root_certificate_extensions = _root_certificate_extension_facts(der)
     sha1_hex = hashlib.sha1(der).hexdigest()
     nss_cert = certs_by_sha1.get(sha1_hex)
     nss_trust = trust_by_sha1.get(sha1_hex)
@@ -651,6 +754,7 @@ def _root_record(
     return {
         "certificate_sha256": fingerprint,
         "certificate_sha1": sha1_hex,
+        "root_certificate_extensions": root_certificate_extensions,
         "subject": subject,
         "issuer": issuer,
         "nss_label": nss_label,
@@ -703,6 +807,12 @@ def build_report(
         root["external_policy_source_sha256"] = overlay.get("source_sha256")
         if overlay.get("schema_version") == OVERLAY_V2_VERSION:
             root["external_policy_sources"] = overlay.get("sources", [])
+            coverage = (
+                {field: {"status": "unknown", "source_ids": []} for field in RESTRICTION_COVERAGE_FIELDS}
+                if policy_record is None
+                else policy_record["attribute_coverage"]
+            )
+            root["restriction_coverage_by_attribute"] = coverage
         if overlay.get("schema_version") == OVERLAY_V2_VERSION:
             root["external_restrictions"] = (
                 "complete" if policy_record is not None and policy_record.get("root_restrictions_status") == "complete"
@@ -762,6 +872,32 @@ def build_report(
     tls_trust_records = [_attr(trust, "CKA_TRUST_SERVER_AUTH") for trust in trust_by_sha1.values()]
     tls_count = tls_trust_records.count("CKT_NSS_TRUSTED_DELEGATOR")
     eligible = [root for root in roots if root["technical_eligibility"] == "eligible"]
+    rejection_counts: dict[str, int] = {}
+    for root in roots:
+        for reason in root["eligibility_rejection_reasons"]:
+            rejection_counts[reason] = rejection_counts.get(reason, 0) + 1
+    restriction_status_counts: dict[str, dict[str, int]] = {}
+    for field in (
+        "external_restrictions",
+        "domain_restrictions_status",
+        "name_constraints_status",
+        "certificate_policy_status",
+        "program_policy_status",
+    ):
+        counts: dict[str, int] = {}
+        for root in roots:
+            status = root.get(field, "unknown")
+            counts[status] = counts.get(status, 0) + 1
+        restriction_status_counts[field] = dict(sorted(counts.items()))
+    restriction_coverage_counts: dict[str, dict[str, int]] = {}
+    for attribute in RESTRICTION_COVERAGE_FIELDS:
+        counts: dict[str, int] = {}
+        for root in roots:
+            coverage_status = root.get("restriction_coverage_by_attribute", {}).get(attribute, {}).get(
+                "status", "unknown"
+            )
+            counts[coverage_status] = counts.get(coverage_status, 0) + 1
+        restriction_coverage_counts[attribute] = dict(sorted(counts.items()))
     return {
         "schema_version": SCHEMA_VERSION,
         "source_lock_schema_version": source_lock_schema_version,
@@ -790,6 +926,12 @@ def build_report(
         },
         "candidate_bundle_sha256": None,
         "candidate_bundle_generated": False,
+        "eligibility_rejection_reason_counts": dict(sorted(rejection_counts.items())),
+        "eligibility_rejection_reason_count_semantics": (
+            "Each value counts roots carrying that distinct reason; roots may have multiple overlapping reasons."
+        ),
+        "restriction_attribute_status_counts": restriction_status_counts,
+        "restriction_attribute_coverage_counts": restriction_coverage_counts,
         "roots": roots,
     }
 
@@ -908,6 +1050,46 @@ def _verified_navhttps21_inputs(
         raise ImportErrorDetail("CCADB V5 snapshot revision/date differs from its source lock")
     ccadb_records = parse_ccadb_v5(ccadb_bytes)
 
+    bugzilla_entries = lock.get("mozilla_bugzilla_snapshots")
+    if not isinstance(bugzilla_entries, list) or not bugzilla_entries:
+        raise ImportErrorDetail("NAVHTTPS22 source lock lacks pinned Mozilla Bugzilla snapshots")
+    bugzilla_sources: dict[str, dict[str, Any]] = {}
+    for entry in bugzilla_entries:
+        if not isinstance(entry, dict):
+            raise ImportErrorDetail("Mozilla Bugzilla snapshot entry must be an object")
+        source_id = entry.get("source_id")
+        bug_id = entry.get("bug_id")
+        local_path = entry.get("local_path")
+        expected_hash = entry.get("sha256")
+        if (
+            not isinstance(source_id, str)
+            or not source_id
+            or source_id in bugzilla_sources
+            or type(bug_id) is not int
+            or not isinstance(local_path, str)
+            or not _valid_sha256(expected_hash)
+            or entry.get("retrieved_date_utc") != lock["snapshot_date"]
+            or not isinstance(entry.get("url"), str)
+            or not entry["url"].startswith("https://bugzilla.mozilla.org/show_bug.cgi?id=")
+            or not isinstance(entry.get("api_url"), str)
+            or not entry["api_url"].startswith("https://bugzilla.mozilla.org/rest/bug/")
+        ):
+            raise ImportErrorDetail("Mozilla Bugzilla snapshot pin is malformed")
+        snapshot_bytes = (repo_root / local_path).read_bytes()
+        if sha256(snapshot_bytes) != expected_hash:
+            raise ImportErrorDetail(f"pinned Mozilla Bugzilla snapshot hash mismatch: {source_id}")
+        snapshot = json.loads(snapshot_bytes.decode("utf-8"))
+        bug = snapshot.get("bug") if isinstance(snapshot, dict) else None
+        expected_revision = f"last_change_time={bug.get('last_change_time')}" if isinstance(bug, dict) else None
+        if (
+            not isinstance(bug, dict)
+            or bug.get("id") != bug_id
+            or entry.get("revision") != expected_revision
+            or not isinstance(snapshot.get("comments"), list)
+        ):
+            raise ImportErrorDetail(f"Mozilla Bugzilla snapshot identity/revision mismatch: {source_id}")
+        bugzilla_sources[source_id] = entry
+
     overlay_lock = lock.get("root_restrictions_overlay")
     if not isinstance(overlay_lock, dict) or not isinstance(overlay_lock.get("local_path"), str) or not _valid_sha256(overlay_lock.get("sha256")):
         raise ImportErrorDetail("NAVHTTPS21 root-restrictions overlay pin is incomplete")
@@ -925,11 +1107,18 @@ def _verified_navhttps21_inputs(
         "mozilla-additional-trust-changes": base_sources["mozilla_additional_trust_changes"]["sha256"],
         "mozilla-root-store-policy": base_sources["mozilla_root_store_policy"]["sha256"],
         "ccadb-v5": ccadb["sha256"],
+        "mozilla-nss-certdata": base_sources["nss_certdata"]["sha256"],
     }
+    expected_source_bindings.update({source_id: entry["sha256"] for source_id, entry in bugzilla_sources.items()})
     for source_id, expected_hash in expected_source_bindings.items():
         source = source_by_id.get(source_id)
         if source is None or source.get("sha256") != expected_hash:
             raise ImportErrorDetail(f"NAVHTTPS21 restriction overlay source binding mismatch: {source_id}")
+        if source_id in bugzilla_sources and (
+            source.get("url") != bugzilla_sources[source_id]["url"]
+            or source.get("revision") != bugzilla_sources[source_id]["revision"]
+        ):
+            raise ImportErrorDetail(f"NAVHTTPS22 Bugzilla overlay provenance mismatch: {source_id}")
 
     enforcement_lock = lock.get("distrust_after_enforcement_policy")
     if not isinstance(enforcement_lock, dict) or not isinstance(enforcement_lock.get("local_path"), str) or not _valid_sha256(enforcement_lock.get("sha256")):
@@ -1006,6 +1195,15 @@ def _verified_navhttps21_inputs(
         "sha256": ccadb["sha256"],
         "date": ccadb["retrieved_date_utc"],
         "license": ccadb["license"],
+    }
+    report["source_revisions"]["mozilla_bugzilla_snapshots"] = {
+        source_id: {
+            "bug_id": entry["bug_id"],
+            "revision": entry["revision"],
+            "sha256": entry["sha256"],
+            "date": entry["retrieved_date_utc"],
+        }
+        for source_id, entry in sorted(bugzilla_sources.items())
     }
     report["restriction_coverage_note"] = (
         "CCADB V5 is used for exact fingerprint and Mozilla root-status cross-checks. Its aggregate trust bits and blank fields do not establish absence of Mozilla restrictions."

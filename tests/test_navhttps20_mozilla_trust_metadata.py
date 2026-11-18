@@ -98,7 +98,7 @@ class MozillaTrustMetadataTests(unittest.TestCase):
         report = importer.build_report(CERTDATA, CANDIDATE, INCOMPLETE_OVERLAY)
         digicert = next(root for root in report["roots"] if root["nss_label"] == "DigiCert Trusted Root G4")
         self.assertEqual(digicert["server_auth_trust_record"], "CKT_NSS_TRUSTED_DELEGATOR")
-        self.assertEqual(digicert["server_distrust_after"], "2609-01-04T23:59:59Z")
+        self.assertEqual(digicert["server_distrust_after"], "2026-09-14T23:59:59Z")
         self.assertIn("server-distrust-after-not-enforced", digicert["eligibility_rejection_reasons"])
 
     def test_other_certificate_purposes_are_preserved_separately(self):

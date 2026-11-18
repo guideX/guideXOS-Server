@@ -1,0 +1,78 @@
+{
+  "bug": {
+    "creation_time": "2026-04-14T15:52:21Z",
+    "id": 2031732,
+    "last_change_time": "2026-11-16T17:05:26Z",
+    "resolution": "",
+    "status": "ASSIGNED",
+    "summary": "DigiCert: Transition Plan for Existing Dual-Purpose Roots"
+  },
+  "comments": [
+    {
+      "attachment_id": null,
+      "author": "dcbugzillaresponse@digicert.com",
+      "bug_id": 2031732,
+      "collapsed": false,
+      "count": 0,
+      "creation_time": "2026-04-14T15:52:21Z",
+      "creator": "dcbugzillaresponse@digicert.com",
+      "id": 18013040,
+      "is_private": false,
+      "raw_text": "In accordance with [Section 7.5.3 of the Mozilla Root Store Policy](https://github.com/mozilla/pkipolicy/blob/master/rootstore/policy.md#753-transition-plan-for-existing-roots), DigiCert submits the following transition plan of changes to our dual-purpose roots.\n\n\n| Certificate | Current Mozilla Trust | SHA-256 Fingerprint | Notes for Mozilla |\n| --- | --- | --- | --- |\n| DigiCert Assured ID Root CA | Websites;Email | 3E9099B5015E8F486C00BCEA9D111EE721FABA355A89BCF1DF69561E3DC6325C | Remove 20260415 per [Bug 2017453](https://bugzilla.mozilla.org/show_bug.cgi?id=2017453) |\n| DigiCert Assured ID Root G2 | Websites;Email | 7D05EBB682339F8C9451EE094EEBFEFA7953A114EDB2F44949452FAB7D2FC185 | Change to SMIME before 20270915, remove on 20300415 |\n| DigiCert Assured ID Root G3 | Websites;Email | 7E37CB8B4C47090CAB36551BA6F45DB840680FBA166A952DB100717F43053FC2 | Change to SMIME before 20270915, remove on 20300415 |\n| DigiCert Global Root CA | Websites;Email | 4348A0E9444C78CB265E058D5E8944B4D84F9662BD26DB257F8934A443C70161 | Remove 20260415 per [Bug 2017453](https://bugzilla.mozilla.org/show_bug.cgi?id=2017453) |\n| DigiCert Global Root G2 | Websites;Email | CB3CCBB76031E5E0138F8DD39A23F9DE47FFC35E43C1144CEA27D46A5AB1CB5F | Change to SMIME before 20260615, remove on 20300415 |\n| DigiCert Global Root G3 | Websites;Email | 31AD6648F8104138C738F39EA4320133393E3A18CC02296EF97C2AC9EF6731D0 | Change to SMIME before 20260615, remove on 20300415 |\n| DigiCert High Assurance EV Root CA | Websites;Email | 7431E5F4C3C1CE4690774F0B61E05440883BA9A01ED00BA6ABD7806ED3B118CF | Remove 20260415 per [Bug 2017453](https://bugzilla.mozilla.org/show_bug.cgi?id=2017453) |\n| DigiCert Trusted Root G4 | Websites;Email | 552F7BDCF1A7AF9E6CE672017F4F12ABF77240C78E761AC203D1D9D20AC89988 | Change to SMIME before 20260615, remove on 20300415 |\n| QuoVadis Root CA 1 G3 | Websites;Email | 8A866FD1B276B57E578E921C65828A2BED58E9F2F288054134B7F1F4BFC9CC74 | Change to SMIME before 20260615, remove on 20300415 |\n| QuoVadis Root CA 2 | Websites;Email | 85A0DD7DD720ADB7FF05F83D542B209DC7FF4528F7D677B18389FEA5E5C49E86 | Remove 20260415 per [Bug 2017453](https://bugzilla.mozilla.org/show_bug.cgi?id=2017453) |\n| QuoVadis Root CA 3 | Websites;Email | 18F1FC7F205DF8ADDDEB7FE007DD57E3AF375A9C4D8D73546BF4F1FED1E18D35 | Remove 20260415 per [Bug 2017453](https://bugzilla.mozilla.org/show_bug.cgi?id=2017453) |\n| QuoVadis Root CA 3 G3 | Websites;Email | 88EF81DE202EB018452E43F864725CEA5FBD1FC2D9D205730709C5D8B8690F46 | Change to SMIME before 20260615, KEEP (See below) |\n\nWe request these Root CAs to become trusted within the Mozilla Root Store for S/MIME-only according to this timeline. These requested trust bit changes in Mozilla should not be construed as a commitment by DigiCert to completely discontinue serverAuth certificate issuance under these hierarchies.\n\n**Transition Outcome**\n\nFor the purposes of clarity, our ultimate goal is to consolidate on the following roots.\n\n| Certificate | Mozilla Trust | SHA-256 Fingerprint | Notes for Mozilla |\n| --- | --- | --- | --- |\n| DigiCert SMIME ECC P384 Root G5 | Email | E8E8176536A60CC2C4E10187C3BEFCA20EF263497018F566D5BEA0F94D0C111B | KEEP |\n| DigiCert SMIME RSA4096 Root G5 | Email | 90370D3EFA88BF58C30105BA25104A358460A7FA52DFC2011DF233A0F417912A | KEEP |\n| DigiCert TLS ECC P384 Root G5 | Websites | 018E13F0772532CF809BD1B17281867283FC48C6E13BE9C69812854A490C1B05 | KEEP |\n| DigiCert TLS RSA4096 Root G5 | Websites | 371A00DC0533B3721A7EEB40E8419E70799D2B0A0F2C1D80693165F7CEC4AD75 | KEEP |\n| QuoVadis Root CA 2 G3 | Websites | 8FE4FB0AF93A4D0D67DB0BEBB23E37C71BF325DCBCDD240EA04DAF58B47E1840 | KEEP |\n| QuoVadis Root CA 3 G3 | Changed to Email | 88EF81DE202EB018452E43F864725CEA5FBD1FC2D9D205730709C5D8B8690F46 | KEEP |\n\nWe intend to begin an embedment process for new DigiCert G6 TLS roots in 2026.",
+      "reactions": {},
+      "tags": [],
+      "text": "In accordance with [Section 7.5.3 of the Mozilla Root Store Policy](https://github.com/mozilla/pkipolicy/blob/master/rootstore/policy.md#753-transition-plan-for-existing-roots), DigiCert submits the following transition plan of changes to our dual-purpose roots.\n\n\n| Certificate | Current Mozilla Trust | SHA-256 Fingerprint | Notes for Mozilla |\n| --- | --- | --- | --- |\n| DigiCert Assured ID Root CA | Websites;Email | 3E9099B5015E8F486C00BCEA9D111EE721FABA355A89BCF1DF69561E3DC6325C | Remove 20260415 per [Bug 2017453](https://bugzilla.mozilla.org/show_bug.cgi?id=2017453) |\n| DigiCert Assured ID Root G2 | Websites;Email | 7D05EBB682339F8C9451EE094EEBFEFA7953A114EDB2F44949452FAB7D2FC185 | Change to SMIME before 20270915, remove on 20300415 |\n| DigiCert Assured ID Root G3 | Websites;Email | 7E37CB8B4C47090CAB36551BA6F45DB840680FBA166A952DB100717F43053FC2 | Change to SMIME before 20270915, remove on 20300415 |\n| DigiCert Global Root CA | Websites;Email | 4348A0E9444C78CB265E058D5E8944B4D84F9662BD26DB257F8934A443C70161 | Remove 20260415 per [Bug 2017453](https://bugzilla.mozilla.org/show_bug.cgi?id=2017453) |\n| DigiCert Global Root G2 | Websites;Email | CB3CCBB76031E5E0138F8DD39A23F9DE47FFC35E43C1144CEA27D46A5AB1CB5F | Change to SMIME before 20260615, remove on 20300415 |\n| DigiCert Global Root G3 | Websites;Email | 31AD6648F8104138C738F39EA4320133393E3A18CC02296EF97C2AC9EF6731D0 | Change to SMIME before 20260615, remove on 20300415 |\n| DigiCert High Assurance EV Root CA | Websites;Email | 7431E5F4C3C1CE4690774F0B61E05440883BA9A01ED00BA6ABD7806ED3B118CF | Remove 20260415 per [Bug 2017453](https://bugzilla.mozilla.org/show_bug.cgi?id=2017453) |\n| DigiCert Trusted Root G4 | Websites;Email | 552F7BDCF1A7AF9E6CE672017F4F12ABF77240C78E761AC203D1D9D20AC89988 | Change to SMIME before 20260615, remove on 20300415 |\n| QuoVadis Root CA 1 G3 | Websites;Email | 8A866FD1B276B57E578E921C65828A2BED58E9F2F288054134B7F1F4BFC9CC74 | Change to SMIME before 20260615, remove on 20300415 |\n| QuoVadis Root CA 2 | Websites;Email | 85A0DD7DD720ADB7FF05F83D542B209DC7FF4528F7D677B18389FEA5E5C49E86 | Remove 20260415 per [Bug 2017453](https://bugzilla.mozilla.org/show_bug.cgi?id=2017453) |\n| QuoVadis Root CA 3 | Websites;Email | 18F1FC7F205DF8ADDDEB7FE007DD57E3AF375A9C4D8D73546BF4F1FED1E18D35 | Remove 20260415 per [Bug 2017453](https://bugzilla.mozilla.org/show_bug.cgi?id=2017453) |\n| QuoVadis Root CA 3 G3 | Websites;Email | 88EF81DE202EB018452E43F864725CEA5FBD1FC2D9D205730709C5D8B8690F46 | Change to SMIME before 20260615, KEEP (See below) |\n\nWe request these Root CAs to become trusted within the Mozilla Root Store for S/MIME-only according to this timeline. These requested trust bit changes in Mozilla should not be construed as a commitment by DigiCert to completely discontinue serverAuth certificate issuance under these hierarchies.\n\n**Transition Outcome**\n\nFor the purposes of clarity, our ultimate goal is to consolidate on the following roots.\n\n| Certificate | Mozilla Trust | SHA-256 Fingerprint | Notes for Mozilla |\n| --- | --- | --- | --- |\n| DigiCert SMIME ECC P384 Root G5 | Email | E8E8176536A60CC2C4E10187C3BEFCA20EF263497018F566D5BEA0F94D0C111B | KEEP |\n| DigiCert SMIME RSA4096 Root G5 | Email | 90370D3EFA88BF58C30105BA25104A358460A7FA52DFC2011DF233A0F417912A | KEEP |\n| DigiCert TLS ECC P384 Root G5 | Websites | 018E13F0772532CF809BD1B17281867283FC48C6E13BE9C69812854A490C1B05 | KEEP |\n| DigiCert TLS RSA4096 Root G5 | Websites | 371A00DC0533B3721A7EEB40E8419E70799D2B0A0F2C1D80693165F7CEC4AD75 | KEEP |\n| QuoVadis Root CA 2 G3 | Websites | 8FE4FB0AF93A4D0D67DB0BEBB23E37C71BF325DCBCDD240EA04DAF58B47E1840 | KEEP |\n| QuoVadis Root CA 3 G3 | Changed to Email | 88EF81DE202EB018452E43F864725CEA5FBD1FC2D9D205730709C5D8B8690F46 | KEEP |\n\nWe intend to begin an embedment process for new DigiCert G6 TLS roots in 2026.",
+      "time": "2026-04-14T15:52:21Z"
+    },
+    {
+      "attachment_id": null,
+      "author": "dcbugzillaresponse@digicert.com",
+      "bug_id": 2031732,
+      "collapsed": false,
+      "count": 1,
+      "creation_time": "2026-04-21T15:14:27Z",
+      "creator": "dcbugzillaresponse@digicert.com",
+      "id": 18030180,
+      "is_private": false,
+      "raw_text": "We request a correction to the above table (affecting the rows for DigiCert Global Root G2 and DigiCert Global Root G3):\n\n| Certificate Name | Mozilla Trust Bits | SHA-256 Fingerprint | Notes for Mozilla |\n| --- | --- | --- | --- |\n| DigiCert Assured ID Root CA | Websites;Email | 3E9099B5015E8F486C00BCEA9D111EE721FABA355A89BCF1DF69561E3DC6325C | Remove 20260415 per https://bugzilla.mozilla.org/show_bug.cgi?id=2017453 |\n| DigiCert Assured ID Root G2 | Websites;Email | 7D05EBB682339F8C9451EE094EEBFEFA7953A114EDB2F44949452FAB7D2FC185 | Change to SMIME before 20270915, remove on 20300415 |\n| DigiCert Assured ID Root G3 | Websites;Email | 7E37CB8B4C47090CAB36551BA6F45DB840680FBA166A952DB100717F43053FC2 | Change to SMIME before 20270915, remove on 20300415 |\n| DigiCert Global Root CA | Websites;Email | 4348A0E9444C78CB265E058D5E8944B4D84F9662BD26DB257F8934A443C70161 | Remove 20260415 per https://bugzilla.mozilla.org/show_bug.cgi?id=2017453 |\n| DigiCert Global Root G2 | Websites;Email | CB3CCBB76031E5E0138F8DD39A23F9DE47FFC35E43C1144CEA27D46A5AB1CB5F | Change to Websites before 20260615, remove on 20300415 |\n| DigiCert Global Root G3 | Websites;Email | 31AD6648F8104138C738F39EA4320133393E3A18CC02296EF97C2AC9EF6731D0 | Change to Websites before 20260615, remove on 20300415 |\n| DigiCert High Assurance EV Root CA | Websites;Email | 7431E5F4C3C1CE4690774F0B61E05440883BA9A01ED00BA6ABD7806ED3B118CF | Remove 20260415 per https://bugzilla.mozilla.org/show_bug.cgi?id=2017453 |\n| DigiCert Trusted Root G4 | Websites;Email | 552F7BDCF1A7AF9E6CE672017F4F12ABF77240C78E761AC203D1D9D20AC89988 | Change to SMIME before 20260615, remove on 20300415 |\n| QuoVadis Root CA 1 G3 | Websites;Email | 8A866FD1B276B57E578E921C65828A2BED58E9F2F288054134B7F1F4BFC9CC74 | Change to SMIME before 20260615, remove on 20300415 |\n| QuoVadis Root CA 2 | Websites;Email | 85A0DD7DD720ADB7FF05F83D542B209DC7FF4528F7D677B18389FEA5E5C49E86 | Remove 20260415 per https://bugzilla.mozilla.org/show_bug.cgi?id=2017453 |\n| QuoVadis Root CA 3 | Websites;Email | 18F1FC7F205DF8ADDDEB7FE007DD57E3AF375A9C4D8D73546BF4F1FED1E18D35 | Remove 20260415 per https://bugzilla.mozilla.org/show_bug.cgi?id=2017453 |\n| QuoVadis Root CA 3 G3 | Websites;Email | 88EF81DE202EB018452E43F864725CEA5FBD1FC2D9D205730709C5D8B8690F46 | Change to SMIME before 20260615, KEEP |",
+      "reactions": {},
+      "tags": [],
+      "text": "We request a correction to the above table (affecting the rows for DigiCert Global Root G2 and DigiCert Global Root G3):\n\n| Certificate Name | Mozilla Trust Bits | SHA-256 Fingerprint | Notes for Mozilla |\n| --- | --- | --- | --- |\n| DigiCert Assured ID Root CA | Websites;Email | 3E9099B5015E8F486C00BCEA9D111EE721FABA355A89BCF1DF69561E3DC6325C | Remove 20260415 per https://bugzilla.mozilla.org/show_bug.cgi?id=2017453 |\n| DigiCert Assured ID Root G2 | Websites;Email | 7D05EBB682339F8C9451EE094EEBFEFA7953A114EDB2F44949452FAB7D2FC185 | Change to SMIME before 20270915, remove on 20300415 |\n| DigiCert Assured ID Root G3 | Websites;Email | 7E37CB8B4C47090CAB36551BA6F45DB840680FBA166A952DB100717F43053FC2 | Change to SMIME before 20270915, remove on 20300415 |\n| DigiCert Global Root CA | Websites;Email | 4348A0E9444C78CB265E058D5E8944B4D84F9662BD26DB257F8934A443C70161 | Remove 20260415 per https://bugzilla.mozilla.org/show_bug.cgi?id=2017453 |\n| DigiCert Global Root G2 | Websites;Email | CB3CCBB76031E5E0138F8DD39A23F9DE47FFC35E43C1144CEA27D46A5AB1CB5F | Change to Websites before 20260615, remove on 20300415 |\n| DigiCert Global Root G3 | Websites;Email | 31AD6648F8104138C738F39EA4320133393E3A18CC02296EF97C2AC9EF6731D0 | Change to Websites before 20260615, remove on 20300415 |\n| DigiCert High Assurance EV Root CA | Websites;Email | 7431E5F4C3C1CE4690774F0B61E05440883BA9A01ED00BA6ABD7806ED3B118CF | Remove 20260415 per https://bugzilla.mozilla.org/show_bug.cgi?id=2017453 |\n| DigiCert Trusted Root G4 | Websites;Email | 552F7BDCF1A7AF9E6CE672017F4F12ABF77240C78E761AC203D1D9D20AC89988 | Change to SMIME before 20260615, remove on 20300415 |\n| QuoVadis Root CA 1 G3 | Websites;Email | 8A866FD1B276B57E578E921C65828A2BED58E9F2F288054134B7F1F4BFC9CC74 | Change to SMIME before 20260615, remove on 20300415 |\n| QuoVadis Root CA 2 | Websites;Email | 85A0DD7DD720ADB7FF05F83D542B209DC7FF4528F7D677B18389FEA5E5C49E86 | Remove 20260415 per https://bugzilla.mozilla.org/show_bug.cgi?id=2017453 |\n| QuoVadis Root CA 3 | Websites;Email | 18F1FC7F205DF8ADDDEB7FE007DD57E3AF375A9C4D8D73546BF4F1FED1E18D35 | Remove 20260415 per https://bugzilla.mozilla.org/show_bug.cgi?id=2017453 |\n| QuoVadis Root CA 3 G3 | Websites;Email | 88EF81DE202EB018452E43F864725CEA5FBD1FC2D9D205730709C5D8B8690F46 | Change to SMIME before 20260615, KEEP |",
+      "time": "2026-04-21T15:14:27Z"
+    },
+    {
+      "attachment_id": null,
+      "author": "bwilson@mozilla.com",
+      "bug_id": 2031732,
+      "collapsed": false,
+      "count": 2,
+      "creation_time": "2026-11-10T19:31:44Z",
+      "creator": "bwilson@mozilla.com",
+      "id": 18492066,
+      "is_private": false,
+      "raw_text": "DigiCert,\nWas this correct?\nWe've removed the Websites trust bit for the G4 and preliminary indications are this is causing trouble with websites.\nDigiCert Trusted Root G4 \tWebsites;Email \t552F7BDCF1A7AF9E6CE672017F4F12ABF77240C78E761AC203D1D9D20AC89988 \tChange to SMIME before 20260615, remove on 20300415\nBen",
+      "reactions": {
+        "+1": 1
+      },
+      "tags": [],
+      "text": "DigiCert,\nWas this correct?\nWe've removed the Websites trust bit for the G4 and preliminary indications are this is causing trouble with websites.\nDigiCert Trusted Root G4 \tWebsites;Email \t552F7BDCF1A7AF9E6CE672017F4F12ABF77240C78E761AC203D1D9D20AC89988 \tChange to SMIME before 20260615, remove on 20300415\nBen",
+      "time": "2026-11-10T19:31:44Z"
+    },
+    {
+      "attachment_id": null,
+      "author": "dcbugzillaresponse@digicert.com",
+      "bug_id": 2031732,
+      "collapsed": false,
+      "count": 3,
+      "creation_time": "2026-11-16T17:05:26Z",
+      "creator": "dcbugzillaresponse@digicert.com",
+      "id": 18506804,
+      "is_private": false,
+      "raw_text": "Hi Ben, \n\nYes, this is correct.",
+      "reactions": {},
+      "tags": [],
+      "text": "Hi Ben, \n\nYes, this is correct.",
+      "time": "2026-11-16T17:05:26Z"
+    }
+  ]
+}

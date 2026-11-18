@@ -49,7 +49,7 @@ The eligibility function additionally requires exact provenance, Mozilla CA poli
 
 ## Root accounting and generated artifact
 
-The latest NSS commit restores TLS server-auth trust for DigiCert Trusted Root G4 and supplies a server distrust-after date. The importer records it as `CKT_NSS_TRUSTED_DELEGATOR` with `2609-01-04T23:59:59Z`; because the importer does not enforce that date during chain verification, the root remains excluded. Four matched comparison roots carry server distrust-after dates: Izenpe.com, emSign Root CA - G1, DigiCert Trusted Root G4, and Autoridad de Certificacion Firmaprofesional CIF A62634068.
+The latest NSS commit restores TLS server-auth trust for DigiCert Trusted Root G4 and supplies a server distrust-after date. The importer recorded it as `2609-01-04T23:59:59Z`; NAVHTTPS22's audit found that this was a timestamp parser defect. The pinned NSS comment identifies the cutoff as `2026-09-14T23:59:59Z`, which NAVHTTPS22 now parses and enforces in the exact-root cutoff table. Four matched comparison roots carry server distrust-after dates: Izenpe.com, emSign Root CA - G1, DigiCert Trusted Root G4, and Autoridad de Certificacion Firmaprofesional CIF A62634068.
 
 | Accounting field | Result |
 |---|---:|

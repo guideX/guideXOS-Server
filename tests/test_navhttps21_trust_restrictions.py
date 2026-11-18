@@ -54,6 +54,10 @@ def complete_overlay(**record_changes):
         "issuance_evidence": {"status": "not-required", "types": []},
         "program_policy_status": "satisfied",
         "supported_enforcement_mechanisms": [],
+        "attribute_coverage": {
+            attribute: {"status": "complete", "source_ids": [source["source_id"] for source in overlay["sources"]]}
+            for attribute in importer.RESTRICTION_COVERAGE_FIELDS
+        },
     }
     record.update(record_changes)
     overlay["records"] = {fingerprint: record}
@@ -75,8 +79,22 @@ class MozillaTrustRestrictionTests(unittest.TestCase):
         issued = cutoff + dt.timedelta(seconds=1)
         self.assertTrue(importer.issued_after_distrust_after(issued, cutoff))
 
-    def test_pinned_nss_generalized_time_preserves_future_years(self):
+    def test_pinned_nss_utc_time_uses_two_digit_year(self):
+        self.assertEqual(importer._distrust_after(b"261116235959Z"), "2026-11-16T23:59:59Z")
+
+    def test_pinned_nss_generalized_time_preserves_extended_years(self):
         self.assertEqual(importer._distrust_after(b"26040105235959Z"), "2604-01-05T23:59:59Z")
+
+    def test_pinned_nss_cutoff_values_match_certdata_comments(self):
+        self.assertEqual(
+            importer.NAVHTTPS21_DISTRUST_AFTER,
+            {
+                "2530cc8e98321502bad96f9b1fba1b099e2d299e0f4548bb914f363bc0d4531f": "2026-04-15T23:59:59Z",
+                "40f6af0346a99aa1cd1d555a4e9cce62c7f9634603ee406615833dc8c8d00367": "2026-11-16T23:59:59Z",
+                "552f7bdcf1a7af9e6ce672017f4f12abf77240c78e761ac203d1d9d20ac89988": "2026-09-14T23:59:59Z",
+                "57de0583efd2b26e0361da99da9df4648def7ee8441c3b728afa9bcde0f9b26a": "2026-08-06T07:01:00Z",
+            },
+        )
 
     def test_missing_overlay_record_is_unknown_and_excluded(self):
         reasons = importer.evaluate_root_eligibility(eligible_root(), INCOMPLETE)
@@ -126,7 +144,14 @@ class MozillaTrustRestrictionTests(unittest.TestCase):
         self.assertEqual(pinned, importer.NAVHTTPS21_DISTRUST_AFTER)
         self.assertEqual(policy["full_tls_enforcement_status"], "partial-notbefore-only")
         self.assertEqual(policy["tls_sct_timestamp_check"], "unsupported")
-        self.assertTrue(policy["sct_semantics_source"].endswith("show_bug.cgi?id=2018979"))
+        self.assertEqual(
+            policy["sct_semantics_source"],
+            [
+                "https://bugzilla.mozilla.org/show_bug.cgi?id=2018158",
+                "https://bugzilla.mozilla.org/show_bug.cgi?id=2089115",
+            ],
+        )
+        self.assertIn("2018979 is an eMudhra transition-tracking bug", policy["sct_semantics_context"])
 
     def test_notbefore_enforcement_does_not_claim_full_distrust_after(self):
         root = eligible_root(
@@ -144,6 +169,53 @@ class MozillaTrustRestrictionTests(unittest.TestCase):
         self.assertEqual(root["ccadb_record"]["Mozilla Status"], "Included")
         self.assertEqual(root["external_restrictions"], "unknown")
         self.assertEqual(root["technical_eligibility"], "ineligible")
+
+    def test_accounting_manifest_counts_overlapping_exclusion_reasons_and_unknowns(self):
+        _, _, report, _, _, _, _ = importer._verified_navhttps21_inputs(
+            ROOT, SOURCE / "source-lock.json"
+        )
+        reasons = report["eligibility_rejection_reason_counts"]
+        self.assertEqual(reasons["certificate-path-validation-unverified"], 118)
+        self.assertEqual(reasons["external-policy-snapshot-incomplete"], 118)
+        self.assertEqual(reasons["root-specific-external-restrictions-missing"], 117)
+        self.assertEqual(reasons["root-specific-restrictions-incomplete"], 1)
+        self.assertEqual(reasons["root-domain-restrictions-coverage-unknown"], 1)
+        self.assertEqual(reasons["root-program-policy-coverage-unknown"], 1)
+        self.assertNotIn("unsupported-certificate-policy-requirement", reasons)
+        self.assertEqual(reasons["server-distrust-after-sct-timestamp-not-enforced"], 4)
+        self.assertEqual(reasons["tls-server-auth-not-explicitly-permitted"], 5)
+        self.assertEqual(
+            report["restriction_attribute_status_counts"]["domain_restrictions_status"],
+            {"unknown": 118},
+        )
+        self.assertEqual(
+            report["restriction_attribute_status_counts"]["certificate_policy_status"],
+            {"not-required": 1, "unknown": 117},
+        )
+        self.assertEqual(
+            report["restriction_attribute_coverage_counts"]["root_inclusion"],
+            {"complete": 1, "unknown": 117},
+        )
+        digicert = next(
+            root for root in report["roots"]
+            if root["certificate_sha256"] == "018e13f0772532cf809bd1b17281867283fc48c6e13be9c69812854a490c1b05"
+        )
+        self.assertEqual(digicert["root_certificate_extensions"]["name_constraints"]["status"], "absent")
+        self.assertEqual(digicert["root_certificate_extensions"]["certificate_policies"]["status"], "absent")
+        self.assertEqual(digicert["domain_restrictions_status"], "unknown")
+        self.assertEqual(digicert["certificate_policy_status"], "not-required")
+        self.assertEqual(
+            digicert["external_policy_record"]["qualification_scope"],
+            "ordinary TLS server authentication; Extended Validation presentation and policy processing are excluded",
+        )
+        self.assertEqual(digicert["technical_eligibility"], "ineligible")
+
+    def test_complete_root_coverage_cannot_contain_unknown_attribute_coverage(self):
+        overlay = complete_overlay()
+        record = overlay["records"]["a" * 64]
+        record["attribute_coverage"]["domain_restrictions"]["status"] = "unknown"
+        with self.assertRaisesRegex(importer.ImportErrorDetail, "claims complete coverage"):
+            importer.validate_restrictions_overlay_v2(overlay)
 
     def test_tampered_ccadb_snapshot_hash_is_rejected(self):
         lock = importer.load_json(SOURCE / "source-lock.json")

@@ -1,0 +1,94 @@
+{
+  "bug": {
+    "creation_time": "2022-04-12T18:26:47Z",
+    "id": 1764397,
+    "last_change_time": "2022-07-20T17:25:35Z",
+    "resolution": "FIXED",
+    "status": "RESOLVED",
+    "summary": "Enable EV Treatment for Digicert G5 root certificates"
+  },
+  "comments": [
+    {
+      "attachment_id": null,
+      "author": "kathleen.a.wilson@gmail.com",
+      "bug_id": 1764397,
+      "collapsed": false,
+      "count": 0,
+      "creation_time": "2022-04-12T18:26:47Z",
+      "creator": "kathleen.a.wilson@gmail.com",
+      "id": 15856567,
+      "is_private": false,
+      "raw_text": "Per bug #1706228 the request from DigiCert has been approved to enable the following root certificates for EV use. Please make the corresponding changes to PSM.\n\nFriendly Name: DigiCert TLS RSA4096 Root G5\nSHA-1 Fingerprint: A78849DC5D7C758C8CDE399856B3AAD0B2A57135\nSHA-256 Fingerprint: 371A00DC0533B3721A7EEB40E8419E70799D2B0A0F2C1D80693165F7CEC4AD75\nEV Policy OID: 2.23.140.1.1\nTest URL: https://digicert-tls-rsa4096-root-g5.chain-demos.digicert.com/\n\nFriendly Name: DigiCert TLS ECC P384 Root G5\nSHA-1 Fingerprint: 17F3DE5E9F0F19E98EF61F32266E20C407AE30EE\nSHA-256 Fingerprint: 018E13F0772532CF809BD1B17281867283FC48C6E13BE9C69812854A490C1B05\nEV Policy OID: 2.23.140.1.1\nTest URL: https://digicert-tls-ecc-p384-root-g5.chain-demos.digicert.com/\n\n\nNOTE: Bug #1764392 must be completed (the certs added to NSS), before this EV-enablement may be implemented.",
+      "reactions": {},
+      "tags": [],
+      "text": "Per bug #1706228 the request from DigiCert has been approved to enable the following root certificates for EV use. Please make the corresponding changes to PSM.\n\nFriendly Name: DigiCert TLS RSA4096 Root G5\nSHA-1 Fingerprint: A78849DC5D7C758C8CDE399856B3AAD0B2A57135\nSHA-256 Fingerprint: 371A00DC0533B3721A7EEB40E8419E70799D2B0A0F2C1D80693165F7CEC4AD75\nEV Policy OID: 2.23.140.1.1\nTest URL: https://digicert-tls-rsa4096-root-g5.chain-demos.digicert.com/\n\nFriendly Name: DigiCert TLS ECC P384 Root G5\nSHA-1 Fingerprint: 17F3DE5E9F0F19E98EF61F32266E20C407AE30EE\nSHA-256 Fingerprint: 018E13F0772532CF809BD1B17281867283FC48C6E13BE9C69812854A490C1B05\nEV Policy OID: 2.23.140.1.1\nTest URL: https://digicert-tls-ecc-p384-root-g5.chain-demos.digicert.com/\n\n\nNOTE: Bug #1764392 must be completed (the certs added to NSS), before this EV-enablement may be implemented.",
+      "time": "2022-04-12T18:26:47Z"
+    },
+    {
+      "attachment_id": 9285379,
+      "author": "dkeeler@mozilla.com",
+      "bug_id": 1764397,
+      "collapsed": false,
+      "count": 1,
+      "creation_time": "2022-07-13T20:54:10Z",
+      "creator": "dkeeler@mozilla.com",
+      "id": 15984385,
+      "is_private": false,
+      "raw_text": "",
+      "reactions": {},
+      "tags": [],
+      "text": "Created attachment 9285379\nBug 1764397 - Enable EV Treatment for Digicert G5 root certificates r?rmf",
+      "time": "2022-07-13T20:54:10Z"
+    },
+    {
+      "attachment_id": null,
+      "author": "pulsebot@bmo.tld",
+      "bug_id": 1764397,
+      "collapsed": false,
+      "count": 2,
+      "creation_time": "2022-07-19T22:19:22Z",
+      "creator": "pulsebot@bmo.tld",
+      "id": 15992205,
+      "is_private": false,
+      "raw_text": "Pushed by dkeeler@mozilla.com:\nhttps://hg.mozilla.org/integration/autoland/rev/e59b5e33df78\nEnable EV Treatment for Digicert G5 root certificates r=rmf",
+      "reactions": {},
+      "tags": [],
+      "text": "Pushed by dkeeler@mozilla.com:\nhttps://hg.mozilla.org/integration/autoland/rev/e59b5e33df78\nEnable EV Treatment for Digicert G5 root certificates r=rmf",
+      "time": "2022-07-19T22:19:22Z"
+    },
+    {
+      "attachment_id": null,
+      "author": "ncsoregi@mozilla.com",
+      "bug_id": 1764397,
+      "collapsed": false,
+      "count": 3,
+      "creation_time": "2022-07-20T10:01:38Z",
+      "creator": "ncsoregi@mozilla.com",
+      "id": 15992595,
+      "is_private": false,
+      "raw_text": "https://hg.mozilla.org/mozilla-central/rev/e59b5e33df78",
+      "reactions": {},
+      "tags": [
+        "bugherder"
+      ],
+      "text": "https://hg.mozilla.org/mozilla-central/rev/e59b5e33df78",
+      "time": "2022-07-20T10:01:38Z"
+    },
+    {
+      "attachment_id": null,
+      "author": "kathleen.a.wilson@gmail.com",
+      "bug_id": 1764397,
+      "collapsed": false,
+      "count": 4,
+      "creation_time": "2022-07-20T17:25:35Z",
+      "creator": "kathleen.a.wilson@gmail.com",
+      "id": 15993170,
+      "is_private": false,
+      "raw_text": "Confirmed EV treatment in Firefox 104.0a1\n\nThanks!",
+      "reactions": {},
+      "tags": [],
+      "text": "Confirmed EV treatment in Firefox 104.0a1\n\nThanks!",
+      "time": "2022-07-20T17:25:35Z"
+    }
+  ]
+}

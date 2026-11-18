@@ -25,15 +25,53 @@
       "An absent record or blank field does not establish that no Mozilla restriction applies."
     ]
   },
+  "mozilla_bugzilla_snapshots": [
+    {
+      "source_id": "mozilla-bugzilla-1764392",
+      "bug_id": 1764392,
+      "url": "https://bugzilla.mozilla.org/show_bug.cgi?id=1764392",
+      "api_url": "https://bugzilla.mozilla.org/rest/bug/1764392",
+      "revision": "last_change_time=2022-07-13T20:54:10Z",
+      "retrieved_date_utc": "2026-11-17",
+      "local_path": "assets/certs/mozilla/navhttps22-sources/bug-1764392.json",
+      "sha256": "c13a9ddd1538d1a63c705c58b21c347288fc9eefa080c274a7cf2d627ecfc237",
+      "roles": ["DigiCert TLS ECC P384 Root G5 identity and initial Websites trust-purpose evidence"],
+      "coverage_limits": ["The inclusion bug is not a complete fingerprint-keyed domain restriction or program-compliance registry."]
+    },
+    {
+      "source_id": "mozilla-bugzilla-1764397",
+      "bug_id": 1764397,
+      "url": "https://bugzilla.mozilla.org/show_bug.cgi?id=1764397",
+      "api_url": "https://bugzilla.mozilla.org/rest/bug/1764397",
+      "revision": "last_change_time=2022-07-20T17:25:35Z",
+      "retrieved_date_utc": "2026-11-17",
+      "local_path": "assets/certs/mozilla/navhttps22-sources/bug-1764397.json",
+      "sha256": "0e5d584e22de1af043b9eee9ad78647f3ff35dbe87bedfe66b81733499d592a6",
+      "roles": ["DigiCert TLS ECC P384 Root G5 EV treatment and OID evidence"],
+      "coverage_limits": ["The EV OID record does not establish a general TLS certificate-policy requirement or full RFC 5280 policy processing."]
+    },
+    {
+      "source_id": "mozilla-bugzilla-2031732",
+      "bug_id": 2031732,
+      "url": "https://bugzilla.mozilla.org/show_bug.cgi?id=2031732",
+      "api_url": "https://bugzilla.mozilla.org/rest/bug/2031732",
+      "revision": "last_change_time=2026-11-16T17:05:26Z",
+      "retrieved_date_utc": "2026-11-17",
+      "local_path": "assets/certs/mozilla/navhttps22-sources/bug-2031732.json",
+      "sha256": "318d215feb08457afcb4af980224591773040586c3f75488c6098f9c61b662be",
+      "roles": ["DigiCert root-purpose transition update through 2026-11-16"],
+      "coverage_limits": ["The transition plan is not a complete fingerprint-keyed domain restriction or certificate-policy registry."]
+    }
+  ],
   "root_restrictions_overlay": {
     "local_path": "assets/certs/mozilla/navhttps21-sources/root-restrictions-overlay.json",
-    "sha256": "25339dd599e85905547096805b873209f76d137ddd24d5a1d703b4c2c6ff12f6",
+    "sha256": "9676339568a863ee5bc95ab778aedc8646e8ce41040251f323b74d8d40dbb5d9",
     "schema_version": "guidexos.mozilla-root-restrictions.v2",
     "coverage_status": "incomplete"
   },
   "distrust_after_enforcement_policy": {
     "local_path": "assets/certs/mozilla/navhttps21-sources/distrust-after-enforcement.json",
-    "sha256": "36127d88adc1c7bd1868969420c88a5ca93780c646838442cfeb35570fe591ef",
+    "sha256": "ac05c3786965c910821806d4b0b9c6e0891083384c597dcc9176bccb02279bca",
     "schema_version": "guidexos.mozilla-server-distrust-after.v2",
     "mechanism": "navigator-tls-verify-callback-leaf-notbefore-v1"
   },

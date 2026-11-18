@@ -19,10 +19,10 @@ typedef struct GxosTlsDistrustAfterPolicy {
  * certdata.txt. Subject names and SPKI matches are deliberately insufficient.
  */
 static const GxosTlsDistrustAfterPolicy GXOS_TLS_MOZILLA_DISTRUST_AFTER_POLICIES[] = {
-    { "2530cc8e98321502bad96f9b1fba1b099e2d299e0f4548bb914f363bc0d4531f", INT64_C(20007475199) },
-    { "40f6af0346a99aa1cd1d555a4e9cce62c7f9634603ee406615833dc8c8d00367", INT64_C(20228486399) },
-    { "552f7bdcf1a7af9e6ce672017f4f12abf77240c78e761ac203d1d9d20ac89988", INT64_C(20165241599) },
-    { "57de0583efd2b26e0361da99da9df4648def7ee8441c3b728afa9bcde0f9b26a", INT64_C(20146928400) },
+    { "2530cc8e98321502bad96f9b1fba1b099e2d299e0f4548bb914f363bc0d4531f", INT64_C(1776297599) },
+    { "40f6af0346a99aa1cd1d555a4e9cce62c7f9634603ee406615833dc8c8d00367", INT64_C(1794873599) },
+    { "552f7bdcf1a7af9e6ce672017f4f12abf77240c78e761ac203d1d9d20ac89988", INT64_C(1789430399) },
+    { "57de0583efd2b26e0361da99da9df4648def7ee8441c3b728afa9bcde0f9b26a", INT64_C(1785999660) },
 };
 
 #define GXOS_TLS_MOZILLA_DISTRUST_AFTER_POLICY_COUNT \

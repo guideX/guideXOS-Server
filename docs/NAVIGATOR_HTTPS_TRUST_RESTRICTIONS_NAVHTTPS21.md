@@ -2,6 +2,8 @@
 
 **Outcome B — enforcement foundation advanced.** Exact NSS server-auth distrust-after dates are pinned, and the runtime checks the leaf `notBefore` portion. Mozilla also requires rejecting SCT timestamps after a TLS distrust-after date; Navigator does not verify SCT timestamps, so the runtime now fails closed for every chain through one of the four affected roots. Full allow/deny semantics remain **partial**, and those roots remain ineligible. The authoritative sources available here also do not give a complete fingerprint-keyed restriction assessment for any candidate root. There are zero eligible roots, no public candidate PEM, and public HTTPS remains disabled.
 
+**NAVHTTPS22 audit amendment:** NAVHTTPS21's importer tried Python's `%Y` parser before `%y` on NSS's 12-digit `YYMMDDhhmmssZ` values. Because `%Y` accepts under-width input, the four 2026 values were recorded as years 2604–2611. The four runtime paths were denied regardless because SCT validation is unavailable, but the cutoff metadata and leaf-date comparisons were incorrect. NAVHTTPS22 changes the parser to select formats by exact width and updates the runtime table. The table below now shows the dates printed in pinned NSS `certdata.txt` comments. The citation to Bug 2018158 is contextual: it is an OISTE transition thread whose comment describes the general TLS distrust-after check (`notBefore` plus SCT timestamps), not a complete specification. Bug 2089115 is the root-specific emSign change that explicitly applies SCT checking. NAVHTTPS22 verifies the interpretation against pinned NSS values and the exercised fail-closed Mbed TLS callback. Current NAVHTTPS22 eligibility decisions and hashes are in [`NAVIGATOR_HTTPS_ROOT_ELIGIBILITY_NAVHTTPS22.md`](NAVIGATOR_HTTPS_ROOT_ELIGIBILITY_NAVHTTPS22.md).
+
 ## Accepted baseline and repository state
 
 - Repository: `D:\dev\guideXOSServer_NAVIGATOR_IMPROVEMENTS`
@@ -47,10 +49,10 @@ The enforcement table is keyed only by exact certificate DER SHA-256. It contain
 
 | Root | SHA-256 | TLS `notBefore` cutoff UTC |
 |---|---|---|
-| Izenpe.com | `2530cc8e98321502bad96f9b1fba1b099e2d299e0f4548bb914f363bc0d4531f` | `2604-01-05T23:59:59Z` |
-| emSign Root CA - G1 | `40f6af0346a99aa1cd1d555a4e9cce62c7f9634603ee406615833dc8c8d00367` | `2611-01-06T23:59:59Z` |
-| DigiCert Trusted Root G4 | `552f7bdcf1a7af9e6ce672017f4f12abf77240c78e761ac203d1d9d20ac89988` | `2609-01-04T23:59:59Z` |
-| Autoridad de Certificacion Firmaprofesional CIF A62634068 | `57de0583efd2b26e0361da99da9df4648def7ee8441c3b728afa9bcde0f9b26a` | `2608-06-07T01:00:00Z` |
+| Izenpe.com | `2530cc8e98321502bad96f9b1fba1b099e2d299e0f4548bb914f363bc0d4531f` | `2026-04-15T23:59:59Z` |
+| emSign Root CA - G1 | `40f6af0346a99aa1cd1d555a4e9cce62c7f9634603ee406615833dc8c8d00367` | `2026-11-16T23:59:59Z` |
+| DigiCert Trusted Root G4 | `552f7bdcf1a7af9e6ce672017f4f12abf77240c78e761ac203d1d9d20ac89988` | `2026-09-14T23:59:59Z` |
+| Autoridad de Certificacion Firmaprofesional CIF A62634068 | `57de0583efd2b26e0361da99da9df4648def7ee8441c3b728afa9bcde0f9b26a` | `2026-08-06T07:01:00Z` |
 
 The existing Mbed TLS verify callback now hashes each CA certificate in the verified chain with PSA SHA-256, records any exact restricted identity, and checks the leaf date when depth zero is visited. Mbed TLS 4.1.0's root-to-leaf callback order is verified in the offline corpus. Because the callback cannot access verified SCT timestamps, it also adds `MBEDTLS_X509_BADCERT_OTHER` to every chain that reaches one of the four exact roots, including certificates before or equal to cutoff. It does not clear Mbed TLS signature, time, hostname, EKU, or Name Constraints flags. No current wall-clock comparison was added, and the existing verifier remains the only chain verifier. The importer reports full TLS distrust-after as false and blocks affected roots until SCT timestamp enforcement exists.
 
@@ -120,7 +122,9 @@ Recommended NAVHTTPS22 scope: implement and verify Mozilla-compatible SCT timest
 ## References
 
 - [NSS Root Store guide](https://firefox-source-docs.mozilla.org/security/nss/runbooks/rootstore.html)
-- [Mozilla Bug 2018979 — TLS distrust-after includes SCT timestamp rejection](https://bugzilla.mozilla.org/show_bug.cgi?id=2018979)
+- [Mozilla Bug 2018158 — OISTE transition thread with a contextual comment describing TLS `notBefore` and SCT checks](https://bugzilla.mozilla.org/show_bug.cgi?id=2018158)
+- [Mozilla Bug 2089115 — emSign Root CA - G1 cutoff and SCT backdating protection](https://bugzilla.mozilla.org/show_bug.cgi?id=2089115)
+- [Mozilla Bug 2018979 — eMudhra transition tracking](https://bugzilla.mozilla.org/show_bug.cgi?id=2018979) (context; not the primary semantics source)
 - [Mozilla Additional Trust Changes](https://wiki.mozilla.org/CA/Additional_Trust_Changes)
 - [Mozilla Root Store Policy 3.1 source](https://github.com/mozilla/pkipolicy/blob/bb613bb30b8d85706bac7ecdd877d19b50efe4e7/rootstore/policy.md)
 - [CCADB resources](https://www.ccadb.org/resources) and [data usage terms](https://www.ccadb.org/rootstores/usage)
