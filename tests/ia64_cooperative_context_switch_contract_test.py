@@ -45,20 +45,34 @@ def valid_output() -> str:
     lines.extend((
         "IA64_COOP_CONTEXT_STATE id=A stack_base=0x100000 stack_limit=0x110000 "
         "sp=0x10f000 rp=0x200100 code_base=0x200000 code_limit=0x210000 "
-        "rbs_base=0x140000 rbs_limit=0x150000 gp=0x200000 switches=0x2 first_entries=0x0 "
+        "rbs_base=0x140000 rbs_limit=0x150000 pfs=0x0150000000000011 lc=0x31 ec=0x15 "
+        "gp=0x200000 gr4=0x4758343441413031 gr5=0x4758353541413031 "
+        "gr6=0x4758363641413031 gr7=0x4758373741413031 "
+        "br1=0x4252314141413031 br2=0x4252324141413031 "
+        "br3=0x4252334141413031 br4=0x4252344141413031 br5=0x4252354141413031 "
+        "pr=0x10003 ccv=0xa5a5 fpsr=0x9804c0270033f switches=0x2 first_entries=0x0 "
         "resumes=0x2 bsp=0x140000 bspstore=0x140000 rnat_defined=0x0 "
         "rnat_valid_mask=0x1 observed_psr=0x0",
         "IA64_COOP_CONTEXT_STATE id=B stack_base=0x120000 stack_limit=0x130000 "
         "sp=0x12f000 rp=0x200200 code_base=0x200000 code_limit=0x210000 "
-        "rbs_base=0x160000 rbs_limit=0x170000 gp=0x0 switches=0x2 first_entries=0x1 "
+        "rbs_base=0x160000 rbs_limit=0x170000 pfs=0x02a0000000000022 lc=0x42 ec=0x2a "
+        "gp=0x0 gr4=0x4758343442423032 gr5=0x4758353542423032 "
+        "gr6=0x4758363642423032 gr7=0x4758373742423032 "
+        "br1=0x4252314242423032 br2=0x4252324242423032 "
+        "br3=0x4252334242423032 br4=0x4252344242423032 br5=0x4252354242423032 "
+        "pr=0x10003 ccv=0x5a5a fpsr=0x9804c0270033f switches=0x2 first_entries=0x1 "
         "resumes=0x1 bsp=0x160000 bspstore=0x160000 rnat_defined=0x0 "
         "rnat_valid_mask=0x1 observed_psr=0x0",
         "IA64_COOP_CONTEXT_VALIDATION errors=0x0 nat_a_before=0x1 nat_a_after=0x1 "
-        "nat_b_before=0x0 nat_b_after=0x0 pfs_a_before=0x11 pfs_a_after=0x11 "
-        "pfs_b_before=0x22 pfs_b_after=0x22 psr_a=0x0 psr_b=0x0 "
+        "nat_b_before=0x0 nat_b_after=0x0 psr_a=0x0 psr_b=0x0 "
         "fp_a_low=0x415f46505f303031 fp_a_high=0x3fff800000000000 "
         "fp_b_first_low=0x425f46505f303032 fp_b_first_high=0x3fff800000000000 "
         "fp_b_resume_low=0x425f46505f303032 fp_b_resume_high=0x3fff800000000000",
+        "IA64_COOP_EC_STATE bootstrap_b=0x0 pfs_bootstrap_b=0x0 a_initial=0x15 "
+        "a_resume_first=0x15 a_resume_final=0x15 b_first_entry=0x2a b_resume=0x2a "
+        "pfs_a_first_resume=0x0150000000000011 "
+        "pfs_a_final_resume=0x0150000000000011 pfs_b_first_entry=0x22 "
+        "pfs_b_resume=0x02a0000000000022",
         "IA64_COOP_FP_VALIDATION images=0x50 registers_per_context=0x14 valid=0x1",
         "IA64_COOP_CONTEXT_PROBE_RESULT=PASS",
     ))
@@ -88,6 +102,31 @@ class CooperativeContextOutputTests(unittest.TestCase):
         self.assertEqual(len(result["events"]), 8)
         self.assertEqual({line.split(" id=")[1].split()[0] for line in
                           result["context_state_lines"]}, {"A", "B"})
+        self.assertEqual(result["ec_pfs_state"]["bootstrap_b"], 0)
+
+    def test_invalid_bootstrap_or_context_ec_observation_is_rejected(self) -> None:
+        self.assert_rejected(replace_once(
+            valid_output(), " bootstrap_b=0x0", " bootstrap_b=0x1"))
+        self.assert_rejected(replace_once(
+            valid_output(), " ec=0x2a ", " ec=0x62 "))
+
+    def test_saved_pfs_epilog_field_must_match_context_ec(self) -> None:
+        self.assert_rejected(replace_once(
+            valid_output(), "pfs=0x02a0000000000022", "pfs=0x0220000000000022"))
+        self.assert_rejected(replace_once(
+            valid_output(), "pfs_b_first_entry=0x22", "pfs_b_first_entry=0x0020000000000022"))
+
+    def test_general_branch_predicate_and_control_register_sentinels_are_checked(self) -> None:
+        self.assert_rejected(replace_once(
+            valid_output(), "gr6=0x4758363642423032", "gr6=0x0"))
+        self.assert_rejected(replace_once(
+            valid_output(), "br4=0x4252344141413031", "br4=0x0"))
+        self.assert_rejected(replace_once(
+            valid_output(), "pr=0x10003 ccv=0xa5a5", "pr=0x1 ccv=0xa5a5"))
+        self.assert_rejected(replace_once(valid_output(), "ccv=0x5a5a", "ccv=0x0"))
+        self.assert_rejected(replace_once(
+            valid_output(), "ccv=0x5a5a fpsr=0x9804c0270033f",
+            "ccv=0x5a5a fpsr=0x0"))
 
     def test_partial_observations_are_retained_without_qualification(self) -> None:
         stdout = "\n".join((
@@ -172,11 +211,8 @@ class CooperativeContextOutputTests(unittest.TestCase):
 
     def test_context_b_backing_store_must_match_selected_elf_identity(self) -> None:
         wrong_identity = replace_once(
-            valid_output(), "rbs_base=0x160000 rbs_limit=0x170000 gp=0x0",
-            "rbs_base=0x150000 rbs_limit=0x160000 gp=0x0")
-        wrong_identity = replace_once(
-            wrong_identity, "bsp=0x160000 bspstore=0x160000",
-            "bsp=0x150000 bspstore=0x150000")
+            valid_output(), "rbs_base=0x160000 rbs_limit=0x170000",
+            "rbs_base=0x150000 rbs_limit=0x160000")
         with self.assertRaisesRegex(runner.GateError, "does not match the selected ELF"):
             runner.validate_cooperative_context_probe_output(
                 wrong_identity, self.expected_layout())
@@ -186,9 +222,11 @@ class CooperativeContextOutputTests(unittest.TestCase):
         self.assert_rejected(output)
 
     def test_missing_or_changed_pfs_is_rejected(self) -> None:
-        missing = replace_once(valid_output(), "pfs_b_before=0x22 ", "")
+        missing = replace_once(valid_output(), "pfs_b_resume=0x02a0000000000022", "")
         self.assert_rejected(missing)
-        changed = replace_once(valid_output(), "pfs_a_after=0x11", "pfs_a_after=0x12")
+        changed = replace_once(
+            valid_output(), "pfs_a_first_resume=0x0150000000000011",
+            "pfs_a_first_resume=0x0120000000000011")
         self.assert_rejected(changed)
 
     def test_lost_nat_or_incorrect_defined_rnat_bits_are_rejected(self) -> None:
@@ -215,8 +253,9 @@ class CooperativeContextOutputTests(unittest.TestCase):
 
     def test_gp_identity_and_all_preserved_fp_images_are_required(self) -> None:
         self.assert_rejected(replace_once(valid_output(), "gp=0x200000", "gp=0x0"))
-        self.assert_rejected(replace_once(valid_output(), "gp=0x0 switches=0x2 first_entries=0x1",
-                                          "gp=0x200000 switches=0x2 first_entries=0x1"))
+        self.assert_rejected(replace_once(
+            valid_output(), "gp=0x0 gr4=0x4758343442423032",
+            "gp=0x200000 gr4=0x4758343442423032"))
         self.assert_rejected(replace_once(valid_output(), "valid=0x1", "valid=0x0"))
 
     def test_unsupported_switch_profile_is_rejected(self) -> None:
@@ -279,6 +318,65 @@ class CooperativeContextRunnerConfigurationTests(unittest.TestCase):
         cooperative_runner = source.split("def run_cooperative_context_probe", 1)[1].split(
             "def verify_break_probe_evidence", 1)[0]
         self.assertIn("stdin_pty=True", cooperative_runner)
+
+
+class CooperativeEpilogCountTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.sequence = (ROOT / "tests" / "ia64_cooperative_context_switch" /
+                         "probe_sequence.s").read_text(encoding="utf-8")
+        self.switch = (ROOT / "tests" / "ia64_cooperative_context_switch" /
+                       "context_switch.s").read_text(encoding="utf-8")
+
+    def test_independent_architectural_width_and_context_values(self) -> None:
+        self.assertEqual(runner.IA64_EC_REGISTER_WIDTH_BITS, 6)
+        self.assertEqual(runner.validate_cooperative_ec_contract(
+            self.sequence, self.switch), {"A": 0x15, "B": 0x2A})
+
+    def test_out_of_range_062_expectation_is_rejected(self) -> None:
+        damaged = self.sequence.replace(".equ EC_B, 0x2a", ".equ EC_B, 0x62", 1)
+        with self.assertRaisesRegex(runner.GateError, "6-bit width"):
+            runner.validate_cooperative_ec_contract(damaged, self.switch)
+
+    def test_in_range_but_wrong_expected_value_is_rejected(self) -> None:
+        damaged = self.sequence.replace(".equ EC_B, 0x2a", ".equ EC_B, 0x22", 1)
+        with self.assertRaisesRegex(runner.GateError, "independent expected value"):
+            runner.validate_cooperative_ec_contract(damaged, self.switch)
+
+    def test_bootstrap_stays_zero_and_b_ec_write_follows_its_prologue(self) -> None:
+        self.assertIn("SET64 r14, C_EC, r0", self.sequence)
+        damaged = self.sequence.replace(
+            "CAPTURE_PFS R_PFS_B_FIRST_ENTRY\n"
+            "    shr.u r14 = r14, 52 ;;\n    movl r15 = 0x3f ;;\n"
+            "    and r14 = r14, r15 ;;\n    ASSERT_EQ r14, 0\n"
+            "    movl r14 = EC_B ;;\n    mov ar.ec = r14 ;;",
+            "movl r14 = EC_B ;;\n    mov ar.ec = r14 ;;\n"
+            "    CAPTURE_PFS R_PFS_B_FIRST_ENTRY\n"
+            "    shr.u r14 = r14, 52 ;;\n    movl r15 = 0x3f ;;\n"
+            "    and r14 = r14, r15 ;;\n    ASSERT_EQ r14, 0", 1)
+        with self.assertRaises(runner.GateError):
+            runner.validate_cooperative_ec_contract(damaged, self.switch)
+
+    def test_counted_loop_instruction_is_rejected(self) -> None:
+        damaged = self.sequence.replace(
+            "br.call.sptk.many b0 = ia64_coop_context_switch ;;",
+            "br.ctop.sptk.few 0, 1f ;;\nbr.call.sptk.many b0 = ia64_coop_context_switch ;;", 1)
+        with self.assertRaisesRegex(runner.GateError, "counted-loop branch"):
+            runner.validate_cooperative_ec_contract(damaged, self.switch)
+
+
+class CooperativeStackUseTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.sequence = (ROOT / "tests" / "ia64_cooperative_context_switch" /
+                         "probe_sequence.s").read_text(encoding="utf-8")
+
+    def test_a_stack_sentinels_are_seeded_below_the_high_guard(self) -> None:
+        runner.validate_cooperative_stack_use_source(self.sequence)
+
+    def test_missing_a_stack_seed_is_rejected(self) -> None:
+        damaged = self.sequence.replace(
+            "    movl r14 = STACK_USE_A_LOW ;;\n    st8 [r12] = r14 ;;\n", "", 1)
+        with self.assertRaisesRegex(runner.GateError, "Context A stack sentinels"):
+            runner.validate_cooperative_stack_use_source(damaged)
 
 
 class CooperativeContextSwitchCallerTests(unittest.TestCase):
@@ -408,21 +506,21 @@ class CooperativeDiagnosticFrontierTests(unittest.TestCase):
     def test_debugger_plan_keeps_six_branch_and_switch_frontiers(self) -> None:
         frontiers = {
             "context_b_first": 0x10B7C0,
-            "b_branch_registers_passed": 0x10D0A0,
+            "b_ec_initialized": 0x10D000,
+            "b_ec_assertion_passed": 0x10D0A0,
             "b_to_a_first_switch": 0x10D6B0,
             "context_a_resume_first": 0x10BBE0,
             "context_b_resume_second": 0x10D6C0,
-            "test_fail": 0x10DF60,
         }
         plan = diagnostic.cooperative_breakpoints(frontiers)
         self.assertEqual(len(plan), 6)
         self.assertEqual([label for _, label in plan], [
             "Context B first-entry bootstrap",
-            "Context B branch-register checks passed",
+            "Context B nonzero EC initialization",
+            "Context B EC assertion passed",
             "first B-to-A switch call",
             "Context A first resumption",
             "Context B second resumption",
-            "first assertion failure loop",
         ])
         self.assertEqual(len({address for address, _ in plan}), 6)
 
@@ -432,6 +530,8 @@ iva=0x100000
 psr=0x0
 rsc=0x3
 bsp=0x144a00
+lc=0x42
+ec=0x2a
 b1=0x4252314242423032
 b2=0x4252324242423032
 b3=0x4252334242423032
@@ -444,7 +544,21 @@ Hex:
             0x4252314242423032, 0x4252324242423032, 0x4252334242423032,
             0x4252344242423032, 0x4252354242423032,
         ])
+        self.assertEqual(parsed[0]["registers"]["ec"], 0x2A)
+        self.assertEqual(parsed[0]["registers"]["lc"], 0x42)
         self.assertNotIn("bspst", parsed[0]["registers"])
+
+    def test_ski_bare_lc_and_ec_evaluation_values_are_decimal(self) -> None:
+        sample = """$insts$ = 12
+lc = 66
+ec = 42
+r14 = 2a
+Hex:
+"""
+        parsed = diagnostic.parse_eval_register_samples(sample)[0]["registers"]
+        self.assertEqual(parsed["lc"], 0x42)
+        self.assertEqual(parsed["ec"], 0x2A)
+        self.assertEqual(parsed["r14"], 0x2A)
 
     def test_objdump_slots_map_to_ski_breakpoint_ips(self) -> None:
         self.assertEqual(diagnostic.ski_breakpoint_ip(0x10DC86), 0x10DC84)

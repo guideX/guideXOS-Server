@@ -1582,6 +1582,26 @@ COOP_CONTEXT_EVENT_NAMES = (
     "A_TO_B_SECOND", "B_RESUMED", "B_TO_A_SECOND", "A_RESUMED_FINAL",
 )
 COOP_CONTEXT_EVENT_IDS = (0xA, 0xB, 0xB, 0xA, 0xA, 0xB, 0xB, 0xA)
+IA64_EC_REGISTER_WIDTH_BITS = 6
+COOP_EXPECTED_EC = {"A": 0x15, "B": 0x2A}
+COOP_EXPECTED_LC = {"A": 0x31, "B": 0x42}
+COOP_EXPECTED_GR = {
+    "A": {4: 0x4758343441413031, 5: 0x4758353541413031,
+          6: 0x4758363641413031, 7: 0x4758373741413031},
+    "B": {4: 0x4758343442423032, 5: 0x4758353542423032,
+          6: 0x4758363642423032, 7: 0x4758373742423032},
+}
+COOP_EXPECTED_BR = {
+    "A": {1: 0x4252314141413031, 2: 0x4252324141413031,
+          3: 0x4252334141413031, 4: 0x4252344141413031,
+          5: 0x4252354141413031},
+    "B": {1: 0x4252314242423032, 2: 0x4252324242423032,
+          3: 0x4252334242423032, 4: 0x4252344242423032,
+          5: 0x4252354242423032},
+}
+COOP_EXPECTED_CCV = {"A": 0xA5A5, "B": 0x5A5A}
+COOP_EXPECTED_FPSR = 0x0009804C0270033F
+COOP_EXPECTED_PREDICATE_MASK = 0x10002
 
 
 def cooperative_context_probe_command(simulator: Path, snapshot: Path) -> list[str]:
@@ -1630,6 +1650,8 @@ def capture_cooperative_context_probe_observations(stdout_text: str,
         "malformed_transition_record_lines": malformed_events,
         "context_state_lines": [line for line in stdout_text.splitlines()
                                  if line.startswith("IA64_COOP_CONTEXT_STATE id=")],
+        "ec_pfs_state_lines": [line for line in stdout_text.splitlines()
+                                if line.startswith("IA64_COOP_EC_STATE")],
         "architectural_state_lines": [line for line in stdout_text.splitlines()
                                       if line.startswith("IA64_COOP_CONTEXT_VALIDATION")],
         "result_marker_lines": [line for line in stdout_text.splitlines()
@@ -1971,6 +1993,155 @@ def validate_cooperative_context_switch_source(switch_source: str) -> None:
         raise GateError("switch source does not fail-stop unsupported RSC profiles")
 
 
+def validate_cooperative_ec_contract(sequence_source: str, switch_source: str,
+                                     disassembly: str | None = None) -> dict[str, int]:
+    """Check legal EC sentinels, the zero bootstrap, and post-prologue writes."""
+    values: dict[str, int] = {}
+    for identity in ("A", "B"):
+        matches = re.findall(
+            rf"(?im)^\s*\.equ\s+EC_{identity}\s*,\s*(0x[0-9a-f]+|[0-9]+)\s*$",
+            sequence_source)
+        if len(matches) != 1:
+            raise GateError(f"Context {identity} EC sentinel must have one independent source definition")
+        values[identity] = int(matches[0], 0)
+        if values[identity] < 0 or values[identity] >= (1 << IA64_EC_REGISTER_WIDTH_BITS):
+            raise GateError(
+                f"Context {identity} EC sentinel 0x{values[identity]:x} exceeds the "
+                f"architectural {IA64_EC_REGISTER_WIDTH_BITS}-bit width")
+        if values[identity] != COOP_EXPECTED_EC[identity]:
+            raise GateError(
+                f"Context {identity} EC sentinel 0x{values[identity]:x} does not match "
+                f"the validator's independent expected value 0x{COOP_EXPECTED_EC[identity]:x}")
+    if values["A"] == values["B"] or not values["A"] or not values["B"]:
+        raise GateError("Context A/B EC sentinels must be distinct and nonzero")
+
+    counted_loop = re.compile(
+        r"\bbr\.(?:cloop|ctop|cexit|wtop|wexit)\b", re.IGNORECASE)
+    if counted_loop.search(sequence_source):
+        raise GateError("probe unexpectedly consumes LC/EC with a counted-loop branch")
+
+    target_functions: dict[str, str] = {}
+    if disassembly is not None:
+        names = (
+            "ia64_coop_probe_setup", "ia64_coop_probe_run", "ia64_coop_b_first_entry",
+            "ia64_coop_a_test", "ia64_coop_b_test", "ia64_coop_test_fail",
+            "ia64_coop_context_switch",
+        )
+        starts = []
+        for name in names:
+            match = re.search(rf"(?m)^\s*[0-9a-fA-F]+\s+<{name}>:\s*$", disassembly)
+            if match is not None:
+                starts.append((match.start(), match.end(), name))
+        starts.sort()
+        for index, (start, body_start, name) in enumerate(starts):
+            end = starts[index + 1][0] if index + 1 < len(starts) else len(disassembly)
+            target_functions[name] = disassembly[body_start:end]
+        target_assembly = "\n".join(target_functions.values())
+        if counted_loop.search(target_assembly):
+            raise GateError(
+                "probe switch and context-entry assembly unexpectedly consumes LC/EC "
+                "with a counted-loop branch")
+
+    setup_start = sequence_source.find("ia64_coop_probe_setup:")
+    setup_end = sequence_source.find(".endp ia64_coop_probe_setup", setup_start)
+    setup = sequence_source[setup_start:setup_end] if setup_start >= 0 and setup_end >= 0 else ""
+    if not re.search(r"mov r15 = r0 ;;\s*SET64 r14, C_PFS, r15", setup) or \
+            not re.search(r"SET64 r14, C_EC, r0", setup):
+        raise GateError("Context B first-entry bootstrap must seed zero PFS and zero EC separately")
+
+    entry_start = sequence_source.find("ia64_coop_b_first_entry:")
+    entry_end = sequence_source.find(".endp ia64_coop_b_first_entry", entry_start)
+    entry = sequence_source[entry_start:entry_end] if entry_start >= 0 and entry_end >= 0 else ""
+    if not re.search(
+            r"ia64_coop_b_bootstrap_state:\s*CAPTURE_EC R_EC_B_BOOTSTRAP\s*"
+            r"ASSERT_EQ r14, 0\s*CAPTURE_PFS R_PFS_B_BOOTSTRAP\s*ASSERT_EQ r14, 0",
+            entry):
+        raise GateError("Context B bootstrap must independently observe zero EC and PFS")
+
+    b_start = sequence_source.find("ia64_coop_b_test:")
+    b_end = sequence_source.find(".endp ia64_coop_b_test", b_start)
+    b_test = sequence_source[b_start:b_end] if b_start >= 0 and b_end >= 0 else ""
+    b_ec_write = re.search(
+        r"alloc r16 = ar\.pfs, 6, 4, 2, 0 ;;\s*mov r34 = b0 ;;\s*mov r35 = r16 ;;\s*"
+        r"CAPTURE_PFS R_PFS_B_FIRST_ENTRY\s*shr\.u r14 = r14, 52 ;;\s*"
+        r"movl r15 = 0x3f ;;\s*and r14 = r14, r15 ;;\s*ASSERT_EQ r14, 0\s*"
+        r"movl r14 = EC_B ;;\s*mov ar\.ec = r14 ;;\s*"
+        r"\.global ia64_coop_b_ec_initialized\s*ia64_coop_b_ec_initialized:", b_test)
+    if b_ec_write is None or "CHECK_APP_STATE LC_B, EC_B, CCV_B" not in b_test or \
+            "ia64_coop_b_ec_assertion_passed:" not in b_test:
+        raise GateError(
+            "Context B EC must be installed after its prologue and checked before its first switch")
+    if "br.call" in b_test[:b_ec_write.start()]:
+        raise GateError("Context B EC must be established before any ordinary call")
+
+    a_start = sequence_source.find("ia64_coop_a_test:")
+    a_end = sequence_source.find(".endp ia64_coop_a_test", a_start)
+    a_test = sequence_source[a_start:a_end] if a_start >= 0 and a_end >= 0 else ""
+    if not re.search(
+            r"alloc r16 = ar\.pfs, 6, 4, 2, 0 ;;\s*mov r34 = b0 ;;\s*mov r35 = r16 ;;"
+            r"[\s\S]*?movl r14 = EC_A ;;\s*mov ar\.ec = r14 ;;", a_test):
+        raise GateError("Context A EC must be installed after its ordinary call prologue")
+
+    if not re.search(r"mov ar\.pfs = r22 ;;[\s\S]*?br\.ret\.sptk\.many b0", switch_source):
+        raise GateError("cooperative return must restore PFS before br.ret restores EC from PFS")
+
+    if disassembly is not None:
+        a_dis = target_functions.get("ia64_coop_a_test", "")
+        b_dis = target_functions.get("ia64_coop_b_test", "")
+        for identity, body in (("A", a_dis), ("B", b_dis)):
+            write = re.search(
+                rf"movl?\s+r14\s*=\s*0x{COOP_EXPECTED_EC[identity]:x}\b"
+                r"[\s\S]{0,300}?mov(?:\.i)?\s+ar\.ec\s*=\s*r14\b", body,
+                re.IGNORECASE)
+            if write is None:
+                raise GateError(
+                    f"target disassembly does not materialize and install legal Context {identity} EC")
+        if not re.search(r"mov(?:\.i)?\s+r14\s*=\s*ar\.ec\b", b_dis, re.IGNORECASE) or \
+                not re.search(
+                    rf"mov(?:l)?\s+r15\s*=\s*0x{COOP_EXPECTED_EC['B']:x}\b"
+                    r"[\s\S]{0,120}?cmp\.eq\s+p6,\s*p7\s*=\s*r14,\s*r15", b_dis,
+                    re.IGNORECASE):
+            raise GateError("Context B target assertion does not compare live EC to the independent sentinel")
+
+    assert_macro = re.search(
+        r"(?ms)^\.macro ASSERT_EQ reg, expected\s+(.*?)^\.endm", sequence_source)
+    if assert_macro is None or not re.search(
+            r"mov r14 = \\reg ;;", assert_macro.group(1)) or not re.search(
+            r"cmp\.eq p6, p7 = r14, r15 ;;", assert_macro.group(1)):
+        raise GateError("assertion failure capture must retain the actual operand in r14")
+    failure_macro = re.search(
+        r"(?ms)^\.macro CAPTURE_FAILURE code\s+(.*?)^\.endm", sequence_source)
+    required_failure_fields = (
+        "R_FAILURE_SEEN", "R_FAILURE_ACTUAL", "R_FAILURE_EXPECTED", "R_FAILURE_SP",
+        "R_FAILURE_PFS", "R_FAILURE_EC", "R_FAILURE_LC", "R_FAILURE_BSP",
+        "R_FAILURE_RSC", "R_FAILURE_GP",
+    )
+    if failure_macro is None or any(
+            f"SET64 r26, {field}," not in failure_macro.group(1)
+            for field in required_failure_fields):
+        raise GateError("test assertion failure path lacks pre-loop architectural state capture")
+    return values
+
+
+def validate_cooperative_stack_use_source(sequence_source: str) -> None:
+    """Require A's stack-use sentinels to live below its high guard."""
+    a_start = sequence_source.find("ia64_coop_a_test:")
+    a_end = sequence_source.find(".endp ia64_coop_a_test", a_start)
+    a_test = sequence_source[a_start:a_end] if a_start >= 0 and a_end >= 0 else ""
+    allocation = re.compile(
+        r"alloc r16 = ar\.pfs, 6, 4, 2, 0 ;;\s*mov r34 = b0 ;;\s*mov r35 = r16 ;;\s*"
+        r"(?:/\*[\s\S]*?\*/\s*)?adds r12 = -4096, r12 ;;\s*"
+        r"movl r14 = STACK_USE_A_LOW ;;\s*"
+        r"st8 \[r12\] = r14 ;;\s*adds r28 = 8, r12 ;;\s*"
+        r"movl r14 = STACK_USE_A_HIGH ;;\s*st8 \[r28\] = r14 ;;")
+    if not allocation.search(a_test) or a_test.count("adds r12 = -4096, r12 ;;") != 1 or \
+            a_test.count("adds r12 = 4096, r12 ;;") != 1 or not re.search(
+                r"adds r12 = 4096, r12 ;;\s*mov ar\.pfs = r35 ;;\s*"
+                r"mov b0 = r34 ;;[\s\S]*?br\.ret\.sptk\.many b0", a_test):
+        raise GateError(
+            "Context A stack sentinels must be initialized at SP-4096 and its stack adjustment balanced")
+
+
 def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Path,
                                                expected_hash: str, objdump: str
                                                ) -> dict[str, Any]:
@@ -1997,6 +2168,8 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
         "ia64_coop_a_resumed_final", "ia64_coop_a_final_exit",
         "ia64_coop_b_first_entry", "ia64_coop_b_test", "ia64_coop_b_resumed",
         "ia64_coop_b_branch_registers_passed", "ia64_coop_b_to_a_first_switch",
+        "ia64_coop_b_bootstrap_state", "ia64_coop_b_ec_initialized",
+        "ia64_coop_b_ec_assertion_passed",
         "ia64_coop_b_unexpected_resume", "ia64_coop_test_fail", "ia64_coop_b_bsp_check",
         "ia64_coop_b_bsp_bounds_valid",
         "__text_start", "__text_end",
@@ -2016,7 +2189,7 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
     symbol = lambda name: elf.symbols[name]["value"]
     size = lambda name: elf.symbols[name]["size"]
     if size("ia64_coop_context_a") != 1024 or size("ia64_coop_context_b") != 1024 or \
-            size("ia64_coop_probe_record") != 1632:
+            size("ia64_coop_probe_record") != 1776:
         raise GateError("cooperative context or event-record geometry changed")
 
     ranges: dict[str, tuple[int, int]] = {}
@@ -2067,6 +2240,8 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
         raise GateError("switch source is missing required state/order operations: " +
                         ", ".join(missing_terms))
     validate_cooperative_context_switch_source(switch_source)
+    validate_cooperative_ec_contract(sequence_source, switch_source)
+    validate_cooperative_stack_use_source(sequence_source)
     validate_cooperative_probe_setup_source(sequence_source)
     validate_cooperative_bsp_bounds_source(sequence_source)
     validate_cooperative_rse_mode_accesses(entry_source, sequence_source, switch_source)
@@ -2177,6 +2352,8 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
                                        check=True, capture_output=True, text=True)
     except (OSError, subprocess.CalledProcessError) as exc:
         raise GateError(f"cannot inspect complete cooperative target disassembly: {exc}") from exc
+    ec_contract = validate_cooperative_ec_contract(
+        sequence_source, switch_source, target_result.stdout)
     branch_validator = load_cooperative_branch_register_validator()
     try:
         branch_register_contract = branch_validator.validate_branch_register_contract(
@@ -2200,6 +2377,9 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
             "probe_after_a_test": symbol("ia64_coop_probe_after_a_test"),
             "a_resume_first": symbol("ia64_coop_a_resumed_first"),
             "b_resume_second": symbol("ia64_coop_b_resumed"),
+            "b_bootstrap_state": symbol("ia64_coop_b_bootstrap_state"),
+            "b_ec_initialized": symbol("ia64_coop_b_ec_initialized"),
+            "b_ec_assertion_passed": symbol("ia64_coop_b_ec_assertion_passed"),
             "b_branch_registers_passed": symbol("ia64_coop_b_branch_registers_passed"),
             "b_to_a_first_switch": symbol("ia64_coop_b_to_a_first_switch"),
             "bsp_check_instruction": bsp_read_instruction,
@@ -2216,6 +2396,7 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
             "switch_bspstore": switch_bspstore,
             "switch_return": switch_return,
             "branch_register_contract": branch_register_contract,
+            "ec_contract": ec_contract,
             "setup_disassembly": setup_disassembly,
             "switch_source": str((script_dir / "context_switch.s").resolve())}
 
@@ -2276,6 +2457,9 @@ def validate_cooperative_context_probe_output(
         "stack_base", "stack_limit", "sp", "rp", "code_base", "code_limit",
         "rbs_base", "rbs_limit", "switches", "first_entries", "resumes", "bsp",
         "bspstore", "rnat_defined", "rnat_valid_mask", "observed_psr", "gp",
+        "pfs", "lc", "ec", "pr", "ccv", "fpsr",
+        *(f"gr{index}" for index in range(4, 8)),
+        *(f"br{index}" for index in range(1, 6)),
     }
     for identity, values in context_records.items():
         missing = required_context_fields - values.keys()
@@ -2305,6 +2489,23 @@ def validate_cooperative_context_probe_output(
             raise GateError(f"context {identity} has an invalid saved return continuation")
         if values["switches"] != 2 or values["observed_psr"] & 0x4000:
             raise GateError(f"context {identity} switch count or interrupt state is invalid")
+        expected_ec = COOP_EXPECTED_EC[identity]
+        if values["ec"] != expected_ec or values["lc"] != COOP_EXPECTED_LC[identity]:
+            raise GateError(f"context {identity} LC/EC state does not match its qualified sentinel")
+        if ((values["pfs"] >> 52) & 0x3F) != expected_ec:
+            raise GateError(f"context {identity} PFS.pec does not match its saved EC state")
+        if any(values[f"gr{index}"] != expected
+               for index, expected in COOP_EXPECTED_GR[identity].items()):
+            raise GateError(f"context {identity} GR4-GR7 preservation sentinels changed")
+        if any(values[f"br{index}"] != expected
+               for index, expected in COOP_EXPECTED_BR[identity].items()):
+            raise GateError(f"context {identity} BR1-BR5 preservation sentinels changed")
+        if (values["pr"] & COOP_EXPECTED_PREDICATE_MASK) != \
+                COOP_EXPECTED_PREDICATE_MASK:
+            raise GateError(f"context {identity} predicate preservation sentinels changed")
+        if values["ccv"] != COOP_EXPECTED_CCV[identity] or \
+                values["fpsr"] != COOP_EXPECTED_FPSR:
+            raise GateError(f"context {identity} CCV/FPSR state does not match its sentinel")
         if (rnat_mask != expected_rnat_mask or rnat_mask == 0 or
                 rnats & ~rnat_mask):
             raise GateError(f"context {identity} defined RNAT bits do not match the valid mask")
@@ -2338,7 +2539,6 @@ def validate_cooperative_context_probe_output(
     values = parse_hex_fields(state, "architectural state")
     required_state = {
         "nat_a_before", "nat_a_after", "nat_b_before", "nat_b_after",
-        "pfs_a_before", "pfs_a_after", "pfs_b_before", "pfs_b_after",
         "psr_a", "psr_b", "fp_a_low", "fp_a_high", "fp_b_first_low",
         "fp_b_first_high", "fp_b_resume_low", "fp_b_resume_high",
     }
@@ -2347,9 +2547,6 @@ def validate_cooperative_context_probe_output(
     if (values["nat_a_before"], values["nat_a_after"],
             values["nat_b_before"], values["nat_b_after"]) != (1, 1, 0, 0):
         raise GateError("cooperative probe lost or unexpectedly changed a tested NaT state")
-    if not values["pfs_a_before"] or values["pfs_a_before"] != values["pfs_a_after"] or \
-            not values["pfs_b_before"] or values["pfs_b_before"] != values["pfs_b_after"]:
-        raise GateError("cooperative probe PFS state is missing or changed across a resume")
     if values["psr_a"] & 0x4000 or values["psr_b"] & 0x4000:
         raise GateError("cooperative probe resumed with PSR.i enabled")
     if (values["fp_a_low"], values["fp_a_high"], values["fp_b_first_low"],
@@ -2362,8 +2559,42 @@ def validate_cooperative_context_probe_output(
     if "IA64_COOP_CONTEXT_PROBE_RESULT=PASS" not in stdout_text or \
             "IA64_COOP_CONTEXT_PROBE_RESULT=FAIL" in stdout_text:
         raise GateError("cooperative probe success marker is absent or contradictory")
+    ec_line = re.search(r"^IA64_COOP_EC_STATE\b([^\r\n]*)$", stdout_text, re.MULTILINE)
+    if ec_line is None:
+        raise GateError("cooperative probe did not report bootstrap and resumed EC/PFS values")
+    ec_state = parse_hex_fields(ec_line.group(1), "EC/PFS state")
+    required_ec_state = {
+        "bootstrap_b", "pfs_bootstrap_b", "a_initial", "a_resume_first",
+        "a_resume_final", "b_first_entry", "b_resume", "pfs_a_first_resume",
+        "pfs_a_final_resume", "pfs_b_first_entry", "pfs_b_resume",
+    }
+    if required_ec_state - ec_state.keys():
+        raise GateError("cooperative probe EC/PFS state record is incomplete")
+    expected_ec_state = {
+        "bootstrap_b": 0,
+        "pfs_bootstrap_b": 0,
+        "a_initial": COOP_EXPECTED_EC["A"],
+        "a_resume_first": COOP_EXPECTED_EC["A"],
+        "a_resume_final": COOP_EXPECTED_EC["A"],
+        "b_first_entry": COOP_EXPECTED_EC["B"],
+        "b_resume": COOP_EXPECTED_EC["B"],
+    }
+    for key, expected_value in expected_ec_state.items():
+        if ec_state[key] != expected_value:
+            raise GateError(
+                f"cooperative probe {key} was 0x{ec_state[key]:x}, expected 0x{expected_value:x}")
+    if ((ec_state["pfs_b_first_entry"] >> 52) & 0x3F) != 0:
+        raise GateError("Context B entry PFS.pec does not retain the zero bootstrap EC")
+    if ec_state["pfs_a_first_resume"] != context_records["A"]["pfs"] or \
+            ec_state["pfs_a_final_resume"] != context_records["A"]["pfs"] or \
+            ec_state["pfs_b_resume"] != context_records["B"]["pfs"] or \
+            not ec_state["pfs_a_first_resume"] or not ec_state["pfs_a_final_resume"] or \
+            not ec_state["pfs_b_resume"]:
+        raise GateError("cooperative probe did not restore the saved PFS at each resume")
     return {"events": events, "context_state_lines": context_lines,
+            "context_records": context_records,
             "architectural_state": state.strip(),
+            "ec_pfs_state": ec_state,
             "fp_image_validation": fp_validation.group(0)}
 
 

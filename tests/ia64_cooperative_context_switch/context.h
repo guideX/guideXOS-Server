@@ -77,10 +77,10 @@ struct ProbeRecord {
     uint64_t fp_a_high;
     uint64_t fp_b_low;
     uint64_t fp_b_high;
-    uint64_t pfs_a_before;
-    uint64_t pfs_a_after;
-    uint64_t pfs_b_before;
-    uint64_t pfs_b_after;
+    uint64_t pfs_a_first_resume;
+    uint64_t pfs_a_final_resume;
+    uint64_t pfs_b_first_entry;
+    uint64_t pfs_b_resume;
     uint64_t fp_b_first_low;
     uint64_t fp_b_first_high;
     uint64_t a_final_count;
@@ -88,6 +88,23 @@ struct ProbeRecord {
     FpImage fp_a_final_resume[20];
     FpImage fp_b_first_entry[20];
     FpImage fp_b_resume[20];
+    uint64_t ec_b_bootstrap;
+    uint64_t pfs_b_bootstrap;
+    uint64_t ec_a_initial;
+    uint64_t ec_a_first_resume;
+    uint64_t ec_a_final_resume;
+    uint64_t ec_b_first_entry;
+    uint64_t ec_b_resume;
+    uint64_t failure_seen;
+    uint64_t failure_actual;
+    uint64_t failure_expected;
+    uint64_t failure_sp;
+    uint64_t failure_pfs;
+    uint64_t failure_ec;
+    uint64_t failure_lc;
+    uint64_t failure_bsp;
+    uint64_t failure_rsc;
+    uint64_t failure_gp;
 };
 
 static const uint64_t kProfileMagic = 0x3541434f4f505631ULL; // "1VPOCA5"
@@ -104,6 +121,10 @@ static const uint64_t kFpALow = 0x415f46505f303031ULL;
 static const uint64_t kFpAHigh = 0x3fff800000000000ULL;
 static const uint64_t kFpBLow = 0x425f46505f303032ULL;
 static const uint64_t kFpBHigh = 0x3fff800000000000ULL;
+static const uint64_t kExpectedEcA = 0x15;
+static const uint64_t kExpectedEcB = 0x2a;
+static const uint64_t kExpectedLcA = 0x31;
+static const uint64_t kExpectedLcB = 0x42;
 static const uint64_t kFpImageStride = 0x100;
 static const uint64_t kStackCanaryLow = 0x535441434b4c4f57ULL;
 static const uint64_t kStackCanaryHigh = 0x535441434b484947ULL;
@@ -152,7 +173,8 @@ static_assert(offsetof(ProbeRecord, errors) == 200, "error counter offset change
 static_assert(offsetof(ProbeRecord, nat_a_before) == 208, "NaT record offset changed");
 static_assert(offsetof(ProbeRecord, psr_a_after_resume) == 240, "PSR record offset changed");
 static_assert(offsetof(ProbeRecord, fp_a_low) == 256, "FP record offset changed");
-static_assert(offsetof(ProbeRecord, pfs_a_before) == 288, "PFS record offset changed");
+static_assert(offsetof(ProbeRecord, pfs_a_first_resume) == 288,
+              "first A PFS resume offset changed");
 static_assert(offsetof(ProbeRecord, fp_b_first_low) == 320, "B first FP offset changed");
 static_assert(offsetof(ProbeRecord, a_final_count) == 336, "final count offset changed");
 static_assert(offsetof(ProbeRecord, fp_a_first_resume) == 352,
@@ -163,7 +185,25 @@ static_assert(offsetof(ProbeRecord, fp_b_first_entry) == 992,
               "B first-entry FP offset changed");
 static_assert(offsetof(ProbeRecord, fp_b_resume) == 1312,
               "B resume FP offset changed");
-static_assert(sizeof(ProbeRecord) == 1632, "probe record size changed");
+static_assert(offsetof(ProbeRecord, ec_b_bootstrap) == 1632,
+              "bootstrap EC evidence offset changed");
+static_assert(offsetof(ProbeRecord, pfs_b_bootstrap) == 1640,
+              "bootstrap PFS evidence offset changed");
+static_assert(offsetof(ProbeRecord, ec_a_initial) == 1648,
+              "initial A EC evidence offset changed");
+static_assert(offsetof(ProbeRecord, ec_a_first_resume) == 1656,
+              "first A EC resume evidence offset changed");
+static_assert(offsetof(ProbeRecord, ec_a_final_resume) == 1664,
+              "final A EC resume evidence offset changed");
+static_assert(offsetof(ProbeRecord, ec_b_first_entry) == 1672,
+              "first B EC evidence offset changed");
+static_assert(offsetof(ProbeRecord, ec_b_resume) == 1680,
+              "resumed B EC evidence offset changed");
+static_assert(offsetof(ProbeRecord, failure_seen) == 1688,
+              "failure evidence offset changed");
+static_assert(offsetof(ProbeRecord, failure_gp) == 1760,
+              "failure GP evidence offset changed");
+static_assert(sizeof(ProbeRecord) == 1776, "probe record size changed");
 static_assert(sizeof(Event) == 24, "event record geometry changed");
 
 extern "C" Context ia64_coop_context_a;

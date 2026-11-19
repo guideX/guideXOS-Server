@@ -52,16 +52,33 @@
 .equ R_PSR_B, 248
 .equ R_FP_A, 256
 .equ R_FP_B, 272
-.equ R_PFS_A_BEFORE, 288
-.equ R_PFS_A_AFTER, 296
-.equ R_PFS_B_BEFORE, 304
-.equ R_PFS_B_AFTER, 312
+.equ R_PFS_A_FIRST_RESUME, 288
+.equ R_PFS_A_FINAL_RESUME, 296
+.equ R_PFS_B_FIRST_ENTRY, 304
+.equ R_PFS_B_RESUME, 312
 .equ R_FP_B_FIRST, 320
 .equ R_A_FINAL_COUNT, 336
 .equ R_FP_A_FIRST_RESUME, 352
 .equ R_FP_A_FINAL_RESUME, 672
 .equ R_FP_B_FIRST_ENTRY, 992
 .equ R_FP_B_RESUME, 1312
+.equ R_EC_B_BOOTSTRAP, 1632
+.equ R_PFS_B_BOOTSTRAP, 1640
+.equ R_EC_A_INITIAL, 1648
+.equ R_EC_A_FIRST_RESUME, 1656
+.equ R_EC_A_FINAL_RESUME, 1664
+.equ R_EC_B_FIRST_ENTRY, 1672
+.equ R_EC_B_RESUME, 1680
+.equ R_FAILURE_SEEN, 1688
+.equ R_FAILURE_ACTUAL, 1696
+.equ R_FAILURE_EXPECTED, 1704
+.equ R_FAILURE_SP, 1712
+.equ R_FAILURE_PFS, 1720
+.equ R_FAILURE_EC, 1728
+.equ R_FAILURE_LC, 1736
+.equ R_FAILURE_BSP, 1744
+.equ R_FAILURE_RSC, 1752
+.equ R_FAILURE_GP, 1760
 .equ B_TEST_BSP_FRAME_BYTES, 96
 
 .equ CTX_PROFILE_MAGIC, 0x3541434f4f505631
@@ -112,8 +129,8 @@
 .equ BR5_B_INITIAL, 0x4252354242423032
 .equ LC_A, 0x31
 .equ LC_B, 0x42
-.equ EC_A, 0x51
-.equ EC_B, 0x62
+.equ EC_A, 0x15
+.equ EC_B, 0x2a
 .equ CCV_A, 0xA5A5
 .equ CCV_B, 0x5A5A
 .equ STACK_CANARY_LOW, 0x535441434b4c4f57
@@ -129,8 +146,12 @@
 .equ NAT_DATA, 0x4e41545354415445
 
 .macro ASSERT_EQ reg, expected
+    .ifc \reg, r14
+    .else
+        mov r14 = \reg ;;
+    .endif
     movl r15 = \expected ;;
-    cmp.eq p6, p7 = \reg, r15 ;;
+    cmp.eq p6, p7 = r14, r15 ;;
 (p7) br.cond.sptk ia64_coop_test_fail ;;
 .endm
 
@@ -212,6 +233,39 @@
 .macro SET64 base, offset, value
     adds r28 = \offset, \base ;;
     st8 [r28] = \value ;;
+.endm
+
+.macro CAPTURE_EC offset
+    mov r14 = ar.ec ;;
+    movl r28 = ia64_coop_probe_record + \offset ;;
+    st8 [r28] = r14 ;;
+.endm
+
+.macro CAPTURE_PFS offset
+    mov r14 = ar.pfs ;;
+    movl r28 = ia64_coop_probe_record + \offset ;;
+    st8 [r28] = r14 ;;
+.endm
+
+.macro CAPTURE_FAILURE code
+    movl r26 = ia64_coop_probe_record ;;
+    mov r27 = \code ;;
+    SET64 r26, R_FAILURE_SEEN, r27
+    SET64 r26, R_FAILURE_ACTUAL, r14
+    SET64 r26, R_FAILURE_EXPECTED, r15
+    SET64 r26, R_FAILURE_SP, r12
+    mov r27 = ar.pfs ;;
+    SET64 r26, R_FAILURE_PFS, r27
+    mov r27 = ar.ec ;;
+    SET64 r26, R_FAILURE_EC, r27
+    mov r27 = ar.lc ;;
+    SET64 r26, R_FAILURE_LC, r27
+    mov r27 = ar.bsp ;;
+    SET64 r26, R_FAILURE_BSP, r27
+    mov r27 = ar.rsc ;;
+    SET64 r26, R_FAILURE_RSC, r27
+    mov r27 = r1 ;;
+    SET64 r26, R_FAILURE_GP, r27
 .endm
 
 .macro RECORD_EVENT event_code, context_id
@@ -375,8 +429,7 @@ ia64_coop_setup_nested_return:
     SET64 r14, C_CALLER_UNAT, r0
     movl r15 = LC_B ;;
     SET64 r14, C_LC, r15
-    movl r15 = EC_B ;;
-    SET64 r14, C_EC, r15
+    SET64 r14, C_EC, r0
     movl r15 = CCV_B ;;
     SET64 r14, C_CCV, r15
     movl r15 = PR_TEST ;;
@@ -587,6 +640,12 @@ ia64_coop_b_first_entry:
     ld8 r15 = [r28] ;;
     adds r15 = 1, r15 ;;
     st8 [r28] = r15 ;;
+.global ia64_coop_b_bootstrap_state
+ia64_coop_b_bootstrap_state:
+    CAPTURE_EC R_EC_B_BOOTSTRAP
+    ASSERT_EQ r14, 0
+    CAPTURE_PFS R_PFS_B_BOOTSTRAP
+    ASSERT_EQ r14, 0
 .global ia64_coop_b_first_entry_call
 ia64_coop_b_first_entry_call:
     br.call.sptk.many b0 = ia64_coop_b_test ;;
@@ -607,6 +666,13 @@ ia64_coop_a_test:
     alloc r16 = ar.pfs, 6, 4, 2, 0 ;;
     mov r34 = b0 ;;
     mov r35 = r16 ;;
+    /* Keep A's use sentinels inside its stack, below the high guard. */
+    adds r12 = -4096, r12 ;;
+    movl r14 = STACK_USE_A_LOW ;;
+    st8 [r12] = r14 ;;
+    adds r28 = 8, r12 ;;
+    movl r14 = STACK_USE_A_HIGH ;;
+    st8 [r28] = r14 ;;
     movl r32 = SENTINEL_A ;;
     mov r33 = r8 ;;
     movl r4 = GR4_A ;;
@@ -650,6 +716,7 @@ ia64_coop_a_test:
     mov ar.lc = r14 ;;
     movl r14 = EC_A ;;
     mov ar.ec = r14 ;;
+    CAPTURE_EC R_EC_A_INITIAL
     movl r14 = CCV_A ;;
     mov ar.ccv = r14 ;;
     movl r14 = FPSR_TEST ;;
@@ -660,10 +727,6 @@ ia64_coop_a_test:
     movl r15 = 1 ;;
     adds r28 = R_NAT_A_BEFORE, r14 ;;
     st8 [r28] = r15 ;;
-    mov r15 = ar.pfs ;;
-    adds r28 = R_PFS_A_BEFORE, r14 ;;
-    st8 [r28] = r15 ;;
-
     RECORD_EVENT EVENT_A_TO_B, CTX_A_ID
     movl r14 = ia64_coop_context_a ;;
     mov out0 = r14 ;;
@@ -674,6 +737,14 @@ ia64_coop_a_test:
 .global ia64_coop_a_resumed_first
 ia64_coop_a_resumed_first:
     RECORD_EVENT EVENT_A_RESUMED_FIRST, CTX_A_ID
+    CAPTURE_EC R_EC_A_FIRST_RESUME
+    CAPTURE_PFS R_PFS_A_FIRST_RESUME
+    mov r16 = r14 ;;
+    movl r14 = ia64_coop_context_a ;;
+    adds r28 = C_PFS, r14 ;;
+    ld8 r15 = [r28] ;;
+    cmp.eq p6, p7 = r16, r15 ;;
+(p7) br.cond.sptk ia64_coop_test_fail ;;
     tnat.nz p6, p7 = r33 ;;
     (p7) br.cond.sptk ia64_coop_test_fail ;;
     movl r14 = ia64_coop_probe_record ;;
@@ -682,9 +753,6 @@ ia64_coop_a_resumed_first:
     st8 [r28] = r15 ;;
     mov r15 = psr ;;
     adds r28 = R_PSR_A, r14 ;;
-    st8 [r28] = r15 ;;
-    mov r15 = ar.pfs ;;
-    adds r28 = R_PFS_A_AFTER, r14 ;;
     st8 [r28] = r15 ;;
     CHECK_CONTEXT_GP ia64_coop_context_a
     CAPTURE_FP_SET R_FP_A_FIRST_RESUME
@@ -700,12 +768,6 @@ ia64_coop_a_resumed_first:
     adds r28 = 8, r12 ;;
     ld8 r14 = [r28] ;;
     ASSERT_EQ r14, STACK_USE_A_HIGH
-    mov r14 = ar.pfs ;;
-    movl r15 = ia64_coop_probe_record ;;
-    adds r28 = R_PFS_A_BEFORE, r15 ;;
-    ld8 r15 = [r28] ;;
-    cmp.eq p6, p7 = r14, r15 ;;
-(p7) br.cond.sptk ia64_coop_test_fail ;;
     movl r14 = ia64_coop_context_a ;;
     adds r28 = C_RESUME_ENTRIES, r14 ;;
     ld8 r15 = [r28] ;;
@@ -722,6 +784,14 @@ ia64_coop_a_resumed_first:
 .global ia64_coop_a_resumed_final
 ia64_coop_a_resumed_final:
     RECORD_EVENT EVENT_A_RESUMED_FINAL, CTX_A_ID
+    CAPTURE_EC R_EC_A_FINAL_RESUME
+    CAPTURE_PFS R_PFS_A_FINAL_RESUME
+    mov r16 = r14 ;;
+    movl r14 = ia64_coop_context_a ;;
+    adds r28 = C_PFS, r14 ;;
+    ld8 r15 = [r28] ;;
+    cmp.eq p6, p7 = r16, r15 ;;
+(p7) br.cond.sptk ia64_coop_test_fail ;;
     tnat.nz p6, p7 = r33 ;;
     (p7) br.cond.sptk ia64_coop_test_fail ;;
     CHECK_PRESERVED_REGS GR4_A, GR5_A, GR6_A, GR7_A, BR1_A, BR2_A, BR3_A, BR4_A, BR5_A
@@ -733,14 +803,6 @@ ia64_coop_a_resumed_final:
     adds r28 = 8, r12 ;;
     ld8 r14 = [r28] ;;
     ASSERT_EQ r14, STACK_USE_A_HIGH
-    movl r14 = ia64_coop_probe_record ;;
-    mov r15 = ar.pfs ;;
-    adds r28 = R_PFS_A_AFTER, r14 ;;
-    st8 [r28] = r15 ;;
-    adds r28 = R_PFS_A_BEFORE, r14 ;;
-    ld8 r14 = [r28] ;;
-    cmp.eq p6, p7 = r15, r14 ;;
-(p7) br.cond.sptk ia64_coop_test_fail ;;
     CAPTURE_FP_SET R_FP_A_FINAL_RESUME
     movl r14 = ia64_coop_probe_record + R_FP_A ;;
     stf.spill [r14] = f2 ;;
@@ -793,6 +855,16 @@ ia64_coop_b_test:
     alloc r16 = ar.pfs, 6, 4, 2, 0 ;;
     mov r34 = b0 ;;
     mov r35 = r16 ;;
+    CAPTURE_PFS R_PFS_B_FIRST_ENTRY
+    shr.u r14 = r14, 52 ;;
+    movl r15 = 0x3f ;;
+    and r14 = r14, r15 ;;
+    ASSERT_EQ r14, 0
+    movl r14 = EC_B ;;
+    mov ar.ec = r14 ;;
+.global ia64_coop_b_ec_initialized
+ia64_coop_b_ec_initialized:
+    CAPTURE_EC R_EC_B_FIRST_ENTRY
     adds r12 = -4096, r12 ;;
     movl r14 = STACK_USE_B_LOW ;;
     st8 [r12] = r14 ;;
@@ -828,6 +900,8 @@ ia64_coop_b_bsp_bounds_valid:
 .global ia64_coop_b_branch_registers_passed
 ia64_coop_b_branch_registers_passed:
     CHECK_APP_STATE LC_B, EC_B, CCV_B
+.global ia64_coop_b_ec_assertion_passed
+ia64_coop_b_ec_assertion_passed:
     mov r14 = r32 ;;
     ASSERT_EQ r14, SENTINEL_B
     ld8 r14 = [r12] ;;
@@ -842,9 +916,6 @@ ia64_coop_b_branch_registers_passed:
     movl r14 = ia64_coop_probe_record ;;
     adds r28 = R_NAT_B_BEFORE, r14 ;;
     st8 [r28] = r0 ;;
-    mov r15 = ar.pfs ;;
-    adds r28 = R_PFS_B_BEFORE, r14 ;;
-    st8 [r28] = r15 ;;
     movl r14 = ia64_coop_probe_record + R_FP_B_FIRST ;;
     stf.spill [r14] = f2 ;;
     CHECK_CONTEXT_GP ia64_coop_context_b
@@ -863,6 +934,14 @@ ia64_coop_b_to_a_first_switch:
 .global ia64_coop_b_resumed
 ia64_coop_b_resumed:
     RECORD_EVENT EVENT_B_RESUMED, CTX_B_ID
+    CAPTURE_EC R_EC_B_RESUME
+    CAPTURE_PFS R_PFS_B_RESUME
+    mov r16 = r14 ;;
+    movl r14 = ia64_coop_context_b ;;
+    adds r28 = C_PFS, r14 ;;
+    ld8 r15 = [r28] ;;
+    cmp.eq p6, p7 = r16, r15 ;;
+(p7) br.cond.sptk ia64_coop_test_fail ;;
     CHECK_PRESERVED_REGS GR4_B, GR5_B, GR6_B, GR7_B, BR1_B, BR2_B, BR3_B, BR4_B, BR5_B
     CHECK_APP_STATE LC_B, EC_B, CCV_B
     CHECK_CONTEXT_GP ia64_coop_context_b
@@ -883,13 +962,6 @@ ia64_coop_b_resumed:
     mov r15 = psr ;;
     adds r28 = R_PSR_B, r14 ;;
     st8 [r28] = r15 ;;
-    mov r15 = ar.pfs ;;
-    adds r28 = R_PFS_B_AFTER, r14 ;;
-    st8 [r28] = r15 ;;
-    adds r28 = R_PFS_B_BEFORE, r14 ;;
-    ld8 r14 = [r28] ;;
-    cmp.eq p6, p7 = r15, r14 ;;
-(p7) br.cond.sptk ia64_coop_test_fail ;;
     CAPTURE_FP_SET R_FP_B_RESUME
     movl r14 = ia64_coop_probe_record + R_FP_B ;;
     stf.spill [r14] = f2 ;;
@@ -913,6 +985,7 @@ ia64_coop_b_unexpected_resume:
 
 .align 16
 ia64_coop_test_fail:
+    CAPTURE_FAILURE 1
     movl r14 = ia64_coop_probe_record ;;
     adds r28 = 200, r14 ;;
     ld8 r15 = [r28] ;;

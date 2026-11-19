@@ -15,7 +15,8 @@ static_assert(offsetof(ProbeRecord, nat_a_before) == 208, "A NaT record offset c
 static_assert(offsetof(ProbeRecord, nat_b_before) == 224, "B NaT record offset changed");
 static_assert(offsetof(ProbeRecord, psr_a_after_resume) == 240, "A PSR offset changed");
 static_assert(offsetof(ProbeRecord, fp_a_low) == 256, "A FP record offset changed");
-static_assert(offsetof(ProbeRecord, pfs_a_before) == 288, "A PFS offset changed");
+static_assert(offsetof(ProbeRecord, pfs_a_first_resume) == 288,
+              "first A PFS resume offset changed");
 static_assert(offsetof(ProbeRecord, fp_b_first_low) == 320, "B first FP offset changed");
 static_assert(offsetof(ProbeRecord, a_final_count) == 336, "final count offset changed");
 static_assert(offsetof(ProbeRecord, fp_a_first_resume) == 352,
@@ -26,7 +27,11 @@ static_assert(offsetof(ProbeRecord, fp_b_first_entry) == 992,
               "B first-entry FP offset changed");
 static_assert(offsetof(ProbeRecord, fp_b_resume) == 1312,
               "B resume FP offset changed");
-static_assert(sizeof(ProbeRecord) == 1632, "probe record size changed");
+static_assert(offsetof(ProbeRecord, ec_b_bootstrap) == 1632,
+              "bootstrap EC evidence offset changed");
+static_assert(offsetof(ProbeRecord, failure_seen) == 1688,
+              "failure evidence offset changed");
+static_assert(sizeof(ProbeRecord) == 1776, "probe record size changed");
 
 } // namespace ia64_coop_probe
 
@@ -145,6 +150,14 @@ uint64_t validate(const ProbeRecord& record, const Context& a, const Context& b)
         a.first_entry != 0 || b.first_entry != 0) ++errors;
     if (a.context_id != kContextA || b.context_id != kContextB ||
         a.profile_magic != kProfileMagic || b.profile_magic != kProfileMagic) ++errors;
+    if (a.lc != kExpectedLcA || b.lc != kExpectedLcB ||
+        a.ec != kExpectedEcA || b.ec != kExpectedEcB ||
+        ((a.pfs >> 52) & 0x3f) != kExpectedEcA ||
+        ((b.pfs >> 52) & 0x3f) != kExpectedEcB ||
+        a.ccv != 0xA5A5 || b.ccv != 0x5A5A ||
+        a.fpsr != 0x0009804c0270033fULL ||
+        b.fpsr != 0x0009804c0270033fULL ||
+        (a.pr & 0x10002) != 0x10002 || (b.pr & 0x10002) != 0x10002) ++errors;
     if (a.gp != address(&__gp) || b.gp != 0) ++errors;
 
     const uint64_t stack_a0 = address(&ia64_coop_stack_a_bottom);
@@ -181,8 +194,44 @@ uint64_t validate(const ProbeRecord& record, const Context& a, const Context& b)
 
     if (record.nat_a_before != 1 || record.nat_a_after != 1 ||
         record.nat_b_before != 0 || record.nat_b_after != 0) ++errors;
-    if (record.pfs_a_before != record.pfs_a_after ||
-        record.pfs_b_before != record.pfs_b_after) ++errors;
+    if (record.ec_b_bootstrap != 0 || record.pfs_b_bootstrap != 0 ||
+        record.ec_a_initial != kExpectedEcA ||
+        record.ec_a_first_resume != kExpectedEcA ||
+        record.ec_a_final_resume != kExpectedEcA ||
+        record.ec_b_first_entry != kExpectedEcB ||
+        record.ec_b_resume != kExpectedEcB) ++errors;
+    if (((record.pfs_b_first_entry >> 52) & 0x3f) != 0 ||
+        record.pfs_a_first_resume != a.pfs ||
+        record.pfs_a_final_resume != a.pfs ||
+        record.pfs_b_resume != b.pfs ||
+        record.pfs_a_first_resume == 0 || record.pfs_a_final_resume == 0 ||
+        record.pfs_b_resume == 0 || record.failure_seen != 0) ++errors;
+    const uint64_t expected_gr_a[4] = {
+        0x4758343441413031ULL, 0x4758353541413031ULL,
+        0x4758363641413031ULL, 0x4758373741413031ULL,
+    };
+    const uint64_t expected_gr_b[4] = {
+        0x4758343442423032ULL, 0x4758353542423032ULL,
+        0x4758363642423032ULL, 0x4758373742423032ULL,
+    };
+    const uint64_t expected_br_a[5] = {
+        0x4252314141413031ULL, 0x4252324141413031ULL,
+        0x4252334141413031ULL, 0x4252344141413031ULL,
+        0x4252354141413031ULL,
+    };
+    const uint64_t expected_br_b[5] = {
+        0x4252314242423032ULL, 0x4252324242423032ULL,
+        0x4252334242423032ULL, 0x4252344242423032ULL,
+        0x4252354242423032ULL,
+    };
+    for (uint64_t i = 0; i < 4; ++i) {
+        if (a.gr4_to_gr7[i] != expected_gr_a[i] ||
+            b.gr4_to_gr7[i] != expected_gr_b[i]) ++errors;
+    }
+    for (uint64_t i = 0; i < 5; ++i) {
+        if (a.br1_to_br5[i] != expected_br_a[i] ||
+            b.br1_to_br5[i] != expected_br_b[i]) ++errors;
+    }
     if (record.a_final_count != 1) ++errors;
     if (record.fp_a_low != kFpALow || record.fp_a_high != kFpAHigh ||
         record.fp_b_low != kFpBLow || record.fp_b_high != kFpBHigh ||
@@ -232,8 +281,38 @@ void report_context(const char* name, const Context& context)
     put_hex(context.rbs_base);
     puts(" rbs_limit=");
     put_hex(context.rbs_limit);
+    puts(" pfs=");
+    put_hex(context.pfs);
+    puts(" lc=");
+    put_hex(context.lc);
+    puts(" ec=");
+    put_hex(context.ec);
     puts(" gp=");
     put_hex(context.gp);
+    puts(" gr4=");
+    put_hex(context.gr4_to_gr7[0]);
+    puts(" gr5=");
+    put_hex(context.gr4_to_gr7[1]);
+    puts(" gr6=");
+    put_hex(context.gr4_to_gr7[2]);
+    puts(" gr7=");
+    put_hex(context.gr4_to_gr7[3]);
+    puts(" br1=");
+    put_hex(context.br1_to_br5[0]);
+    puts(" br2=");
+    put_hex(context.br1_to_br5[1]);
+    puts(" br3=");
+    put_hex(context.br1_to_br5[2]);
+    puts(" br4=");
+    put_hex(context.br1_to_br5[3]);
+    puts(" br5=");
+    put_hex(context.br1_to_br5[4]);
+    puts(" pr=");
+    put_hex(context.pr);
+    puts(" ccv=");
+    put_hex(context.ccv);
+    puts(" fpsr=");
+    put_hex(context.fpsr);
     puts(" switches=");
     put_hex(context.switch_count);
     puts(" first_entries=");
@@ -290,14 +369,6 @@ extern "C" void ia64_coop_probe_main()
     put_hex(ia64_coop_probe_record.nat_b_before);
     puts(" nat_b_after=");
     put_hex(ia64_coop_probe_record.nat_b_after);
-    puts(" pfs_a_before=");
-    put_hex(ia64_coop_probe_record.pfs_a_before);
-    puts(" pfs_a_after=");
-    put_hex(ia64_coop_probe_record.pfs_a_after);
-    puts(" pfs_b_before=");
-    put_hex(ia64_coop_probe_record.pfs_b_before);
-    puts(" pfs_b_after=");
-    put_hex(ia64_coop_probe_record.pfs_b_after);
     puts(" psr_a=");
     put_hex(ia64_coop_probe_record.psr_a_after_resume);
     puts(" psr_b=");
@@ -314,6 +385,29 @@ extern "C" void ia64_coop_probe_main()
     put_hex(ia64_coop_probe_record.fp_b_low);
     puts(" fp_b_resume_high=");
     put_hex(ia64_coop_probe_record.fp_b_high);
+    puts("\r\n");
+    puts("IA64_COOP_EC_STATE bootstrap_b=");
+    put_hex(ia64_coop_probe_record.ec_b_bootstrap);
+    puts(" pfs_bootstrap_b=");
+    put_hex(ia64_coop_probe_record.pfs_b_bootstrap);
+    puts(" a_initial=");
+    put_hex(ia64_coop_probe_record.ec_a_initial);
+    puts(" a_resume_first=");
+    put_hex(ia64_coop_probe_record.ec_a_first_resume);
+    puts(" a_resume_final=");
+    put_hex(ia64_coop_probe_record.ec_a_final_resume);
+    puts(" b_first_entry=");
+    put_hex(ia64_coop_probe_record.ec_b_first_entry);
+    puts(" b_resume=");
+    put_hex(ia64_coop_probe_record.ec_b_resume);
+    puts(" pfs_a_first_resume=");
+    put_hex(ia64_coop_probe_record.pfs_a_first_resume);
+    puts(" pfs_a_final_resume=");
+    put_hex(ia64_coop_probe_record.pfs_a_final_resume);
+    puts(" pfs_b_first_entry=");
+    put_hex(ia64_coop_probe_record.pfs_b_first_entry);
+    puts(" pfs_b_resume=");
+    put_hex(ia64_coop_probe_record.pfs_b_resume);
     puts("\r\n");
     if (errors == 0) {
         puts("IA64_COOP_CONTEXT_PROBE_RESULT=PASS\r\n");
