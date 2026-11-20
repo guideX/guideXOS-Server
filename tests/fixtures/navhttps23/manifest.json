@@ -1,0 +1,248 @@
+{
+  "capture_date_utc": "2026-11-19",
+  "capture_method": "OpenSSL s_client -showcerts over TLS 1.3/1.2; peer PEM bytes pinned by SHA-256",
+  "expired_server_chain": [
+    {
+      "certificate_policy_oids": [
+        "2.16.840.1.114412.2.1",
+        "2.23.140.1.1"
+      ],
+      "extended_key_usage_oids": [
+        "1.3.6.1.5.5.7.3.1",
+        "1.3.6.1.5.5.7.3.2"
+      ],
+      "issuer": "CN=DigiCert G5 TLS ECC SHA384 2021 CA1,O=DigiCert\\, Inc.,C=US",
+      "name_constraints": null,
+      "not_after_utc": "2023-03-16T23:59:59Z",
+      "not_before_utc": "2023-03-16T00:00:00Z",
+      "sha256": "4ad187813d1c7ee88a7ccc013e2e1dd50e9185d8f7e2f026835b23714f4639ee",
+      "subject": "CN=digicert-tls-ecc-p384-root-g5-expired.chain-demos.digicert.com,O=DigiCert\\, Inc.,L=Lehi,ST=Utah,C=US,2.5.4.5=5299537-0142,2.5.4.15=Private Organization,1.3.6.1.4.1.311.60.2.1.2=Utah,1.3.6.1.4.1.311.60.2.1.3=US",
+      "subject_alt_name_dns": [
+        "digicert-tls-ecc-p384-root-g5-expired.chain-demos.digicert.com"
+      ]
+    },
+    {
+      "certificate_policy_oids": [
+        "2.16.840.1.114412.2.1",
+        "2.23.140.1.1",
+        "2.23.140.1.2.1",
+        "2.23.140.1.2.2",
+        "2.23.140.1.2.3"
+      ],
+      "extended_key_usage_oids": [
+        "1.3.6.1.5.5.7.3.1",
+        "1.3.6.1.5.5.7.3.2"
+      ],
+      "issuer": "CN=DigiCert TLS ECC P384 Root G5,O=DigiCert\\, Inc.,C=US",
+      "name_constraints": null,
+      "not_after_utc": "2031-04-13T23:59:59Z",
+      "not_before_utc": "2021-04-14T00:00:00Z",
+      "sha256": "97a073957c5812725757672f222690655a1407d71011edfc8b2fadc5128911da",
+      "subject": "CN=DigiCert G5 TLS ECC SHA384 2021 CA1,O=DigiCert\\, Inc.,C=US",
+      "subject_alt_name_dns": []
+    },
+    {
+      "certificate_policy_oids": [
+        "2.5.29.32.0"
+      ],
+      "extended_key_usage_oids": [],
+      "issuer": "CN=DigiCert Global Root G3,OU=www.digicert.com,O=DigiCert Inc,C=US",
+      "name_constraints": null,
+      "not_after_utc": "2037-09-20T23:59:59Z",
+      "not_before_utc": "2022-09-21T00:00:00Z",
+      "sha256": "d92e93252eabca950870b94331990963a2dd5db96d833c82b08e41afd1719178",
+      "subject": "CN=DigiCert TLS ECC P384 Root G5,O=DigiCert\\, Inc.,C=US",
+      "subject_alt_name_dns": []
+    }
+  ],
+  "fixtures": {
+    "alternate_candidate_only_chain.pem": {
+      "bytes": 4948,
+      "sha256": "dded6322f9de4d0eb9ce6034567099e87f8c552783fdf7f2daf6882be9f22dd9"
+    },
+    "alternate_global_g3_chain.pem": {
+      "bytes": 5802,
+      "sha256": "c4059926b4a029ee0de18e5bfa921e0ad82f7f4c2070eb8c48be39e58ad730a6"
+    },
+    "expired-0.pem": {
+      "bytes": 2478,
+      "sha256": "12fc8f0051adb00a967896cb65f5f6abef6684f51c737093ae0e4f5b6475809b"
+    },
+    "expired-1.pem": {
+      "bytes": 1266,
+      "sha256": "84a87bf6e0f5c4b7e966bf805b9077122b2f7926d586eb4766d11eacbce1ba3b"
+    },
+    "expired-2.pem": {
+      "bytes": 1162,
+      "sha256": "5a198e57e625a91786d8904863f673ac407dad63cb2499969e7b24e084b4792f"
+    },
+    "expired_g5_chain.pem": {
+      "bytes": 4906,
+      "sha256": "712a122c72de097391abf703e777ca28cbac135622c6e6c60c214db9b8041e8d"
+    },
+    "expired_g5_cross_signed_by_global_g3.pem": {
+      "bytes": 1162,
+      "sha256": "5a198e57e625a91786d8904863f673ac407dad63cb2499969e7b24e084b4792f"
+    },
+    "expired_issuing_ca.pem": {
+      "bytes": 1266,
+      "sha256": "84a87bf6e0f5c4b7e966bf805b9077122b2f7926d586eb4766d11eacbce1ba3b"
+    },
+    "expired_leaf.pem": {
+      "bytes": 2478,
+      "sha256": "12fc8f0051adb00a967896cb65f5f6abef6684f51c737093ae0e4f5b6475809b"
+    },
+    "g5_cross_signed_by_global_g3.pem": {
+      "bytes": 1204,
+      "sha256": "d1d8c107c0e56e2f0e26fe38ccca9386e6a74e70c7c0caddfd3c2adf5f884a3b"
+    },
+    "g5_root.pem": {
+      "bytes": 804,
+      "sha256": "d5f0c187f3c075e43893c3c5d80dcca918c9c58346118480cb2d64c8819771c6"
+    },
+    "global_root_g3.pem": {
+      "bytes": 854,
+      "sha256": "ef6658e789bfdc65f3ba834a13825cb607b68aaafe8bbf5c7411aabe00b2b0b0"
+    },
+    "issuing_ca.pem": {
+      "bytes": 1266,
+      "sha256": "84a87bf6e0f5c4b7e966bf805b9077122b2f7926d586eb4766d11eacbce1ba3b"
+    },
+    "tampered_issuing_ca.pem": {
+      "bytes": 1245,
+      "sha256": "ba9a32a60310833231d4534b052fbe4e93fb8f378640ec840e7dc3bcbbf338c2"
+    },
+    "tampered_issuing_ca_chain.pem": {
+      "bytes": 3723,
+      "sha256": "67dcb4b658898cd5b6383c076decb7a4441c6bd14f3fa83b5ed1b7a372744e42"
+    },
+    "tampered_leaf.pem": {
+      "bytes": 2439,
+      "sha256": "ad5bb0bcf7fbd09fb3e0ab6f853e8327bbdb756e5404174b0d71ec08da76a080"
+    },
+    "tampered_leaf_chain.pem": {
+      "bytes": 3705,
+      "sha256": "77255b9436bc88769740f561595d72e8f11272803ad4d7e7c0058e3ec4d44547"
+    },
+    "valid-0.pem": {
+      "bytes": 2478,
+      "sha256": "2acec1e18f4e87ef56104efbda3d0f53d040bd9e2756854fa90495f97399d049"
+    },
+    "valid-1.pem": {
+      "bytes": 1266,
+      "sha256": "84a87bf6e0f5c4b7e966bf805b9077122b2f7926d586eb4766d11eacbce1ba3b"
+    },
+    "valid-2.pem": {
+      "bytes": 804,
+      "sha256": "d5f0c187f3c075e43893c3c5d80dcca918c9c58346118480cb2d64c8819771c6"
+    },
+    "valid-3.pem": {
+      "bytes": 1204,
+      "sha256": "d1d8c107c0e56e2f0e26fe38ccca9386e6a74e70c7c0caddfd3c2adf5f884a3b"
+    },
+    "valid-4.pem": {
+      "bytes": 854,
+      "sha256": "ef6658e789bfdc65f3ba834a13825cb607b68aaafe8bbf5c7411aabe00b2b0b0"
+    },
+    "valid_g5_chain.pem": {
+      "bytes": 3744,
+      "sha256": "0329afe133305d7c13a21aaef33cf29909ae8459d60c428343fd0c979f52a56a"
+    },
+    "valid_leaf.pem": {
+      "bytes": 2478,
+      "sha256": "2acec1e18f4e87ef56104efbda3d0f53d040bd9e2756854fa90495f97399d049"
+    }
+  },
+  "limitations": [
+    "Only the CA-disclosed demo paths captured on the stated date are qualified.",
+    "The test site serves both the exact G5 self-signed anchor and a G5 cross-certificate under DigiCert Global Root G3.",
+    "The altered-signature certificates are negative test controls and are not represented as public certificates."
+  ],
+  "schema_version": "guidexos.navhttps23.digicert-chain-fixtures.v1",
+  "source_record": {
+    "authority": "Common CA Database (Linux Foundation), V5 snapshot 2026-11-17",
+    "expired_demo_url": "https://digicert-tls-ecc-p384-root-g5-expired.chain-demos.digicert.com/",
+    "local_snapshot": "assets/certs/mozilla/navhttps21-sources/ccadb-v5-2026-11-17.csv",
+    "root_sha256": "018e13f0772532cf809bd1b17281867283fc48c6e13be9c69812854a490c1b05",
+    "valid_demo_url": "https://digicert-tls-ecc-p384-root-g5.chain-demos.digicert.com/"
+  },
+  "valid_server_chain": [
+    {
+      "certificate_policy_oids": [
+        "2.16.840.1.114412.2.1",
+        "2.23.140.1.1"
+      ],
+      "extended_key_usage_oids": [
+        "1.3.6.1.5.5.7.3.1",
+        "1.3.6.1.5.5.7.3.2"
+      ],
+      "issuer": "CN=DigiCert G5 TLS ECC SHA384 2021 CA1,O=DigiCert\\, Inc.,C=US",
+      "name_constraints": null,
+      "not_after_utc": "2026-12-13T23:59:59Z",
+      "not_before_utc": "2026-11-14T00:00:00Z",
+      "sha256": "4398421de2131accaf446b61dea44bd9814ed65cd540ecca07afcaba45490b18",
+      "subject": "CN=digicert-tls-ecc-p384-root-g5.chain-demos.digicert.com,O=DigiCert\\, Inc.,L=Lehi,ST=Utah,C=US,2.5.4.5=5299537-0142,2.5.4.15=Private Organization,1.3.6.1.4.1.311.60.2.1.2=Utah,1.3.6.1.4.1.311.60.2.1.3=US",
+      "subject_alt_name_dns": [
+        "digicert-tls-ecc-p384-root-g5.chain-demos.digicert.com"
+      ]
+    },
+    {
+      "certificate_policy_oids": [
+        "2.16.840.1.114412.2.1",
+        "2.23.140.1.1",
+        "2.23.140.1.2.1",
+        "2.23.140.1.2.2",
+        "2.23.140.1.2.3"
+      ],
+      "extended_key_usage_oids": [
+        "1.3.6.1.5.5.7.3.1",
+        "1.3.6.1.5.5.7.3.2"
+      ],
+      "issuer": "CN=DigiCert TLS ECC P384 Root G5,O=DigiCert\\, Inc.,C=US",
+      "name_constraints": null,
+      "not_after_utc": "2031-04-13T23:59:59Z",
+      "not_before_utc": "2021-04-14T00:00:00Z",
+      "sha256": "97a073957c5812725757672f222690655a1407d71011edfc8b2fadc5128911da",
+      "subject": "CN=DigiCert G5 TLS ECC SHA384 2021 CA1,O=DigiCert\\, Inc.,C=US",
+      "subject_alt_name_dns": []
+    },
+    {
+      "certificate_policy_oids": [],
+      "extended_key_usage_oids": [],
+      "issuer": "CN=DigiCert TLS ECC P384 Root G5,O=DigiCert\\, Inc.,C=US",
+      "name_constraints": null,
+      "not_after_utc": "2046-01-14T23:59:59Z",
+      "not_before_utc": "2021-01-15T00:00:00Z",
+      "sha256": "018e13f0772532cf809bd1b17281867283fc48c6e13be9c69812854a490c1b05",
+      "subject": "CN=DigiCert TLS ECC P384 Root G5,O=DigiCert\\, Inc.,C=US",
+      "subject_alt_name_dns": []
+    },
+    {
+      "certificate_policy_oids": [
+        "2.5.29.32.0"
+      ],
+      "extended_key_usage_oids": [
+        "1.3.6.1.5.5.7.3.1",
+        "1.3.6.1.5.5.7.3.2"
+      ],
+      "issuer": "CN=DigiCert Global Root G3,OU=www.digicert.com,O=DigiCert Inc,C=US",
+      "name_constraints": null,
+      "not_after_utc": "2036-03-30T23:59:59Z",
+      "not_before_utc": "2026-03-31T00:00:00Z",
+      "sha256": "3142f99d358d9b500e5cdd2dff8f719a8ccecf589652334848522cca807d0807",
+      "subject": "CN=DigiCert TLS ECC P384 Root G5,O=DigiCert\\, Inc.,C=US",
+      "subject_alt_name_dns": []
+    },
+    {
+      "certificate_policy_oids": [],
+      "extended_key_usage_oids": [],
+      "issuer": "CN=DigiCert Global Root G3,OU=www.digicert.com,O=DigiCert Inc,C=US",
+      "name_constraints": null,
+      "not_after_utc": "2038-01-15T12:00:00Z",
+      "not_before_utc": "2013-08-01T12:00:00Z",
+      "sha256": "31ad6648f8104138c738f39ea4320133393e3a18cc02296ef97c2ac9ef6731d0",
+      "subject": "CN=DigiCert Global Root G3,OU=www.digicert.com,O=DigiCert Inc,C=US",
+      "subject_alt_name_dns": []
+    }
+  ]
+}

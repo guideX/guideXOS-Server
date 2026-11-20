@@ -1,0 +1,444 @@
+  <!DOCTYPE html>
+<html>
+  <head>
+    <meta charset='utf-8'>
+    <meta http-equiv="X-UA-Compatible" content="chrome=1">
+    <link href='https://fonts.googleapis.com/css?family=Chivo:900' rel='stylesheet' type='text/css'>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/assets/css/style.css?v=">
+    <link rel="stylesheet" type="text/css" href="/assets/css/print.css" media="print">
+    <!--[if lt IE 9]>
+    <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <title>Common CA Database by the Linux Foundation</title>
+  </head>
+
+  <body>
+    <div id="container">
+      <div class="inner">
+
+        <header style="padding-bottom: 0px">
+          <h1>Common CA Database</h1>
+           <table><tr><td>
+             <a href="/">Home</a> |
+             <a href="/policy">Policy</a> |
+             <a href="/cas">For CAs</a> |
+             <a href="/auditors">For Auditors</a> |
+             <a href="/rootstores">For Root Stores</a> |
+             <a href="/resources">Resources</a>
+           </td></tr>
+           </table>
+        </header>
+        <section id="main_content">
+          <h1 id="useful-resources">Useful Resources</h1>
+
+<h2 id="ccadb-support">CCADB Support</h2>
+
+<ul>
+  <li>For problems or questions when using the CCADB, please contact support [at] ccadb [dot] org.</li>
+  <li>You can record enhancements, bugs, and API access requests in the ‘Common CA Database’ <a href="https://bugzilla.mozilla.org/enter_bug.cgi?product=CA%20Program&amp;component=Common%20CA%20Database">component</a> under the ‘CA Program’ <a href="https://bugzilla.mozilla.org/describecomponents.cgi?product=CA%20Program">product</a> in Bugzilla.</li>
+</ul>
+
+<h2 id="ccadb-data">CCADB Data</h2>
+
+<p>The <a href="rootstores/usage#ccadb-data-usage-terms">CCADB Data Usage Terms</a> applies to all data hosted in and by the CCADB.</p>
+
+<h3 id="root-store-information">Root Store Information</h3>
+
+<p>The Root Store Operators participating in the CCADB are described below, along with resources and reports that may be helpful to members of the community.</p>
+
+<p><strong>It is crucial to understand</strong> that each of these root stores is carefully managed for specific use cases and user communities. While the availability of root store reports and associated certificate bundles may seem convenient for re-use, re-purposing custom-built root stores for applications that do not perfectly align with their intended products, communities, or policies can introduce significant risks to security and interoperability. Such misuse can undermine the very protections these root stores are designed to provide.</p>
+
+<p>In most cases, it’s far more appropriate and secure to curate a purpose-built root store tailored to satisfy the specific risk-based determinations of your corresponding user community. To assist user communities in considering and establishing their own root stores, several additional reports are provided in the <a href="#community-reports">Community Reports</a> section of this page. These can help you determine the set of roots most appropriate for your PKI use case and community goals, leading to a more secure and interoperable outcome compared to simply reusing a root store that you do not control.</p>
+
+<h4 id="apple">Apple</h4>
+
+<p><strong>Policy:</strong> <a href="https://github.com/apple/apple-root-program/blob/main/policy.md">Apple Root Certificate Program</a></p>
+
+<p><strong>Additional Resources:</strong></p>
+
+<p><strong>Contact:</strong> certificate-authority-program [at] apple [dot] com</p>
+
+<p><strong>Root Store Reports:</strong></p>
+
+<table>
+  <thead>
+    <tr>
+      <th>PKI Use Case</th>
+      <th>Downloads</th>
+      <th>Note</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>TLS Server Authentication</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=AppleTLSServerAuthenticationCSV">CSV</a></td>
+      <td> </td>
+    </tr>
+    <tr>
+      <td>TLS Client Authentication</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=AppleTLSClientAuthenticationCSV">CSV</a></td>
+      <td> </td>
+    </tr>
+    <tr>
+      <td>S/MIME</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=AppleSMIMECSV">CSV</a></td>
+      <td> </td>
+    </tr>
+    <tr>
+      <td>Timestamping</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=AppleTimestampingCSV">CSV</a></td>
+      <td> </td>
+    </tr>
+  </tbody>
+</table>
+
+<p><br /></p>
+
+<h4 id="cisco">Cisco</h4>
+
+<p><strong>Policy:</strong> <a href="https://www.cisco.com/security/pki/trs/readme.html">Cisco PKI: Trusted Root Stores</a></p>
+
+<p><strong>Additional Resources:</strong></p>
+
+<ul>
+  <li><a href="https://www.cisco.com/security/pki/trs/readme.html#frequently-asked-questions">Frequently Asked Questions</a></li>
+</ul>
+
+<p><strong>Contact:</strong>  trust-root-store [at] external [dot] cisco [dot] com</p>
+
+<p><strong>Root Store Reports:</strong></p>
+
+<ul>
+  <li>See the <a href="https://www.cisco.com/security/pki/trs/readme.html">bundles</a> offered by Cisco.</li>
+</ul>
+
+<p><br /></p>
+
+<h4 id="google-chrome">Google Chrome</h4>
+
+<p><strong>Policy:</strong> <a href="https://g.co/chrome/root-policy">Chrome Root Program Policy</a></p>
+
+<p><strong>Additional Resources:</strong></p>
+<ul>
+  <li><a href="https://googlechrome.github.io/chromerootprogram/moving-forward-together/">Moving Forward, Together</a></li>
+  <li><a href="https://chromium.googlesource.com/chromium/src/+/main/net/data/ssl/chrome_root_store/faq.md">Chrome Root Store &amp; Certificate Verifier FAQ</a></li>
+</ul>
+
+<p><strong>Contact:</strong> chrome-root-program [at] google [dot] com</p>
+
+<p><strong>Root Store Reports:</strong></p>
+
+<table>
+  <thead>
+    <tr>
+      <th>PKI Use Case</th>
+      <th>Downloads</th>
+      <th>Note</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>TLS Server Authentication</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=ChromeTLSServerAuthenticationCSV">CSV</a></td>
+      <td>This download includes certificates that are <a href="https://chromium.googlesource.com/chromium/src/+/main/net/cert/root_store.proto#13">constrained</a> for various reasons.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><br /></p>
+
+<h4 id="microsoft">Microsoft</h4>
+
+<p><strong>Policy:</strong> <a href="https://aka.ms/RootCert">Trusted Root Program Requirements</a></p>
+
+<p><strong>Additional Resources:</strong></p>
+<ul>
+  <li><a href="https://aka.ms/rootupdates">Trusted Root Certificate Program Updates</a></li>
+  <li><a href="https://aka.ms/auditreqs">Trusted Root Audit Requirements</a></li>
+</ul>
+
+<p><strong>Contact:</strong> msroots [at] microsoft [dot] com</p>
+
+<p><strong>Root Store Reports:</strong></p>
+
+<table>
+  <thead>
+    <tr>
+      <th>PKI Use Case</th>
+      <th>Downloads</th>
+      <th>Note</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>TLS Server Authentication</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=MicrosoftTLSServerAuthenticationCSV">CSV</a></td>
+      <td> </td>
+    </tr>
+    <tr>
+      <td>TLS Client Authentication</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=MicrosoftTLSClientAuthenticationCSV">CSV</a></td>
+      <td> </td>
+    </tr>
+    <tr>
+      <td>S/MIME</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=MicrosoftSMIMECSV">CSV</a></td>
+      <td> </td>
+    </tr>
+    <tr>
+      <td>Timestamping</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=MicrosoftTimestampingCSV">CSV</a></td>
+      <td> </td>
+    </tr>
+    <tr>
+      <td>Code Signing</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=MicrosoftCodeSigningCSV">CSV</a></td>
+      <td> </td>
+    </tr>
+    <tr>
+      <td>Document Signing</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=MicrosoftDocumentSigningCSV">CSV</a></td>
+      <td> </td>
+    </tr>
+    <tr>
+      <td>Encrypting File System</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=MicrosoftEncryptingFileSystemCSV">CSV</a></td>
+      <td> </td>
+    </tr>
+    <tr>
+      <td>IP Security End System</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=MicrosoftIPSecurityEndSystemCSV">CSV</a></td>
+      <td> </td>
+    </tr>
+    <tr>
+      <td>IP Security IKE Intermediate</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=MicrosoftIPSecurityIKEIntermediateCSV">CSV</a></td>
+      <td> </td>
+    </tr>
+    <tr>
+      <td>IP Security Tunnel Termination</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=MicrosoftIPSecurityTunnelTerminationCSV">CSV</a></td>
+      <td> </td>
+    </tr>
+    <tr>
+      <td>IP Security User</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=MicrosoftIPSecurityUserCSV">CSV</a></td>
+      <td> </td>
+    </tr>
+  </tbody>
+</table>
+
+<p><br /></p>
+
+<h4 id="mozilla">Mozilla</h4>
+
+<p><strong>Policy:</strong> <a href="https://www.mozilla.org/en-US/about/governance/policies/security-group/certs/policy/">Mozilla Root Store Policy</a></p>
+
+<p><strong>Additional Resources:</strong></p>
+<ul>
+  <li><a href="https://wiki.mozilla.org/CA">Root Program Documentation</a></li>
+  <li><a href="https://wiki.mozilla.org/CA/Communications">CA Communications</a></li>
+  <li><a href="https://wiki.mozilla.org/CA/Incident_Dashboard">CA Incident Dashboard</a></li>
+  <li><a href="https://groups.google.com/a/mozilla.org/g/dev-security-policy">dev-security-policy WebPKI Forum</a></li>
+</ul>
+
+<p><strong>Contact:</strong> certificates [at] mozilla [dot] org</p>
+
+<p><strong>Root Store Reports:</strong></p>
+
+<table>
+  <thead>
+    <tr>
+      <th>PKI Use Case</th>
+      <th>Downloads</th>
+      <th>Note</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>TLS Server Authentication</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=MozillaTLSServerAuthenticationCSV">CSV</a></td>
+      <td> </td>
+    </tr>
+    <tr>
+      <td>S/MIME</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=MozillaSMIMECSV">CSV</a></td>
+      <td> </td>
+    </tr>
+  </tbody>
+</table>
+
+<p><br /></p>
+
+<h3 id="community-reports">Community Reports</h3>
+
+<h4 id="use-case-specific-reports">Use-case Specific Reports</h4>
+
+<p>The following reports contain any root Certification Authority (CA) certificate trusted for the given PKI use case by at least one CCADB Root Store Operator. The <code class="language-plaintext highlighter-rouge">Trust Bits for Root Cert</code> field is auto updated from a CCADB trigger that uses the collection of trust bits from all CCADB root stores. All “Apple Constrained”, “Google Chrome Constrained”, “Microsoft Constrained”, “Mozilla Constrained” values will be boolean depending on if any constraint information exists for that root program on that root certificate.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>PKI Use Case</th>
+      <th>Downloads</th>
+      <th>Note</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>TLS Server Authentication</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=TLSServerAuthenticationCSV">CSV</a></td>
+      <td>Trust Bits for Root Cert INCLUDES Server Authentication AND ((Apple Status != Not Included OR Removed) OR (Google Chrome Status != Not Included OR Removed) OR (Microsoft Status != Not Included OR Pending OR Removed) OR (Mozilla Status != Not Included OR Removed OR Obsolete))</td>
+    </tr>
+    <tr>
+      <td>TLS Client Authentication</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=TLSClientAuthenticationCSV">CSV</a></td>
+      <td>Trust Bits for Root Cert INCLUDES Client Authentication AND ((Apple Status != Not Included OR Removed) OR (Google Chrome Status != Not Included OR Removed) OR (Microsoft Status != Not Included OR Pending OR Removed) OR (Mozilla Status != Not Included OR Removed OR Obsolete))</td>
+    </tr>
+    <tr>
+      <td>S/MIME</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=SMIMECSV">CSV</a></td>
+      <td>Trust Bits for Root Cert INCLUDES Secure Email AND ((Apple Status != Not Included OR Removed) OR (Google Chrome Status != Not Included OR Removed) OR (Microsoft Status != Not Included OR Pending OR Removed) OR (Mozilla Status != Not Included OR Removed OR Obsolete))</td>
+    </tr>
+    <tr>
+      <td>Timestamping</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=TimestampingCSV">CSV</a></td>
+      <td>Trust Bits for Root Cert INCLUDES Time Stamping AND ((Apple Status != Not Included OR Removed) OR (Google Chrome Status != Not Included OR Removed) OR (Microsoft Status != Not Included OR Pending OR Removed) OR (Mozilla Status != Not Included OR Removed OR Obsolete))</td>
+    </tr>
+    <tr>
+      <td>Code Signing</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=CodeSigningCSV">CSV</a></td>
+      <td>Trust Bits for Root Cert INCLUDES Code Signing AND ((Apple Status != Not Included OR Removed) OR (Google Chrome Status != Not Included OR Removed) OR (Microsoft Status != Not Included OR Pending OR Removed) OR (Mozilla Status != Not Included OR Removed OR Obsolete))</td>
+    </tr>
+    <tr>
+      <td>Document Signing</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=DocumentSigningCSV">CSV</a></td>
+      <td>Trust Bits for Root Cert INCLUDES Document Signing AND ((Apple Status != Not Included OR Removed) OR (Google Chrome Status != Not Included OR Removed) OR (Microsoft Status != Not Included OR Pending OR Removed) OR (Mozilla Status != Not Included OR Removed OR Obsolete))</td>
+    </tr>
+    <tr>
+      <td>Encrypting File System</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=EncryptingFileSystemCSV">CSV</a></td>
+      <td>Trust Bits for Root Cert INCLUDES Encrypting File System AND ((Apple Status != Not Included OR Removed) OR (Google Chrome Status != Not Included OR Removed) OR (Microsoft Status != Not Included OR Pending OR Removed) OR (Mozilla Status != Not Included OR Removed OR Obsolete))</td>
+    </tr>
+    <tr>
+      <td>IP Security End System</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=IPSecurityEndSystemCSV">CSV</a></td>
+      <td>Trust Bits for Root Cert INCLUDES IP Security End System AND ((Apple Status != Not Included OR Removed) OR (Google Chrome Status != Not Included OR Removed) OR (Microsoft Status != Not Included OR Pending OR Removed) OR (Mozilla Status != Not Included OR Removed OR Obsolete))</td>
+    </tr>
+    <tr>
+      <td>IP Security IKE Intermediate</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=IPSecurityIKEIntermediateCSV">CSV</a></td>
+      <td>Trust Bits for Root Cert INCLUDES IP Security IKE Intermediate AND ((Apple Status != Not Included OR Removed) OR (Google Chrome Status != Not Included OR Removed) OR (Microsoft Status != Not Included OR Pending OR Removed) OR (Mozilla Status != Not Included OR Removed OR Obsolete))</td>
+    </tr>
+    <tr>
+      <td>IP Security Tunnel Termination</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=IPSecurityTunnelTerminationCSV">CSV</a></td>
+      <td>Trust Bits for Root Cert INCLUDES IP Security Tunnel Termination AND ((Apple Status != Not Included OR Removed) OR (Google Chrome Status != Not Included OR Removed) OR (Microsoft Status != Not Included OR Pending OR Removed) OR (Mozilla Status != Not Included OR Removed OR Obsolete))</td>
+    </tr>
+    <tr>
+      <td>IP Security User</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=IPSecurityUserCSV">CSV</a></td>
+      <td>Trust Bits for Root Cert INCLUDES IP Security User AND ((Apple Status != Not Included OR Removed) OR (Google Chrome Status != Not Included OR Removed) OR (Microsoft Status != Not Included OR Pending OR Removed) OR (Mozilla Status != Not Included OR Removed OR Obsolete))</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><br /></p>
+
+<h4 id="additional-reports">Additional Reports</h4>
+
+<table>
+  <thead>
+    <tr>
+      <th>Description</th>
+      <th>Downloads</th>
+      <th>Note</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><a href="https://github.com/mozilla/CCADB-Tools/blob/master/API_AllCertificateRecords/README.md">AllCertificateRecords REST API</a></td>
+      <td>N/A</td>
+      <td><a href="https://docs.google.com/document/d/1S3u0-_YACA7m-3LPpjE-t4WCh2cww_SQFh2C9DJeXHA/edit?usp=sharing">Description</a> of report fields. This API intends to one day replace the All Certificate Information reports.</td>
+    </tr>
+    <tr>
+      <td>V5 All Certificate Information (root and intermediate) in the CCADB</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/AllCertificateRecordsCSVFormatV5">CSV</a></td>
+      <td><a href="https://docs.google.com/document/d/1S3u0-_YACA7m-3LPpjE-t4WCh2cww_SQFh2C9DJeXHA/edit?usp=sharing">Description</a> of report fields.</td>
+    </tr>
+    <tr>
+      <td>V4 All Certificate Information (root and intermediate) in the CCADB</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/AllCertificateRecordsCSVFormatv4">CSV</a></td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/AllCertificateRecordsCSVFormatV4a">V4a</a> (Records of CA certificates, excluding those that expired more than five years ago) <a href="https://ccadb.my.salesforce-sites.com/ccadb/AllCertificateRecordsCSVFormatV4b">V4b</a> (Records of CA certificates expired over five years ago). These two reports–V4a and V4b–are mutually exclusive partitions of the full dataset for V4 and can be combined to reconstruct the complete list.</td>
+    </tr>
+    <tr>
+      <td>All Included Root Certificate Trust Bit Settings</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/AllIncludedRootCertsCSV">CSV</a></td>
+      <td> </td>
+    </tr>
+    <tr>
+      <td>List of CA problem reporting mechanisms (email, etc.)</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/AllProblemReportingMechanismsCSV">CSV</a> / <a href="https://ccadb.my.salesforce-sites.com/ccadb/AllProblemReportingMechanismsReport">Custom</a></td>
+      <td>Use this download to report a certificate problem directly to the CA.</td>
+    </tr>
+    <tr>
+      <td>List of CAA Identifiers</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/AllCAAIdentifiersReportCSVV2">CSV</a> / <a href="https://ccadb.my.salesforce-sites.com/ccadb/AllCAAIdentifiersReportV2">Custom</a></td>
+      <td>Used to restrict issuance of certificates to specific CAs via a <a href="https://tools.ietf.org/html/rfc6844">DNS Certification Authority Authorization Resource Record</a>.</td>
+    </tr>
+    <tr>
+      <td>Disclosed Domain Control Validation Practices</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/googlechrome/TLSCertDomainValidationCSVFormat">CSV</a></td>
+      <td> </td>
+    </tr>
+    <tr>
+      <td>Accepted Roots for Production Certificate Transparency Logs</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/RootCACertificatesIncludedByRSReportCSV">CSV</a></td>
+      <td>Includes CAs trusted by at least one of the CCADB root stores.</td>
+    </tr>
+    <tr>
+      <td>Accepted Roots for Test Certificate Transparency Logs</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/RootCACertificatesInclusionReportCSV">CSV</a></td>
+      <td>Includes CAs that have applied to at least one of the CCADB root stores.</td>
+    </tr>
+    <tr>
+      <td>All Certificate PEMs Year</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/AllCertificatePEMsCSVFormat?NotBeforeYear=1999">CSV</a></td>
+      <td>Provides the certificate PEMs for which the CCADB record has a ‘Valid From (GMT)’ field that contains 1999. Change “1999” in the URL to a year of your choosing.</td>
+    </tr>
+    <tr>
+      <td>All Certificate PEMs Decade</td>
+      <td><a href="https://ccadb.my.salesforce-sites.com/ccadb/AllCertificatePEMsCSVFormat?NotBeforeDecade=2010">CSV</a></td>
+      <td>Provides the certificate PEMs for which the CCADB record has a ‘Valid From (GMT)’ field that contains 2010. Change “2010” in the URL to a decade of your choosing.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><br /></p>
+
+<h3 id="additional-resources">Additional Resources</h3>
+<ul>
+  <li><a href="https://crt.sh/">crt.sh Certificate Search</a></li>
+  <li><a href="https://censys.io/">Censys Certificate Search</a></li>
+  <li><a href="https://tls-observatory.services.mozilla.com/static/certsplainer.html">Certificate Explainer</a></li>
+  <li><a href="https://groups.google.com/a/ccadb.org/g/public">public@ccadb.org Forum</a></li>
+  <li><a href="/documents/TSP_Technical_Best_Practices_eIDAS.pdf">Trust Service Provider Technical Best Practices</a></li>
+  <li><a href="/documents/Qualified_Website_Authentication_Certificates_Interoperability.pdf">Qualified Website Authentication Certificates (QWACs) Interoperability</a></li>
+</ul>
+
+        </section>
+
+        <footer style="text-align: center">
+            <img src="/images/moz_ms_goog_logos.png">
+Copyright © 2026 The Linux Foundation®. All rights reserved.
+The Linux Foundation has registered trademarks and uses trademarks. For a list of trademarks of The Linux Foundation, please see our <a href="https://www.linuxfoundation.org/legal/trademark-usage">Trademark Usage</a> page. Linux is a registered trademark of Linus Torvalds. 
+          <br>
+          <a href="https://www.linuxfoundation.org/legal/privacy-policy">The Linux Foundation Privacy Policy</a> | <a href="https://www.ccadb.org/privacy">CCADB Privacy Policy Addendum</a> | <a href="https://www.linuxfoundation.org/legal/terms">Terms of Use</a>
+        </footer>
+      </div>
+    </div>
+
+    
+  </body>
+</html>

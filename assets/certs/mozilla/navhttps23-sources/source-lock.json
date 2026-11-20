@@ -1,0 +1,263 @@
+{
+  "schema_version": "guidexos.mozilla-trust-source-lock.v2",
+  "snapshot_date": "2026-11-17",
+  "baseline_source_lock": {
+    "local_path": "assets/certs/mozilla/navhttps20-sources/source-lock.json",
+    "sha256": "8c18c1a11f1c471a672e48e496fd42690531797cc6a3f5a7e209a85631774095",
+    "purpose": "Preserve and verify the accepted NAVHTTPS20 NSS, Mozilla policy, wiki, curl, and fixture source pins."
+  },
+  "ccadb_v5_all_certificate_records": {
+    "owner": "Common CA Database (Linux Foundation)",
+    "url": "https://ccadb.my.salesforce-sites.com/ccadb/AllCertificateRecordsCSVFormatV5",
+    "revision": "downloaded-snapshot-2026-11-17",
+    "retrieved_date_utc": "2026-11-17",
+    "local_path": "assets/certs/mozilla/navhttps21-sources/ccadb-v5-2026-11-17.csv",
+    "sha256": "f3b205d590aa5e78d5e79df631b87a331f2e3e1ea990b704c3165fa2627daf36",
+    "license": "CDLA-2.0-Permissive; attribution to CCADB required",
+    "roles": [
+      "certificate-fingerprint-and-record-type-cross-check",
+      "Mozilla root status cross-check",
+      "CCADB trust-bit and EV metadata cross-check"
+    ],
+    "coverage_limits": [
+      "The report is a dynamic snapshot and does not expose a complete machine-readable inventory of Mozilla code-level restrictions.",
+      "The aggregate Trust Bits for Root Cert field is not a Mozilla-only trust decision.",
+      "An absent record or blank field does not establish that no Mozilla restriction applies."
+    ]
+  },
+  "mozilla_bugzilla_snapshots": [
+    {
+      "source_id": "mozilla-bugzilla-1764392",
+      "bug_id": 1764392,
+      "url": "https://bugzilla.mozilla.org/show_bug.cgi?id=1764392",
+      "api_url": "https://bugzilla.mozilla.org/rest/bug/1764392",
+      "revision": "last_change_time=2022-07-13T20:54:10Z",
+      "retrieved_date_utc": "2026-11-17",
+      "local_path": "assets/certs/mozilla/navhttps22-sources/bug-1764392.json",
+      "sha256": "c13a9ddd1538d1a63c705c58b21c347288fc9eefa080c274a7cf2d627ecfc237",
+      "roles": [
+        "DigiCert TLS ECC P384 Root G5 identity and initial Websites trust-purpose evidence"
+      ],
+      "coverage_limits": [
+        "The inclusion bug is not a complete fingerprint-keyed domain restriction or program-compliance registry."
+      ]
+    },
+    {
+      "source_id": "mozilla-bugzilla-1764397",
+      "bug_id": 1764397,
+      "url": "https://bugzilla.mozilla.org/show_bug.cgi?id=1764397",
+      "api_url": "https://bugzilla.mozilla.org/rest/bug/1764397",
+      "revision": "last_change_time=2022-07-20T17:25:35Z",
+      "retrieved_date_utc": "2026-11-17",
+      "local_path": "assets/certs/mozilla/navhttps22-sources/bug-1764397.json",
+      "sha256": "0e5d584e22de1af043b9eee9ad78647f3ff35dbe87bedfe66b81733499d592a6",
+      "roles": [
+        "DigiCert TLS ECC P384 Root G5 EV treatment and OID evidence"
+      ],
+      "coverage_limits": [
+        "The EV OID record does not establish a general TLS certificate-policy requirement or full RFC 5280 policy processing."
+      ]
+    },
+    {
+      "source_id": "mozilla-bugzilla-2031732",
+      "bug_id": 2031732,
+      "url": "https://bugzilla.mozilla.org/show_bug.cgi?id=2031732",
+      "api_url": "https://bugzilla.mozilla.org/rest/bug/2031732",
+      "revision": "last_change_time=2026-11-16T17:05:26Z",
+      "retrieved_date_utc": "2026-11-17",
+      "local_path": "assets/certs/mozilla/navhttps22-sources/bug-2031732.json",
+      "sha256": "318d215feb08457afcb4af980224591773040586c3f75488c6098f9c61b662be",
+      "roles": [
+        "DigiCert root-purpose transition update through 2026-11-16"
+      ],
+      "coverage_limits": [
+        "The transition plan is not a complete fingerprint-keyed domain restriction or certificate-policy registry."
+      ]
+    }
+  ],
+  "root_restrictions_overlay": {
+    "local_path": "assets/certs/mozilla/navhttps23-sources/root-restrictions-overlay.json",
+    "sha256": "01046c433ab7b70ca8fd518c6f7d544b631321479c3e1c3b3b338ca6dfebf08d",
+    "schema_version": "guidexos.mozilla-root-restrictions.v2",
+    "coverage_status": "complete",
+    "coverage_scope": "selected-root-set"
+  },
+  "distrust_after_enforcement_policy": {
+    "local_path": "assets/certs/mozilla/navhttps21-sources/distrust-after-enforcement.json",
+    "sha256": "ac05c3786965c910821806d4b0b9c6e0891083384c597dcc9176bccb02279bca",
+    "schema_version": "guidexos.mozilla-server-distrust-after.v2",
+    "mechanism": "navigator-tls-verify-callback-leaf-notbefore-v1"
+  },
+  "license_and_attribution": {
+    "ccadb": "CCADB Data Usage Terms: CDLA-2.0-Permissive; attribute CCADB when redistributing or using derived data.",
+    "mozilla_nss": "MPL-2.0, as pinned by NAVHTTPS20.",
+    "mozilla_root_store_policy": "CC-BY-SA-3.0-or-later per NAVHTTPS20 source lock.",
+    "mozilla_additional_trust_changes": "CC-BY-SA-3.0-or-later per NAVHTTPS20 source lock."
+  },
+  "external_policy_effective_date": "2026-11-19",
+  "navhttps23_pinned_sources": [
+    {
+      "source_id": "mozilla-nss-genname-8c60e757",
+      "local_path": "assets/certs/mozilla/navhttps23-sources/nss-genname-8c60e757.c",
+      "url": "https://github.com/nss-dev/nss/blob/8c60e757c30b1b239bae46532b4f6d4ebb1e1cad/lib/certdb/genname.c",
+      "owner": "Mozilla NSS",
+      "revision": "8c60e757c30b1b239bae46532b4f6d4ebb1e1cad",
+      "retrieved_date_utc": "2026-11-19",
+      "sha256": "1fd0bff1c9cfd59a3ebadbcf5bd60fa5555e29ba68a0190eda0bcf401b80e75d",
+      "license": "MPL-2.0",
+      "coverage": "Exact exhaustive source table for NSS imposed root Name Constraints and lookup behavior.",
+      "bind_overlay": true
+    },
+    {
+      "source_id": "mozilla-gecko-nss-certdb-trust-domain-28b89924",
+      "local_path": "assets/certs/mozilla/navhttps23-sources/mozilla-NSSCertDBTrustDomain-28b89924.cpp",
+      "url": "https://hg.mozilla.org/mozilla-central/file/28b8992494cac70d7abafa3ed120411de6d44dc0/security/certverifier/NSSCertDBTrustDomain.cpp",
+      "owner": "Mozilla Firefox / NSSCertDBTrustDomain",
+      "revision": "28b8992494cac70d7abafa3ed120411de6d44dc0",
+      "retrieved_date_utc": "2026-11-19",
+      "sha256": "42d13febe01938e87d2ece06916192f217edc9d216cbf485d5c977dcd75455ff",
+      "license": "MPL-2.0",
+      "coverage": "Confirms Gecko calls the exact NSS imposed-name-constraints API for issuer certificates.",
+      "bind_overlay": true
+    },
+    {
+      "source_id": "mozilla-gecko-cert-verifier-28b89924",
+      "local_path": "assets/certs/mozilla/navhttps23-sources/mozilla-CertVerifier-28b89924.cpp",
+      "url": "https://hg.mozilla.org/mozilla-central/file/28b8992494cac70d7abafa3ed120411de6d44dc0/security/certverifier/CertVerifier.cpp",
+      "owner": "Mozilla Firefox certificate verifier",
+      "revision": "28b8992494cac70d7abafa3ed120411de6d44dc0",
+      "retrieved_date_utc": "2026-11-19",
+      "sha256": "53cf6f8c999a310d4e91314568a1d08d6cdddffc552ed89cfb8105a9cee4d6d3",
+      "license": "MPL-2.0",
+      "coverage": "Shows EV policy-path handling is separate from ordinary TLS anyPolicy validation.",
+      "bind_overlay": true
+    },
+    {
+      "source_id": "mozilla-gecko-extended-validation-28b89924",
+      "local_path": "assets/certs/mozilla/navhttps23-sources/mozilla-ExtendedValidation-28b89924.cpp",
+      "url": "https://hg.mozilla.org/mozilla-central/file/28b8992494cac70d7abafa3ed120411de6d44dc0/security/certverifier/ExtendedValidation.cpp",
+      "owner": "Mozilla Firefox EV policy authorization source",
+      "revision": "28b8992494cac70d7abafa3ed120411de6d44dc0",
+      "retrieved_date_utc": "2026-11-19",
+      "sha256": "3a737949ca1c47f477b8bce5e0129334bf00fb0e1b5a435fbba01be77fde3c13",
+      "license": "MPL-2.0",
+      "coverage": "Pins Mozilla's separate G5 EV policy authorization record; NAVHTTPS23 candidate scope excludes EV.",
+      "bind_overlay": true
+    },
+    {
+      "source_id": "mozilla-gecko-extended-validation-header-28b89924",
+      "local_path": "assets/certs/mozilla/navhttps23-sources/mozilla-ExtendedValidation-28b89924.h",
+      "url": "https://hg.mozilla.org/mozilla-central/file/28b8992494cac70d7abafa3ed120411de6d44dc0/security/certverifier/ExtendedValidation.h",
+      "owner": "Mozilla Firefox EV policy authorization source",
+      "revision": "28b8992494cac70d7abafa3ed120411de6d44dc0",
+      "retrieved_date_utc": "2026-11-19",
+      "sha256": "0798a969bfd1d51b25910377ae01e29e4b4c939c46cd56c5be526e414a954432",
+      "license": "MPL-2.0",
+      "coverage": "Pins the EV policy lookup interface used by the separate EV validation branch.",
+      "bind_overlay": true
+    },
+    {
+      "source_id": "mozilla-root-store-policy-v3.1",
+      "local_path": "assets/certs/mozilla/navhttps23-sources/mozilla-root-store-policy-v3.1.md",
+      "url": "https://github.com/mozilla/pkipolicy/blob/bb613bb30b8d85706bac7ecdd877d19b50efe4e7/rootstore/policy.md",
+      "owner": "Mozilla Root Program",
+      "revision": "bb613bb30b8d85706bac7ecdd877d19b50efe4e7",
+      "retrieved_date_utc": "2026-11-19",
+      "sha256": "0e39e12a7251b5011c86cbc83355eb63dd0b82ca33019f5ccafad6cc7ffb59db",
+      "license": "CC-BY-SA-3.0-or-later",
+      "coverage": "Current Mozilla root inclusion, CA operational, audit, ordinary TLS and conditional EV requirements.",
+      "bind_overlay": true
+    },
+    {
+      "source_id": "ccadb-tls-server-auth-community-2026-11-19",
+      "local_path": "assets/certs/mozilla/navhttps23-sources/ccadb-tls-server-auth-community-2026-11-19.csv",
+      "url": "https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=TLSServerAuthenticationCSV",
+      "owner": "Common CA Database (Linux Foundation)",
+      "revision": "downloaded-snapshot-2026-11-19",
+      "retrieved_date_utc": "2026-11-19",
+      "sha256": "4ad8918077f77a8b1c651b3a711a32d658d610a475d4116cc8b5c08114f6253e",
+      "license": "CDLA-2.0-Permissive; CCADB attribution required",
+      "coverage": "Exact root identity and Mozilla Constrained boolean in the TLS server-auth community report.",
+      "bind_overlay": true
+    },
+    {
+      "source_id": "ccadb-resources-2026-11-19",
+      "local_path": "assets/certs/mozilla/navhttps23-sources/ccadb-resources-2026-11-19.html",
+      "url": "https://www.ccadb.org/resources",
+      "owner": "Common CA Database (Linux Foundation)",
+      "revision": "retrieved-snapshot-2026-11-19",
+      "retrieved_date_utc": "2026-11-19",
+      "sha256": "92273cd0fdd6e595a72ed42762022ee8fdfaf7ffc29e436d648ccbd04942f7f8",
+      "license": "CDLA-2.0-Permissive; CCADB attribution required",
+      "coverage": "Defines Mozilla Constrained as a boolean indicating whether constraint information exists; does not publish detail here.",
+      "bind_overlay": true
+    },
+    {
+      "source_id": "digicert-navhttps23-demo-fixtures",
+      "local_path": "tests/fixtures/navhttps23/manifest.json",
+      "url": "https://digicert-tls-ecc-p384-root-g5.chain-demos.digicert.com/",
+      "owner": "DigiCert public TLS demo endpoints listed in CCADB V5",
+      "revision": "OpenSSL s_client peer capture 2026-11-19",
+      "retrieved_date_utc": "2026-11-19",
+      "sha256": "3215615455a63fb795c4dbdd260ceaec1072a906f53450dd52ae9ea60be7c410",
+      "license": "Publicly served certificate data; preserved for test and identity verification",
+      "coverage": "Pins actual peer-served G5 valid and expired demo chains, cross-signs, and fixture byte hashes.",
+      "bind_overlay": true
+    },
+    {
+      "source_id": "navhttps23-mbedtls-qualification",
+      "local_path": "tests/fixtures/navhttps23/mbedtls-qualification.json",
+      "revision": "Mbed TLS 4.1.0 commit 0fe989b6b514192783c469039edd325fd0989806",
+      "retrieved_date_utc": "2026-11-19",
+      "sha256": "ce00af0c1a65ad89786d1dc52ea04a8f5e83fdd96d284874e880f98dd0c0d67d",
+      "bind_overlay": false
+    }
+  ],
+  "navhttps23_test_inputs": [
+    {
+      "artifact_id": "mbedtls-x509-verifier-source",
+      "local_path": "third_party/mbedtls/library/x509_crt.c",
+      "sha256": "09691a45bc8a236ec6b921f2a67fb2dd70c37fdcb94fe4910111635ac25f3976"
+    },
+    {
+      "artifact_id": "guidexos-mbedtls-config",
+      "local_path": "guidexos/mbedtls_config.h",
+      "sha256": "937999df5b819fa3e7f685db901489681684a4b63b40b733daf2cebb012a4bb8"
+    },
+    {
+      "artifact_id": "guidexos-crypto-config",
+      "local_path": "guidexos/crypto_config.h",
+      "sha256": "ee5319e445464144caafe8fd7f9146a04aad490687224783daaf9d26ebe01573"
+    },
+    {
+      "artifact_id": "navhttps23-verifier-harness",
+      "local_path": "tests/navhttps23/navhttps23_mbedtls_verifier.c",
+      "sha256": "80188e8f8cc79748123f63231a5f782434d2069cac31a840c6998137a4d4026d"
+    },
+    {
+      "artifact_id": "navhttps23-cmake",
+      "local_path": "tests/navhttps23/CMakeLists.txt",
+      "sha256": "ba58367a933440158f1304d3d4963a98ded4ff3796101fc7b46ea442e0050147"
+    },
+    {
+      "artifact_id": "navhttps23-offline-runner",
+      "local_path": "scripts/test-navhttps23-digicert-offline.ps1",
+      "sha256": "6dea578d1d6bc103b1bf004c72fa069bf23c6a98d5152469016308035c13cf05"
+    },
+    {
+      "artifact_id": "navhttps23-fixture-preparer",
+      "local_path": "tests/navhttps23/prepare_fixtures.py",
+      "sha256": "78d899d41fdc9f2012e16fc1aad93af8ced14abe4330842bad140247dd2d9123"
+    }
+  ],
+  "navhttps23_assessment": {
+    "assessment_date_utc": "2026-11-19",
+    "candidate_root_sha256": "018e13f0772532cf809bd1b17281867283fc48c6e13be9c69812854a490c1b05",
+    "scope": "one selected root; ordinary TLS server authentication; disabled candidate only",
+    "fixture_manifest_sha256": "3215615455a63fb795c4dbdd260ceaec1072a906f53450dd52ae9ea60be7c410",
+    "qualification_report_sha256": "ce00af0c1a65ad89786d1dc52ea04a8f5e83fdd96d284874e880f98dd0c0d67d",
+    "qualification_case_count": 11,
+    "builder_path": "scripts/build_navhttps23_source_coverage.py",
+    "builder_sha256": "a0db31d956e17c545d8a959fad2e5dd4838cf6d1f39dac49b59d2f104f9248ab"
+  }
+}

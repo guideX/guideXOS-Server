@@ -1,0 +1,80 @@
+{
+  "schema_version": "guidexos.navhttps23.disabled-public-root-candidate.v1",
+  "assessment_date_utc": "2026-11-19",
+  "candidate": {
+    "name": "DigiCert TLS ECC P384 Root G5",
+    "subject": "CN=DigiCert TLS ECC P384 Root G5,O=DigiCert\\, Inc.,C=US",
+    "sha256": "018e13f0772532cf809bd1b17281867283fc48c6e13be9c69812854a490c1b05",
+    "der_bytes": 541,
+    "trust_purpose": "tls-server-auth",
+    "domain_restrictions": "none-identified-for-selected-root",
+    "name_constraints": "no-root-extension-or-mozilla-imposed-root-constraint",
+    "certificate_policy": {
+      "ordinary_tls_status": "not-required",
+      "required_oids": [],
+      "ev_oid": "2.23.140.1.1",
+      "ev_supported": false,
+      "ev_claimed": false
+    },
+    "explicit_distrust": "not-distrusted",
+    "server_distrust_after": {
+      "status": "none",
+      "utc": null
+    },
+    "email_distrust_after": {
+      "status": "none",
+      "utc": null
+    },
+    "eligibility": "technically-eligible-for-scoped-ordinary-tls-candidate"
+  },
+  "source_coverage": {
+    "status": "complete-for-selected-root-set",
+    "selected_root_fingerprints": [
+      "018e13f0772532cf809bd1b17281867283fc48c6e13be9c69812854a490c1b05"
+    ],
+    "selected_root_attributes_complete": 11,
+    "selected_root_attribute_count": 11,
+    "full_source_root_inventory_complete": false,
+    "other_roots_covered": 0,
+    "other_roots_unknown": 117
+  },
+  "offline_qualification": {
+    "status": "passed",
+    "verifier": "Mbed TLS 4.1.0; active guideXOS config; mbedtls_x509_crt_verify_with_profile",
+    "mbedtls_source_revision": "0fe989b6b514192783c469039edd325fd0989806",
+    "expected_case_count": 11,
+    "passed_case_count": 11,
+    "fixture_manifest_sha256": "3215615455a63fb795c4dbdd260ceaec1072a906f53450dd52ae9ea60be7c410",
+    "qualification_report_sha256": "ce00af0c1a65ad89786d1dc52ea04a8f5e83fdd96d284874e880f98dd0c0d67d"
+  },
+  "artifacts": {
+    "trust_manifest_path": "assets/certs/candidates/mozilla-nss-2026-11-19.navhttps23-trust-manifest.json",
+    "trust_manifest_sha256": "8fb3889404f5c632f67f51ef517ff025d8e49b2e9f0625ccd0fe2fa160be6790",
+    "candidate_bundle_path": "assets/certs/candidates/digicert-tls-ecc-p384-root-g5-navhttps23.pem",
+    "candidate_bundle_sha256": "05161ad2ac04a0df956ef803e127aa877cc5131e0a727ed8e5de43f02e8868c4",
+    "source_lock_sha256": "31add38b4446f26b3a533cb45645ee40d725ab97af1d9d856e9c7ef4406f9c87",
+    "restriction_overlay_sha256": "01046c433ab7b70ca8fd518c6f7d544b631321479c3e1c3b3b338ca6dfebf08d"
+  },
+  "qualification_states": {
+    "source_coverage_complete_for_selected_root": true,
+    "technically_eligible": true,
+    "offline_qualified": true,
+    "guest_distrust_after_qualified": false,
+    "production_approved": false
+  },
+  "activation": {
+    "candidate_enabled": false,
+    "production_approved": false,
+    "public_https_enabled": false,
+    "candidate_mode": "disabled-offline-only",
+    "fixture_roots_included": false
+  },
+  "independent_gates": [
+    "NAVHTTPS21 distrust-after guest scenario remains pending",
+    "production trusted-time provisioning and cross-boot rollback assurance remain incomplete",
+    "production certificate revocation policy and enforcement remain unresolved; no soft-fail decision is made",
+    "current Mozilla program/audit status must be refreshed before any production approval",
+    "release-owner approval remains required"
+  ],
+  "sidecar_sha256": "5eb4e144d84ab053c01a3ea759bc8634d00687d4d8aec524e6ea853c3d804b0e"
+}

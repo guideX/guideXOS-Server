@@ -1,0 +1,92 @@
+{
+  "schema_version": "guidexos.navhttps23.mbedtls-qualification.v1",
+  "assessment_date_utc": "2026-11-19",
+  "verifier": "Mbed TLS 4.1.0; active guideXOS config; mbedtls_x509_crt_verify_with_profile",
+  "mbedtls_source_revision": "0fe989b6b514192783c469039edd325fd0989806",
+  "test_input_sha256": {
+    "mbedtls-x509-verifier-source": "09691a45bc8a236ec6b921f2a67fb2dd70c37fdcb94fe4910111635ac25f3976",
+    "guidexos-mbedtls-config": "937999df5b819fa3e7f685db901489681684a4b63b40b733daf2cebb012a4bb8",
+    "guidexos-crypto-config": "ee5319e445464144caafe8fd7f9146a04aad490687224783daaf9d26ebe01573",
+    "navhttps23-verifier-harness": "80188e8f8cc79748123f63231a5f782434d2069cac31a840c6998137a4d4026d",
+    "navhttps23-cmake": "ba58367a933440158f1304d3d4963a98ded4ff3796101fc7b46ea442e0050147",
+    "navhttps23-offline-runner": "6dea578d1d6bc103b1bf004c72fa069bf23c6a98d5152469016308035c13cf05",
+    "navhttps23-fixture-preparer": "78d899d41fdc9f2012e16fc1aad93af8ced14abe4330842bad140247dd2d9123"
+  },
+  "candidate_root_sha256": "018e13f0772532cf809bd1b17281867283fc48c6e13be9c69812854a490c1b05",
+  "trust_bundle_scope": "single selected root for candidate-anchor cases",
+  "fixture_manifest_sha256": "3215615455a63fb795c4dbdd260ceaec1072a906f53450dd52ae9ea60be7c410",
+  "valid_verification_time_unix": 1795089600,
+  "future_verification_time_unix": 1794614399,
+  "expected_case_count": 11,
+  "passed_case_count": 11,
+  "cases": [
+    {
+      "name": "g5-valid-chain-correct-hostname",
+      "result": "PASS",
+      "verifier_output": "MBEDTLS_CASE name=g5-valid-chain-correct-hostname result=PASS verify=0 flags=0x00000000 required_flags=0x00000000 time=1795089600"
+    },
+    {
+      "name": "g5-wrong-hostname",
+      "result": "PASS",
+      "verifier_output": "MBEDTLS_CASE name=g5-wrong-hostname result=PASS verify=-9984 flags=0x00000004 required_flags=0x00000004 time=1795089600"
+    },
+    {
+      "name": "g5-expired-public-demo-leaf",
+      "result": "PASS",
+      "verifier_output": "MBEDTLS_CASE name=g5-expired-public-demo-leaf result=PASS verify=-9984 flags=0x00000001 required_flags=0x00000001 time=1795089600"
+    },
+    {
+      "name": "g5-future-dated-public-leaf",
+      "result": "PASS",
+      "verifier_output": "MBEDTLS_CASE name=g5-future-dated-public-leaf result=PASS verify=-9984 flags=0x00000200 required_flags=0x00000200 time=1794614399"
+    },
+    {
+      "name": "g5-invalid-leaf-signature",
+      "result": "PASS",
+      "verifier_output": "MBEDTLS_CASE name=g5-invalid-leaf-signature result=PASS verify=-9984 flags=0x00000008 required_flags=0x00000000 time=1795089600"
+    },
+    {
+      "name": "g5-invalid-intermediate-signature",
+      "result": "PASS",
+      "verifier_output": "MBEDTLS_CASE name=g5-invalid-intermediate-signature result=PASS verify=-9984 flags=0x00000008 required_flags=0x00000000 time=1795089600"
+    },
+    {
+      "name": "g5-wrong-trust-anchor",
+      "result": "PASS",
+      "verifier_output": "MBEDTLS_CASE name=g5-wrong-trust-anchor result=PASS verify=-9984 flags=0x00000008 required_flags=0x00000000 time=1795089600"
+    },
+    {
+      "name": "g5-server-auth-purpose",
+      "result": "PASS",
+      "verifier_output": "MBEDTLS_CASE name=g5-server-auth-purpose result=PASS eku_check=0 expected_supported=1"
+    },
+    {
+      "name": "g5-wrong-trust-purpose-email",
+      "result": "PASS",
+      "verifier_output": "MBEDTLS_CASE name=g5-wrong-trust-purpose-email result=PASS eku_check=-10240 expected_supported=0"
+    },
+    {
+      "name": "global-g3-cross-signed-alternate-path",
+      "result": "PASS",
+      "verifier_output": "MBEDTLS_CASE name=global-g3-cross-signed-alternate-path result=PASS verify=0 flags=0x00000000 required_flags=0x00000000 time=1795089600"
+    },
+    {
+      "name": "cross-signed-path-with-g5-candidate-anchor",
+      "result": "PASS",
+      "verifier_output": "MBEDTLS_CASE name=cross-signed-path-with-g5-candidate-anchor result=PASS verify=0 flags=0x00000000 required_flags=0x00000000 time=1795089600"
+    }
+  ],
+  "adjacent_regression_coverage": {
+    "name_constraints": "NAVHTTPS19 Mbed TLS corpus; 40 cases",
+    "unsupported_constrained_name_forms": "NAVHTTPS19 Mbed TLS corpus; unsupported applicable forms fail closed",
+    "client_only_wrong_purpose": "NAVHTTPS18 Mbed TLS verifier; serverAuth EKU negative case",
+    "manifest_activation_and_time_scope": "NAVHTTPS21 trust-profile and HTTPS qualification contract suites",
+    "plaintext_downgrade": "HTTPS qualification contract and hosted local-fixture smoke"
+  },
+  "limitations": [
+    "The captured public demo leaf has both serverAuth and clientAuth EKUs; it cannot serve as a client-only negative fixture.",
+    "The real G5 demo chain has no applicable Name Constraints extension, so constraint violations are covered by the shared NAVHTTPS19 corpus.",
+    "The demo leaf includes the EV policy OID, but this candidate qualification is ordinary TLS only and asserts no EV treatment."
+  ],
+  "result": "offline-qualified-for-scoped-ordinary-tls-path-tests"
+}

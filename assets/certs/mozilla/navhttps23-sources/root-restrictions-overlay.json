@@ -1,0 +1,363 @@
+{
+  "schema_version": "guidexos.mozilla-root-restrictions.v2",
+  "source_revision": "navhttps23-selected-root-assessment-2026-11-19",
+  "effective_date": "2026-11-19",
+  "coverage_status": "complete",
+  "coverage_scope": "selected-root-set",
+  "selected_root_fingerprints": [
+    "018e13f0772532cf809bd1b17281867283fc48c6e13be9c69812854a490c1b05"
+  ],
+  "sources": [
+    {
+      "source_id": "mozilla-additional-trust-changes",
+      "owner": "Mozilla Root Program",
+      "url": "https://wiki.mozilla.org/CA/Additional_Trust_Changes",
+      "revision": "retrieved-snapshot-2026-11-16",
+      "sha256": "4cf63203c5fb8aef744b8c8d148d4bc4cd43c2e37881b20ae03f9c16eed2b60d",
+      "license": "CC-BY-SA-3.0-or-later",
+      "coverage": "Best-efforts explanatory coverage; explicitly not a complete per-root registry."
+    },
+    {
+      "source_id": "ccadb-v5",
+      "owner": "Common CA Database (Linux Foundation)",
+      "url": "https://ccadb.my.salesforce-sites.com/ccadb/AllCertificateRecordsCSVFormatV5",
+      "revision": "downloaded-snapshot-2026-11-17",
+      "sha256": "f3b205d590aa5e78d5e79df631b87a331f2e3e1ea990b704c3165fa2627daf36",
+      "license": "CDLA-2.0-Permissive; attribution to CCADB required",
+      "coverage": "Root status, fingerprint, trust-bit summary, EV metadata, and submitted record fields; not a complete Mozilla runtime restriction registry."
+    },
+    {
+      "source_id": "mozilla-root-store-policy",
+      "owner": "Mozilla Root Program",
+      "url": "https://github.com/mozilla/pkipolicy/blob/bb613bb30b8d85706bac7ecdd877d19b50efe4e7/rootstore/policy.md",
+      "revision": "bb613bb30b8d85706bac7ecdd877d19b50efe4e7",
+      "sha256": "0e39e12a7251b5011c86cbc83355eb63dd0b82ca33019f5ccafad6cc7ffb59db",
+      "license": "CC-BY-SA-3.0-or-later per NAVHTTPS20 source lock",
+      "coverage": "Program-wide requirements; not a fingerprint-keyed no-restrictions assertion."
+    },
+    {
+      "source_id": "mozilla-nss-certdata",
+      "owner": "Mozilla NSS built-in root store",
+      "url": "https://github.com/nss-dev/nss/blob/8c60e757c30b1b239bae46532b4f6d4ebb1e1cad/lib/ckfw/builtins/certdata.txt",
+      "revision": "8c60e757c30b1b239bae46532b4f6d4ebb1e1cad",
+      "sha256": "6d177e33ab54b338edfee24dc3868585833636716a320a725137ab4a15927292",
+      "license": "MPL-2.0",
+      "coverage": "Exact DER identity, Mozilla policy membership, purpose trust values, and server/email distrust-after attributes; not a custom-domain restriction catalog."
+    },
+    {
+      "source_id": "mozilla-bugzilla-1764392",
+      "owner": "Mozilla Bugzilla public record",
+      "url": "https://bugzilla.mozilla.org/show_bug.cgi?id=1764392",
+      "revision": "last_change_time=2022-07-13T20:54:10Z",
+      "sha256": "c13a9ddd1538d1a63c705c58b21c347288fc9eefa080c274a7cf2d627ecfc237",
+      "license": "Public Bugzilla record; no separate content license asserted.",
+      "coverage": "Root inclusion request and stated trust flags for DigiCert TLS ECC P384 Root G5; not a complete restrictions registry."
+    },
+    {
+      "source_id": "mozilla-bugzilla-1764397",
+      "owner": "Mozilla Bugzilla public record",
+      "url": "https://bugzilla.mozilla.org/show_bug.cgi?id=1764397",
+      "revision": "last_change_time=2022-07-20T17:25:35Z",
+      "sha256": "0e5d584e22de1af043b9eee9ad78647f3ff35dbe87bedfe66b81733499d592a6",
+      "license": "Public Bugzilla record; no separate content license asserted.",
+      "coverage": "EV treatment and OID metadata for DigiCert TLS ECC P384 Root G5; does not impose an EV policy requirement on ordinary TLS server authentication."
+    },
+    {
+      "source_id": "mozilla-bugzilla-2031732",
+      "owner": "Mozilla Bugzilla public record",
+      "url": "https://bugzilla.mozilla.org/show_bug.cgi?id=2031732",
+      "revision": "last_change_time=2026-11-16T17:05:26Z",
+      "sha256": "318d215feb08457afcb4af980224591773040586c3f75488c6098f9c61b662be",
+      "license": "Public Bugzilla record; no separate content license asserted.",
+      "coverage": "DigiCert's Mozilla root-purpose transition plan updated 2026-11-16; not a complete domain restriction inventory."
+    },
+    {
+      "source_id": "mozilla-nss-genname-8c60e757",
+      "owner": "Mozilla NSS",
+      "url": "https://github.com/nss-dev/nss/blob/8c60e757c30b1b239bae46532b4f6d4ebb1e1cad/lib/certdb/genname.c",
+      "revision": "8c60e757c30b1b239bae46532b4f6d4ebb1e1cad",
+      "sha256": "1fd0bff1c9cfd59a3ebadbcf5bd60fa5555e29ba68a0190eda0bcf401b80e75d",
+      "license": "MPL-2.0",
+      "coverage": "Exact exhaustive source table for NSS imposed root Name Constraints and lookup behavior."
+    },
+    {
+      "source_id": "mozilla-gecko-nss-certdb-trust-domain-28b89924",
+      "owner": "Mozilla Firefox / NSSCertDBTrustDomain",
+      "url": "https://hg.mozilla.org/mozilla-central/file/28b8992494cac70d7abafa3ed120411de6d44dc0/security/certverifier/NSSCertDBTrustDomain.cpp",
+      "revision": "28b8992494cac70d7abafa3ed120411de6d44dc0",
+      "sha256": "42d13febe01938e87d2ece06916192f217edc9d216cbf485d5c977dcd75455ff",
+      "license": "MPL-2.0",
+      "coverage": "Confirms Gecko calls the exact NSS imposed-name-constraints API for issuer certificates."
+    },
+    {
+      "source_id": "mozilla-gecko-cert-verifier-28b89924",
+      "owner": "Mozilla Firefox certificate verifier",
+      "url": "https://hg.mozilla.org/mozilla-central/file/28b8992494cac70d7abafa3ed120411de6d44dc0/security/certverifier/CertVerifier.cpp",
+      "revision": "28b8992494cac70d7abafa3ed120411de6d44dc0",
+      "sha256": "53cf6f8c999a310d4e91314568a1d08d6cdddffc552ed89cfb8105a9cee4d6d3",
+      "license": "MPL-2.0",
+      "coverage": "Shows EV policy-path handling is separate from ordinary TLS anyPolicy validation."
+    },
+    {
+      "source_id": "mozilla-gecko-extended-validation-28b89924",
+      "owner": "Mozilla Firefox EV policy authorization source",
+      "url": "https://hg.mozilla.org/mozilla-central/file/28b8992494cac70d7abafa3ed120411de6d44dc0/security/certverifier/ExtendedValidation.cpp",
+      "revision": "28b8992494cac70d7abafa3ed120411de6d44dc0",
+      "sha256": "3a737949ca1c47f477b8bce5e0129334bf00fb0e1b5a435fbba01be77fde3c13",
+      "license": "MPL-2.0",
+      "coverage": "Pins Mozilla's separate G5 EV policy authorization record; NAVHTTPS23 candidate scope excludes EV."
+    },
+    {
+      "source_id": "mozilla-gecko-extended-validation-header-28b89924",
+      "owner": "Mozilla Firefox EV policy authorization source",
+      "url": "https://hg.mozilla.org/mozilla-central/file/28b8992494cac70d7abafa3ed120411de6d44dc0/security/certverifier/ExtendedValidation.h",
+      "revision": "28b8992494cac70d7abafa3ed120411de6d44dc0",
+      "sha256": "0798a969bfd1d51b25910377ae01e29e4b4c939c46cd56c5be526e414a954432",
+      "license": "MPL-2.0",
+      "coverage": "Pins the EV policy lookup interface used by the separate EV validation branch."
+    },
+    {
+      "source_id": "mozilla-root-store-policy-v3.1",
+      "owner": "Mozilla Root Program",
+      "url": "https://github.com/mozilla/pkipolicy/blob/bb613bb30b8d85706bac7ecdd877d19b50efe4e7/rootstore/policy.md",
+      "revision": "bb613bb30b8d85706bac7ecdd877d19b50efe4e7",
+      "sha256": "0e39e12a7251b5011c86cbc83355eb63dd0b82ca33019f5ccafad6cc7ffb59db",
+      "license": "CC-BY-SA-3.0-or-later",
+      "coverage": "Current Mozilla root inclusion, CA operational, audit, ordinary TLS and conditional EV requirements."
+    },
+    {
+      "source_id": "ccadb-tls-server-auth-community-2026-11-19",
+      "owner": "Common CA Database (Linux Foundation)",
+      "url": "https://ccadb.my.salesforce-sites.com/ccadb/Report?Name=TLSServerAuthenticationCSV",
+      "revision": "downloaded-snapshot-2026-11-19",
+      "sha256": "4ad8918077f77a8b1c651b3a711a32d658d610a475d4116cc8b5c08114f6253e",
+      "license": "CDLA-2.0-Permissive; CCADB attribution required",
+      "coverage": "Exact root identity and Mozilla Constrained boolean in the TLS server-auth community report."
+    },
+    {
+      "source_id": "ccadb-resources-2026-11-19",
+      "owner": "Common CA Database (Linux Foundation)",
+      "url": "https://www.ccadb.org/resources",
+      "revision": "retrieved-snapshot-2026-11-19",
+      "sha256": "92273cd0fdd6e595a72ed42762022ee8fdfaf7ffc29e436d648ccbd04942f7f8",
+      "license": "CDLA-2.0-Permissive; CCADB attribution required",
+      "coverage": "Defines Mozilla Constrained as a boolean indicating whether constraint information exists; does not publish detail here."
+    },
+    {
+      "source_id": "digicert-navhttps23-demo-fixtures",
+      "owner": "DigiCert public TLS demo endpoints listed in CCADB V5",
+      "url": "https://digicert-tls-ecc-p384-root-g5.chain-demos.digicert.com/",
+      "revision": "OpenSSL s_client peer capture 2026-11-19",
+      "sha256": "3215615455a63fb795c4dbdd260ceaec1072a906f53450dd52ae9ea60be7c410",
+      "license": "Publicly served certificate data; preserved for test and identity verification",
+      "coverage": "Pins actual peer-served G5 valid and expired demo chains, cross-signs, and fixture byte hashes."
+    }
+  ],
+  "coverage_notes": [
+    "Coverage is complete only for the exact selected DigiCert TLS ECC P384 Root G5 fingerprint; it does not cover the other source roots.",
+    "CCADB's Mozilla Constrained field is a boolean and is interpreted according to CCADB's pinned field documentation; it is not treated as a detailed restriction registry.",
+    "The Mozilla Additional Trust Changes page explicitly provides best-efforts coverage, so its silence is not used alone to establish absence.",
+    "The exact NSS imposed-name-constraints table and Gecko issuer hook were inspected at pinned revisions; only ANSSI and TUBITAK1 are present in the table, and neither matches the selected root.",
+    "Current Mozilla inclusion and root-specific program state are established; the independent ongoing CA audit and operational compliance process remains under Mozilla program oversight and is not re-audited by guideXOS.",
+    "EV policy authorization is explicitly excluded from this ordinary TLS candidate; unsupported policy-tree semantics cannot yield an EV result.",
+    "OneCRL/intermediate revocation, runtime guest qualification, trusted-time provisioning, production revocation decisions, rollback assurance, and release-owner approval remain independent gates."
+  ],
+  "records": {
+    "018e13f0772532cf809bd1b17281867283fc48c6e13be9c69812854a490c1b05": {
+      "certificate_sha256": "018e13f0772532cf809bd1b17281867283fc48c6e13be9c69812854a490c1b05",
+      "certificate_subject": "CN=DigiCert TLS ECC P384 Root G5,O=DigiCert\\, Inc.,C=US",
+      "effective_date": "2026-11-19",
+      "qualification_scope": "ordinary TLS server authentication only; EV presentation and EV policy-tree processing are excluded",
+      "source_ids": [
+        "mozilla-nss-certdata",
+        "ccadb-v5",
+        "mozilla-bugzilla-1764392",
+        "mozilla-bugzilla-1764397",
+        "mozilla-bugzilla-2031732",
+        "mozilla-additional-trust-changes",
+        "mozilla-root-store-policy",
+        "mozilla-root-store-policy-v3.1",
+        "ccadb-tls-server-auth-community-2026-11-19",
+        "ccadb-resources-2026-11-19",
+        "mozilla-nss-genname-8c60e757",
+        "mozilla-gecko-nss-certdb-trust-domain-28b89924",
+        "mozilla-gecko-cert-verifier-28b89924",
+        "mozilla-gecko-extended-validation-28b89924",
+        "digicert-navhttps23-demo-fixtures"
+      ],
+      "root_restrictions_status": "complete",
+      "trust_purpose": "tls-server-auth",
+      "explicit_distrust": "not-distrusted",
+      "server_distrust_after": {
+        "status": "none",
+        "utc": null
+      },
+      "email_distrust_after": {
+        "status": "none",
+        "utc": null
+      },
+      "domain_restrictions": {
+        "status": "none",
+        "domains": [],
+        "assessment": "No selected-root-specific Mozilla domain restriction is present in CCADB and no enforced NSS/Gecko imposed-name-constraints entry matches this exact root. The CA Additional Trust Changes page is best-efforts and was not treated as exhaustive by itself.",
+        "ccadb_mozilla_constrained": "false",
+        "ccadb_scope": "boolean: whether constraint information exists for this root in that root-program record; not a detailed domain list",
+        "nss_imposed_constraint_table_entries": [
+          "ANSSI",
+          "TUBITAK1"
+        ],
+        "nss_exact_subject_match": false,
+        "root_certificate_has_name_constraints_extension": false
+      },
+      "name_constraints": {
+        "status": "none",
+        "certificate_extension": "absent-on-selected-root",
+        "mozilla_enforcement": "NSS CERT_GetImposedNameConstraints table checked at pinned NSS revision; Gecko invokes it when finding issuers",
+        "path_enforcement": "Mbed TLS 4.1.0 NAVHTTPS19 covers DNS/IP/email/directoryName and fails closed for unsupported applicable constrained forms"
+      },
+      "certificate_policy": {
+        "status": "not-required",
+        "required_oids": [],
+        "ordinary_tls_basis": "Mozilla Root Store Policy 3.1 uses ordinary serverAuth verification and treats EV as a separate conditional policy validation path; its inclusion application asks for the EV OID if the CA issues EV certificates, not as an ordinary TLS path policy requirement.",
+        "root_ev_oid": "2.23.140.1.1",
+        "mozilla_ev_mapping_exists": true,
+        "candidate_ev_processing": "unsupported-and-disabled; no EV indicator or qualified EV claim is made",
+        "policy_tree_limitation": "Mbed TLS 4.1.0 does not implement full RFC 5280 policy-tree processing; ordinary TLS scope does not require that behavior."
+      },
+      "issuance_evidence": {
+        "status": "not-required",
+        "types": [],
+        "assessment": "No root-specific issuance evidence or certificate-transparency requirement was found for this ordinary TLS server-auth candidate; the ordinary Mozilla path accepts anyPolicy while EV is handled separately."
+      },
+      "program_policy_status": "satisfied",
+      "program_policy_assessment": {
+        "status_basis": "Current Mozilla inclusion and TLS trust purpose are confirmed in pinned NSS certdata and current CCADB records; the submitted transition plan is a cross-check only.",
+        "policy_revision": "bb613bb30b8d85706bac7ecdd877d19b50efe4e7",
+        "policy_effective_date": "2026-07-01",
+        "scope_limit": "This status means the selected root is currently included and no root-specific Mozilla program restriction contradicts ordinary TLS eligibility. It is not an independent audit of DigiCert's ongoing CA operations.",
+        "ccadb_audit_metadata": {
+          "standard_statement_date": "2025.11.21",
+          "standard_period_start": "2024.09.01",
+          "standard_period_end": "2025.08.31",
+          "netsec_statement_date": "2025.11.21",
+          "tls_br_statement_date": "2025.11.21",
+          "tls_evg_statement_date": "2025.11.21",
+          "cp_cps_effective_date": "2026.09.03"
+        },
+        "production_recheck_required": true
+      },
+      "supported_enforcement_mechanisms": [
+        "mbedtls-4.1.0-navhttps19",
+        "navigator-https-trust-profile-v2"
+      ],
+      "attribute_coverage": {
+        "certificate_identity": {
+          "status": "complete",
+          "source_ids": [
+            "mozilla-nss-certdata",
+            "ccadb-v5",
+            "mozilla-bugzilla-1764392",
+            "ccadb-tls-server-auth-community-2026-11-19"
+          ]
+        },
+        "root_inclusion": {
+          "status": "complete",
+          "source_ids": [
+            "mozilla-nss-certdata",
+            "ccadb-v5",
+            "mozilla-bugzilla-1764392",
+            "mozilla-bugzilla-2031732"
+          ]
+        },
+        "trust_purpose": {
+          "status": "complete",
+          "source_ids": [
+            "mozilla-nss-certdata",
+            "ccadb-v5",
+            "mozilla-bugzilla-1764392"
+          ]
+        },
+        "explicit_distrust": {
+          "status": "complete",
+          "source_ids": [
+            "mozilla-nss-certdata",
+            "mozilla-bugzilla-2031732"
+          ]
+        },
+        "server_distrust_after": {
+          "status": "complete",
+          "source_ids": [
+            "mozilla-nss-certdata",
+            "mozilla-bugzilla-2031732"
+          ]
+        },
+        "email_distrust_after": {
+          "status": "complete",
+          "source_ids": [
+            "mozilla-nss-certdata",
+            "mozilla-bugzilla-2031732"
+          ]
+        },
+        "domain_restrictions": {
+          "status": "complete",
+          "source_ids": [
+            "mozilla-additional-trust-changes",
+            "ccadb-tls-server-auth-community-2026-11-19",
+            "ccadb-resources-2026-11-19",
+            "mozilla-nss-genname-8c60e757",
+            "mozilla-gecko-nss-certdb-trust-domain-28b89924",
+            "mozilla-bugzilla-1764392",
+            "mozilla-root-store-policy-v3.1"
+          ]
+        },
+        "name_constraints": {
+          "status": "complete",
+          "source_ids": [
+            "mozilla-nss-certdata",
+            "ccadb-v5",
+            "ccadb-tls-server-auth-community-2026-11-19",
+            "ccadb-resources-2026-11-19",
+            "mozilla-nss-genname-8c60e757",
+            "mozilla-gecko-nss-certdb-trust-domain-28b89924"
+          ]
+        },
+        "certificate_policy": {
+          "status": "complete",
+          "source_ids": [
+            "ccadb-v5",
+            "mozilla-bugzilla-1764397",
+            "mozilla-root-store-policy-v3.1",
+            "mozilla-gecko-cert-verifier-28b89924",
+            "mozilla-gecko-extended-validation-28b89924"
+          ]
+        },
+        "issuance_evidence": {
+          "status": "complete",
+          "source_ids": [
+            "mozilla-nss-certdata",
+            "mozilla-additional-trust-changes",
+            "mozilla-root-store-policy-v3.1"
+          ]
+        },
+        "program_policy": {
+          "status": "complete",
+          "source_ids": [
+            "mozilla-nss-certdata",
+            "ccadb-v5",
+            "ccadb-tls-server-auth-community-2026-11-19",
+            "ccadb-resources-2026-11-19",
+            "mozilla-root-store-policy-v3.1",
+            "mozilla-bugzilla-1764392",
+            "mozilla-bugzilla-2031732"
+          ]
+        }
+      },
+      "candidate_path_validation": {
+        "status": "verified-by-mbedtls-4.1.0",
+        "qualification_report_sha256": "ce00af0c1a65ad89786d1dc52ea04a8f5e83fdd96d284874e880f98dd0c0d67d",
+        "fixture_manifest_sha256": "3215615455a63fb795c4dbdd260ceaec1072a906f53450dd52ae9ea60be7c410",
+        "passed_case_count": 11
+      }
+    }
+  }
+}

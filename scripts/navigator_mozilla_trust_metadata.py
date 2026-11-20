@@ -301,6 +301,22 @@ def validate_restrictions_overlay_v2(overlay: dict[str, Any]) -> None:
         raise ImportErrorDetail("NAVHTTPS21 external-policy overlay has an invalid effective_date")
     if overlay.get("coverage_status") not in ("complete", "incomplete", "unknown"):
         raise ImportErrorDetail("NAVHTTPS21 external-policy overlay has an invalid coverage_status")
+    coverage_scope = overlay.get("coverage_scope", "full-source-roots")
+    if coverage_scope not in ("full-source-roots", "selected-root-set"):
+        raise ImportErrorDetail("NAVHTTPS21 external-policy overlay has an unsupported coverage_scope")
+    selected_roots = overlay.get("selected_root_fingerprints", [])
+    if coverage_scope == "selected-root-set":
+        if (
+            not isinstance(selected_roots, list)
+            or not selected_roots
+            or any(not _valid_sha256(value) for value in selected_roots)
+            or len(selected_roots) != len(set(selected_roots))
+        ):
+            raise ImportErrorDetail("selected-root-set coverage requires unique exact SHA-256 identities")
+        if overlay.get("coverage_status") != "complete":
+            raise ImportErrorDetail("selected-root-set coverage must describe a complete selected set")
+    elif selected_roots:
+        raise ImportErrorDetail("full-source-roots coverage cannot carry a selected-root list")
 
     sources = overlay.get("sources")
     if not isinstance(sources, list) or not sources:
@@ -322,6 +338,8 @@ def validate_restrictions_overlay_v2(overlay: dict[str, Any]) -> None:
     records = overlay.get("records")
     if not isinstance(records, dict):
         raise ImportErrorDetail("NAVHTTPS21 restriction records must be an object keyed by exact SHA-256")
+    if coverage_scope == "selected-root-set" and set(records) != set(selected_roots):
+        raise ImportErrorDetail("selected-root-set coverage records must match the selected identities exactly")
     for fingerprint, record in records.items():
         if not _valid_sha256(fingerprint) or not isinstance(record, dict):
             raise ImportErrorDetail("NAVHTTPS21 restriction record has an invalid identity or value type")
@@ -414,6 +432,17 @@ def validate_restrictions_overlay_v2(overlay: dict[str, Any]) -> None:
             raise ImportErrorDetail(
                 f"NAVHTTPS21 restriction record {fingerprint} claims complete coverage with unresolved attributes"
             )
+        path_validation = record.get("candidate_path_validation")
+        if path_validation is not None:
+            if (
+                not isinstance(path_validation, dict)
+                or path_validation.get("status") != "verified-by-mbedtls-4.1.0"
+                or not _valid_sha256(path_validation.get("qualification_report_sha256"))
+                or not _valid_sha256(path_validation.get("fixture_manifest_sha256"))
+                or type(path_validation.get("passed_case_count")) is not int
+                or path_validation.get("passed_case_count") < 1
+            ):
+                raise ImportErrorDetail(f"NAVHTTPS23 path-validation evidence is malformed for {fingerprint}")
 
 
 def parse_ccadb_v5(data: bytes) -> dict[str, dict[str, Any]]:
@@ -803,6 +832,7 @@ def build_report(
     ccadb_records: dict[str, dict[str, Any]] | None = None,
     enforced_distrust_after: dict[str, str] | None = None,
     source_lock_schema_version: str = SOURCE_LOCK_VERSION,
+    verified_path_validation: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     certs_by_sha1, trust_by_sha1 = parse_nss_certdata(certdata)
     roots = [
@@ -855,6 +885,10 @@ def build_report(
             root["certificate_policy_status"] = "missing" if policy_record is None else policy_record.get("certificate_policy_status", "missing")
             root["program_policy_status"] = "missing" if policy_record is None else policy_record.get("program_policy_status", "missing")
         root["certificate_policy_requirements"] = root["certificate_policy_status"]
+        path_validation = (verified_path_validation or {}).get(root["certificate_sha256"])
+        if path_validation is not None:
+            root["path_validation_status"] = "verified-by-mbedtls-4.1.0"
+            root["candidate_path_validation"] = path_validation
         ccadb_snapshot_record = (ccadb_records or {}).get(root["certificate_sha256"])
         ccadb_rows = [] if ccadb_snapshot_record is None else ccadb_snapshot_record.get("records", [])
         ccadb_root_rows = [row for row in ccadb_rows if row.get("Certificate Record Type") == "Root Certificate"]
@@ -909,15 +943,38 @@ def build_report(
             )
             counts[coverage_status] = counts.get(coverage_status, 0) + 1
         restriction_coverage_counts[attribute] = dict(sorted(counts.items()))
+    coverage_scope = overlay.get("coverage_scope", "full-source-roots")
+    selected_root_fingerprints = overlay.get("selected_root_fingerprints", [])
+    selected_coverage_complete = (
+        coverage_scope == "selected-root-set"
+        and overlay.get("coverage_status") == "complete"
+        and all(
+            isinstance(overlay.get("records", {}).get(fingerprint), dict)
+            and overlay["records"][fingerprint].get("root_restrictions_status") == "complete"
+            and all(
+                overlay["records"][fingerprint]["attribute_coverage"][attribute]["status"] == "complete"
+                for attribute in RESTRICTION_COVERAGE_FIELDS
+            )
+            for fingerprint in selected_root_fingerprints
+        )
+    )
+    full_inventory_coverage_complete = (
+        coverage_scope == "full-source-roots"
+        and (overlay.get("complete_for_source_roots") is True or overlay.get("coverage_status") == "complete")
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "source_lock_schema_version": source_lock_schema_version,
         "metadata_integrity": "source-files-verified-by-sha256",
-        "external_policy_complete": (
-            overlay.get("complete_for_source_roots") is True
-            or overlay.get("coverage_status") == "complete"
+        "external_policy_complete": selected_coverage_complete or full_inventory_coverage_complete,
+        "external_policy_coverage_scope": coverage_scope,
+        "selected_root_fingerprints": list(selected_root_fingerprints),
+        "candidate_source_coverage_complete": selected_coverage_complete or full_inventory_coverage_complete,
+        "full_inventory_external_policy_complete": full_inventory_coverage_complete,
+        "external_policy_coverage_status": (
+            "complete-for-selected-root-set" if selected_coverage_complete
+            else overlay.get("coverage_status", "complete" if overlay.get("complete_for_source_roots") is True else "incomplete")
         ),
-        "external_policy_coverage_status": overlay.get("coverage_status", "complete" if overlay.get("complete_for_source_roots") is True else "incomplete"),
         "nss_certificate_object_count": len(certs_by_sha1),
         "nss_trust_object_count": len(trust_by_sha1),
         "nss_tls_server_auth_trust_record_count": tls_count,
@@ -1109,8 +1166,9 @@ def _verified_navhttps21_inputs(
         raise ImportErrorDetail("pinned NAVHTTPS21 root-restrictions overlay hash mismatch")
     overlay = json.loads(overlay_bytes.decode("utf-8"))
     validate_restrictions_overlay_v2(overlay)
-    if overlay.get("effective_date") != lock["snapshot_date"]:
-        raise ImportErrorDetail("NAVHTTPS21 overlay effective date differs from the pinned snapshot")
+    overlay_effective_date = lock.get("external_policy_effective_date", lock["snapshot_date"])
+    if not _valid_iso_date(overlay_effective_date) or overlay.get("effective_date") != overlay_effective_date:
+        raise ImportErrorDetail("NAVHTTPS21 overlay effective date differs from its pinned policy assessment date")
 
     base_sources = baseline_lock["sources"]
     source_by_id = {source["source_id"]: source for source in overlay["sources"]}
@@ -1121,6 +1179,82 @@ def _verified_navhttps21_inputs(
         "mozilla-nss-certdata": base_sources["nss_certdata"]["sha256"],
     }
     expected_source_bindings.update({source_id: entry["sha256"] for source_id, entry in bugzilla_sources.items()})
+    nav23_pinned_sources = lock.get("navhttps23_pinned_sources", [])
+    if not isinstance(nav23_pinned_sources, list):
+        raise ImportErrorDetail("NAVHTTPS23 pinned source inventory must be an array")
+    nav23_source_by_id: dict[str, dict[str, Any]] = {}
+    for entry in nav23_pinned_sources:
+        if not isinstance(entry, dict):
+            raise ImportErrorDetail("NAVHTTPS23 pinned source entry must be an object")
+        source_id = entry.get("source_id")
+        local_path = entry.get("local_path")
+        expected_hash = entry.get("sha256")
+        if (
+            not isinstance(source_id, str)
+            or not source_id
+            or source_id in nav23_source_by_id
+            or not isinstance(local_path, str)
+            or not _valid_sha256(expected_hash)
+            or not isinstance(entry.get("revision"), str)
+            or not entry["revision"]
+        ):
+            raise ImportErrorDetail("NAVHTTPS23 pinned source entry has malformed provenance")
+        bind_overlay = entry.get("bind_overlay", True)
+        if type(bind_overlay) is not bool or (
+            bind_overlay
+            and (not isinstance(entry.get("url"), str) or not entry["url"].startswith("https://"))
+        ):
+            raise ImportErrorDetail("NAVHTTPS23 source overlay binding is malformed")
+        source_bytes = (repo_root / local_path).read_bytes()
+        if sha256(source_bytes) != expected_hash:
+            raise ImportErrorDetail(f"pinned NAVHTTPS23 source hash mismatch: {source_id}")
+        source = source_by_id.get(source_id)
+        if bind_overlay:
+            if (
+                source is None
+                or source.get("sha256") != expected_hash
+                or source.get("url") != entry["url"]
+                or source.get("revision") != entry["revision"]
+            ):
+                raise ImportErrorDetail(f"NAVHTTPS23 overlay source binding mismatch: {source_id}")
+        elif source is not None:
+            raise ImportErrorDetail(f"generated NAVHTTPS23 evidence must not masquerade as an authority source: {source_id}")
+        nav23_source_by_id[source_id] = entry
+
+    nav23_test_inputs = lock.get("navhttps23_test_inputs", [])
+    if not isinstance(nav23_test_inputs, list):
+        raise ImportErrorDetail("NAVHTTPS23 test input inventory must be an array")
+    nav23_test_input_hashes: dict[str, str] = {}
+    for entry in nav23_test_inputs:
+        if not isinstance(entry, dict):
+            raise ImportErrorDetail("NAVHTTPS23 test input entry must be an object")
+        artifact_id = entry.get("artifact_id")
+        local_path = entry.get("local_path")
+        expected_hash = entry.get("sha256")
+        if (
+            not isinstance(artifact_id, str)
+            or not artifact_id
+            or artifact_id in nav23_test_input_hashes
+            or not isinstance(local_path, str)
+            or not _valid_sha256(expected_hash)
+        ):
+            raise ImportErrorDetail("NAVHTTPS23 test input entry has malformed provenance")
+        if sha256((repo_root / local_path).read_bytes()) != expected_hash:
+            raise ImportErrorDetail(f"pinned NAVHTTPS23 test input hash mismatch: {artifact_id}")
+        nav23_test_input_hashes[artifact_id] = expected_hash
+    nav23_assessment = lock.get("navhttps23_assessment")
+    if nav23_assessment is not None:
+        builder_path = nav23_assessment.get("builder_path") if isinstance(nav23_assessment, dict) else None
+        builder_hash = nav23_assessment.get("builder_sha256") if isinstance(nav23_assessment, dict) else None
+        if (
+            not isinstance(nav23_assessment, dict)
+            or nav23_assessment.get("assessment_date_utc") != lock.get("external_policy_effective_date")
+            or nav23_assessment.get("candidate_root_sha256") != "018e13f0772532cf809bd1b17281867283fc48c6e13be9c69812854a490c1b05"
+            or not isinstance(builder_path, str)
+            or not _valid_sha256(builder_hash)
+            or sha256((repo_root / builder_path).read_bytes()) != builder_hash
+        ):
+            raise ImportErrorDetail("NAVHTTPS23 source assessment metadata or deterministic builder pin is invalid")
     for source_id, expected_hash in expected_source_bindings.items():
         source = source_by_id.get(source_id)
         if source is None or source.get("sha256") != expected_hash:
@@ -1130,6 +1264,107 @@ def _verified_navhttps21_inputs(
             or source.get("revision") != bugzilla_sources[source_id]["revision"]
         ):
             raise ImportErrorDetail(f"NAVHTTPS22 Bugzilla overlay provenance mismatch: {source_id}")
+
+    verified_path_validation: dict[str, dict[str, Any]] = {}
+    if overlay.get("coverage_scope") == "selected-root-set":
+        if not isinstance(nav23_assessment, dict):
+            raise ImportErrorDetail("selected-root-set coverage lacks pinned NAVHTTPS23 assessment metadata")
+        required_nav23_sources = {
+            "mozilla-nss-genname-8c60e757",
+            "mozilla-gecko-nss-certdb-trust-domain-28b89924",
+            "mozilla-gecko-cert-verifier-28b89924",
+            "mozilla-gecko-extended-validation-28b89924",
+            "mozilla-gecko-extended-validation-header-28b89924",
+            "ccadb-tls-server-auth-community-2026-11-19",
+            "ccadb-resources-2026-11-19",
+            "mozilla-root-store-policy-v3.1",
+            "digicert-navhttps23-demo-fixtures",
+        }
+        if not required_nav23_sources.issubset(nav23_source_by_id):
+            missing = ", ".join(sorted(required_nav23_sources - set(nav23_source_by_id)))
+            raise ImportErrorDetail(f"selected-root-set coverage lacks required NAVHTTPS23 source pins: {missing}")
+        fixture_entry = nav23_source_by_id.get("digicert-navhttps23-demo-fixtures")
+        result_entry = nav23_source_by_id.get("navhttps23-mbedtls-qualification")
+        required_test_inputs = {
+            "mbedtls-x509-verifier-source",
+            "guidexos-mbedtls-config",
+            "guidexos-crypto-config",
+            "navhttps23-verifier-harness",
+            "navhttps23-cmake",
+            "navhttps23-offline-runner",
+            "navhttps23-fixture-preparer",
+        }
+        if not required_test_inputs.issubset(nav23_test_input_hashes):
+            missing = ", ".join(sorted(required_test_inputs - set(nav23_test_input_hashes)))
+            raise ImportErrorDetail(f"selected-root-set coverage lacks pinned qualification test inputs: {missing}")
+        if fixture_entry is None or result_entry is None:
+            raise ImportErrorDetail("selected-root-set coverage lacks pinned NAVHTTPS23 chain or verifier evidence")
+        if (
+            nav23_assessment.get("fixture_manifest_sha256") != fixture_entry["sha256"]
+            or nav23_assessment.get("qualification_report_sha256") != result_entry["sha256"]
+            or nav23_assessment.get("qualification_case_count") != 11
+        ):
+            raise ImportErrorDetail("NAVHTTPS23 assessment does not bind the pinned fixture and qualification reports")
+        fixture_manifest = json.loads((repo_root / fixture_entry["local_path"]).read_text(encoding="utf-8-sig"))
+        expected_fixtures = fixture_manifest.get("fixtures")
+        if (
+            fixture_manifest.get("schema_version") != "guidexos.navhttps23.digicert-chain-fixtures.v1"
+            or fixture_manifest.get("source_record", {}).get("root_sha256") != "018e13f0772532cf809bd1b17281867283fc48c6e13be9c69812854a490c1b05"
+            or not isinstance(expected_fixtures, dict)
+        ):
+            raise ImportErrorDetail("NAVHTTPS23 DigiCert fixture manifest has unsupported identity or schema")
+        for fixture_name, fixture_metadata in expected_fixtures.items():
+            if not isinstance(fixture_metadata, dict) or not _valid_sha256(fixture_metadata.get("sha256")):
+                raise ImportErrorDetail("NAVHTTPS23 DigiCert fixture manifest has malformed fixture hashes")
+            fixture_path = repo_root / "tests/fixtures/navhttps23" / fixture_name
+            if not fixture_path.is_file() or sha256(fixture_path.read_bytes()) != fixture_metadata["sha256"]:
+                raise ImportErrorDetail(f"NAVHTTPS23 DigiCert fixture hash mismatch: {fixture_name}")
+
+        qualification = json.loads((repo_root / result_entry["local_path"]).read_text(encoding="utf-8-sig"))
+        expected_case_names = {
+            "g5-valid-chain-correct-hostname",
+            "g5-wrong-hostname",
+            "g5-expired-public-demo-leaf",
+            "g5-future-dated-public-leaf",
+            "g5-invalid-leaf-signature",
+            "g5-invalid-intermediate-signature",
+            "g5-wrong-trust-anchor",
+            "g5-server-auth-purpose",
+            "g5-wrong-trust-purpose-email",
+            "global-g3-cross-signed-alternate-path",
+            "cross-signed-path-with-g5-candidate-anchor",
+        }
+        cases = qualification.get("cases")
+        if (
+            qualification.get("schema_version") != "guidexos.navhttps23.mbedtls-qualification.v1"
+            or qualification.get("candidate_root_sha256") != fixture_manifest["source_record"]["root_sha256"]
+            or qualification.get("verifier") != "Mbed TLS 4.1.0; active guideXOS config; mbedtls_x509_crt_verify_with_profile"
+            or qualification.get("result") != "offline-qualified-for-scoped-ordinary-tls-path-tests"
+            or qualification.get("fixture_manifest_sha256") != fixture_entry["sha256"]
+            or qualification.get("assessment_date_utc") != nav23_assessment.get("assessment_date_utc")
+            or qualification.get("mbedtls_source_revision") != "0fe989b6b514192783c469039edd325fd0989806"
+            or qualification.get("test_input_sha256") != nav23_test_input_hashes
+            or qualification.get("expected_case_count") != len(expected_case_names)
+            or qualification.get("passed_case_count") != len(expected_case_names)
+            or not isinstance(cases, list)
+            or {case.get("name") for case in cases if isinstance(case, dict)} != expected_case_names
+            or any(case.get("result") != "PASS" for case in cases if isinstance(case, dict))
+        ):
+            raise ImportErrorDetail("NAVHTTPS23 Mbed TLS candidate path qualification is incomplete or failed")
+        root_fingerprint = fixture_manifest["source_record"]["root_sha256"]
+        if overlay.get("selected_root_fingerprints") != [root_fingerprint]:
+            raise ImportErrorDetail("NAVHTTPS23 source coverage must be scoped to the exact G5 root only")
+        policy_record = overlay.get("records", {}).get(root_fingerprint)
+        path_evidence = policy_record.get("candidate_path_validation") if isinstance(policy_record, dict) else None
+        if (
+            not isinstance(path_evidence, dict)
+            or path_evidence.get("status") != "verified-by-mbedtls-4.1.0"
+            or path_evidence.get("qualification_report_sha256") != result_entry["sha256"]
+            or path_evidence.get("fixture_manifest_sha256") != fixture_entry["sha256"]
+            or path_evidence.get("passed_case_count") != len(expected_case_names)
+        ):
+            raise ImportErrorDetail("NAVHTTPS23 selected root does not bind its path status to the pinned Mbed TLS evidence")
+        verified_path_validation[root_fingerprint] = path_evidence
 
     enforcement_lock = lock.get("distrust_after_enforcement_policy")
     if not isinstance(enforcement_lock, dict) or not isinstance(enforcement_lock.get("local_path"), str) or not _valid_sha256(enforcement_lock.get("sha256")):
@@ -1174,6 +1409,7 @@ def _verified_navhttps21_inputs(
         ccadb_records,
         enforced,
         SOURCE_LOCK_V2_VERSION,
+        verified_path_validation,
     )
     # Compare every active cutoff from the 118-root comparison bundle with the
     # pinned runtime table. A cutoff missing from code cannot silently become an
@@ -1216,6 +1452,20 @@ def _verified_navhttps21_inputs(
         }
         for source_id, entry in sorted(bugzilla_sources.items())
     }
+    if nav23_source_by_id:
+        report["source_revisions"]["navhttps23_pinned_sources"] = {
+            source_id: {
+                "revision": entry["revision"],
+                "sha256": entry["sha256"],
+                "date": entry.get("effective_date_utc", entry.get("retrieved_date_utc")),
+                "url": entry.get("url"),
+            }
+            for source_id, entry in sorted(nav23_source_by_id.items())
+        }
+    if nav23_test_input_hashes:
+        report["source_revisions"]["navhttps23_test_inputs"] = dict(sorted(nav23_test_input_hashes.items()))
+    if nav23_assessment:
+        report["source_revisions"]["navhttps23_assessment"] = nav23_assessment
     report["restriction_coverage_note"] = (
         "CCADB V5 is used for exact fingerprint and Mozilla root-status cross-checks. Its aggregate trust bits and blank fields do not establish absence of Mozilla restrictions."
     )

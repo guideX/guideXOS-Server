@@ -1,6 +1,22 @@
 /assets/certs/mozilla/navhttps20-sources/** -text
 /assets/certs/mozilla/navhttps21-sources/** -text
 /assets/certs/mozilla/navhttps21-sources/ccadb-v5-2026-11-17.csv -whitespace
+/assets/certs/mozilla/navhttps23-sources/** -text
+/assets/certs/mozilla/navhttps23-sources/** whitespace=-blank-at-eol,-blank-at-eof
+/assets/certs/mozilla/navhttps23-sources/source-lock.json text eol=crlf
+/assets/certs/candidates/digicert-tls-ecc-p384-root-g5-navhttps23.* -text
+/assets/certs/candidates/mozilla-nss-2026-11-19.navhttps23-trust-manifest.json -text
+/tests/fixtures/navhttps23/** -text
+/tests/fixtures/navhttps23/** whitespace=-blank-at-eol,-blank-at-eof
+/tests/navhttps23/CMakeLists.txt -text
+/tests/navhttps23/navhttps23_mbedtls_verifier.c -text
+/tests/navhttps23/prepare_fixtures.py -text
+/tests/test_navhttps23_candidate.py -text
+/scripts/build_navhttps23_source_coverage.py -text
+/scripts/test-navhttps23-digicert-offline.ps1 -text
+/third_party/mbedtls/library/x509_crt.c -text
+/guidexos/mbedtls_config.h text eol=crlf
+/guidexos/crypto_config.h text eol=crlf
 /assets/certs/candidates/mozilla-nss-2026-11-13.navhttps20-trust-manifest.json -text
 /assets/certs/candidates/mozilla-cacert-2026-11-05.pem -text
 /scripts/fixtures/navigator-smoke-root-ca-bundle.pem -text
