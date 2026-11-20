@@ -13,6 +13,7 @@ function Get-C188R33ManagedReadinessProfile(
         return [ordered]@{
             profile='C188R11_FIVE_DESCRIPTOR_COMPATIBILITY'
             expectedDescriptorCount=[uint32]5
+            expectedDescriptorSelectors=[uint32[]]@()
             runtimePackManifestPath=''
             runtimePackManifestSha256=''
         }
@@ -31,6 +32,7 @@ function Get-C188R33ManagedReadinessProfile(
         return [ordered]@{
             profile='C188R11_FIVE_DESCRIPTOR_COMPATIBILITY'
             expectedDescriptorCount=[uint32]5
+            expectedDescriptorSelectors=[uint32[]]@()
             runtimePackManifestPath=''
             runtimePackManifestSha256=''
         }
@@ -68,6 +70,7 @@ function Get-C188R33ManagedReadinessProfile(
         return [ordered]@{
             profile='C188R30_THREAD_ATTACHMENT_TRACE_TWO_DESCRIPTORS'
             expectedDescriptorCount=[uint32]2
+            expectedDescriptorSelectors=[uint32[]]@(4,5)
             runtimePackManifestPath=$runtimePackManifestPath
             runtimePackManifestSha256=$runtimePackManifestHash
         }
@@ -76,6 +79,7 @@ function Get-C188R33ManagedReadinessProfile(
     return [ordered]@{
         profile='C188R11_FIVE_DESCRIPTOR_COMPATIBILITY'
         expectedDescriptorCount=[uint32]5
+        expectedDescriptorSelectors=[uint32[]]@()
         runtimePackManifestPath=$runtimePackManifestPath
         runtimePackManifestSha256=$runtimePackManifestHash
     }
@@ -125,14 +129,15 @@ function Test-C188R33SettingsClickGate(
     [string]$ReadinessProfile,
     [uint32]$ExpectedDescriptorCount,
     [int]$ScreenWidth,
-    [int]$ScreenHeight) {
+    [int]$ScreenHeight,
+    [uint32[]]$ExpectedDescriptorSelectors = @()) {
     if ($ScreenWidth -le 0 -or $ScreenHeight -le 0 -or
         -not [regex]::IsMatch($SerialText,
             '(?m)^\[C102-STARTUP\] stage=C188B005\s*$') -or
         -not [regex]::IsMatch($SerialText,
             '(?m)^\[C102-STARTUP\] stage=C188B002\s*$') -or
         -not (Test-C188R11InitializationEvidence $SerialText) -or
-        -not (Test-C188R11ManagedLaunchState $SerialText $ExpectedDescriptorCount) -or
+        -not (Test-C188R11ManagedLaunchState $SerialText $ExpectedDescriptorCount $ExpectedDescriptorSelectors) -or
         -not (Test-C188R11NativeLaunchBoundary $SerialText) -or
         -not (Test-C188R33NotesApplicationReady $SerialText $ReadinessProfile)) {
         return $false

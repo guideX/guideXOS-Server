@@ -5,7 +5,9 @@ param(
     [Parameter()][string]$BootEvidenceAuthorizationPath = '',
     [Parameter()][ValidateRange(60,300)][int]$MaxRuntimeSeconds = 120,
     [Parameter()][switch]$CaptureCpuOnReadinessTimeout,
-    [Parameter()][switch]$PrelaunchRehearsal
+    [Parameter()][switch]$PrelaunchRehearsal,
+    [Parameter()][string]$ExecutionPackageManifestPath = '',
+    [Parameter()][ValidatePattern('^[A-Fa-f0-9]{32}$')][string]$ExecutionAttemptId = ''
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -20,6 +22,8 @@ $phaseRoots = @(
     [System.IO.Path]::GetFullPath('E:\CodexArtifacts\guideXOSServerV1.1_DOTNET_SUPPORT'))
 $candidate = [System.IO.Path]::GetFullPath($CandidateRoot)
 $bootRoot = [System.IO.Path]::GetFullPath($BootEvidencePath)
+$executionPackageManifestSha256 = ''
+$executionPackageId = ''
 $candidateRootMatches = @($phaseRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_,$candidate)
     $relative -ne '.' -and -not $relative.StartsWith('..' + [System.IO.Path]::DirectorySeparatorChar) -and
@@ -36,6 +40,37 @@ if ($candidateRootMatches.Count -ne 1 -or $bootRootMatches.Count -ne 1 -or
 }
 $phaseRoot = $candidateRootMatches[0]
 if (-not (Test-Path -LiteralPath $candidate -PathType Container)) { throw "Candidate root is missing: $candidate" }
+$candidateManifestPath = Join-Path $candidate 'candidate-manifest.json'
+$candidateIntegrityPath = Join-Path $candidate 'candidate-integrity.json'
+if (-not [string]::IsNullOrWhiteSpace($ExecutionPackageManifestPath)) {
+    $ExecutionPackageManifestPath = [System.IO.Path]::GetFullPath($ExecutionPackageManifestPath)
+    if ([string]::IsNullOrWhiteSpace($ExecutionAttemptId) -or
+        -not (Test-Path -LiteralPath $ExecutionPackageManifestPath -PathType Leaf)) {
+        throw 'R35 execution package path or attempt identity is missing.'
+    }
+    $executionPackage = Get-Content -LiteralPath $ExecutionPackageManifestPath -Raw |
+        ConvertFrom-Json -ErrorAction Stop
+    $executionPackageManifestSha256 = (Get-FileHash -LiteralPath $ExecutionPackageManifestPath -Algorithm SHA256).Hash
+    $nestedRunnerComponent = @($executionPackage.runnerComponents | Where-Object {
+        [string]$_.path -ceq 'scripts/dotnet/run-c188r12r1-settings-handoff.ps1'
+    })
+    if ([string]$executionPackage.schema -cne 'GUIDEXOS_C188R35_SETTINGS_LAUNCH_PACKAGE_V1' -or
+        (([System.IO.Path]::GetFullPath([string]$executionPackage.candidateRoot) -cne $candidate) -and
+            -not $PrelaunchRehearsal) -or
+        [string]$executionPackage.executionAttemptId -ine $ExecutionAttemptId -or
+        [string]$executionPackage.candidateManifestSha256 -ine
+            (Get-FileHash -LiteralPath $candidateManifestPath -Algorithm SHA256).Hash -or
+        [string]$executionPackage.candidateIntegritySha256 -ine
+            (Get-FileHash -LiteralPath $candidateIntegrityPath -Algorithm SHA256).Hash -or
+        $nestedRunnerComponent.Count -ne 1 -or
+        [string]$nestedRunnerComponent[0].sha256 -ine
+            (Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash -or
+        [string]$executionPackage.r25CandidateManifestSha256 -ine
+            (Get-FileHash -LiteralPath ([string]$executionPackage.r25CandidateManifestPath) -Algorithm SHA256).Hash) {
+        throw 'R35 execution package failed nested-runner candidate, attempt, or source validation.'
+    }
+    $executionPackageId = [string]$executionPackage.executionPackageId
+}
 $precreatedR25EvidenceRoot = $false
 if (Test-Path -LiteralPath $bootRoot) {
     . (Join-Path $PSScriptRoot 'c188r26-precreated-evidence-root.ps1')
@@ -75,6 +110,14 @@ if ($stagingManifest.result -ne 'PASS' -or
     throw 'Candidate staging manifest or kernel/ramdisk hashes do not match the qualified inputs.'
 }
 $readinessProfile = Get-C188R33ManagedReadinessProfile $candidate
+if (-not [string]::IsNullOrWhiteSpace($ExecutionPackageManifestPath) -and
+    ([string]$executionPackage.readinessProfile -cne [string]$readinessProfile.profile -or
+     [uint32]$executionPackage.expectedManagedDescriptorCount -ne
+        [uint32]$readinessProfile.expectedDescriptorCount -or
+     (($executionPackage.expectedManagedDescriptorSelectors -join ',') -cne
+        ($readinessProfile.expectedDescriptorSelectors -join ',')))) {
+    throw 'R35 package readiness identity differs from the authoritative candidate profile.'
+}
 $sourceMediaHashes = [ordered]@{}
 foreach ($relativeMedia in @('kernel.elf','ramdisk.img','EFI\BOOT\BOOTX64.EFI')) {
     $sourceMediaHashes[$relativeMedia.Replace('\','/')] =
@@ -99,8 +142,13 @@ $runManifestPath = Join-Path $bootRoot 'r12r2r1-input-manifest.json'
 [ordered]@{
     phase='C188R12R2R1-settings-dispatch';runIdentityId=$runIdentityId
     candidateRoot=$candidate;stagingManifest=$stagingManifestPath
+    executionPackageId=$executionPackageId;executionPackageManifestPath=$ExecutionPackageManifestPath
+    executionPackageManifestSha256=$executionPackageManifestSha256;executionAttemptId=$ExecutionAttemptId
     readinessProfile=[string]$readinessProfile.profile
+    candidateManifestSha256=(Get-FileHash -LiteralPath (Join-Path $candidate 'candidate-manifest.json') -Algorithm SHA256).Hash
+    candidateIntegritySha256=(Get-FileHash -LiteralPath (Join-Path $candidate 'candidate-integrity.json') -Algorithm SHA256).Hash
     expectedManagedDescriptorCount=[uint32]$readinessProfile.expectedDescriptorCount
+    expectedManagedDescriptorSelectors=@($readinessProfile.expectedDescriptorSelectors)
     readinessRuntimePackManifestSha256=[string]$readinessProfile.runtimePackManifestSha256
     stagingManifestSha256=(Get-FileHash -LiteralPath $stagingManifestPath -Algorithm SHA256).Hash
     expectedKernelSha256=$ExpectedKernelSha256.ToUpperInvariant()
@@ -112,6 +160,8 @@ if ($PrelaunchRehearsal) {
     [ordered]@{
         schema='GUIDEXOS_C188R27_PRELAUNCH_REHEARSAL_V1';result='PASS'
         candidateRoot=$candidate;bootEvidencePath=$bootRoot
+        executionPackageId=$executionPackageId;executionPackageManifestPath=$ExecutionPackageManifestPath
+        executionPackageManifestSha256=$executionPackageManifestSha256;executionAttemptId=$ExecutionAttemptId
         precreatedEvidenceRoot=$precreatedR25EvidenceRoot
         sourceMediaHashes=$sourceMediaHashes;copiedMediaHashes=$copiedMediaHashes
         runManifestSha256=(Get-FileHash -LiteralPath $runManifestPath -Algorithm SHA256).Hash
@@ -151,7 +201,8 @@ $readinessTimeout = $false
 $ownershipDegraded = $false
 $runnerStdout = ''
 $runnerStderr = ''
-$settingsEvidence = $null
+$settingsEvidence = Get-C188R12R1SettingsHandoffEvidence '' `
+    ([uint32]$readinessProfile.expectedDescriptorCount)
 $settingsDispatchEvidence = Get-C188R12R2R1SettingsDispatchEvidence '' $false
 $lifetimeStartEvidence = Get-C188R12R3LifetimeEvidence ''
 $factoryEvidence = Get-C188R12R4FactoryEvidence -SerialText '' -CaptureState 'incomplete'
@@ -289,6 +340,11 @@ try {
     if ($CaptureCpuOnReadinessTimeout) {
         $runnerArguments += '-CaptureCpuOnReadinessTimeout'
     }
+    if (-not [string]::IsNullOrWhiteSpace($ExecutionPackageManifestPath)) {
+        $runnerArguments += @('-ExecutionPackageManifestPath',$ExecutionPackageManifestPath,
+            '-ExecutionPackageManifestSha256',$executionPackageManifestSha256,
+            '-ExecutionAttemptId',$ExecutionAttemptId)
+    }
     foreach ($argument in $runnerArguments) {
         [void]$psi.ArgumentList.Add([string]$argument)
     }
@@ -308,7 +364,8 @@ try {
                 if (Test-C188R33SettingsClickGate $serialText `
                     $readinessProfile.profile `
                     ([uint32]$readinessProfile.expectedDescriptorCount) `
-                    ([int]$active.screenWidth) ([int]$active.screenHeight)) {
+                    ([int]$active.screenWidth) ([int]$active.screenHeight) `
+                    ([uint32[]]$readinessProfile.expectedDescriptorSelectors)) {
                     $ready = $true
                     break
                 }
@@ -323,7 +380,8 @@ try {
         $active = Get-Content -LiteralPath $activePath -Raw | ConvertFrom-Json
         $serialText = Read-C188R12R1SharedText $serialPath
         $readinessFailure = Get-C188R11ReadinessFailureReason $serialText `
-            ([uint32]$readinessProfile.expectedDescriptorCount)
+            ([uint32]$readinessProfile.expectedDescriptorCount) `
+            ([uint32[]]$readinessProfile.expectedDescriptorSelectors)
         if (-not [string]::IsNullOrWhiteSpace($readinessFailure)) {
             throw "C188R11 read-only readiness audit failed: $readinessFailure"
         }
@@ -429,7 +487,8 @@ try {
                             $surfaceSettleDeadline = $null
                             do {
                                 $serialText = Read-C188R12R1SharedText $serialPath
-                                $settingsEvidence = Get-C188R12R1SettingsHandoffEvidence $serialText
+                                $settingsEvidence = Get-C188R12R1SettingsHandoffEvidence $serialText `
+                                    ([uint32]$readinessProfile.expectedDescriptorCount)
                                 $settingsDispatchEvidence = Get-C188R12R2R1SettingsDispatchEvidence `
                                     $serialText $false
                                 $lifetimeStartEvidence = Get-C188R12R3LifetimeEvidence `
@@ -526,12 +585,14 @@ if (-not $ready -and $runnerTerminalEvidence.terminalCause -eq 'qac-qemu-exited-
 } elseif (-not $ready -and $runnerTerminalEvidence.readinessTimeout) {
     $failureText = 'The nested guest runner timed out waiting for the kernel input loop, then requested bounded QMP cleanup.'
 }
-$settingsEvidence = Get-C188R12R1SettingsHandoffEvidence $serialText
+$settingsEvidence = Get-C188R12R1SettingsHandoffEvidence $serialText `
+    ([uint32]$readinessProfile.expectedDescriptorCount)
 $settingsDispatchEvidence = Get-C188R12R2R1SettingsDispatchEvidence $serialText $false
 $qmpControlText = Read-C188R12R1SharedText $qmpControlPath
 $clickEvidence = Test-C188R12R1SingleClickQmpEvidence $qmpControlText
 $runnerInputEvidence = Get-C188R12R1RunnerInputEvidence $serialText $qmpControlText `
-    $clickAttempted $pointerTargetEvidence
+    $clickAttempted $pointerTargetEvidence `
+    ([uint32]$readinessProfile.expectedDescriptorCount)
 $earliestBoundary = if (-not [bool]$settingsEvidence.appModelLaunch -and
     $runnerInputEvidence.earliestMissingBoundary -eq 'runner-input-target-delivery') {
     'runner-input-target-delivery'
@@ -571,8 +632,12 @@ $factoryEvidence = Get-C188R12R4FactoryEvidence `
 $settingsRegistryRegression = [bool]$settingsEvidence.settingsRegistryReturn -and
     (-not [bool]$settingsEvidence.settingsRegistryReturnValid -or
      [bool]$settingsEvidence.settingsRegistryMemoryMismatch)
-$runtimeRegressionProven = [regex]::IsMatch($serialText,
-    '(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state seq=\d+ st=launch-return selector=4 .* n=(?!5\b)\d+ result=\d+ .*\r?$') -or
+$notesLaunchReturns = [regex]::Matches($serialText,
+    '(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state seq=\d+ st=launch-return selector=4 .* n=(?<count>\d+) result=\d+ .*\r?$')
+$notesLaunchDescriptorMismatch = @($notesLaunchReturns | Where-Object {
+    $_.Groups['count'].Value -cne [string]$readinessProfile.expectedDescriptorCount
+}).Count -gt 0
+$runtimeRegressionProven = $notesLaunchDescriptorMismatch -or
     $serialText -match '(?m)^\[NATIVEAOT-HEAP\] action=clear ' -or
     $serialText -match '(?m)^\[C188-IDENTITY-REGISTRY\].*result=FAIL' -or
     $settingsRegistryRegression -or
@@ -611,6 +676,8 @@ if ((Test-Path -LiteralPath $beforePpm -PathType Leaf) -and
 $finalEvidence = [ordered]@{
     schemaVersion=1;phase='C188R12R2R1-settings-dispatch';outcome=$outcome
     candidateRoot=$candidate;bootEvidencePath=$bootRoot
+    executionPackageId=$executionPackageId;executionPackageManifestPath=$ExecutionPackageManifestPath
+    executionPackageManifestSha256=$executionPackageManifestSha256;executionAttemptId=$ExecutionAttemptId
     runIdentityId=$runIdentityId;expectedKernelSha256=$ExpectedKernelSha256.ToUpperInvariant()
     sourceMediaHashes=$sourceMediaHashes;copiedMediaHashes=$copiedMediaHashes
     originalRamdiskSha256=$stagingManifest.ramdiskSha256.ToUpperInvariant()
@@ -619,6 +686,7 @@ $finalEvidence = [ordered]@{
     bootReady=$ready;readinessTimeout=$readinessTimeout;failure=$failureText
     readinessProfile=[string]$readinessProfile.profile
     expectedManagedDescriptorCount=[uint32]$readinessProfile.expectedDescriptorCount
+    expectedManagedDescriptorSelectors=@($readinessProfile.expectedDescriptorSelectors)
     readinessRuntimePackManifestSha256=[string]$readinessProfile.runtimePackManifestSha256
     clickAttempted=$clickAttempted;clickExitCode=$clickExitCode;clickTarget=$clickTarget
     clickEvidence=$clickEvidence;runnerInputEvidence=$runnerInputEvidence

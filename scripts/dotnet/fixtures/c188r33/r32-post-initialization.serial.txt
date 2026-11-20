@@ -6,6 +6,7 @@
 [C102-MANAGED-OUTPUT] C188R11-MANAGED stage=entry seq=1 call=1 corr=1 id=4 gen=1 in=0 rc=-1
 [C188R11-NATIVE] nseq=00000009 stage=managed-init-event regEpoch=00000001 poolEpoch=00000001 module=00000001
 [C102-MANAGED-OUTPUT] C188R11-INIT seq=4 re=1 pe=1 rg=1 p=1 ps=1
+[C102-MANAGED-OUTPUT] C188R9-300 REG owner=static stage=descriptor-lookup selector=4 gen=1 input=0 count=2 slots=4,5 live=0 result=0
 [C102-MANAGED-OUTPUT] C188R11 state seq=9 st=instance-start selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=2 result=0 gc=0 w=1:1
 [C150-APP-LAUNCH] id=com.guidexos.apps.managed.notes generation=00000001 selector=00000004 kind=normal
 [C150-SURFACE] action=create appId=com.guidexos.apps.managed.notes generation=00000001 window=000003E8 result=PASS

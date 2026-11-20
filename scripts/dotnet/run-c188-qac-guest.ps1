@@ -9,7 +9,10 @@ param(
     [Parameter()][ValidateRange(30,300)][int]$BootTimeoutSeconds = 180,
     [Parameter()][ValidateRange(30,1800)][int]$AdmissionTimeoutSeconds = 1750,
     [Parameter()][ValidateSet(2,5)][int]$ExpectedManagedDescriptorCount = 5,
-    [Parameter()][ValidatePattern('^[A-Fa-f0-9]{32}$')][string]$RunIdentityId = ([guid]::NewGuid().ToString('N'))
+    [Parameter()][ValidatePattern('^[A-Fa-f0-9]{32}$')][string]$RunIdentityId = ([guid]::NewGuid().ToString('N')),
+    [Parameter()][string]$ExecutionPackageManifestPath = '',
+    [Parameter()][string]$ExecutionPackageManifestSha256 = '',
+    [Parameter()][ValidatePattern('^[A-Fa-f0-9]{32}$')][string]$ExecutionAttemptId = ''
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -23,6 +26,8 @@ if ([bool]$ProductionCompatibility -ne $isProductionScenario) {
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $PSScriptRoot 'c188r33-settings-handoff-predicates.ps1')
 . (Join-Path $PSScriptRoot 'c188r25-failfast-runner-predicates.ps1')
+$candidateReadinessProfile = $null
+$expectedDescriptorSelectors = [uint32[]]@()
 $phaseRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188-external-app-identity')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r5-notes-proof-invocation')),
@@ -58,25 +63,74 @@ if ($phaseRoot.Count -eq 0) {
     throw "C188 guest evidence must remain below one of: $($phaseRoots -join ', ')."
 }
 $phaseRoot = $phaseRoot[0]
-if ($ExpectedManagedDescriptorCount -eq 2) {
+if ($Scenario -eq 'settings-handoff-diagnostic') {
     $handoffInputManifestPath = Join-Path $bootRoot 'r12r2r1-input-manifest.json'
-    if ($Scenario -ne 'settings-handoff-diagnostic' -or
-        -not (Test-Path -LiteralPath $handoffInputManifestPath -PathType Leaf)) {
-        throw 'Two-descriptor readiness is reserved for a validated R30 Settings handoff run.'
+    if (-not (Test-Path -LiteralPath $handoffInputManifestPath -PathType Leaf)) {
+        throw 'Settings readiness requires the candidate-bound handoff input manifest.'
     }
     $handoffInputManifest = Get-Content -LiteralPath $handoffInputManifestPath -Raw |
         ConvertFrom-Json -ErrorAction Stop
     $candidateReadinessProfile = Get-C188R33ManagedReadinessProfile `
         ([string]$handoffInputManifest.candidateRoot)
-    if ([string]$handoffInputManifest.readinessProfile -cne
-            'C188R30_THREAD_ATTACHMENT_TRACE_TWO_DESCRIPTORS' -or
-        [uint32]$handoffInputManifest.expectedManagedDescriptorCount -ne 2 -or
+    $expectedDescriptorSelectors = [uint32[]]@($candidateReadinessProfile.expectedDescriptorSelectors)
+    $manifestDescriptorSelectors = [uint32[]]@($handoffInputManifest.expectedManagedDescriptorSelectors)
+    if ([string]::IsNullOrWhiteSpace([string]$handoffInputManifest.candidateRoot) -or
+        -not (Test-Path -LiteralPath ([string]$handoffInputManifest.candidateRoot) -PathType Container)) {
+        throw 'Settings handoff input manifest has no candidate identity.'
+    }
+    $candidateManifestPath = Join-Path ([string]$handoffInputManifest.candidateRoot) 'candidate-manifest.json'
+    $candidateIntegrityPath = Join-Path ([string]$handoffInputManifest.candidateRoot) 'candidate-integrity.json'
+    if ([string]$handoffInputManifest.readinessProfile -cne [string]$candidateReadinessProfile.profile -or
+        [int]$ExpectedManagedDescriptorCount -ne [int]$candidateReadinessProfile.expectedDescriptorCount -or
+        [uint32]$handoffInputManifest.expectedManagedDescriptorCount -ne
+            [uint32]$candidateReadinessProfile.expectedDescriptorCount -or
+        (($manifestDescriptorSelectors -join ',') -cne ($expectedDescriptorSelectors -join ',')) -or
+        (Get-FileHash -LiteralPath $candidateManifestPath -Algorithm SHA256).Hash -ine
+            [string]$handoffInputManifest.candidateManifestSha256 -or
+        (Get-FileHash -LiteralPath $candidateIntegrityPath -Algorithm SHA256).Hash -ine
+            [string]$handoffInputManifest.candidateIntegritySha256 -or
         [string]$handoffInputManifest.readinessRuntimePackManifestSha256 -ine
             [string]$candidateReadinessProfile.runtimePackManifestSha256 -or
-        [string]$candidateReadinessProfile.profile -cne
-            'C188R30_THREAD_ATTACHMENT_TRACE_TWO_DESCRIPTORS') {
-        throw 'R30 two-descriptor readiness profile failed candidate/runtime manifest validation.'
+        [string]$candidateReadinessProfile.profile -ceq
+            'C188R30_THREAD_ATTACHMENT_TRACE_TWO_DESCRIPTORS' -and
+            (($expectedDescriptorSelectors -join ',') -cne '4,5')) {
+        throw 'Candidate-bound Settings readiness profile, descriptor identities, or manifest hashes failed validation.'
     }
+    if (-not [string]::IsNullOrWhiteSpace($ExecutionPackageManifestPath)) {
+        $ExecutionPackageManifestPath = [System.IO.Path]::GetFullPath($ExecutionPackageManifestPath)
+        if (-not (Test-Path -LiteralPath $ExecutionPackageManifestPath -PathType Leaf) -or
+            [string]::IsNullOrWhiteSpace($ExecutionPackageManifestSha256) -or
+            [string]::IsNullOrWhiteSpace($ExecutionAttemptId)) {
+            throw 'R35 execution package handoff is incomplete.'
+        }
+        $executionPackage = Get-Content -LiteralPath $ExecutionPackageManifestPath -Raw |
+            ConvertFrom-Json -ErrorAction Stop
+        $packageRunnerComponents = @($executionPackage.runnerComponents | Where-Object {
+            [string]$_.path -ceq 'scripts/dotnet/run-c188-qac-guest.ps1'
+        })
+        if ((Get-FileHash -LiteralPath $ExecutionPackageManifestPath -Algorithm SHA256).Hash -ine
+                $ExecutionPackageManifestSha256 -or
+            [string]$handoffInputManifest.executionPackageManifestPath -cne $ExecutionPackageManifestPath -or
+            [string]$handoffInputManifest.executionPackageManifestSha256 -ine $ExecutionPackageManifestSha256 -or
+            [string]$handoffInputManifest.executionAttemptId -ine $ExecutionAttemptId -or
+            [string]$handoffInputManifest.executionPackageId -cne [string]$executionPackage.executionPackageId -or
+            [System.IO.Path]::GetFullPath([string]$executionPackage.candidateRoot) -cne
+                [System.IO.Path]::GetFullPath([string]$handoffInputManifest.candidateRoot) -or
+            [string]$executionPackage.executionAttemptId -ine $ExecutionAttemptId -or
+            [int]$executionPackage.expectedManagedDescriptorCount -ne
+                [int]$candidateReadinessProfile.expectedDescriptorCount -or
+            (($executionPackage.expectedManagedDescriptorSelectors -join ',') -cne
+                ($expectedDescriptorSelectors -join ',')) -or
+            $packageRunnerComponents.Count -ne 1 -or
+            [string]$packageRunnerComponents[0].sha256 -ine
+                (Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash) {
+            throw 'R35 package identity did not survive the parent-to-nested guest-runner handoff.'
+        }
+    } elseif (-not [string]::IsNullOrWhiteSpace([string]$handoffInputManifest.executionPackageManifestPath)) {
+        throw 'R35 package-bound handoff omitted its package manifest arguments.'
+    }
+} elseif ($ExpectedManagedDescriptorCount -ne 5) {
+    throw 'Non-Settings scenarios cannot request a non-default managed descriptor count.'
 }
 $esp = Join-Path $bootRoot 'esp'
 $serial = Join-Path $bootRoot 'serial.log'
@@ -444,7 +498,7 @@ try {
     $text = Read-GuestSerial
     if ($isC188R11Boot) {
         $readinessFailure = Get-C188R11ReadinessFailureReason $text `
-            ([uint32]$ExpectedManagedDescriptorCount)
+            ([uint32]$ExpectedManagedDescriptorCount) $expectedDescriptorSelectors
         if (-not [string]::IsNullOrEmpty($readinessFailure)) {
             throw "[C188R11-FAIL] reason=$readinessFailure; no screenshot or input may be captured."
         }
@@ -680,7 +734,13 @@ $manifest = [ordered]@{
     c188SerialMarkers=([regex]::Matches($serialText,'(?m)^.*C188[-A-Z].*$')).Count
     registryDiagnosticMarkers=([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R9-300 REG .*\r?$')).Count
     r11NativeLaunchBoundary=if ($isC188R11Boot) { Test-C188R11NativeLaunchBoundary $serialText } else { $false }
-    r11ManagedLaunchState=if ($isC188R11Boot) { Test-C188R11ManagedLaunchState $serialText } else { $false }
+    expectedManagedDescriptorCount=[uint32]$ExpectedManagedDescriptorCount
+    expectedManagedDescriptorSelectors=@($expectedDescriptorSelectors)
+    readinessProfile=if ($null -ne $candidateReadinessProfile) { [string]$candidateReadinessProfile.profile } else { '' }
+    readinessRuntimePackManifestSha256=if ($null -ne $candidateReadinessProfile) { [string]$candidateReadinessProfile.runtimePackManifestSha256 } else { '' }
+    r11ManagedLaunchState=if ($isC188R11Boot) {
+        Test-C188R11ManagedLaunchState $serialText ([uint32]$ExpectedManagedDescriptorCount) $expectedDescriptorSelectors
+    } else { $false }
     r11InitializationEvidence=if ($isC188R11Boot) { Test-C188R11InitializationEvidence $serialText } else { $false }
     r11MemoryStorageStable=if ($isC188R11Boot) { Test-C188R11MemoryStorageStable $serialText } else { $false }
     r11MemoryStorageOwnedByPersistentHeap=if ($isC188R11Boot) { Test-C188R11MemoryStorageInPersistentHeap $serialText } else { $false }
@@ -689,7 +749,10 @@ $manifest = [ordered]@{
     r11ImageContextMatch=if ($isC188R11Boot) { Test-C188R11ImageContextMatch $serialText } else { $false }
     r11ManagedInputSnapshots=if ($isC188R11Boot) { ([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state seq=\d+ st=input-dispatch-entry .*\r?$')).Count } else { 0 }
     r11LookupResults=if ($isC188R11Boot) { ([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state seq=\d+ st=lookup .*\r?$')).Count } else { 0 }
-    r11SuccessfulLookupMarkers=if ($isC188R11Boot) { ([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state seq=\d+ st=lookup selector=4 .* m=1 .* n=5 result=0 .*\r?$')).Count } else { 0 }
+    r11SuccessfulLookupMarkers=if ($isC188R11Boot) {
+        ([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state seq=\d+ st=lookup selector=4 .* m=1 .* n=' +
+            [regex]::Escape([string]$ExpectedManagedDescriptorCount) + ' result=0 .*\r?$')).Count
+    } else { 0 }
     r11NotesCallbackMarkers=if ($isC188R11Boot) { ([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R11R2_KEY seq=\d+ stage=notes-callback-entry selector=4 kind=key-char value=97 shift=0 ctrl=0 result=-1\r?$')).Count } else { 0 }
     r11ManagedCallbackReturnMarkers=if ($isC188R11Boot -and $r11KeyboardTraceForManifest.notesCallbackReturn) { 1 } else { 0 }
     persistentHeapInitializationMarkers=([regex]::Matches($serialText,'(?m)^\[NATIVEAOT-HEAP\] action=initialize count=0000000000000001 base=[A-Fa-f0-9]{16} bytes=[A-Fa-f0-9]{16} reason=initial-managed-thread-attachment\r?$')).Count

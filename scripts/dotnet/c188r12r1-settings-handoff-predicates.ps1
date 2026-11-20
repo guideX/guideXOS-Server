@@ -1,4 +1,7 @@
-function Get-C188R12R1SettingsHandoffEvidence([string]$SerialText) {
+function Get-C188R12R1SettingsHandoffEvidence(
+    [string]$SerialText,
+    [uint32]$ExpectedDescriptorCount = 5) {
+    $descriptorCountPattern = [regex]::Escape([string]$ExpectedDescriptorCount)
     $notesActionDispatches = [regex]::Matches($SerialText,
         '(?m)^\[C112-ACTION-DISPATCH\] selector=00000004 action=(?<action>[0-9A-Fa-f]{8}) managedReturn=(?<managedReturn>[0-9A-Fa-f]{8}) result=(?<result>PASS|FAIL)\r?$')
     $settingsActionDispatches = @($notesActionDispatches | Where-Object {
@@ -40,7 +43,7 @@ function Get-C188R12R1SettingsHandoffEvidence([string]$SerialText) {
     $appLaunchReturn = [regex]::Match($SerialText,
         '(?m)^\[C102-MANAGED-OUTPUT\] C188R12R1-MANAGED stage=application-launch-return selector=5 result=PASS\r?$')
     $registryEntry = [regex]::Match($SerialText,
-        '(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state seq=\d+ st=settings-dispatch-entry selector=5 .* n=5 result=-1 gc=0 .*\r?$')
+        '(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state seq=\d+ st=settings-dispatch-entry selector=5 .* n=' + $descriptorCountPattern + ' result=-1 gc=0 .*\r?$')
     $registryReturn = [regex]::Match($SerialText,
         '(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state seq=\d+ st=settings-launch-return selector=5(?: .*?)? reset=(?<reset>\d+) m=(?<mask>\d+) g=\d+ td=\d+ n=(?<descriptors>\d+) result=(?<result>-?\d+) gc=(?<gc>\d+) w=\d+:\d+\r?$')
     $notesRegistryMemory = [regex]::Match($SerialText,
@@ -104,7 +107,7 @@ function Get-C188R12R1SettingsHandoffEvidence([string]$SerialText) {
         $registryReturn.Success -and
             $registryReturn.Groups['reset'].Value -eq '0' -and
             $settingsResidentMask -gt 0 -and
-            $registryReturn.Groups['descriptors'].Value -eq '5' -and
+            $registryReturn.Groups['descriptors'].Value -eq [string]$ExpectedDescriptorCount -and
             $registryReturn.Groups['result'].Value -eq '0' -and
             [int]$registryReturn.Groups['gc'].Value -gt 0 -and
             $r21RootValid
@@ -112,7 +115,7 @@ function Get-C188R12R1SettingsHandoffEvidence([string]$SerialText) {
         $registryReturn.Success -and
             $registryReturn.Groups['reset'].Value -eq '0' -and
             $settingsResidentMask -eq 1 -and
-            $registryReturn.Groups['descriptors'].Value -eq '5' -and
+            $registryReturn.Groups['descriptors'].Value -eq [string]$ExpectedDescriptorCount -and
             $registryReturn.Groups['result'].Value -eq '0' -and
             $registryReturn.Groups['gc'].Value -eq '0'
     }
@@ -297,11 +300,11 @@ function Test-C188R12R1PointerOnSettingsButton($PointerPosition, $ClickTarget) {
 
 function Get-C188R12R1RunnerInputEvidence(
     [string]$SerialText, [string]$QmpControlText, [bool]$ClickAttempted,
-    $PointerTargetEvidence) {
+    $PointerTargetEvidence, [uint32]$ExpectedDescriptorCount = 5) {
     $click = Test-C188R12R1SingleClickQmpEvidence $QmpControlText
     $settingsRequest = [regex]::IsMatch($SerialText,
         '(?m)^\[APPMODEL-MANAGED-LAUNCH\] source=DesktopLaunch appId=com\.guidexos\.apps\.managed\.settingscenter selector=00000005 image=/system/apps/GXOSAPP\.ELF metadata=valid\r?$')
-    $settingsEvidence = Get-C188R12R1SettingsHandoffEvidence $SerialText
+    $settingsEvidence = Get-C188R12R1SettingsHandoffEvidence $SerialText $ExpectedDescriptorCount
     $unrelatedMenu = [regex]::IsMatch($SerialText,
         '(?m)^\[C102-MANAGED-OUTPUT\] C135-POPUP-OPEN invoke=(?:Options|File) capture=PASS popup=open result=PASS\r?$')
     $targetVerified = $null -ne $PointerTargetEvidence -and [bool]$PointerTargetEvidence.accepted

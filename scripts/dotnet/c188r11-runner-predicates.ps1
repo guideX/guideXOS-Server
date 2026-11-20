@@ -81,10 +81,35 @@ function Test-C188R11ImageContextMatch([string]$SerialText) {
 }
 
 function Test-C188R11ManagedLaunchState([string]$SerialText,
-    [uint32]$ExpectedDescriptorCount = 5) {
-    return [regex]::IsMatch($SerialText,
+    [uint32]$ExpectedDescriptorCount = 5,
+    [uint32[]]$ExpectedDescriptorSelectors = @()) {
+    $stateValid = [regex]::IsMatch($SerialText,
         '(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state seq=[1-9]\d* st=managed-return selector=4 ownerGen=1 rg=[1-9]\d* re=1 rr=0 rcl=0 p=[1-9]\d* pr=0 ps=[1-9]\d* psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=' +
         [regex]::Escape([string]$ExpectedDescriptorCount) + ' result=0 gc=\d+ w=1:1\r?$')
+    if (-not $stateValid) { return $false }
+    return Test-C188R11ManagedDescriptorIdentity $SerialText $ExpectedDescriptorSelectors
+}
+
+function Test-C188R11ManagedDescriptorIdentity([string]$SerialText,
+    [uint32[]]$ExpectedDescriptorSelectors = @()) {
+    if ($ExpectedDescriptorSelectors.Count -eq 0) { return $true }
+    if (@($ExpectedDescriptorSelectors | Select-Object -Unique).Count -ne
+        $ExpectedDescriptorSelectors.Count) { return $false }
+    $descriptorLines = [regex]::Matches($SerialText,
+        '(?m)^\[C102-MANAGED-OUTPUT\] C188R9-300 REG owner=static stage=descriptor-lookup\b[^\r\n]*\r?$')
+    if ($descriptorLines.Count -ne 1) { return $false }
+    $match = [regex]::Match($descriptorLines[0].Value,
+        '^\[C102-MANAGED-OUTPUT\] C188R9-300 REG owner=static stage=descriptor-lookup selector=(?<requested>\d+) gen=(?<generation>\d+) input=(?<input>\d+) count=(?<count>\d+) slots=(?<slots>\d+(?:,\d+)*) live=(?<live>\d+) result=(?<result>-?\d+)\r?$')
+    if (-not $match.Success) { return $false }
+    $expectedSlots = $ExpectedDescriptorSelectors -join ','
+    $expectedRequestedSelector = [string]$ExpectedDescriptorSelectors[0]
+    return $match.Groups['requested'].Value -ceq $expectedRequestedSelector -and
+        $match.Groups['generation'].Value -ceq '1' -and
+        $match.Groups['input'].Value -ceq '0' -and
+        [uint32]$match.Groups['count'].Value -eq $ExpectedDescriptorSelectors.Count -and
+        $match.Groups['slots'].Value -ceq $expectedSlots -and
+        $match.Groups['live'].Value -ceq '0' -and
+        $match.Groups['result'].Value -ceq '0'
 }
 
 function Test-C188R11ManagedInputState([string]$SerialText, [uint32]$Count,
@@ -197,7 +222,8 @@ function Test-C188R11ManagedBoundaryCorrelation([string]$SerialText) {
 }
 
 function Get-C188R11ReadinessFailureReason([string]$SerialText,
-    [uint32]$ExpectedDescriptorCount = 5) {
+    [uint32]$ExpectedDescriptorCount = 5,
+    [uint32[]]$ExpectedDescriptorSelectors = @()) {
     if (-not [regex]::IsMatch($SerialText,
             '(?m)^\[KERNEL\] Entering main loop \(waiting for input\)\.\.\.\r?$')) {
         return 'main-loop-not-reached'
@@ -210,7 +236,7 @@ function Get-C188R11ReadinessFailureReason([string]$SerialText,
             '(?m)^\[C150-SURFACE\] action=create appId=com\.guidexos\.apps\.managed\.notes generation=00000001 window=[0-9A-Fa-f]{8} result=PASS\r?$')) {
         return 'notes-surface-not-created'
     }
-    if (-not (Test-C188R11ManagedLaunchState $SerialText $ExpectedDescriptorCount)) {
+    if (-not (Test-C188R11ManagedLaunchState $SerialText $ExpectedDescriptorCount $ExpectedDescriptorSelectors)) {
         return 'managed-return-state-missing-or-invalid'
     }
     if (-not (Test-C188R11InitializationEvidence $SerialText)) {

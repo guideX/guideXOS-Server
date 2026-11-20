@@ -27,7 +27,8 @@ if (-not $r32Milestones.missingSettingsLaunch -or
 $passed++
 
 $r30Profile = 'C188R30_THREAD_ATTACHMENT_TRACE_TWO_DESCRIPTORS'
-if (-not (Test-C188R33SettingsClickGate $r32Serial $r30Profile 2 1280 800)) {
+$r30Selectors = [uint32[]]@(4,5)
+if (-not (Test-C188R33SettingsClickGate $r32Serial $r30Profile 2 1280 800 $r30Selectors)) {
     throw 'R32 real Notes readiness and surface state did not open the verified Settings-click gate.'
 }
 $passed++
@@ -36,13 +37,35 @@ if ($legacyReadinessFailure -cne 'managed-return-state-missing-or-invalid') {
     throw 'The legacy five-descriptor readiness audit no longer rejects the R30 two-descriptor profile.'
 }
 $passed++
-if (-not [string]::IsNullOrEmpty((Get-C188R11ReadinessFailureReason $r32Serial 2))) {
+if (-not [string]::IsNullOrEmpty((Get-C188R11ReadinessFailureReason $r32Serial 2 $r30Selectors))) {
     throw 'The profile-bound post-readiness audit rejected the valid R30 two-descriptor state.'
+}
+$passed++
+$wrongDescriptorOrder = $r32Serial -replace 'slots=4,5', 'slots=5,4'
+if (Test-C188R33SettingsClickGate $wrongDescriptorOrder $r30Profile 2 1280 800 $r30Selectors) {
+    throw 'R30 readiness accepted the correct descriptor count with the wrong selector order.'
+}
+$passed++
+$duplicatedDescriptorSlots = $r32Serial -replace 'slots=4,5', 'slots=4,4'
+if (Test-C188R33SettingsClickGate $duplicatedDescriptorSlots $r30Profile 2 1280 800 $r30Selectors) {
+    throw 'R30 readiness accepted a duplicated descriptor identity.'
+}
+$passed++
+$missingDescriptorIdentity = $r32Serial -replace '(?m)^\[C102-MANAGED-OUTPUT\] C188R9-300 REG owner=static stage=descriptor-lookup.*\r?\n', ''
+if (Test-C188R33SettingsClickGate $missingDescriptorIdentity $r30Profile 2 1280 800 $r30Selectors) {
+    throw 'R30 readiness accepted a descriptor count without identity evidence.'
+}
+$passed++
+$duplicatedDescriptorTrace = $r32Serial + "`n" + ([regex]::Match($r32Serial,
+    '(?m)^\[C102-MANAGED-OUTPUT\] C188R9-300 REG owner=static stage=descriptor-lookup.*$').Value) + "`n"
+if (Test-C188R33SettingsClickGate $duplicatedDescriptorTrace $r30Profile 2 1280 800 $r30Selectors) {
+    throw 'R30 readiness accepted duplicated descriptor lookup evidence.'
 }
 $passed++
 $settingsRunnerPath = Join-Path $PSScriptRoot 'run-c188r12r1-settings-handoff.ps1'
 $settingsRunnerSource = Get-Content -LiteralPath $settingsRunnerPath -Raw
-if ($settingsRunnerSource -notmatch 'Get-C188R11ReadinessFailureReason\s+\$serialText\s+\x60?\s*\(\[uint32\]\$readinessProfile\.expectedDescriptorCount\)') {
+if (-not $settingsRunnerSource.Contains('([uint32]$readinessProfile.expectedDescriptorCount) `' +
+        "`n            ([uint32[]]`$readinessProfile.expectedDescriptorSelectors)")) {
     throw 'The nested Settings runner post-readiness audit is not bound to its candidate readiness profile.'
 }
 $passed++
@@ -110,6 +133,7 @@ try {
     $profile = Get-C188R33ManagedReadinessProfile $tempRoot
     if ([string]$profile.profile -cne $r30Profile -or
         [uint32]$profile.expectedDescriptorCount -ne 2 -or
+    ($profile.expectedDescriptorSelectors -join ',') -cne '4,5' -or
         [string]$profile.runtimePackManifestSha256 -ine $runtimeHash) {
         throw 'Candidate/runtime manifests did not establish the exact R30 readiness profile.'
     }
@@ -154,7 +178,8 @@ try {
         -Value '{"candidate":"legacy-prelaunch-fixture"}' -Encoding utf8
     $legacyProfile = Get-C188R33ManagedReadinessProfile $legacyRoot
     if ([string]$legacyProfile.profile -cne 'C188R11_FIVE_DESCRIPTOR_COMPATIBILITY' -or
-        [uint32]$legacyProfile.expectedDescriptorCount -ne 5) {
+        [uint32]$legacyProfile.expectedDescriptorCount -ne 5 -or
+        @($legacyProfile.expectedDescriptorSelectors).Count -ne 0) {
         throw 'The minimal prelaunch fixture lost its legacy compatibility readiness profile.'
     }
     $passed++

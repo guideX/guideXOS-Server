@@ -2,7 +2,9 @@ param(
     [Parameter(Mandatory=$true)][string]$CandidateRoot,
     [Parameter()][string]$ArtifactRoot='E:\CodexArtifacts\guideXOSServerV1.1_DOTNET_SUPPORT',
     [Parameter()][ValidateRange(60,300)][int]$MaxRuntimeSeconds=120,
-    [Parameter()][string]$R25ManifestPath=''
+    [Parameter()][string]$R25ManifestPath='',
+    [Parameter()][ValidatePattern('^[A-Fa-f0-9]{32}$')][string]$RunIdentityId=([guid]::NewGuid().ToString('N')),
+    [Parameter()][string]$ExecutionPackageManifestPath=''
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -18,7 +20,9 @@ if (-not $candidate.StartsWith($artifactPrefix,[System.StringComparison]::Ordina
 $phaseRoot = [System.IO.Path]::GetDirectoryName($candidate)
 $isR25 = -not [string]::IsNullOrWhiteSpace($R25ManifestPath)
 $runPrefix = if ($isR25) { 'r25' } else { 'r24' }
-$runId = [guid]::NewGuid().ToString('N')
+$runId = $RunIdentityId.ToLowerInvariant()
+$executionPackageManifestSha256 = ''
+$executionPackageId = ''
 $bootRoot = Join-Path $phaseRoot ('qac-guest-' + $runPrefix + '-' + $runId)
 $guardRoot = Join-Path $phaseRoot 'one-boot-guards'
 $guardPath = Join-Path $guardRoot ('attempt-' + $runPrefix + '-' + $runId + '.json')
@@ -37,6 +41,7 @@ $final = [ordered]@{
     qacReleaseVerified=$false;cpuSnapshotPath=$null;cpuBoundaryEvidence=$null
     r25FirstFailureRecordValid=$false;r25CallerAttribution=$null;r25SnapshotPath=$null;r25OriginAnalysisPath=$null
     serialSha256='';qacReservationId=$null;failure='';milestones=$null
+    executionPackageManifestPath=$null;executionPackageManifestSha256='';executionPackageId='';executionAttemptId=$runId
 }
 
 try {
@@ -134,6 +139,44 @@ try {
     }
     $final.candidateIntegrityVerified = $true
 
+    if (-not [string]::IsNullOrWhiteSpace($ExecutionPackageManifestPath)) {
+        $ExecutionPackageManifestPath = [System.IO.Path]::GetFullPath($ExecutionPackageManifestPath)
+        if (-not (Test-Path -LiteralPath $ExecutionPackageManifestPath -PathType Leaf)) {
+            throw "R35 execution package manifest is missing: $ExecutionPackageManifestPath"
+        }
+        $executionPackage = Get-Content -LiteralPath $ExecutionPackageManifestPath -Raw |
+            ConvertFrom-Json -ErrorAction Stop
+        $executionPackageManifestSha256 = (Get-FileHash -LiteralPath $ExecutionPackageManifestPath -Algorithm SHA256).Hash
+        $nestedRunnerComponents = @($executionPackage.runnerComponents | Where-Object {
+            [string]$_.path -ceq 'scripts/dotnet/run-c188r12r1-settings-handoff.ps1'
+        })
+        $analyzerComponents = @($executionPackage.runnerComponents | Where-Object {
+            [string]$_.path -ceq 'scripts/dotnet/analyze-c188r25-failfast-origin.py'
+        })
+        if ([string]$executionPackage.schema -cne 'GUIDEXOS_C188R35_SETTINGS_LAUNCH_PACKAGE_V1' -or
+            [System.IO.Path]::GetFullPath([string]$executionPackage.candidateRoot) -cne $candidate -or
+            [string]$executionPackage.executionAttemptId -ine $runId -or
+            [string]$executionPackage.candidateManifestSha256 -ine
+                (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash -or
+            [string]$executionPackage.candidateIntegritySha256 -ine
+                (Get-FileHash -LiteralPath $integrityPath -Algorithm SHA256).Hash -or
+            [int]$executionPackage.candidateInventoryFileCount -ne 349 -or
+            $nestedRunnerComponents.Count -ne 1 -or
+            [string]$nestedRunnerComponents[0].sha256 -ine
+                (Get-FileHash -LiteralPath $outerRunner -Algorithm SHA256).Hash -or
+            $analyzerComponents.Count -ne 1 -or
+            [string]$analyzerComponents[0].sha256 -ine
+                (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'analyze-c188r25-failfast-origin.py') -Algorithm SHA256).Hash -or
+            [string]$executionPackage.r25CandidateManifestSha256 -ine
+                (Get-FileHash -LiteralPath $R25ManifestPath -Algorithm SHA256).Hash) {
+            throw 'R35 execution package does not bind this candidate, fresh attempt identity, corrected runner, analyzer, and R25 sidecar.'
+        }
+        $executionPackageId = [string]$executionPackage.executionPackageId
+        $final.executionPackageManifestPath = $ExecutionPackageManifestPath
+        $final.executionPackageManifestSha256 = $executionPackageManifestSha256
+        $final.executionPackageId = $executionPackageId
+    }
+
     if (Test-Path -LiteralPath $guardRoot -PathType Container) {
         foreach ($existingGuardPath in @(Get-ChildItem -LiteralPath $guardRoot -File -Filter 'attempt-*.json')) {
             try { $existingGuard = Get-Content -LiteralPath $existingGuardPath.FullName -Raw | ConvertFrom-Json -ErrorAction Stop }
@@ -172,6 +215,9 @@ try {
         qacStatusExitCode=$statusCode;qacListExitCode=$listCode
         statusSha256=(Get-FileHash -LiteralPath $statusPath -Algorithm SHA256).Hash
         listSha256=(Get-FileHash -LiteralPath $listPath -Algorithm SHA256).Hash
+        executionPackageManifestPath=$ExecutionPackageManifestPath
+        executionPackageManifestSha256=$executionPackageManifestSha256
+        executionPackageId=$executionPackageId;executionAttemptId=$runId
         captureRoot=$preflightRoot
     }
     $preflight | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $preflightRoot 'qac-preflight.json') -Encoding utf8
@@ -194,6 +240,9 @@ try {
         preflightPath=$preflightRoot;preflightReportSha256=(Get-FileHash -LiteralPath (Join-Path $preflightRoot 'qac-preflight.json') -Algorithm SHA256).Hash
         bootEvidencePath=$bootRoot;attemptNumber=1;maxGuestBoots=1;automaticRetry=$false
         retryAllowed=$false;consumed=$true;consumedUtc=[DateTime]::UtcNow.ToString('O')
+        executionPackageManifestPath=$ExecutionPackageManifestPath
+        executionPackageManifestSha256=$executionPackageManifestSha256
+        executionPackageId=$executionPackageId;executionAttemptId=$runId
     }
     $guard | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $guardPath -Encoding utf8
     if ($isR25) {
@@ -206,10 +255,15 @@ try {
     $psi = [System.Diagnostics.ProcessStartInfo]::new()
     $psi.FileName=$pwsh;$psi.WorkingDirectory=$repo;$psi.UseShellExecute=$false
     $psi.CreateNoWindow=$true;$psi.RedirectStandardOutput=$true;$psi.RedirectStandardError=$true
-    foreach ($argument in @('-NoProfile','-File',$outerRunner,'-CandidateRoot',$candidate,
+    $outerArguments = @('-NoProfile','-File',$outerRunner,'-CandidateRoot',$candidate,
             '-ExpectedKernelSha256',[string]$manifest.kernelSha256,'-BootEvidencePath',$bootRoot,
             '-BootEvidenceAuthorizationPath',$guardPath,
-            '-MaxRuntimeSeconds',[string]$MaxRuntimeSeconds,'-CaptureCpuOnReadinessTimeout')) {
+            '-MaxRuntimeSeconds',[string]$MaxRuntimeSeconds,'-CaptureCpuOnReadinessTimeout')
+    if (-not [string]::IsNullOrWhiteSpace($ExecutionPackageManifestPath)) {
+        $outerArguments += @('-ExecutionPackageManifestPath',$ExecutionPackageManifestPath,
+            '-ExecutionAttemptId',$runId)
+    }
+    foreach ($argument in $outerArguments) {
         [void]$psi.ArgumentList.Add([string]$argument)
     }
     $process = [System.Diagnostics.Process]::Start($psi)

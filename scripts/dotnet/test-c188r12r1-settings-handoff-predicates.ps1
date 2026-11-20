@@ -45,6 +45,16 @@ Assert-C188R12R1 'generation and window identity remain correlated through prese
     $positive.notesSettingsActionInvoked -and $positive.notesSettingsActionSucceeded -and
     $positive.settingsRegistryMemoryStable -and $positive.persistentHeapPreserved)
 
+$twoDescriptorTrace = $acceptedTrace -replace '\bn=5\b', 'n=2'
+$twoDescriptorEvidence = Get-C188R12R1SettingsHandoffEvidence $twoDescriptorTrace 2
+Assert-C188R12R1 'Settings dispatch and return accept the candidate profile descriptor count' (
+    $twoDescriptorEvidence.accepted -and $twoDescriptorEvidence.settingsRegistryEntry -and
+    $twoDescriptorEvidence.settingsRegistryReturnValid)
+$wrongProfileEvidence = Get-C188R12R1SettingsHandoffEvidence $twoDescriptorTrace 5
+Assert-C188R12R1 'Settings dispatch evidence rejects a descriptor count from another profile' (
+    -not $wrongProfileEvidence.accepted -and -not $wrongProfileEvidence.settingsRegistryEntry -and
+    -not $wrongProfileEvidence.settingsRegistryReturnValid)
+
 $wrongAction = $acceptedTrace.Replace(
     '[C112-ACTION-DISPATCH] selector=00000004 action=00000018 managedReturn=00000000 result=PASS',
     '[C112-ACTION-DISPATCH] selector=00000004 action=00000017 managedReturn=FFFFFFFE result=FAIL')
