@@ -590,6 +590,86 @@ function Get-GuestApplicationResponseStage([string]$Text) {
     return [pscustomobject]@{ stage = $stage; guestPs2IrqReceived = $deviceObserved; nativeElfDispatcherDequeued = $inputObserved; applicationHandledEscape = $applicationResponded }
 }
 
+function Get-SN10DeferredLaunchRuntimeContract([string]$Text, [switch]$RequireResult) {
+    $markers = @(
+        '[KERNEL] Desktop drawn',
+        '[KERNEL] VFS layer initialized',
+        'App Model package discovered package=StellarNavigator id=com.guidexos.stellarnavigator displayName=Stellar Navigator',
+        '[KERNEL] PS/2 mouse init complete',
+        '[KERNEL] IRQ12 handler registered and unmasked',
+        '[PS2KB] Keyboard initialized (scancode set 2)',
+        '[KERNEL] IRQ1 (keyboard) handler registered',
+        '[KERNEL] Input manager initialized',
+        '[KERNEL] Entering main loop (waiting for input)...',
+        '[SN10-GUEST] input-ready source=ps2 irq1=registered input-manager=initialized desktop-loop=operational',
+        '[SN10-GUEST] appmodel-launch begin id=com.guidexos.stellarnavigator'
+    )
+    $positions = @()
+    foreach ($marker in $markers) {
+        $position = $Text.IndexOf($marker, [StringComparison]::Ordinal)
+        if ($position -lt 0) { throw "DEFERRED_LAUNCH_ORDER_FAILURE: required guest marker is missing: $marker" }
+        $positions += $position
+    }
+    for ($index = 1; $index -lt $positions.Count; $index++) {
+        if ($positions[$index] -le $positions[$index - 1]) { throw "DEFERRED_LAUNCH_ORDER_FAILURE: guest startup marker order regressed at '$($markers[$index])'." }
+    }
+    $readyCount = [regex]::Matches($Text, '\[SN10-GUEST\] input-ready source=ps2 irq1=registered input-manager=initialized desktop-loop=operational').Count
+    $launchCount = [regex]::Matches($Text, '\[SN10-GUEST\] appmodel-launch begin id=com\.guidexos\.stellarnavigator').Count
+    $resultSuccessCount = [regex]::Matches($Text, '\[SN10-GUEST\] appmodel-launch result=success').Count
+    $resultFailureCount = [regex]::Matches($Text, '\[SN10-GUEST\] appmodel-launch result=failed').Count
+    $resumeCount = [regex]::Matches($Text, '\[SN10-GUEST\] desktop-loop-resumed input=active').Count
+    if ($readyCount -ne 1 -or $launchCount -ne 1) { throw "DEFERRED_LAUNCH_ORDER_FAILURE: expected one readiness marker and one proof launch, observed readiness=$readyCount launch=$launchCount." }
+    if ($resultFailureCount -gt 0 -or $resultSuccessCount -gt 1 -or $resumeCount -gt 1) { throw 'DEFERRED_LAUNCH_ORDER_FAILURE: launch returned failure or emitted duplicate completion markers.' }
+    if ($RequireResult -and ($resultSuccessCount -ne 1 -or $resumeCount -ne 1)) { throw 'DEFERRED_LAUNCH_ORDER_FAILURE: the one-shot launch did not return to the desktop loop after normal cleanup.' }
+    return [ordered]@{
+        passed = $true
+        orderedMarkers = $markers
+        readinessMarkerCount = $readyCount
+        proofLaunchCount = $launchCount
+        successResultCount = $resultSuccessCount
+        desktopLoopResumeCount = $resumeCount
+        keyboardAndIrqReadyBeforeLaunch = $true
+        inputManagerReadyBeforeLaunch = $true
+        desktopLoopOperationalBeforeLaunch = $true
+        launchIsOneShot = $true
+    }
+}
+
+function Get-SN10DeferredLaunchSourceContract {
+    $mainPath = Join-Path $Root 'kernel\core\main.cpp'
+    if (-not (Test-Path -LiteralPath $mainPath -PathType Leaf)) { throw 'Deferred launch source contract is missing kernel/core/main.cpp.' }
+    $main = Get-Content -LiteralPath $mainPath -Raw
+    $keyboardInit = $main.IndexOf('kernel::ps2keyboard::init();', [StringComparison]::Ordinal)
+    $irq1Registration = $main.IndexOf('kernel::interrupts::register_irq(1, kernel::ps2keyboard::irq_handler);', [StringComparison]::Ordinal)
+    $inputInit = $main.IndexOf('kernel::input::init(', $irq1Registration, [StringComparison]::Ordinal)
+    $desktopLoopMarker = $main.IndexOf('[KERNEL] Entering main loop (waiting for input)...', [StringComparison]::Ordinal)
+    $pendingInit = $main.IndexOf('bool stellarNavigatorProofLaunchPending = true;', [StringComparison]::Ordinal)
+    $loopComment = $main.IndexOf('// Main kernel loop', [StringComparison]::Ordinal)
+    $loopStart = if ($loopComment -ge 0) { $main.IndexOf('while (1)', $loopComment, [StringComparison]::Ordinal) } else { -1 }
+    $pendingCheck = if ($loopStart -ge 0) { $main.IndexOf('if (stellarNavigatorProofLaunchPending)', $loopStart, [StringComparison]::Ordinal) } else { -1 }
+    $pendingClear = if ($pendingCheck -ge 0) { $main.IndexOf('stellarNavigatorProofLaunchPending = false;', $pendingCheck, [StringComparison]::Ordinal) } else { -1 }
+    $readyMarker = if ($pendingClear -ge 0) { $main.IndexOf('[SN10-GUEST] input-ready source=ps2 irq1=registered input-manager=initialized desktop-loop=operational', $pendingClear, [StringComparison]::Ordinal) } else { -1 }
+    $launchCall = if ($readyMarker -ge 0) { $main.IndexOf('kernel::desktop::launch_app("com.guidexos.stellarnavigator");', $readyMarker, [StringComparison]::Ordinal) } else { -1 }
+    $launchCalls = [regex]::Matches($main, 'kernel::desktop::launch_app\("com\.guidexos\.stellarnavigator"\);').Count
+    if ($keyboardInit -lt 0 -or $irq1Registration -le $keyboardInit -or $inputInit -le $irq1Registration -or
+        $desktopLoopMarker -le $inputInit -or $pendingInit -le $inputInit -or $loopStart -le $pendingInit -or
+        $desktopLoopMarker -le $pendingInit -or $loopStart -le $desktopLoopMarker -or
+        $pendingCheck -le $loopStart -or $pendingClear -le $pendingCheck -or $readyMarker -le $pendingClear -or
+        $launchCall -le $readyMarker -or $launchCalls -ne 1 -or
+        -not $main.Contains('#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)')) {
+        throw 'Deferred launch source contract failed: the proof launch must be one-shot inside the operational desktop loop after PS/2, IRQ1, and input-manager initialization.'
+    }
+    return [ordered]@{
+        passed = $true
+        ps2KeyboardInitBeforeIrq1Registration = $true
+        irq1AndInputManagerReadyBeforeDesktopLoop = $true
+        launchDeferredUntilAfterDesktopLoopStarts = $true
+        pendingFlagClearedBeforeDispatch = $true
+        proofLaunchCallCount = $launchCalls
+        proofOnlyBuildGuard = $true
+    }
+}
+
 function Test-QacCoordinatorUnavailableError([string]$Message) {
     return $Message -match '(?i)\bCoordinator(?: is)? unavailable\b'
 }
@@ -607,7 +687,7 @@ function Wait-GuestInputReadiness {
         marker = '[SN10-GUEST-INPUT] app-event-loop-ready focus=focused'
         observedBeforeAnyGuestInputInjection = $true
         appWindowFocusVerified = $true
-        synchronousBootLaunchStillInProgress = ($Capture.Snapshot() -notmatch '\[KERNEL\] Entering main loop \(waiting for input\)')
+        desktopLoopStartedBeforeProofLaunch = ($Capture.Snapshot() -match '\[KERNEL\] Entering main loop \(waiting for input\)')
     }
 }
 
@@ -807,7 +887,7 @@ try {
     $stream = $client.GetStream()
     $lines = switch ($Scenario) {
         'Markers' { @('[TEST] boot-ready', '[TEST] app-visible', '[TEST] first-ephemeris-evaluated', '[TEST] first-close-requested', '[TEST] first-shutdown-complete', '[TEST] first-appmodel-return', '[TEST] reopen-command-dispatched', '[TEST] second-window-created', '[TEST] second-ephemeris-evaluated', '[TEST] second-close-requested', '[TEST] second-shutdown-complete', '[TEST] second-cleanup-complete', 'partial-after-nonzero-exit') }
-        'BootLaunch' { @('[KERNEL] VFS layer initialized', '[NATIVE-ELF] App Model package discovered package=StellarNavigator id=com.guidexos.stellarnavigator displayName=Stellar Navigator', '[SN10-GUEST] appmodel-launch begin id=com.guidexos.stellarnavigator', 'STELLAR_NAVIGATOR_UI status=window-created', 'STELLAR_NAVIGATOR_EPHEMERIS status=available body=earth target_naif=399 et_tdb_s=0.000000 frame=J2000_SSB units=km position_km=(-27566740.483,132361381.154,57418653.286) sha256=fixture', 'STELLAR_NAVIGATOR_UI status=initial-content-drawn', 'STELLAR_NAVIGATOR_LIFECYCLE status=initialized-evaluated-shutdown', 'lifecycle PASS window/resource cleanup complete', '[SN10-GUEST] appmodel-launch result=success', '[KERNEL] Entering main loop (waiting for input)...') }
+        'BootLaunch' { @('[KERNEL] Desktop drawn', '[KERNEL] VFS layer initialized', '[NATIVE-ELF] App Model package discovered package=StellarNavigator id=com.guidexos.stellarnavigator displayName=Stellar Navigator', '[KERNEL] PS/2 mouse init complete', '[KERNEL] IRQ12 handler registered and unmasked', '[PS2KB] Keyboard initialized (scancode set 2)', '[KERNEL] IRQ1 (keyboard) handler registered', '[KERNEL] Input manager initialized', '[KERNEL] Entering main loop (waiting for input)...', '[SN10-GUEST] input-ready source=ps2 irq1=registered input-manager=initialized desktop-loop=operational', '[SN10-GUEST] appmodel-launch begin id=com.guidexos.stellarnavigator', 'STELLAR_NAVIGATOR_UI status=window-created', 'STELLAR_NAVIGATOR_EPHEMERIS status=available body=earth target_naif=399 et_tdb_s=0.000000 frame=J2000_SSB units=km position_km=(-27566740.483,132361381.154,57418653.286) sha256=fixture', 'STELLAR_NAVIGATOR_UI status=initial-content-drawn', 'STELLAR_NAVIGATOR_LIFECYCLE status=initialized-evaluated-shutdown', 'lifecycle PASS window/resource cleanup complete', '[SN10-GUEST] appmodel-launch result=success', '[SN10-GUEST] desktop-loop-resumed input=active') }
         'Partial' { @('[TEST] partial-progress') }
         'PartialHold' { @('[TEST] partial-progress') }
         'Fatal' { @('[KERNEL-PANIC] assertion=offline-fixture halted=1') }
@@ -900,7 +980,12 @@ function Assert-CandidateIdentity {
             if ($diskStream.Read($boot, 0, $boot.Length) -ne 512 -or [BitConverter]::ToUInt16($boot, 11) -ne 512 -or $boot[13] -eq 0 -or $boot[510] -ne 0x55 -or $boot[511] -ne 0xAA -or [BitConverter]::ToUInt32($boot, 32) -ne [int64]$partition.sectors -or [Text.Encoding]::ASCII.GetString($boot, 82, 8) -cne 'FAT32   ') { throw "FAT32 BPB at MBR partition $($partition.index) is invalid or has the wrong LBA extent." }
         }
     } finally { $diskStream.Dispose() }
-    if ($diskVerification.originalGptUnchanged -ne $true -or $diskVerification.payloadHashesMatchAcceptedManifest -ne $true -or $diskVerification.kernelFatPartitionProbe.rootType0x0cSupported -ne $true -or [string]$diskVerification.kernelFatPartitionProbe.firstMountablePartitionType -cne '0x0C' -or $rootPartition.containsAppsDirectory -ne $true -or $rootPartition.containsNativeAmd64Elf -ne $true -or $rootPartition.containsDE440sData -ne $true -or [string]$efiPartition.firmwareBootPath -cne 'EFI/BOOT/BOOTX64.EFI') { throw 'Candidate verification does not establish kernel mount compatibility, AppModel payload availability, and UEFI fallback boot content.' }
+    $sourceDiskUnchanged = $diskVerification.originalGptUnchanged -eq $true -or
+        $diskVerification.sourceDisk.unchanged -eq $true -or
+        $diskVerification.sourceOriginalDisk.unchanged -eq $true
+    $candidatePayloadsMatch = $diskVerification.payloadHashesMatchCandidateManifest -eq $true -or
+        $diskVerification.payloadHashesMatchAcceptedManifest -eq $true
+    if (-not $sourceDiskUnchanged -or -not $candidatePayloadsMatch -or $diskVerification.kernelFatPartitionProbe.rootType0x0cSupported -ne $true -or [string]$diskVerification.kernelFatPartitionProbe.firstMountablePartitionType -cne '0x0C' -or $rootPartition.containsAppsDirectory -ne $true -or $rootPartition.containsNativeAmd64Elf -ne $true -or $rootPartition.containsDE440sData -ne $true -or [string]$efiPartition.firmwareBootPath -cne 'EFI/BOOT/BOOTX64.EFI') { throw 'Candidate verification does not establish the source-disk immutability, candidate payload hashes, kernel mount compatibility, AppModel payload availability, and UEFI fallback boot content.' }
     $diskFiles = @{}
     foreach ($entry in $diskVerification.files) { $diskFiles[[string]$entry.path] = [string]$entry.sha256 }
     foreach ($entry in $verification.stagedInputs) {
@@ -1315,7 +1400,27 @@ function Invoke-SelfTest {
         $focusContract = Get-SN10FocusContract
         $runnerResult.checks.reopenInput = [ordered]@{ passed = $true; method = 'QMP qcode press/release; backtick opens shell; desktop.launch com.guidexos.stellarnavigator uses desktop::launch_app'; qcodeCount = $reopenKeys.Count; spaceAndPeriodMapped = $true; unsupportedCharactersRejected = $true; qmpDownUpSequencingVerified = $true; readinessStagesCovered = @('application-not-visible', 'focused-app-event-loop-not-ready', 'guest-device-input-not-observed', 'desktop-input-dispatch-not-observed', 'guest-key-release-not-observed', 'guest-input-loop-responsive'); applicationResponseStagesCovered = @('guest-device-input-not-observed', 'desktop-input-dispatch-not-observed', 'application-response-not-observed', 'application-response-observed') }
         $runnerResult.checks.inputFocusContract = $focusContract
-        $runnerResult.checks.initialLaunch = [ordered]@{ passed = $true; method = 'SN10 guest-proof boot driver dispatches the first instance through desktop::launch_app'; noShellCommandRequired = $true; desktopLoopWaitDeferredUntilFirstAppShutdown = $true }
+        $sourceLaunchContract = Get-SN10DeferredLaunchSourceContract
+        $validLaunchFixture = @(
+            '[KERNEL] Desktop drawn',
+            '[KERNEL] VFS layer initialized',
+            'App Model package discovered package=StellarNavigator id=com.guidexos.stellarnavigator displayName=Stellar Navigator',
+            '[KERNEL] PS/2 mouse init complete',
+            '[KERNEL] IRQ12 handler registered and unmasked',
+            '[PS2KB] Keyboard initialized (scancode set 2)',
+            '[KERNEL] IRQ1 (keyboard) handler registered',
+            '[KERNEL] Input manager initialized',
+            '[KERNEL] Entering main loop (waiting for input)...',
+            '[SN10-GUEST] input-ready source=ps2 irq1=registered input-manager=initialized desktop-loop=operational',
+            '[SN10-GUEST] appmodel-launch begin id=com.guidexos.stellarnavigator'
+        ) -join "`n"
+        $fixtureLaunchContract = Get-SN10DeferredLaunchRuntimeContract $validLaunchFixture
+        $duplicateLaunchRejected = $false
+        try { [void](Get-SN10DeferredLaunchRuntimeContract ($validLaunchFixture + "`n[SN10-GUEST] appmodel-launch begin id=com.guidexos.stellarnavigator")) }
+        catch { $duplicateLaunchRejected = $true }
+        if (-not $duplicateLaunchRejected) { throw 'Deferred launch one-shot fixture accepted a duplicate proof launch.' }
+        $runnerResult.checks.deferredLaunch = [ordered]@{ passed = $true; source = $sourceLaunchContract; runtimeOrderParser = $fixtureLaunchContract; duplicateProofLaunchRejected = $duplicateLaunchRejected }
+        $runnerResult.checks.initialLaunch = [ordered]@{ passed = $true; method = 'SN10 proof driver invokes desktop::launch_app exactly once after the normal desktop loop completes an input pass'; noShellCommandRequired = $true; keyboardIrqAndInputManagerReadyBeforeLaunch = $true; desktopLoopResumesAfterAppCleanup = $true }
 
         $elfLayout = Get-NativeElfLayout
         $fixtureBase = [UInt64]0x60C000
@@ -1370,15 +1475,17 @@ function Invoke-SelfTest {
         $bootProducer = Start-TestProducer -Port $bootCapture.Port -Scenario BootLaunch -ExitCode 0
         [void](Wait-SerialPattern -Capture $bootCapture -Pattern '\[KERNEL\] VFS layer initialized' -Seconds 5 -Description 'boot-launch VFS marker')
         [void](Wait-SerialPattern -Capture $bootCapture -Pattern 'App Model package discovered.*Stellar Navigator' -Seconds 5 -Description 'boot-launch AppModel discovery marker')
-        $bootAppText = Wait-SerialPattern -Capture $bootCapture -Pattern 'STELLAR_NAVIGATOR_UI status=initial-content-drawn' -Seconds 5 -Description 'boot-time native app content before desktop input readiness'
-        if ($bootAppText -notmatch 'STELLAR_NAVIGATOR_UI status=window-created' -or $bootCapture.Snapshot() -match '\[KERNEL\] Entering main loop \(waiting for input\)') { throw 'Boot-time AppModel launch fixture did not draw the app before the desktop input loop.' }
+        $bootAppText = Wait-SerialPattern -Capture $bootCapture -Pattern 'STELLAR_NAVIGATOR_UI status=initial-content-drawn' -Seconds 5 -Description 'deferred boot-time native app content after desktop input readiness'
+        $bootLaunchContract = Get-SN10DeferredLaunchRuntimeContract $bootCapture.Snapshot()
+        if ($bootAppText -notmatch 'STELLAR_NAVIGATOR_UI status=window-created') { throw 'Deferred AppModel launch fixture did not draw the app after desktop input readiness.' }
         [void](Wait-SerialPattern -Capture $bootCapture -Pattern 'STELLAR_NAVIGATOR_LIFECYCLE status=initialized-evaluated-shutdown' -Seconds 5 -Description 'boot-launch normal shutdown')
         [void](Wait-SerialPattern -Capture $bootCapture -Pattern 'lifecycle PASS window/resource cleanup complete' -Seconds 5 -Description 'boot-launch resource cleanup')
-        [void](Wait-SerialPattern -Capture $bootCapture -Pattern '\[KERNEL\] Entering main loop \(waiting for input\)' -Seconds 5 -Description 'desktop input readiness after boot-launch shutdown')
+        [void](Wait-SerialPattern -Capture $bootCapture -Pattern '\[SN10-GUEST\] desktop-loop-resumed input=active' -Seconds 5 -Description 'desktop loop resumes after boot-launch shutdown')
+        $bootLaunchReturnedContract = Get-SN10DeferredLaunchRuntimeContract $bootCapture.Snapshot() -RequireResult
         if (-not $bootProducer.WaitForExit(5000)) { $bootProducer.Kill(); throw 'Boot-launch serial producer did not exit.' }
         [void]$bootCapture.WaitForCompletion(3000)
         if ($bootProducer.ExitCode -ne 0 -or $bootCapture.Snapshot() -notmatch '\[SN10-GUEST\] appmodel-launch result=success') { throw 'Boot-launch fixture did not return to the desktop loop after normal application cleanup.' }
-        $runnerResult.checks.bootLaunchOrdering = [ordered]@{ passed = $true; firstAppContentPrecedesDesktopInputLoop = $true; normalClosePrecedesDesktopInputLoop = $true; serialStartIndexCoversBootLaunch = $true; logPath = $bootCapturePath }
+        $runnerResult.checks.bootLaunchOrdering = [ordered]@{ passed = $true; keyboardIrqAndInputManagerPrecedeLaunch = $true; normalDesktopLoopPassPrecedesLaunch = $true; launchAndReadinessMarkersAreOneShot = $true; normalCloseReturnsToDesktopLoop = $true; launchContract = $bootLaunchContract; returnedContract = $bootLaunchReturnedContract; logPath = $bootCapturePath }
         $bootCapture.Dispose(); $bootCapture = $null
 
         $capture2Path = Join-Path $script:RunRoot 'selftest-missing-marker.serial.log'
@@ -1515,6 +1622,7 @@ try {
     $candidateCheck = Assert-CandidateIdentity
     $overall.checks.artifactIntegrity = $candidateCheck
     $overall.checks.inputFocusContract = Get-SN10FocusContract
+    $overall.checks.deferredLaunchSourceContract = Get-SN10DeferredLaunchSourceContract
 
     $qacStatus = Get-QacSnapshot 'qac-status-before.log' @('status')
     $qacList = Get-QacSnapshot 'qac-list-before.log' @('list')
@@ -1716,14 +1824,14 @@ try {
     $remaining = [Math]::Max(1, [int][Math]::Ceiling(($script:RunDeadline - [DateTimeOffset]::UtcNow).TotalSeconds))
     $discoveryText = Wait-SerialPattern -Capture $capture -Pattern 'App Model package discovered.*Stellar Navigator|displayName=Stellar Navigator' -Seconds $remaining -Description 'Stellar Navigator AppModel discovery'
     $overall.checks.appModelDiscovery = [ordered]@{ passed = $true; marker = ($discoveryText -split "`r?`n" | Where-Object { $_ -match 'App Model package discovered.*Stellar Navigator|displayName=Stellar Navigator' } | Select-Object -Last 1) }
-    # The SN10 guest-proof kernel dispatches the first instance through the real
-    # AppModel during boot. That call is synchronous, so the desktop input loop
-    # cannot start until the app is closed. Observe and qualify the boot launch
-    # before waiting for the desktop loop; otherwise the runner deadlocks itself.
+    # The proof hook starts after the normal desktop loop has completed its
+    # first input/presentation pass. Verify the full initialization order and
+    # one-shot dispatch before testing the live app input path.
     $bootLaunchStartIndex = 0
     $remaining = [Math]::Max(1, [int][Math]::Ceiling(($script:RunDeadline - [DateTimeOffset]::UtcNow).TotalSeconds))
-    $appText = Wait-SerialPattern -Capture $capture -Pattern 'STELLAR_NAVIGATOR_UI status=initial-content-drawn' -Seconds $remaining -Description 'boot-time native AppModel launch and initial content draw' -StartIndex $bootLaunchStartIndex
+    $appText = Wait-SerialPattern -Capture $capture -Pattern 'STELLAR_NAVIGATOR_UI status=initial-content-drawn' -Seconds $remaining -Description 'deferred native AppModel launch and initial content draw' -StartIndex $bootLaunchStartIndex
     if ($appText -notmatch 'STELLAR_NAVIGATOR_UI status=window-created') { throw 'Guest did not report native Stellar Navigator window creation after its boot-time production AppModel launch.' }
+    $overall.checks.deferredLaunchOrder = Get-SN10DeferredLaunchRuntimeContract $appText
     $nativeElfLayout = Get-NativeElfLayout
     $firstLoadPlacement = Get-VerifiedGuestLoadPlacement $appText $nativeElfLayout
     $firstWindowTitle = Get-VerifiedGuestWindowTitle $appText
@@ -1767,8 +1875,8 @@ try {
     $overall.checks.normalClose = [ordered]@{ passed = ($firstCloseResponseStage.stage -ceq 'application-response-observed'); injection = $firstCloseInjection; guestDeviceAndDispatch = $firstCloseInput; applicationResponseStage = $firstCloseResponseStage; lifecycleMarker = ($firstCloseText -match 'STELLAR_NAVIGATOR_LIFECYCLE status=initialized-evaluated-shutdown'); loaderCleanupMarker = ($firstCloseText -match 'lifecycle PASS window/resource cleanup complete'); productionLaunchReturnedAfterCleanup = $true; applicationInstanceExited = ($firstCloseText -match 'lifecycle PASS window/resource cleanup complete') }
     if (-not $overall.checks.normalClose.loaderCleanupMarker) { throw 'Native loader did not report complete window/resource cleanup.' }
     $remaining = [Math]::Max(1, [int][Math]::Ceiling(($script:RunDeadline - [DateTimeOffset]::UtcNow).TotalSeconds))
-    [void](Wait-SerialPattern -Capture $capture -Pattern '\[KERNEL\] Entering main loop \(waiting for input\)' -Seconds $remaining -Description 'desktop keyboard input loop readiness after first native app shutdown' -StartIndex $firstCloseStartIndex)
-    $overall.checks.desktopInputReady = [ordered]@{ passed = $true; marker = '[KERNEL] Entering main loop (waiting for input)'; firstLaunchObservedAndClosedBeforeDesktopInput = $true }
+    [void](Wait-SerialPattern -Capture $capture -Pattern '\[SN10-GUEST\] desktop-loop-resumed input=active' -Seconds $remaining -Description 'desktop input loop resumed after first native app shutdown' -StartIndex $firstCloseStartIndex)
+    $overall.checks.desktopInputReady = [ordered]@{ passed = $true; marker = '[SN10-GUEST] desktop-loop-resumed input=active'; desktopInputLoopResumedAfterNormalClose = $true; launchContract = (Get-SN10DeferredLaunchRuntimeContract $capture.Snapshot() -RequireResult) }
     $overall.checks.screenshotAfterClose = Save-Screenshot 'desktop-after-close.ppm'
 
     # Use the existing desktop backtick shortcut and guest shell command, which
@@ -1816,14 +1924,24 @@ try {
     $secondCloseText = $capture.Snapshot().Substring($secondCloseStartIndex)
     $secondCloseResponseStage = Get-GuestApplicationResponseStage $secondCloseText
     $overall.checks.secondClose = [ordered]@{ passed = ($secondCloseResponseStage.stage -ceq 'application-response-observed'); injection = $secondCloseInjection; guestDeviceAndDispatch = $secondCloseInput; applicationResponseStage = $secondCloseResponseStage; lifecycleMarker = ($secondCloseText -match 'STELLAR_NAVIGATOR_LIFECYCLE status=initialized-evaluated-shutdown'); loaderCleanupMarker = ($secondCloseText -match 'lifecycle PASS window/resource cleanup complete'); applicationInstanceExited = ($secondCloseText -match 'lifecycle PASS window/resource cleanup complete') }
+    $desktopProbeStartIndex = $capture.Snapshot().Length
+    $desktopProbeInjection = Send-OwnedGuestKey 'grave_accent' 100
+    [void](Wait-SerialPattern -Capture $capture -Pattern '\[SN10-GUEST-INPUT\] ps2 key=0x0*60 action=down' -Seconds 8 -Description 'post-close desktop shell shortcut PS/2 press' -StartIndex $desktopProbeStartIndex)
+    [void](Wait-SerialPattern -Capture $capture -Pattern '\[SN10-GUEST-INPUT\] ps2 key=0x0*60 action=up' -Seconds 8 -Description 'post-close desktop shell shortcut PS/2 release' -StartIndex $desktopProbeStartIndex)
     $overall.checks.shellAfterSecondClose = Save-Screenshot 'shell-after-second-close.ppm'
-    [void](Send-OwnedGuestKey 'esc' 100)
+    if (-not $overall.checks.shellAfterSecondClose.captured) { throw 'Post-close desktop shell screenshot was not captured after an observed PS/2 shortcut.' }
+    $desktopEscapeStartIndex = $capture.Snapshot().Length
+    $desktopEscapeInjection = Send-OwnedGuestKey 'esc' 100
+    [void](Wait-SerialPattern -Capture $capture -Pattern '\[SN10-GUEST-INPUT\] ps2 key=0x0*1B action=down' -Seconds 8 -Description 'post-close desktop shell Escape PS/2 press' -StartIndex $desktopEscapeStartIndex)
+    [void](Wait-SerialPattern -Capture $capture -Pattern '\[SN10-GUEST-INPUT\] ps2 key=0x0*1B action=up' -Seconds 8 -Description 'post-close desktop shell Escape PS/2 release' -StartIndex $desktopEscapeStartIndex)
     Start-Sleep -Milliseconds 500
     $overall.checks.desktopAfterSecondClose = Save-Screenshot 'desktop-after-second-close.ppm'
     if (-not $overall.checks.desktopAfterSecondClose.captured) { throw 'Guest desktop screenshot after second close was not captured.' }
+    $overall.checks.desktopPostCloseInput = [ordered]@{ passed = $true; desktopShellShortcutInjection = $desktopProbeInjection; shortcutPs2PressAndReleaseObserved = $true; shellScreenshot = $overall.checks.shellAfterSecondClose; escapeInjection = $desktopEscapeInjection; escapePs2PressAndReleaseObserved = $true; desktopScreenshot = $overall.checks.desktopAfterSecondClose }
     $overall.checks.guestStability = Confirm-OwnedGuestStable 3
     $overall.checks.desktopUsable = [ordered]@{ appModelDiscoveryVerified = $true; visualDesktopAfterFirstCloseCaptured = $overall.checks.screenshotAfterClose.captured; visualDesktopAfterSecondCloseCaptured = $overall.checks.desktopAfterSecondClose.captured; guestRemainedAliveAfterSecondClose = $true }
     $overall.checks.repeatEphemerisParity = [ordered]@{ first = $firstEphemeris.comparison; second = $secondEphemeris.comparison; bothGuestEvaluationsPassed = $true; referenceToleranceKm = 0.0005 }
+    $overall.checks.deferredLaunchFinalContract = Get-SN10DeferredLaunchRuntimeContract $capture.Snapshot() -RequireResult
     $overall.classification = 'PASS'
     $overall.blocker = $null
 } catch {

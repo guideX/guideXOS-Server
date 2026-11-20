@@ -996,18 +996,6 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         // Redraw now so bare-metal thumbnails and the selected wallpaper use /system/wallpapers.
         kernel::desktop::draw();
 
-#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)
-        // SN10 acceptance-only driver: launch through the real Desktop/App
-        // Model dispatcher after package discovery and VFS mounting. The
-        // Native ELF app exits when the proof runner sends Escape over QEMU.
-        kernel::serial::puts("[SN10-GUEST] appmodel-launch begin id=com.guidexos.stellarnavigator\n");
-        const bool stellarNavigatorLaunched =
-            kernel::desktop::launch_app("com.guidexos.stellarnavigator");
-        kernel::serial::puts(stellarNavigatorLaunched
-            ? "[SN10-GUEST] appmodel-launch result=success\n"
-            : "[SN10-GUEST] appmodel-launch result=failed\n");
-#endif
-
 #if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
 #if defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_PERSISTENCE_ACTIVE)
         manualPersistenceReady = mounted;
@@ -1242,6 +1230,14 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         // follow-up run with monitor-driven input (it needs Escape to exit).
         kernel::native_elf::app_audio_app_proof();
 #endif
+#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)
+        // The proof launch is deferred until the regular desktop loop has
+        // completed one input and presentation pass. That guarantees PS/2,
+        // IRQ1, the input manager, compositor, and desktop are ready before
+        // the synchronous Native ELF event loop starts. After it exits, this
+        // same desktop loop resumes without skipping kernel initialization.
+        bool stellarNavigatorProofLaunchPending = true;
+#endif
         kernel::serial::puts("[KERNEL] Entering main loop (waiting for input)...\n");
         
         
@@ -1361,6 +1357,22 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             if (workEndTicks >= workStartTicks) {
                 kernel::desktop::record_cpu_busy_ticks(workEndTicks - workStartTicks);
             }
+
+#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)
+            if (stellarNavigatorProofLaunchPending) {
+                // Clear before dispatch so even an unusual return path cannot
+                // repeat the proof launch on a later desktop iteration.
+                stellarNavigatorProofLaunchPending = false;
+                kernel::serial::puts("[SN10-GUEST] input-ready source=ps2 irq1=registered input-manager=initialized desktop-loop=operational\n");
+                kernel::serial::puts("[SN10-GUEST] appmodel-launch begin id=com.guidexos.stellarnavigator\n");
+                const bool stellarNavigatorLaunched =
+                    kernel::desktop::launch_app("com.guidexos.stellarnavigator");
+                kernel::serial::puts(stellarNavigatorLaunched
+                    ? "[SN10-GUEST] appmodel-launch result=success\n"
+                    : "[SN10-GUEST] appmodel-launch result=failed\n");
+                kernel::serial::puts("[SN10-GUEST] desktop-loop-resumed input=active\n");
+            }
+#endif
             
             uint64_t idleStartTicks = kernel::pit::ticks();
 
