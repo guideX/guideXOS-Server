@@ -366,17 +366,192 @@ class CooperativeEpilogCountTests(unittest.TestCase):
 
 class CooperativeStackUseTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.sequence = (ROOT / "tests" / "ia64_cooperative_context_switch" /
-                         "probe_sequence.s").read_text(encoding="utf-8")
+        script_dir = ROOT / "tests" / "ia64_cooperative_context_switch"
+        self.sequence = (script_dir / "probe_sequence.s").read_text(encoding="utf-8")
+        self.entry = (script_dir / "entry.s").read_text(encoding="utf-8")
+        self.switch = (script_dir / "context_switch.s").read_text(encoding="utf-8")
 
-    def test_a_stack_sentinels_are_seeded_below_the_high_guard(self) -> None:
-        runner.validate_cooperative_stack_use_source(self.sequence)
+    def validate_source(self, sequence: str | None = None, entry: str | None = None,
+                        switch: str | None = None) -> None:
+        runner.validate_cooperative_stack_use_source(
+            sequence if sequence is not None else self.sequence,
+            entry if entry is not None else self.entry,
+            switch if switch is not None else self.switch)
+
+    def test_a_and_b_markers_use_independent_expected_values_and_live_resumes(self) -> None:
+        self.validate_source()
+
+    def test_a_marker_is_checked_before_first_suspension(self) -> None:
+        self.validate_source()
+        marker_check = (
+            "ia64_coop_a_stack_marker_initial_check:\n"
+            "    ld8 r14 = [r12] ;;\n"
+            "    ASSERT_EQ r14, STACK_USE_A_LOW_EXPECTED\n"
+            "    adds r28 = 8, r12 ;;\n"
+            "    ld8 r14 = [r28] ;;\n"
+            "    ASSERT_EQ r14, STACK_USE_A_HIGH_EXPECTED\n")
+        damaged = self.sequence.replace(marker_check,
+                                        "ia64_coop_a_stack_marker_initial_check:\n", 1)
+        with self.assertRaisesRegex(runner.GateError, "Context A markers"):
+            self.validate_source(damaged)
+
+    def test_missing_marker_initialization_is_rejected(self) -> None:
+        damaged = self.sequence.replace(
+            "    adds r12 = -4096, r12 ;;\n"
+            "    movl r14 = STACK_USE_A_LOW ;;\n    st8 [r12] = r14 ;;\n"
+            "    adds r28 = 8, r12 ;;\n"
+            "    movl r14 = STACK_USE_A_HIGH ;;\n    st8 [r28] = r14 ;;\n", "", 1)
+        with self.assertRaisesRegex(runner.GateError, "Context A markers"):
+            self.validate_source(damaged)
+
+    def test_marker_outside_context_a_stack_is_rejected(self) -> None:
+        damaged = self.sequence.replace(
+            "adds r12 = -4096, r12 ;;", "adds r12 = -65544, r12 ;;", 1)
+        with self.assertRaisesRegex(runner.GateError, "Context A markers"):
+            self.validate_source(damaged)
+
+    def test_marker_in_context_b_stack_is_rejected(self) -> None:
+        damaged = self.sequence.replace(
+            "movl r15 = ia64_coop_stack_a_top ;;\n    SET64 r14, C_SP, r15",
+            "movl r15 = ia64_coop_stack_b_top ;;\n    SET64 r14, C_SP, r15", 1)
+        with self.assertRaisesRegex(runner.GateError, "Context A must save its own stack"):
+            self.validate_source(damaged)
+
+    def test_marker_overlapping_rbs_is_rejected(self) -> None:
+        with self.assertRaisesRegex(runner.GateError, "overlap"):
+            runner.validate_cooperative_stack_use_layout(
+                (0x10000, 0x20000), (0x21000, 0x31000),
+                (0x1F000, 0x2F000), (0x43000, 0x53000),
+                (0x54000, 0x54400), (0x54800, 0x54C00), (0x55000, 0x55700))
+
+    def test_marker_overlapping_context_metadata_is_rejected(self) -> None:
+        with self.assertRaisesRegex(runner.GateError, "overlap"):
+            runner.validate_cooperative_stack_use_layout(
+                (0x10000, 0x20000), (0x21000, 0x31000),
+                (0x32000, 0x42000), (0x43000, 0x53000),
+                (0x1F000, 0x1F400), (0x54800, 0x54C00), (0x55000, 0x55700))
+
+    def test_marker_initialized_only_after_a_resumes_is_rejected(self) -> None:
+        seed = (
+            "    adds r12 = -4096, r12 ;;\n"
+            "    movl r14 = STACK_USE_A_LOW ;;\n    st8 [r12] = r14 ;;\n"
+            "    adds r28 = 8, r12 ;;\n"
+            "    movl r14 = STACK_USE_A_HIGH ;;\n    st8 [r28] = r14 ;;\n")
+        damaged = self.sequence.replace(seed, "", 1).replace(
+            "ia64_coop_a_resumed_first:\n",
+            "ia64_coop_a_resumed_first:\n" + seed, 1)
+        with self.assertRaisesRegex(runner.GateError, "Context A markers"):
+            self.validate_source(damaged)
+
+    def test_normal_fixture_setup_cannot_overwrite_a_marker(self) -> None:
+        damaged = self.sequence.replace(
+            "ia64_coop_setup_exit:\n",
+            "ia64_coop_setup_exit:\n"
+            "    movl r14 = STACK_USE_A_LOW ;;\n    st8 [r12] = r14 ;;\n", 1)
+        with self.assertRaisesRegex(runner.GateError, "setup must not seed or overwrite"):
+            self.validate_source(damaged)
+
+    def test_assertion_cannot_reuse_the_initializer_as_its_expected_value(self) -> None:
+        damaged = self.sequence.replace(
+            "ASSERT_EQ r14, STACK_USE_A_LOW_EXPECTED",
+            "ASSERT_EQ r14, STACK_USE_A_LOW", 1)
+        with self.assertRaisesRegex(runner.GateError, "Context A markers"):
+            self.validate_source(damaged)
+
+    def test_incorrect_stack_bounds_are_rejected(self) -> None:
+        damaged_entry = self.entry.replace(
+            "ia64_coop_stack_a_bottom:\n    .skip 65536",
+            "ia64_coop_stack_a_bottom:\n    .skip 32768", 1)
+        with self.assertRaisesRegex(runner.GateError, "stack bounds"):
+            self.validate_source(entry=damaged_entry)
+
+    def test_incorrect_growth_direction_is_rejected(self) -> None:
+        damaged = self.sequence.replace(
+            "adds r12 = -4096, r12 ;;", "adds r12 = 4096, r12 ;;", 1)
+        with self.assertRaisesRegex(runner.GateError, "Context A markers"):
+            self.validate_source(damaged)
+
+    def test_marker_width_and_alignment_mismatches_are_rejected(self) -> None:
+        damaged_cases = (
+            self.sequence.replace("st8 [r12] = r14 ;;", "st4 [r12] = r14 ;;", 1),
+            self.sequence.replace("adds r28 = 8, r12 ;;", "adds r28 = 4, r12 ;;", 1),
+            self.sequence.replace("ld8 r14 = [r12] ;;", "ld4 r14 = [r12] ;;", 1),
+        )
+        for index, damaged in enumerate(damaged_cases):
+            with self.subTest(case=index):
+                with self.assertRaises(runner.GateError):
+                    self.validate_source(damaged)
+
+    def test_wrong_expected_sentinel_is_rejected(self) -> None:
+        damaged = self.sequence.replace(
+            ".equ STACK_USE_A_LOW_EXPECTED, 0x415f535441434b30",
+            ".equ STACK_USE_A_LOW_EXPECTED, 0x415f535441434b31", 1)
+        with self.assertRaisesRegex(runner.GateError, "independently specified"):
+            self.validate_source(damaged)
+
+    def test_target_disassembly_must_match_marker_store_and_resumed_load(self) -> None:
+        valid = """0000000000108000 <_start>:
+    movl r12=0x20000
+0000000000108100 <ia64_coop_probe_setup>:
+0000000000108200 <ia64_coop_a_test>:
+    adds r12=-4096,r12
+    movl r14=0x415f535441434b30
+    st8 [r12]=r14
+    adds r28=8,r12
+    movl r14=0x415f535441434b31
+    st8 [r28]=r14
+00000000001082f0 <ia64_coop_a_stack_marker_initial_check>:
+    ld8 r14=[r12]
+    movl r15=0x415f535441434b30
+    cmp.eq p6,p7=r14,r15
+    (p07) br.cond.sptk.few 10ff00 <ia64_coop_test_fail>
+    adds r28=8,r12
+    ld8 r14=[r28]
+    movl r15=0x415f535441434b31
+    cmp.eq p6,p7=r14,r15
+    (p07) br.cond.sptk.few 10ff00 <ia64_coop_test_fail>
+    br.call.sptk.many b0=10f2a0 <ia64_coop_context_switch>
+0000000000108300 <ia64_coop_a_resumed_first>:
+0000000000108310 <ia64_coop_a_stack_marker_first_check>:
+    ld8 r14=[r12]
+    movl r15=0x415f535441434b30
+    cmp.eq p6,p7=r14,r15
+    (p07) br.cond.sptk.few 10ff00 <ia64_coop_test_fail>
+    adds r28=8,r12
+    ld8 r14=[r28]
+    movl r15=0x415f535441434b31
+    cmp.eq p6,p7=r14,r15
+    (p07) br.cond.sptk.few 10ff00 <ia64_coop_test_fail>
+0000000000108320 <ia64_coop_a_to_b_second_switch>:
+0000000000108400 <ia64_coop_a_resumed_final>:
+0000000000108410 <ia64_coop_a_stack_marker_final_check>:
+    ld8 r14=[r12]
+    movl r15=0x415f535441434b30
+    cmp.eq p6,p7=r14,r15
+    (p07) br.cond.sptk.few 10ff00 <ia64_coop_test_fail>
+    adds r28=8,r12
+    ld8 r14=[r28]
+    movl r15=0x415f535441434b31
+    cmp.eq p6,p7=r14,r15
+    (p07) br.cond.sptk.few 10ff00 <ia64_coop_test_fail>
+0000000000108420 <ia64_coop_a_final_exit>:
+"""
+        symbols = {"stack_a_top": 0x20000}
+        marker = (0x1F000, 0x1F010)
+        runner.validate_cooperative_stack_use_disassembly(valid, symbols, marker)
+        damaged = valid.replace("st8 [r12]=r14", "st4 [r12]=r14", 1)
+        with self.assertRaisesRegex(runner.GateError, "initialization"):
+            runner.validate_cooperative_stack_use_disassembly(damaged, symbols, marker)
+        bad_failure = valid.replace(
+            "10ff00 <ia64_coop_test_fail>", "10ff10 <unexpected_failure>", 1)
+        with self.assertRaisesRegex(runner.GateError, "failure path"):
+            runner.validate_cooperative_stack_use_disassembly(bad_failure, symbols, marker)
 
     def test_missing_a_stack_seed_is_rejected(self) -> None:
         damaged = self.sequence.replace(
             "    movl r14 = STACK_USE_A_LOW ;;\n    st8 [r12] = r14 ;;\n", "", 1)
-        with self.assertRaisesRegex(runner.GateError, "Context A stack sentinels"):
-            runner.validate_cooperative_stack_use_source(damaged)
+        with self.assertRaisesRegex(runner.GateError, "Context A markers"):
+            self.validate_source(damaged)
 
 
 class CooperativeContextSwitchCallerTests(unittest.TestCase):

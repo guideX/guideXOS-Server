@@ -959,17 +959,20 @@ def analyze_debugger_initialization(stderr_text: str, command_text: str,
 
 def _format_eval_and_snapshot(lines: list[str], index: int, label: str,
                               root: Path, context_a: int, context_b: int,
-                              probe_record: int, probe_record_size: int) -> None:
+                              probe_record: int, probe_record_size: int,
+                              stack_marker_a: tuple[int, int]) -> None:
     lines.append("eval ip+0 $insts$")
     lines.append("eval iva psr rsc bsp rnat unat pfs lc ec sp gp b0 b1 b2 b3 b4 b5 r14 r15 "
                  "r32 r33 r42 r43 iip ipsr isr ifs iipa")
     register_path = root / "registers" / f"{index:04d}-{label}.txt"
     context_a_path = root / "contexts" / f"{index:04d}-{label}-a.txt"
     context_b_path = root / "contexts" / f"{index:04d}-{label}-b.txt"
+    marker_path = root / "markers" / f"{index:04d}-{label}-a.txt"
     record_path = root / "records" / f"{index:04d}-{label}.txt"
     lines.append(f"rd {register_path}")
     lines.append(f"dd 0x{context_a:x} 0x{context_a + 1023:x} {context_a_path}")
     lines.append(f"dd 0x{context_b:x} 0x{context_b + 1023:x} {context_b_path}")
+    lines.append(f"dd 0x{stack_marker_a[0]:x} 0x{stack_marker_a[1] - 1:x} {marker_path}")
     lines.append(f"dd 0x{probe_record:x} "
                  f"0x{probe_record + probe_record_size - 1:x} {record_path}")
     lines.append("if $exited$ quit")
@@ -989,9 +992,21 @@ def cooperative_breakpoints(frontiers: dict[str, int]) -> tuple[tuple[int, str],
 def make_command_file(root: Path, symbols: dict[str, Any],
                       instruction_budget: int = SUPPORTED_INSTRUCTION_BUDGET) -> str:
     validate_instruction_budget(instruction_budget)
-    for path in (root, root / "registers", root / "contexts", root / "records"):
+    for path in (root, root / "registers", root / "contexts", root / "markers",
+                 root / "records"):
         if any(ch.isspace() for ch in str(path)):
             raise DiagnosticError("Ski command-file paths cannot contain whitespace")
+    marker_range = symbols.get("stack_marker_a")
+    marker_expected = symbols.get("stack_marker_a_expected")
+    if not isinstance(marker_range, (tuple, list)) or len(marker_range) != 2 or \
+            not all(isinstance(value, int) for value in marker_range) or \
+            marker_range[0] < 0 or marker_range[1] <= marker_range[0] or \
+            marker_range[1] - marker_range[0] != 16 or marker_range[0] % 8:
+        raise DiagnosticError("candidate A stack-marker dump requires an aligned two-word range")
+    if not isinstance(marker_expected, dict) or set(marker_expected) != {"LOW", "HIGH"} or \
+            not all(isinstance(value, int) and 0 <= value < (1 << 64)
+                    for value in marker_expected.values()):
+        raise DiagnosticError("candidate A stack-marker dump requires independent expected values")
     text_start, text_end = symbols["text"]
     ivt = symbols["ivt"]
     breakpoints = cooperative_breakpoints(symbols["frontiers"])
@@ -1002,16 +1017,19 @@ def make_command_file(root: Path, symbols: dict[str, Any],
     lines.append(f"step {INITIAL_STEP_BUDGET}")
     _format_eval_and_snapshot(lines, 1, "startup-frontier", root,
                               symbols["context_a"], symbols["context_b"],
-                              symbols["probe_record"], symbols["probe_record_size"])
+                              symbols["probe_record"], symbols["probe_record_size"],
+                              tuple(marker_range))
     lines.append(f"step {INITIAL_FOLLOWUP_STEP_BUDGET}")
     _format_eval_and_snapshot(lines, 2, "startup-followup", root,
                               symbols["context_a"], symbols["context_b"],
-                              symbols["probe_record"], symbols["probe_record_size"])
+                              symbols["probe_record"], symbols["probe_record_size"],
+                              tuple(marker_range))
     for quantum in range(1, STEP_QUANTA + 1):
         lines.append(f"step {STEP_QUANTUM}")
         _format_eval_and_snapshot(lines, quantum + 2, f"q{quantum:03d}", root,
                                   symbols["context_a"], symbols["context_b"],
-                                  symbols["probe_record"], symbols["probe_record_size"])
+                                  symbols["probe_record"], symbols["probe_record_size"],
+                                  tuple(marker_range))
     lines.append("quit")
     validate_command_file(
         "\n".join(lines) + "\n",

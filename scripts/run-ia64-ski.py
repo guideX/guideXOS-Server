@@ -1584,6 +1584,12 @@ COOP_CONTEXT_EVENT_NAMES = (
 COOP_CONTEXT_EVENT_IDS = (0xA, 0xB, 0xB, 0xA, 0xA, 0xB, 0xB, 0xA)
 IA64_EC_REGISTER_WIDTH_BITS = 6
 COOP_EXPECTED_EC = {"A": 0x15, "B": 0x2A}
+COOP_EXPECTED_STACK_MARKERS = {
+    "A": {"LOW": 0x415F535441434B30, "HIGH": 0x415F535441434B31},
+    "B": {"LOW": 0x425F535441434B30, "HIGH": 0x425F535441434B31},
+}
+COOP_STACK_USE_DEPTH = 4096
+COOP_STACK_MARKER_WIDTH = 8
 COOP_EXPECTED_LC = {"A": 0x31, "B": 0x42}
 COOP_EXPECTED_GR = {
     "A": {4: 0x4758343441413031, 5: 0x4758353541413031,
@@ -2123,23 +2129,274 @@ def validate_cooperative_ec_contract(sequence_source: str, switch_source: str,
     return values
 
 
-def validate_cooperative_stack_use_source(sequence_source: str) -> None:
-    """Require A's stack-use sentinels to live below its high guard."""
-    a_start = sequence_source.find("ia64_coop_a_test:")
-    a_end = sequence_source.find(".endp ia64_coop_a_test", a_start)
-    a_test = sequence_source[a_start:a_end] if a_start >= 0 and a_end >= 0 else ""
-    allocation = re.compile(
-        r"alloc r16 = ar\.pfs, 6, 4, 2, 0 ;;\s*mov r34 = b0 ;;\s*mov r35 = r16 ;;\s*"
-        r"(?:/\*[\s\S]*?\*/\s*)?adds r12 = -4096, r12 ;;\s*"
-        r"movl r14 = STACK_USE_A_LOW ;;\s*"
-        r"st8 \[r12\] = r14 ;;\s*adds r28 = 8, r12 ;;\s*"
-        r"movl r14 = STACK_USE_A_HIGH ;;\s*st8 \[r28\] = r14 ;;")
-    if not allocation.search(a_test) or a_test.count("adds r12 = -4096, r12 ;;") != 1 or \
-            a_test.count("adds r12 = 4096, r12 ;;") != 1 or not re.search(
-                r"adds r12 = 4096, r12 ;;\s*mov ar\.pfs = r35 ;;\s*"
-                r"mov b0 = r34 ;;[\s\S]*?br\.ret\.sptk\.many b0", a_test):
+def _cooperative_source_body(source: str, start_marker: str, end_marker: str) -> str:
+    start = source.find(start_marker)
+    end = source.find(end_marker, start + len(start_marker)) if start >= 0 else -1
+    return source[start:end] if start >= 0 and end >= 0 else ""
+
+
+def _cooperative_stack_pattern(identity: str) -> re.Pattern[str]:
+    return re.compile(
+        rf"\.global ia64_coop_stack_{identity}_guard_low\s+"
+        rf"ia64_coop_stack_{identity}_guard_low:\s+\.skip 8\s+"
+        rf"\.global ia64_coop_stack_{identity}_bottom\s+"
+        rf"ia64_coop_stack_{identity}_bottom:\s+\.skip 65536\s+"
+        rf"\.global ia64_coop_stack_{identity}_top\s+"
+        rf"ia64_coop_stack_{identity}_top:\s+"
+        rf"\.global ia64_coop_stack_{identity}_guard_high\s+"
+        rf"ia64_coop_stack_{identity}_guard_high:\s+\.skip 8",
+        re.IGNORECASE,
+    )
+
+
+def validate_cooperative_stack_use_source(sequence_source: str, entry_source: str,
+                                           switch_source: str) -> None:
+    """Qualify fixed A/B memory-stack markers, their independent expectations, and lifetime."""
+    for identity, marker_values in COOP_EXPECTED_STACK_MARKERS.items():
+        for edge, expected_value in marker_values.items():
+            for suffix in ("", "_EXPECTED"):
+                name = f"STACK_USE_{identity}_{edge}{suffix}"
+                definition = re.search(
+                    rf"(?m)^\.equ\s+{name}\s*,\s*(0x[0-9a-fA-F]+|[0-9]+)\s*$",
+                    sequence_source,
+                )
+                if definition is None or int(definition.group(1), 0) != expected_value:
+                    raise GateError(
+                        f"{name} must be an independently specified fixed stack-marker value")
+
+    setup_body = _cooperative_source_body(
+        sequence_source, "ia64_coop_probe_setup:", ".endp ia64_coop_probe_setup")
+    if not setup_body or re.search(r"STACK_USE_[AB]_(?:LOW|HIGH)", setup_body):
+        raise GateError("normal fixture setup must not seed or overwrite a stack-use marker")
+
+    for identity in ("a", "b"):
+        if _cooperative_stack_pattern(identity).search(entry_source) is None:
+            raise GateError(
+                f"Context {identity.upper()} stack bounds must retain the guarded 64 KiB layout")
+    entry_body = _cooperative_source_body(entry_source, "_start:", ".endp _start")
+    if not entry_body or not re.search(
+            r"movl sp = ia64_coop_stack_a_top ;;[\s\S]*?"
+            r"br\.call\.sptk\.many b0 = ia64_coop_probe_run ;;[\s\S]*?"
+            r"br\.call\.sptk\.many b0 = ia64_coop_probe_main ;;", entry_body):
+        raise GateError("Context A must start at its own high stack bound before the probe runs")
+
+    setup_contexts = _cooperative_source_body(
+        sequence_source, "ia64_coop_probe_setup:", ".endp ia64_coop_probe_setup")
+    for identity in ("a", "b"):
+        c_sp_setup = (rf"movl r15 = ia64_coop_stack_{identity}_top ;;\s*"
+                      rf"SET64 r14, C_SP, r15" if identity == "a" else
+                      r"SET64 r14, C_SP, r15")
+        context_setup = re.search(
+            rf"movl r14 = ia64_coop_context_{identity} ;;"
+            rf"[\s\S]*?movl r15 = ia64_coop_stack_{identity}_bottom ;;\s*"
+            rf"SET64 r14, C_STACK_BASE, r15[\s\S]*?"
+            rf"movl r15 = ia64_coop_stack_{identity}_top ;;\s*"
+            rf"SET64 r14, C_STACK_LIMIT, r15[\s\S]*?{c_sp_setup}",
+            setup_contexts,
+        )
+        if context_setup is None:
+            raise GateError(
+                f"Context {identity.upper()} must save its own stack bounds and initial SP")
+
+    # The original entry establishes A's SP at stack_a_top. The setup routines
+    # do not allocate memory-stack frames, and the NaT helper restores r12.
+    run_body = _cooperative_source_body(
+        sequence_source, "ia64_coop_probe_run:", ".endp ia64_coop_probe_run")
+    nat_body = _cooperative_source_body(
+        sequence_source, "ia64_coop_set_nat8:", ".endp ia64_coop_set_nat8")
+    if re.search(r"\b(?:adds|mov)\s+r12\s*=", setup_contexts) or \
+            re.search(r"\b(?:adds|mov)\s+r12\s*=", run_body) or \
+            not re.search(r"mov r10 = r12 ;;[\s\S]*?ia64_coop_nat_saved_r12[\s\S]*?"
+                          r"movl r11 = ia64_coop_nat_saved_r12 ;;\s*ld8 r12 = \[r11\] ;;",
+                          nat_body):
+        raise GateError("probe setup must preserve A's incoming memory SP through the NaT helper")
+
+    if re.search(r"\bbr\.call\b", switch_source) or re.search(
+            r"\b(?:ld8|st8)(?:\.\w+)?\s+[^\n]*\[r12\]", switch_source):
+        raise GateError("the switch must not call a callee or spill through the suspended memory SP")
+
+    def marker_seed(body: str, identity: str) -> re.Match[str] | None:
+        return re.search(
+            rf"adds r12 = -{COOP_STACK_USE_DEPTH}, r12 ;;\s*"
+            rf"movl r14 = STACK_USE_{identity}_LOW ;;\s*"
+            rf"st8 \[r12\] = r14 ;;\s*"
+            rf"adds r28 = {COOP_STACK_MARKER_WIDTH}, r12 ;;\s*"
+            rf"movl r14 = STACK_USE_{identity}_HIGH ;;\s*"
+            rf"st8 \[r28\] = r14 ;;",
+            body,
+        )
+
+    def marker_check(body: str, identity: str) -> bool:
+        return re.search(
+            rf"ld8 r14 = \[r12\] ;;\s*"
+            rf"ASSERT_EQ r14, STACK_USE_{identity}_LOW_EXPECTED\s*"
+            rf"adds r28 = {COOP_STACK_MARKER_WIDTH}, r12 ;;\s*"
+            rf"ld8 r14 = \[r28\] ;;\s*"
+            rf"ASSERT_EQ r14, STACK_USE_{identity}_HIGH_EXPECTED",
+            body,
+        ) is not None
+
+    a_test = _cooperative_source_body(
+        sequence_source, "ia64_coop_a_test:", ".endp ia64_coop_a_test")
+    b_test = _cooperative_source_body(
+        sequence_source, "ia64_coop_b_test:", ".endp ia64_coop_b_test")
+    if not a_test or not b_test:
+        raise GateError("Context A/B test procedures are required for stack-marker qualification")
+    a_seed = marker_seed(a_test, "A")
+    a_initial_check = _cooperative_source_body(
+        a_test, "ia64_coop_a_stack_marker_initial_check:", "movl r32 = SENTINEL_A")
+    a_first_resume = _cooperative_source_body(
+        a_test, "ia64_coop_a_resumed_first:", ".global ia64_coop_a_to_b_second_switch")
+    final_resume_start = a_test.find("ia64_coop_a_resumed_final:")
+    a_final_resume = a_test[final_resume_start:] if final_resume_start >= 0 else ""
+    if a_seed is None or a_test.count("adds r12 = -4096, r12 ;;") != 1 or \
+            a_test.count("adds r12 = 4096, r12 ;;") != 1 or \
+            a_test.count("st8 [r12] = r14 ;;") != 1 or \
+            not marker_check(a_initial_check, "A") or \
+            not marker_check(a_first_resume, "A") or not marker_check(a_final_resume, "A") or \
+            not re.search(r"adds r12 = 4096, r12 ;;\s*mov ar\.pfs = r35 ;;\s*"
+                          r"mov b0 = r34 ;;[\s\S]*?br\.ret\.sptk\.many b0", a_final_resume):
         raise GateError(
-            "Context A stack sentinels must be initialized at SP-4096 and its stack adjustment balanced")
+            "Context A markers must be seeded once at SP-4096 before suspension, checked "
+            "against independent values on both resumes, and kept live until stack restoration")
+    first_a_switch = a_test.find("br.call.sptk.many b0 = ia64_coop_context_switch ;;")
+    first_a_resume_pos = a_test.find("ia64_coop_a_resumed_first:")
+    initial_check_pos = a_test.find("ia64_coop_a_stack_marker_initial_check:")
+    if first_a_switch < 0 or first_a_resume_pos < 0 or initial_check_pos < 0 or \
+            a_seed.start() > initial_check_pos or a_seed.end() > initial_check_pos or \
+            initial_check_pos >= first_a_switch:
+        raise GateError("Context A markers must be initialized before its first suspension")
+
+    b_seed = marker_seed(b_test, "B")
+    b_first_switch = b_test.find("br.call.sptk.many b0 = ia64_coop_context_switch ;;")
+    b_first_resume = _cooperative_source_body(
+        b_test, "ia64_coop_b_resumed:", "RECORD_EVENT EVENT_B_TO_A_SECOND")
+    if b_seed is None or b_first_switch < 0 or b_seed.start() > b_first_switch or \
+            not marker_check(b_test, "B") or not marker_check(b_first_resume, "B"):
+        raise GateError(
+            "Context B markers must be seeded on B's own stack before suspension and checked "
+            "against independent values on entry and resume")
+
+
+def validate_cooperative_stack_use_layout(
+        stack_a: tuple[int, int], stack_b: tuple[int, int],
+        rbs_a: tuple[int, int], rbs_b: tuple[int, int],
+        context_a: tuple[int, int], context_b: tuple[int, int],
+        probe_record: tuple[int, int]) -> tuple[int, int]:
+    """Return A's two-word marker range after proving it belongs only to A's stack."""
+    memory_ranges = {
+        "stack_a": stack_a,
+        "stack_b": stack_b,
+        "rbs_a": rbs_a,
+        "rbs_b": rbs_b,
+        "context_a": context_a,
+        "context_b": context_b,
+        "probe_record": probe_record,
+    }
+    if stack_a[1] - stack_a[0] != 65536 or stack_a[0] % 16 or \
+            stack_b[1] - stack_b[0] != 65536 or stack_b[0] % 16:
+        raise GateError("Context A/B stack bounds or 16-byte alignment are invalid")
+    for name in ("rbs_a", "rbs_b"):
+        bounds = memory_ranges[name]
+        if bounds[1] - bounds[0] != 65536 or bounds[0] % 512 or bounds[1] % 512:
+            raise GateError(f"Context {name[-1].upper()} RSE backing-store bounds are invalid")
+    for left_name, left in memory_ranges.items():
+        if left[0] >= left[1]:
+            raise GateError(f"cooperative memory range {left_name} is empty or reversed")
+        for right_name, right in memory_ranges.items():
+            if left_name < right_name and ranges_overlap(left, right):
+                raise GateError(
+                    f"cooperative memory ranges overlap: {left_name} and {right_name}")
+
+    marker = (stack_a[1] - COOP_STACK_USE_DEPTH,
+              stack_a[1] - COOP_STACK_USE_DEPTH + 2 * COOP_STACK_MARKER_WIDTH)
+    if marker[0] % COOP_STACK_MARKER_WIDTH or marker[1] > stack_a[1] or \
+            not stack_a[0] <= marker[0] < marker[1] <= stack_a[1]:
+        raise GateError("Context A marker width, alignment, or address is outside its stack")
+    for name, bounds in memory_ranges.items():
+        if name != "stack_a" and ranges_overlap(marker, bounds):
+            raise GateError(f"Context A marker overlaps {name}")
+    return marker
+
+
+def validate_cooperative_stack_use_disassembly(
+        disassembly: str, expected_symbols: dict[str, int],
+        marker_range: tuple[int, int]) -> None:
+    """Bind marker seed/read instructions and stack identity to linked target code."""
+    def region(start_name: str, end_name: str) -> str:
+        start = re.search(rf"(?m)^[0-9a-f]+\s+<{re.escape(start_name)}>:\s*$", disassembly)
+        end = re.search(rf"(?m)^[0-9a-f]+\s+<{re.escape(end_name)}>:\s*$", disassembly)
+        if start is None or end is None or end.start() <= start.start():
+            raise GateError(
+                f"target disassembly is missing stack-marker symbols {start_name}/{end_name}")
+        return disassembly[start.start():end.start()]
+
+    start_body = region("_start", "ia64_coop_probe_setup")
+    if not re.search(rf"movl\s+r12\s*=\s*0x{expected_symbols['stack_a_top']:x}\b",
+                     start_body, re.IGNORECASE):
+        raise GateError("target entry does not initialize A SP to A's linked stack limit")
+
+    a_seed = region("ia64_coop_a_test", "ia64_coop_a_resumed_first")
+    low = COOP_EXPECTED_STACK_MARKERS["A"]["LOW"]
+    high = COOP_EXPECTED_STACK_MARKERS["A"]["HIGH"]
+    seed_match = re.search(
+        rf"adds\s+r12\s*=\s*-{COOP_STACK_USE_DEPTH}\s*,\s*r12[\s\S]*?"
+        rf"movl\s+r14\s*=\s*0x{low:x}\b[\s\S]*?"
+        r"st8\s+\[r12\]\s*=\s*r14[\s\S]*?"
+        rf"adds\s+r28\s*=\s*{COOP_STACK_MARKER_WIDTH}\s*,\s*r12[\s\S]*?"
+        rf"movl\s+r14\s*=\s*0x{high:x}\b[\s\S]*?"
+        r"st8\s+\[r28\]\s*=\s*r14",
+        a_seed,
+        re.IGNORECASE,
+    )
+    if seed_match is None or len(re.findall(r"\bst8\s+\[r12\]\s*=", a_seed,
+                                             re.IGNORECASE)) != 1:
+        raise GateError("target A marker initialization does not match the qualified source")
+
+    def check_region(start_name: str, end_name: str, label: str) -> None:
+        body = region(start_name, end_name)
+        if not re.search(
+                rf"ld8\s+r14\s*=\s*\[r12\][\s\S]*?"
+                rf"movl\s+r15\s*=\s*0x{low:x}\b[\s\S]*?"
+                r"cmp\.eq\s+p6,\s*p7\s*=\s*r14,\s*r15[\s\S]*?"
+                rf"adds\s+r28\s*=\s*{COOP_STACK_MARKER_WIDTH}\s*,\s*r12[\s\S]*?"
+                r"ld8\s+r14\s*=\s*\[r28\][\s\S]*?"
+                rf"movl\s+r15\s*=\s*0x{high:x}\b[\s\S]*?"
+                r"cmp\.eq\s+p6,\s*p7\s*=\s*r14,\s*r15",
+                body, re.IGNORECASE):
+            raise GateError(f"target {label} marker reads/comparisons do not match source")
+        comparisons = list(re.finditer(
+            r"cmp\.eq\s+p6,\s*p7\s*=\s*r14,\s*r15", body, re.IGNORECASE))
+        if len(comparisons) != 2:
+            raise GateError(f"target {label} marker assertion count does not match source")
+        for index, match in enumerate(comparisons):
+            next_compare = (comparisons[index + 1].start()
+                            if index + 1 < len(comparisons) else len(body))
+            if re.search(r"br\.cond[^\n]*<ia64_coop_test_fail>",
+                         body[match.end():next_compare], re.IGNORECASE) is None:
+                raise GateError(
+                    f"target {label} marker assertion does not branch to the failure path")
+
+    check_region("ia64_coop_a_stack_marker_initial_check",
+                 "ia64_coop_a_resumed_first", "pre-suspend")
+    pre_suspend = region("ia64_coop_a_stack_marker_initial_check",
+                         "ia64_coop_a_resumed_first")
+    first_switch = re.search(
+        r"br\.call\.sptk\.many\s+b0\s*=\s*[0-9a-f]+\s+<ia64_coop_context_switch>",
+        pre_suspend, re.IGNORECASE)
+    pre_suspend_checks = list(re.finditer(
+        r"cmp\.eq\s+p6,\s*p7\s*=\s*r14,\s*r15", pre_suspend, re.IGNORECASE))
+    if first_switch is None or len(pre_suspend_checks) != 2 or any(
+            match.start() >= first_switch.start() for match in pre_suspend_checks):
+        raise GateError("target A marker must be read and checked before its first suspension")
+
+    check_region("ia64_coop_a_stack_marker_first_check",
+                 "ia64_coop_a_to_b_second_switch", "first-resume")
+    check_region("ia64_coop_a_stack_marker_final_check",
+                 "ia64_coop_a_final_exit", "final-resume")
+    if marker_range[1] - marker_range[0] != 2 * COOP_STACK_MARKER_WIDTH or \
+            marker_range[0] != expected_symbols["stack_a_top"] - COOP_STACK_USE_DEPTH:
+        raise GateError("target A marker address does not match its linked stack geometry")
 
 
 def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Path,
@@ -2166,7 +2423,11 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
         "ia64_coop_probe_after_setup", "ia64_coop_probe_after_a_test",
         "ia64_coop_a_test", "ia64_coop_a_resumed_first",
         "ia64_coop_a_resumed_final", "ia64_coop_a_final_exit",
+        "ia64_coop_a_stack_markers_seeded", "ia64_coop_a_stack_marker_initial_check",
+        "ia64_coop_a_stack_marker_first_check",
+        "ia64_coop_a_stack_marker_final_check", "ia64_coop_a_to_b_second_switch",
         "ia64_coop_b_first_entry", "ia64_coop_b_test", "ia64_coop_b_resumed",
+        "ia64_coop_b_to_a_second_switch",
         "ia64_coop_b_branch_registers_passed", "ia64_coop_b_to_a_first_switch",
         "ia64_coop_b_bootstrap_state", "ia64_coop_b_ec_initialized",
         "ia64_coop_b_ec_assertion_passed",
@@ -2193,6 +2454,7 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
         raise GateError("cooperative context or event-record geometry changed")
 
     ranges: dict[str, tuple[int, int]] = {}
+    exact_ranges: dict[str, tuple[int, int]] = {}
     for name in ("a", "b"):
         stack_base = symbol(f"ia64_coop_stack_{name}_bottom")
         stack_limit = symbol(f"ia64_coop_stack_{name}_top")
@@ -2209,6 +2471,8 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
             raise GateError(f"context {name.upper()} boundary canaries do not bracket their ranges")
         ranges[f"stack_{name}"] = (symbol(f"ia64_coop_stack_{name}_guard_low"), stack_limit + 8)
         ranges[f"rbs_{name}"] = (symbol(f"ia64_coop_rbs_{name}_guard_low"), rbs_limit + 8)
+        exact_ranges[f"stack_{name}"] = (stack_base, stack_limit)
+        exact_ranges[f"rbs_{name}"] = (rbs_base, rbs_limit)
     for left_name, left in ranges.items():
         for right_name, right in ranges.items():
             if left_name < right_name and ranges_overlap(left, right):
@@ -2217,6 +2481,12 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
     context_b = (symbol("ia64_coop_context_b"), symbol("ia64_coop_context_b") + 1024)
     if context_a[0] % 512 or context_b[0] % 512 or ranges_overlap(context_a, context_b):
         raise GateError("context records are not separate 512-byte aligned objects")
+    probe_record = (symbol("ia64_coop_probe_record"),
+                    symbol("ia64_coop_probe_record") + size("ia64_coop_probe_record"))
+    marker_range = validate_cooperative_stack_use_layout(
+        exact_ranges["stack_a"], exact_ranges["stack_b"],
+        exact_ranges["rbs_a"], exact_ranges["rbs_b"],
+        context_a, context_b, probe_record)
     if symbol("__text_start") >= symbol("__text_end"):
         raise GateError("cooperative probe text bounds are invalid")
 
@@ -2241,7 +2511,7 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
                         ", ".join(missing_terms))
     validate_cooperative_context_switch_source(switch_source)
     validate_cooperative_ec_contract(sequence_source, switch_source)
-    validate_cooperative_stack_use_source(sequence_source)
+    validate_cooperative_stack_use_source(sequence_source, entry_source, switch_source)
     validate_cooperative_probe_setup_source(sequence_source)
     validate_cooperative_bsp_bounds_source(sequence_source)
     validate_cooperative_rse_mode_accesses(entry_source, sequence_source, switch_source)
@@ -2354,6 +2624,9 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
         raise GateError(f"cannot inspect complete cooperative target disassembly: {exc}") from exc
     ec_contract = validate_cooperative_ec_contract(
         sequence_source, switch_source, target_result.stdout)
+    validate_cooperative_stack_use_disassembly(
+        target_result.stdout,
+        {"stack_a_top": symbol("ia64_coop_stack_a_top")}, marker_range)
     branch_validator = load_cooperative_branch_register_validator()
     try:
         branch_register_contract = branch_validator.validate_branch_register_contract(
@@ -2365,6 +2638,8 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
             "context_b": symbol("ia64_coop_context_b"),
             "stack_a": [symbol("ia64_coop_stack_a_bottom"), symbol("ia64_coop_stack_a_top")],
             "stack_b": [symbol("ia64_coop_stack_b_bottom"), symbol("ia64_coop_stack_b_top")],
+            "stack_marker_a": list(marker_range),
+            "stack_marker_a_expected": COOP_EXPECTED_STACK_MARKERS["A"],
             "rbs_a": [symbol("ia64_coop_rbs_a_base"), symbol("ia64_coop_rbs_a_limit")],
             "rbs_b": [symbol("ia64_coop_rbs_b_base"), symbol("ia64_coop_rbs_b_limit")],
             "setup": symbol("ia64_coop_probe_setup"),
@@ -2376,7 +2651,13 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
             "probe_after_setup": symbol("ia64_coop_probe_after_setup"),
             "probe_after_a_test": symbol("ia64_coop_probe_after_a_test"),
             "a_resume_first": symbol("ia64_coop_a_resumed_first"),
+            "a_marker_seeded": symbol("ia64_coop_a_stack_markers_seeded"),
+            "a_marker_initial_check": symbol("ia64_coop_a_stack_marker_initial_check"),
+            "a_marker_first_check": symbol("ia64_coop_a_stack_marker_first_check"),
+            "a_marker_final_check": symbol("ia64_coop_a_stack_marker_final_check"),
+            "a_to_b_second_switch": symbol("ia64_coop_a_to_b_second_switch"),
             "b_resume_second": symbol("ia64_coop_b_resumed"),
+            "b_to_a_second_switch": symbol("ia64_coop_b_to_a_second_switch"),
             "b_bootstrap_state": symbol("ia64_coop_b_bootstrap_state"),
             "b_ec_initialized": symbol("ia64_coop_b_ec_initialized"),
             "b_ec_assertion_passed": symbol("ia64_coop_b_ec_assertion_passed"),
@@ -2388,6 +2669,7 @@ def validate_cooperative_context_probe_static(artifact: Path, manifest_path: Pat
             "bsp_current_frame_offset": bsp_expected_offset,
             "bsp_expected_value": bsp_base + bsp_expected_offset,
             "bsp_frame_bytes": bsp_frame_bytes,
+            "probe_record": symbol("ia64_coop_probe_record"),
             "probe_record_size": size("ia64_coop_probe_record"),
             "a_resume_final": symbol("ia64_coop_a_resumed_final"),
             "a_final_exit": symbol("ia64_coop_a_final_exit"),

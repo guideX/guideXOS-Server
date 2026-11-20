@@ -139,6 +139,11 @@
 .equ STACK_USE_A_HIGH, 0x415f535441434b31
 .equ STACK_USE_B_LOW, 0x425f535441434b30
 .equ STACK_USE_B_HIGH, 0x425f535441434b31
+/* These expected values are independent from the initializers above. */
+.equ STACK_USE_A_LOW_EXPECTED, 0x415f535441434b30
+.equ STACK_USE_A_HIGH_EXPECTED, 0x415f535441434b31
+.equ STACK_USE_B_LOW_EXPECTED, 0x425f535441434b30
+.equ STACK_USE_B_HIGH_EXPECTED, 0x425f535441434b31
 .equ RBS_CANARY_LOW, 0x5242534c4f574341
 .equ RBS_CANARY_HIGH, 0x5242534849474843
 .equ SENTINEL_A, 0x47584f5341413031
@@ -673,6 +678,15 @@ ia64_coop_a_test:
     adds r28 = 8, r12 ;;
     movl r14 = STACK_USE_A_HIGH ;;
     st8 [r28] = r14 ;;
+.global ia64_coop_a_stack_markers_seeded
+ia64_coop_a_stack_markers_seeded:
+.global ia64_coop_a_stack_marker_initial_check
+ia64_coop_a_stack_marker_initial_check:
+    ld8 r14 = [r12] ;;
+    ASSERT_EQ r14, STACK_USE_A_LOW_EXPECTED
+    adds r28 = 8, r12 ;;
+    ld8 r14 = [r28] ;;
+    ASSERT_EQ r14, STACK_USE_A_HIGH_EXPECTED
     movl r32 = SENTINEL_A ;;
     mov r33 = r8 ;;
     movl r4 = GR4_A ;;
@@ -763,11 +777,13 @@ ia64_coop_a_resumed_first:
     CHECK_CONTEXT_GP ia64_coop_context_a
     mov r14 = r32 ;;
     ASSERT_EQ r14, SENTINEL_A
+.global ia64_coop_a_stack_marker_first_check
+ia64_coop_a_stack_marker_first_check:
     ld8 r14 = [r12] ;;
-    ASSERT_EQ r14, STACK_USE_A_LOW
+    ASSERT_EQ r14, STACK_USE_A_LOW_EXPECTED
     adds r28 = 8, r12 ;;
     ld8 r14 = [r28] ;;
-    ASSERT_EQ r14, STACK_USE_A_HIGH
+    ASSERT_EQ r14, STACK_USE_A_HIGH_EXPECTED
     movl r14 = ia64_coop_context_a ;;
     adds r28 = C_RESUME_ENTRIES, r14 ;;
     ld8 r15 = [r28] ;;
@@ -779,6 +795,8 @@ ia64_coop_a_resumed_first:
     mov out0 = r14 ;;
     movl r14 = ia64_coop_context_b ;;
     mov out1 = r14 ;;
+.global ia64_coop_a_to_b_second_switch
+ia64_coop_a_to_b_second_switch:
     br.call.sptk.many b0 = ia64_coop_context_switch ;;
 
 .global ia64_coop_a_resumed_final
@@ -798,11 +816,13 @@ ia64_coop_a_resumed_final:
     CHECK_APP_STATE LC_A, EC_A, CCV_A
     mov r14 = r32 ;;
     ASSERT_EQ r14, SENTINEL_A
+.global ia64_coop_a_stack_marker_final_check
+ia64_coop_a_stack_marker_final_check:
     ld8 r14 = [r12] ;;
-    ASSERT_EQ r14, STACK_USE_A_LOW
+    ASSERT_EQ r14, STACK_USE_A_LOW_EXPECTED
     adds r28 = 8, r12 ;;
     ld8 r14 = [r28] ;;
-    ASSERT_EQ r14, STACK_USE_A_HIGH
+    ASSERT_EQ r14, STACK_USE_A_HIGH_EXPECTED
     CAPTURE_FP_SET R_FP_A_FINAL_RESUME
     movl r14 = ia64_coop_probe_record + R_FP_A ;;
     stf.spill [r14] = f2 ;;
@@ -905,10 +925,10 @@ ia64_coop_b_ec_assertion_passed:
     mov r14 = r32 ;;
     ASSERT_EQ r14, SENTINEL_B
     ld8 r14 = [r12] ;;
-    ASSERT_EQ r14, STACK_USE_B_LOW
+    ASSERT_EQ r14, STACK_USE_B_LOW_EXPECTED
     adds r28 = 8, r12 ;;
     ld8 r14 = [r28] ;;
-    ASSERT_EQ r14, STACK_USE_B_HIGH
+    ASSERT_EQ r14, STACK_USE_B_HIGH_EXPECTED
     mov r14 = r33 ;;
     ASSERT_EQ r14, GR8_B_FIRST
     tnat.nz p6, p7 = r33 ;;
@@ -948,10 +968,10 @@ ia64_coop_b_resumed:
     mov r14 = r32 ;;
     ASSERT_EQ r14, SENTINEL_B
     ld8 r14 = [r12] ;;
-    ASSERT_EQ r14, STACK_USE_B_LOW
+    ASSERT_EQ r14, STACK_USE_B_LOW_EXPECTED
     adds r28 = 8, r12 ;;
     ld8 r14 = [r28] ;;
-    ASSERT_EQ r14, STACK_USE_B_HIGH
+    ASSERT_EQ r14, STACK_USE_B_HIGH_EXPECTED
     mov r14 = r33 ;;
     ASSERT_EQ r14, GR8_B_FIRST
     tnat.nz p6, p7 = r33 ;;
@@ -976,6 +996,8 @@ ia64_coop_b_resumed:
     mov out0 = r14 ;;
     movl r14 = ia64_coop_context_a ;;
     mov out1 = r14 ;;
+.global ia64_coop_b_to_a_second_switch
+ia64_coop_b_to_a_second_switch:
     br.call.sptk.many b0 = ia64_coop_context_switch ;;
 .global ia64_coop_b_unexpected_resume
 ia64_coop_b_unexpected_resume:

@@ -302,6 +302,9 @@ class CommandFileContractTests(unittest.TestCase):
             "context_b": 0x112200,
             "probe_record": 0x112000,
             "probe_record_size": 1776,
+            "stack_marker_a": [0x110800, 0x110810],
+            "stack_marker_a_expected": {
+                "LOW": 0x415F535441434B30, "HIGH": 0x415F535441434B31},
             "switch_entry": 0x10CFC0,
             "context_b_first_entry": 0x10AEC0,
             "frontiers": {
@@ -352,6 +355,25 @@ class CommandFileContractTests(unittest.TestCase):
                       "r14 r15 r32 r33 r42 r43 iip ipsr isr ifs iipa", text)
         self.assertNotIn("bspst", text)
         self.assertEqual(text.splitlines()[-1], "quit")
+
+    def test_stack_marker_memory_is_dumped_at_every_bounded_checkpoint(self) -> None:
+        symbols = self.symbols()
+        text = diagnostic.make_command_file(Path("/tmp/coop-debug"), symbols)
+        marker_start, marker_end = symbols["stack_marker_a"]
+        marker_dump = f"dd 0x{marker_start:x} 0x{marker_end - 1:x}"
+        self.assertEqual(text.count(marker_dump), diagnostic.STEP_QUANTA + 2)
+        self.assertIn("/markers/0001-startup-frontier-a.txt", text)
+        self.assertEqual(symbols["stack_marker_a_expected"], {
+            "LOW": 0x415F535441434B30, "HIGH": 0x415F535441434B31})
+
+    def test_stack_marker_dumps_require_an_aligned_two_word_range_and_expectations(self) -> None:
+        for field, value in (("stack_marker_a", [0x110801, 0x110811]),
+                             ("stack_marker_a_expected", {"LOW": 1})):
+            symbols = self.symbols()
+            symbols[field] = value
+            with self.subTest(field=field), self.assertRaisesRegex(
+                    diagnostic.DiagnosticError, "stack-marker"):
+                diagnostic.make_command_file(Path("/tmp/coop-debug"), symbols)
 
 
 class RuntimeSwitchFrontierAnalysisTests(unittest.TestCase):
