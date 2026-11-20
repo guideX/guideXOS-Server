@@ -30,29 +30,28 @@ The correction does not relax policy. The production callback checks the leaf da
 
 ## 3. Full root exclusion-reason accounting
 
-The manifest accounts for all 118 curl comparison roots. Reason counts below are per-root counts for each distinct reason; reasons overlap and must not be summed as unique roots.
+The manifest accounts for all 118 curl comparison roots. The table combines manifest reason counts with direct NSS/CCADB state counts; categories overlap and must not be summed as unique roots.
 
-| Manifest exclusion reason | Roots | Interpretation |
-|---|---:|---|
-| `certificate-identity-not-verified` | 2 | Exact certificate identity absent from pinned NSS. |
-| `mozilla-ca-policy-membership-not-affirmed` | 2 | Mozilla membership is not affirmed for the unmatched entries. |
-| `nss-certificate-record-missing` | 2 | No exact NSS certificate object. |
-| `nss-trust-record-missing` | 2 | No matching NSS trust object. |
-| `tls-server-auth-not-explicitly-permitted` | 5 | Three exact matches have `CKT_NSS_MUST_VERIFY_TRUST`; two are the unmatched Buypass entries. |
-| `server-distrust-after-not-enforced` | 4 | Leaf date handling exists, but full TLS cutoff behavior is incomplete. |
-| `server-distrust-after-sct-timestamp-not-enforced` | 4 | Required SCT cutoff checks are unsupported, so runtime denies these chains. |
-| `root-specific-external-restrictions-missing` | 117 | No root-specific overlay assessment exists. |
-| `root-specific-restrictions-incomplete` | 1 | The DigiCert record has two unknown attributes. |
-| `domain-restriction-status-unknown` | 1 | Explicitly unknown for DigiCert; missing records leave the other 117 unknown as well. |
-| `root-domain-restrictions-coverage-unknown` | 1 | The DigiCert source coverage does not resolve custom domain limits. |
-| `root-program-policy-coverage-unknown` | 1 | The DigiCert record lacks a complete root-specific program-compliance assessment. |
-| `root-program-policy-requirements-unverified` | 1 | Program-policy obligations are not independently verified for DigiCert. |
-| `certificate-path-validation-unverified` | 118 | No root has a separately qualified production path-validation assessment. |
-| `external-policy-snapshot-incomplete` | 118 | The source set is not a complete machine-readable Mozilla restrictions registry. |
+| Reason or state | Roots | Class | Interpretation |
+|---|---:|---|---|
+| Mozilla root status `Removed` / `mozilla-root-removed-from-trust-store` | 2 | Hard exclusion | Both are the exact-fingerprint Buypass Class 2 and Class 3 records in CCADB. |
+| Exact DER identity mismatch | 0 | Hard exclusion | No same-record DER mismatch was found. Two input certificates have no exact NSS object; they are absent, not mismatched. |
+| `certificate-identity-not-verified` | 2 | Missing identity evidence | The two absent NSS objects cannot be trusted by subject or SPKI resemblance. |
+| `nss-certificate-record-missing`; `nss-trust-record-missing` | 2 each | Missing NSS records | These are the two unmatched Buypass certificates. |
+| NSS server-auth purpose not explicitly trusted (`CKT_NSS_MUST_VERIFY_TRUST`) | 3 | Hard exclusion | QuoVadis Root CA 1 G3, QuoVadis Root CA 3 G3, and Certigna Root CA. The two missing trust records are counted separately. |
+| Explicit NSS TLS distrust | 0 | Hard exclusion | No input root has `CKT_NSS_NOT_TRUSTED` in the pinned NSS server-auth record. |
+| `server-distrust-after-not-enforced` | 4 | Unsupported functionality | Leaf `notBefore` cutoff handling is present, but full TLS cutoff enforcement remains incomplete. |
+| `server-distrust-after-sct-timestamp-not-enforced` | 4 | Unsupported functionality | SCT verification is unavailable, so these paths remain denied even when the leaf date is before the cutoff. |
+| `root-specific-external-restrictions-missing` / incomplete | 117 / 1 | Missing source coverage | No root-specific overlay exists for 117 roots; the DigiCert record exists but is incomplete. |
+| Domain restriction state unknown | 118 | Missing source coverage | DigiCert is explicitly unknown; the other 117 have no root-specific record. Unknown does not mean unrestricted. |
+| Root program-policy state unknown | 118 | Missing policy evidence | The DigiCert record has a specific unresolved coverage reason; the other 117 have no record. |
+| Certificate-policy requirement unsupported | 0 | Known technical limitation | No known applicable mandatory certificate-policy requirement was found. Policy status remains unknown for 117 roots and `not-required` only for the scoped DigiCert ordinary non-EV review. |
+| `certificate-path-validation-unverified` | 118 | Missing qualification evidence | No candidate-specific path has been qualified through the actual Mbed TLS verifier. |
+| `external-policy-snapshot-incomplete` | 118 | Missing source coverage | The available source set is not a complete machine-readable Mozilla restriction registry. |
 
-There are zero NSS explicit TLS distrust records in the 118-root comparison. The two unmatched roots are Buypass Class 2 and Class 3; both exact CCADB V5 records say Mozilla `Removed`. Three matched roots without explicit TLS server-auth permission are QuoVadis Root CA 1 G3, QuoVadis Root CA 3 G3, and Certigna Root CA; each has `CKT_NSS_MUST_VERIFY_TRUST` for server authentication.
+The manifest now distinguishes a Mozilla `Removed` status from missing NSS identity/trust objects and distinguishes the three matched `CKT_NSS_MUST_VERIFY_TRUST` values from the two absent trust records. The exclusion count for `tls-server-auth-not-explicitly-permitted` is no longer inflated by absent records. Explicit NSS distrust remains zero.
 
-Hard exclusions and missing evidence remain distinct. Exact identity mismatch, removed status, non-permitted purpose, and unimplemented cutoff enforcement are concrete exclusions. An unknown domain rule or absent root-specific assessment means information is missing; it is not evidence that the root has a restriction, and it is not evidence that it has none.
+Hard exclusions, unsupported enforcement, and missing evidence are distinct. Removed status and lack of explicit server-auth trust are concrete exclusions. Missing identity/trust records, incomplete policy coverage, and unverified path qualification are missing evidence. Unknown domain or certificate-policy status is not evidence that a restriction exists, and it is not evidence that none exists.
 
 The importer parsed all 118 root certificates for extension facts: none has a root Name Constraints extension or EKU extension; four carry the `anyPolicy` certificatePolicies extension. These DER facts do not establish the absence of Mozilla code-level domain restrictions. There are zero manifest blockers called `unsupported-certificate-policy-requirement`: the detailed DigiCert scope does not require a root certificate-policy OID for ordinary non-EV TLS, while the other 117 roots remain unknown due to missing assessments.
 
@@ -122,7 +121,7 @@ The final manifest was regenerated from the pinned NAVHTTPS21/NAVHTTPS22 source 
 
 | Artifact | SHA-256 |
 |---|---|
-| NAVHTTPS22 trust manifest `assets/certs/candidates/mozilla-nss-2026-11-17.navhttps22-trust-manifest.json` | `40869b97be17428781705d57aa0f87eb6b03940f67e1e6e8c2445f54c516038c` |
+| NAVHTTPS22 trust manifest `assets/certs/candidates/mozilla-nss-2026-11-17.navhttps22-trust-manifest.json` | `b4097df582bb6612ac1e2132f70791bd84e603ed731455d7f18f87f2dccc7b40` |
 | Extended source lock | `77f4d7d6ef8d8b4d2577437be3dc51fa15eeba82893b4921481c3c19efb7b483` |
 | NAVHTTPS20 source-lock baseline recorded by manifest | `8c18c1a11f1c471a672e48e496fd42690531797cc6a3f5a7e209a85631774095` |
 | Root-restrictions overlay | `9676339568a863ee5bc95ab778aedc8646e8ce41040251f323b74d8d40dbb5d9` |
@@ -148,7 +147,7 @@ No root-specific DigiCert chain was proposed, so the selected-root positive-chai
 
 | Regression | Result |
 |---|---|
-| NAVHTTPS20 and NAVHTTPS21 metadata/overlay suites | 64/64 pass (35 NAVHTTPS20, 29 NAVHTTPS21) |
+| NAVHTTPS20 and NAVHTTPS21 metadata/overlay suites | 65/65 pass after the accounting audit (35 NAVHTTPS20, 30 NAVHTTPS21) |
 | NAVHTTPS21 distrust-after verifier | 12/12 pass, including before/equal/after cutoff, missing-SCT fail closed, exact root identity, hostname, expiry, signature, and alternate-anchor behavior |
 | NAVHTTPS18 Mbed TLS verifier | 15/15 expected assertions pass: valid fixture chain, wrong root, expired/future dates, wrong hostname, bad signature, Name Constraints, serverAuth EKU, path length, strict source parsing, and documented policy-tree limitation |
 | NAVHTTPS19 Name Constraints | 40/40 pass (16 positive, 24 negative; 22 Name Constraints rejections) |
@@ -201,6 +200,32 @@ The Mozilla Root Program is the owner needed to supply authoritative per-root do
 Keep the current root and public-HTTPS gates in place. Obtain a complete fingerprint-keyed source for DigiCert TLS ECC P384 Root G5's domain restrictions and a current program-compliance assessment, pin and hash the evidence, then update the same overlay and importer. If those sources close all blockers, build an offline chain fixture anchored to the exact root and run the full positive/negative matrix against Mbed TLS 4.1.0 before considering a disabled candidate. Do not infer permission from the current `Websites` trust bit or from a blank source field.
 
 Separately, run the pending D-A guest Test A/B through QAC when the controller is available, preserving the positive controlled HTTPS regression. Continue to deny the four D-A roots unless real SCT signature and timestamp enforcement is implemented. Production public HTTPS remains outside scope until authenticated time with cross-boot protection, a revocation decision and source, and release-owner authorization are completed.
+
+## 15. NAVHTTPS22 audit follow-up
+
+This task specified expected starting HEAD `f47d71b636c20a05693c0aa0bc5884ee3df84818`. Repository preflight instead found HEAD `bf86e24003239797e5cf23cac263e36d759f85d5`, which is already the NAVHTTPS22 implementation commit directly on top of that expected revision. The branch was `NAVIGATOR_GENERAL_IMPROVEMENTS`, two commits ahead of origin, and the tracked worktree was clean. Existing untracked build outputs, caches, logs, fixtures, and qualification artifacts were preserved. No reset, clean, stash, rebase, merge, branch switch, push, or I219-LM operation was performed.
+
+The follow-up corrected the exclusion accounting so CCADB `Removed` status, missing NSS trust records, and matched NSS `CKT_NSS_MUST_VERIFY_TRUST` values are separately counted. It changed the importer, its regression tests, and this report only; runtime validation code and trust defaults did not change. The manifest was regenerated from the same pinned inputs and now hashes to `b4097df582bb6612ac1e2132f70791bd84e603ed731455d7f18f87f2dccc7b40`. It still reports 118 inputs, 0 eligible roots, 0 candidates, 0 production-approved roots, and public HTTPS disabled.
+
+Fresh follow-up checks on 2026-11-19:
+
+- Importer and restriction suites: 65/65 pass.
+- Deterministic manifest generation: output hash matches the committed artifact.
+- NAVHTTPS21 distrust-after Mbed TLS harness: 12/12 pass.
+- NAVHTTPS18 verifier nested in the NAVHTTPS19 run: 15/15 pass.
+- NAVHTTPS19 Name Constraints corpus: 40/40 pass (16 positive, 24 negative).
+- Trust-profile validation: pass; HTTPS qualification contract: 7/7 pass.
+- Mbed TLS 4.1.0 / TF-PSA-Crypto 1.1.0 profile and pinned libsodium 1.0.22 profile: pass.
+- Roughtime hosted and portable suites: 96/96 pass.
+- Strict Ed25519: 238/238 hosted and 238/238 freestanding; 7 reference checks; 3,824-byte reachable stack upper bound.
+- Clock assurance: pass.
+- Secure-random contract: pass.
+- DNS: 13 protocol scenarios and 6 controlled fixture checks pass.
+- UDP/socket bounds: 6/6 pass.
+- IPv4/TCP cleanup: pass for attribution, failed/pending SYN cleanup, and socket bounds.
+- Hosted Navigator smoke using local HTTP/HTTPS fixtures: pass (`logs/navigator-hosted-smoke-20261119-194113.log`).
+
+The existing NAVHTTPS22 ordinary and qualification AMD64 build artifacts remain the outputs recorded in section 12; this accounting-only follow-up does not change kernel code. No QAC controller was available, so the guest distrust-after scenario remains pending. I219-LM remains `last_completed=PHASE26`, `next_expected=PHASE27`.
 
 ## References
 

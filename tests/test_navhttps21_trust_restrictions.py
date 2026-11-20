@@ -181,9 +181,12 @@ class MozillaTrustRestrictionTests(unittest.TestCase):
         self.assertEqual(reasons["root-specific-restrictions-incomplete"], 1)
         self.assertEqual(reasons["root-domain-restrictions-coverage-unknown"], 1)
         self.assertEqual(reasons["root-program-policy-coverage-unknown"], 1)
+        self.assertEqual(reasons["mozilla-root-removed-from-trust-store"], 2)
+        self.assertEqual(reasons["nss-server-auth-purpose-not-explicitly-trusted"], 3)
+        self.assertNotIn("tls-server-auth-not-explicitly-permitted", reasons)
+        self.assertEqual(reasons["nss-trust-record-missing"], 2)
         self.assertNotIn("unsupported-certificate-policy-requirement", reasons)
         self.assertEqual(reasons["server-distrust-after-sct-timestamp-not-enforced"], 4)
-        self.assertEqual(reasons["tls-server-auth-not-explicitly-permitted"], 5)
         self.assertEqual(
             report["restriction_attribute_status_counts"]["domain_restrictions_status"],
             {"unknown": 118},
@@ -209,6 +212,24 @@ class MozillaTrustRestrictionTests(unittest.TestCase):
             "ordinary TLS server authentication; Extended Validation presentation and policy processing are excluded",
         )
         self.assertEqual(digicert["technical_eligibility"], "ineligible")
+
+    def test_accounting_separates_removed_roots_from_missing_nss_trust(self):
+        _, _, report, _, _, _, _ = importer._verified_navhttps21_inputs(
+            ROOT, SOURCE / "source-lock.json"
+        )
+        removed = [
+            root for root in report["roots"]
+            if "mozilla-root-removed-from-trust-store" in root["eligibility_rejection_reasons"]
+        ]
+        self.assertEqual(len(removed), 2)
+        self.assertTrue(all(root["ccadb_record"]["Mozilla Status"] == "Removed" for root in removed))
+        self.assertTrue(all("nss-trust-record-missing" in root["eligibility_rejection_reasons"] for root in removed))
+        explicit_non_grants = [
+            root for root in report["roots"]
+            if "nss-server-auth-purpose-not-explicitly-trusted" in root["eligibility_rejection_reasons"]
+        ]
+        self.assertEqual(len(explicit_non_grants), 3)
+        self.assertTrue(all(root["server_auth_trust_record"] == "CKT_NSS_MUST_VERIFY_TRUST" for root in explicit_non_grants))
 
     def test_complete_root_coverage_cannot_contain_unknown_attribute_coverage(self):
         overlay = complete_overlay()

@@ -29,7 +29,9 @@
     "domain-restriction-status-unknown": 1,
     "external-policy-snapshot-incomplete": 118,
     "mozilla-ca-policy-membership-not-affirmed": 2,
+    "mozilla-root-removed-from-trust-store": 2,
     "nss-certificate-record-missing": 2,
+    "nss-server-auth-purpose-not-explicitly-trusted": 3,
     "nss-trust-record-missing": 2,
     "root-domain-restrictions-coverage-unknown": 1,
     "root-program-policy-coverage-unknown": 1,
@@ -37,8 +39,7 @@
     "root-specific-external-restrictions-missing": 117,
     "root-specific-restrictions-incomplete": 1,
     "server-distrust-after-not-enforced": 4,
-    "server-distrust-after-sct-timestamp-not-enforced": 4,
-    "tls-server-auth-not-explicitly-permitted": 5
+    "server-distrust-after-sct-timestamp-not-enforced": 4
   },
   "eligibility_rejection_reason_count_semantics": "Each value counts roots carrying that distinct reason; roots may have multiple overlapping reasons.",
   "restriction_attribute_status_counts": {
@@ -12236,9 +12237,7 @@
       "name_constraints_enforcement": "Mbed TLS 4.1.0 guideXOS NAVHTTPS19 for DNS/IP/email/directoryName; unsupported applicable forms fail closed",
       "path_validation_status": "unverified-by-mbedtls-per-root",
       "unknown_nss_fields": [],
-      "source_rejection_reasons": [
-        "tls-server-auth-not-explicitly-permitted"
-      ],
+      "source_rejection_reasons": [],
       "external_policy_record": null,
       "external_policy_source_revision": "navhttps21-investigation-snapshot-2026-11-17",
       "external_policy_source_sha256": null,
@@ -12375,8 +12374,8 @@
       "eligibility_rejection_reasons": [
         "certificate-path-validation-unverified",
         "external-policy-snapshot-incomplete",
-        "root-specific-external-restrictions-missing",
-        "tls-server-auth-not-explicitly-permitted"
+        "nss-server-auth-purpose-not-explicitly-trusted",
+        "root-specific-external-restrictions-missing"
       ],
       "technical_eligibility": "ineligible",
       "candidate_included": false,
@@ -12797,9 +12796,7 @@
       "name_constraints_enforcement": "Mbed TLS 4.1.0 guideXOS NAVHTTPS19 for DNS/IP/email/directoryName; unsupported applicable forms fail closed",
       "path_validation_status": "unverified-by-mbedtls-per-root",
       "unknown_nss_fields": [],
-      "source_rejection_reasons": [
-        "tls-server-auth-not-explicitly-permitted"
-      ],
+      "source_rejection_reasons": [],
       "external_policy_record": null,
       "external_policy_source_revision": "navhttps21-investigation-snapshot-2026-11-17",
       "external_policy_source_sha256": null,
@@ -12936,8 +12933,8 @@
       "eligibility_rejection_reasons": [
         "certificate-path-validation-unverified",
         "external-policy-snapshot-incomplete",
-        "root-specific-external-restrictions-missing",
-        "tls-server-auth-not-explicitly-permitted"
+        "nss-server-auth-purpose-not-explicitly-trusted",
+        "root-specific-external-restrictions-missing"
       ],
       "technical_eligibility": "ineligible",
       "candidate_included": false,
@@ -14244,10 +14241,10 @@
         "certificate-path-validation-unverified",
         "external-policy-snapshot-incomplete",
         "mozilla-ca-policy-membership-not-affirmed",
+        "mozilla-root-removed-from-trust-store",
         "nss-certificate-record-missing",
         "nss-trust-record-missing",
-        "root-specific-external-restrictions-missing",
-        "tls-server-auth-not-explicitly-permitted"
+        "root-specific-external-restrictions-missing"
       ],
       "technical_eligibility": "ineligible",
       "candidate_included": false,
@@ -18580,9 +18577,7 @@
       "name_constraints_enforcement": "Mbed TLS 4.1.0 guideXOS NAVHTTPS19 for DNS/IP/email/directoryName; unsupported applicable forms fail closed",
       "path_validation_status": "unverified-by-mbedtls-per-root",
       "unknown_nss_fields": [],
-      "source_rejection_reasons": [
-        "tls-server-auth-not-explicitly-permitted"
-      ],
+      "source_rejection_reasons": [],
       "external_policy_record": null,
       "external_policy_source_revision": "navhttps21-investigation-snapshot-2026-11-17",
       "external_policy_source_sha256": null,
@@ -18719,8 +18714,8 @@
       "eligibility_rejection_reasons": [
         "certificate-path-validation-unverified",
         "external-policy-snapshot-incomplete",
-        "root-specific-external-restrictions-missing",
-        "tls-server-auth-not-explicitly-permitted"
+        "nss-server-auth-purpose-not-explicitly-trusted",
+        "root-specific-external-restrictions-missing"
       ],
       "technical_eligibility": "ineligible",
       "candidate_included": false,
@@ -20774,10 +20769,10 @@
         "certificate-path-validation-unverified",
         "external-policy-snapshot-incomplete",
         "mozilla-ca-policy-membership-not-affirmed",
+        "mozilla-root-removed-from-trust-store",
         "nss-certificate-record-missing",
         "nss-trust-record-missing",
-        "root-specific-external-restrictions-missing",
-        "tls-server-auth-not-explicitly-permitted"
+        "root-specific-external-restrictions-missing"
       ],
       "technical_eligibility": "ineligible",
       "candidate_included": false,

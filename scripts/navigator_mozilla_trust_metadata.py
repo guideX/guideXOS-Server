@@ -537,13 +537,26 @@ def evaluate_root_eligibility(
         reasons.append("fixture-root-contamination")
     if not root.get("identity_verified"):
         reasons.append("certificate-identity-not-verified")
+    ccadb_record = root.get("ccadb_record")
+    if (
+        root.get("ccadb_record_status") == "matched-exact-root-fingerprint"
+        and isinstance(ccadb_record, dict)
+        and ccadb_record.get("Mozilla Status") == "Removed"
+    ):
+        reasons.append("mozilla-root-removed-from-trust-store")
     if root.get("mozilla_ca_policy") is not True:
         reasons.append("mozilla-ca-policy-membership-not-affirmed")
     purpose = root.get("server_auth_trust_record")
     if purpose == "CKT_NSS_NOT_TRUSTED":
         reasons.append("explicitly-distrusted-for-server-auth")
     elif purpose != "CKT_NSS_TRUSTED_DELEGATOR":
-        reasons.append("tls-server-auth-not-explicitly-permitted")
+        if purpose not in (None, "missing"):
+            reason = (
+                "nss-server-auth-purpose-not-explicitly-trusted"
+                if overlay.get("schema_version") == OVERLAY_V2_VERSION
+                else "tls-server-auth-not-explicitly-permitted"
+            )
+            reasons.append(reason)
     if root.get("unknown_nss_fields"):
         reasons.append("unsupported-nss-metadata")
     if root.get("path_validation_status") != "verified-by-mbedtls-4.1.0":
@@ -730,8 +743,6 @@ def _root_record(
         unknown_fields.extend(sorted(set(nss_trust) - SUPPORTED_TRUST_ATTRIBUTES))
         if server_auth_trust == "CKT_NSS_NOT_TRUSTED":
             reasons.append("explicitly-distrusted-for-server-auth")
-        elif server_auth_trust != "CKT_NSS_TRUSTED_DELEGATOR":
-            reasons.append("tls-server-auth-not-explicitly-permitted")
     if unknown_fields:
         reasons.append("unsupported-nss-metadata")
     try:
