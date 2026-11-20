@@ -13,6 +13,10 @@ $package = Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json -ErrorA
 $evidence = Get-Content -LiteralPath $evidencePath -Raw | ConvertFrom-Json -ErrorAction Stop
 $wrapperPath = Join-Path $repo 'scripts\dotnet\run-c188r35-settings-launch.ps1'
 $wrapperSource = Get-Content -LiteralPath $wrapperPath -Raw
+$nestedRunnerSource = Get-Content -LiteralPath (Join-Path $repo 'scripts\dotnet\run-c188r12r1-settings-handoff.ps1') -Raw
+$python = (Get-Command python.exe -ErrorAction Stop | Select-Object -First 1).Source
+$visualTool = Join-Path $repo 'scripts\dotnet\compare-c188r12r1-screenshots.py'
+$referencePpm = [string]$package.r34Evidence.screenshotPpmPath
 $assertions = 0
 function Assert-C188R35([bool]$Condition,[string]$Message) {
     if (-not $Condition) { throw "R35 Settings launch test failed: $Message" }
@@ -40,6 +44,17 @@ Assert-C188R35 ([int]$target.buttonScreenX -le [int]$target.x -and
     [int]$target.buttonScreenY -le [int]$target.y -and
     [int]$target.buttonScreenX + [int]$target.buttonWidth -ge [int]$target.x -and
     [int]$target.buttonScreenY + [int]$target.buttonHeight -ge [int]$target.y) 'click center lies within the actual Settings button bounds'
+Assert-C188R35 ($nestedRunnerSource.Contains("'--verify-settings-target'") -and
+    $nestedRunnerSource.Contains('PASS_TARGET_VISIBLE_UNOBSTRUCTED') -and
+    $nestedRunnerSource.Contains('Live Notes layout does not match the source-validated Settings target at (815, 550).')) `
+    'live target layout and unobstructed button pixels are checked before input'
+$visualOutput = & $python $visualTool '--verify-settings-target' $referencePpm $referencePpm '815' '550' 2>&1 | Out-String
+$visualExitCode = $LASTEXITCODE
+$visualProof = $visualOutput | ConvertFrom-Json -ErrorAction Stop
+Assert-C188R35 ($visualExitCode -eq 0 -and [string]$visualProof.result -ceq 'PASS_TARGET_VISIBLE_UNOBSTRUCTED' -and
+    [int]$visualProof.matchingPixels -eq 2520 -and [int]$visualProof.totalPixels -eq 2520 -and
+    [int]$visualProof.targetBounds.left -eq 770 -and [int]$visualProof.targetBounds.top -eq 536) `
+    'source screenshot confirms the full Settings button target patch'
 Assert-C188R35 (-not [bool]$evidence.readiness.qmpInputSubmitted -and
     -not [bool]$evidence.readiness.settingsLaunchAlreadyRequested -and
     -not [bool]$evidence.settingsClickSubmitted) 'rehearsal issued no guest input or synthetic factory activation'
@@ -69,6 +84,22 @@ if (Test-Path -LiteralPath $tempRoot) { throw "Refusing to overwrite R35 negativ
 $null = New-Item -ItemType Directory -Path $tempRoot
 try {
     $pwsh = (Get-Command pwsh.exe -ErrorAction Stop | Select-Object -First 1).Source
+    $referenceBytes = [System.IO.File]::ReadAllBytes($referencePpm)
+    $ppmHeaderPrefix = [System.Text.Encoding]::ASCII.GetString($referenceBytes,0,[Math]::Min(128,$referenceBytes.Length))
+    $ppmHeaderMatch = [regex]::Match($ppmHeaderPrefix, '^P6\s+\d+\s+\d+\s+255\s')
+    if (-not $ppmHeaderMatch.Success) { throw 'R34 visual reference has an invalid PPM header.' }
+    $ppmPixelOffset = $ppmHeaderMatch.Length
+    if ($referenceBytes[$ppmPixelOffset - 1] -eq 13 -and $referenceBytes[$ppmPixelOffset] -eq 10) { $ppmPixelOffset++ }
+    $mutatedPpmPath = Join-Path $tempRoot 'target-pixel-mutated.ppm'
+    $mutatedBytes = [byte[]]$referenceBytes.Clone()
+    $mutatedPixelOffset = $ppmPixelOffset + ((550 * 1280 + 815) * 3)
+    $mutatedBytes[$mutatedPixelOffset] = [byte]($mutatedBytes[$mutatedPixelOffset] -bxor 1)
+    [System.IO.File]::WriteAllBytes($mutatedPpmPath,$mutatedBytes)
+    $negativeVisualOutput = & $python $visualTool '--verify-settings-target' $referencePpm $mutatedPpmPath '815' '550' 2>&1 | Out-String
+    $negativeVisualExit = $LASTEXITCODE
+    $negativeVisualProof = $negativeVisualOutput | ConvertFrom-Json -ErrorAction Stop
+    Assert-C188R35 ($negativeVisualExit -ne 0 -and [string]$negativeVisualProof.result -ceq 'FAIL_TARGET_MISMATCH' -and
+        [int]$negativeVisualProof.matchingPixels -eq 2519) 'occlusion or target-pixel mismatch fails closed before click'
     $invalidRoot = Join-Path $tempRoot 'invalid-manifest'
     $null = New-Item -ItemType Directory -Path $invalidRoot
     Set-Content -LiteralPath (Join-Path $invalidRoot 'r35-execution-package.json') -Value '{"schema":"wrong"}' -Encoding utf8

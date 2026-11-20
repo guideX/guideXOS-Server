@@ -22,6 +22,7 @@ $phaseRoots = @(
     [System.IO.Path]::GetFullPath('E:\CodexArtifacts\guideXOSServerV1.1_DOTNET_SUPPORT'))
 $candidate = [System.IO.Path]::GetFullPath($CandidateRoot)
 $bootRoot = [System.IO.Path]::GetFullPath($BootEvidencePath)
+$executionPackage = $null
 $executionPackageManifestSha256 = ''
 $executionPackageId = ''
 $candidateRootMatches = @($phaseRoots | Where-Object {
@@ -192,6 +193,8 @@ $qacRunnerExitCode = $null
 $clickAttempted = $false
 $clickExitCode = $null
 $clickTarget = $null
+$targetVisualCheck = $null
+$targetVisualCheckPath = Join-Path $bootRoot 'settings-target-visual-check.json'
 $pointerPositionEvidence = @()
 $pointerTargetEvidence = $null
 $runnerInputEvidence = $null
@@ -393,6 +396,12 @@ try {
         if (-not [bool]$clickTarget.accepted) {
             $failureText = "source-validated Settings target unavailable: $($clickTarget.reason)"
         } else {
+            if ([int]$active.screenWidth -ne 1280 -or [int]$active.screenHeight -ne 800 -or
+                [int]$clickTarget.x -ne 815 -or [int]$clickTarget.y -ne 550 -or
+                [int]$clickTarget.buttonScreenX -ne 770 -or [int]$clickTarget.buttonScreenY -ne 536 -or
+                [int]$clickTarget.buttonWidth -ne 90 -or [int]$clickTarget.buttonHeight -ne 28) {
+                throw 'Live Notes layout does not match the source-validated Settings target at (815, 550).'
+            }
             $preCheckpointOwnership = Get-C188R12R1FreshQacOwnership 'pre-click-capture'
             if (-not [bool]$preCheckpointOwnership.accepted) {
                 $ownershipDegraded = $true
@@ -400,6 +409,32 @@ try {
             } else {
                 $beforeCapture = Invoke-C188R12R1Control 'capture-desktop-ready' @('capture','before-settings')
                 if ($beforeCapture.exitCode -ne 0) { throw "Pre-transition screenshot capture failed: $($beforeCapture.output)" }
+                if ($null -eq $executionPackage -or $null -eq $executionPackage.r34Evidence) {
+                    throw 'Live Settings click requires the package-bound R34 visual reference.'
+                }
+                $referencePpm = [System.IO.Path]::GetFullPath([string]$executionPackage.r34Evidence.screenshotPpmPath)
+                $referencePpmHash = (Get-FileHash -LiteralPath $referencePpm -Algorithm SHA256).Hash
+                if ($referencePpmHash -ine 'F2FF19367B096ED5360B80014DAB7886EE81DA084768EF6C4BE0442629905CD5' -or
+                    $referencePpmHash -ine [string]$executionPackage.r34Evidence.screenshotPpmSha256) {
+                    throw 'Package-bound R34 Settings target reference hash is invalid.'
+                }
+                $beforePpmPath = Join-Path $bootRoot 'before-settings.ppm'
+                if (-not (Test-Path -LiteralPath $beforePpmPath -PathType Leaf)) {
+                    throw 'Live pre-click desktop capture is missing; Settings input was not sent.'
+                }
+                $visualOutput = & $python.Source $compare '--verify-settings-target' `
+                    $referencePpm $beforePpmPath ([string]$clickTarget.x) ([string]$clickTarget.y) 2>&1 | Out-String
+                $visualExitCode = $LASTEXITCODE
+                Set-Content -LiteralPath $targetVisualCheckPath -Value $visualOutput -Encoding utf8
+                $targetVisualCheck = $visualOutput | ConvertFrom-Json -ErrorAction Stop
+                if ($visualExitCode -ne 0 -or
+                    [string]$targetVisualCheck.result -cne 'PASS_TARGET_VISIBLE_UNOBSTRUCTED' -or
+                    [int]$targetVisualCheck.matchingPixels -ne 2520 -or
+                    [int]$targetVisualCheck.totalPixels -ne 2520 -or
+                    [int]$targetVisualCheck.framebuffer.width -ne 1280 -or
+                    [int]$targetVisualCheck.framebuffer.height -ne 800) {
+                    throw 'Live pre-click Settings button pixels differ from the unobstructed source-validated reference.'
+                }
                 $qmpBeforeClick = Read-C188R12R1SharedText $qmpControlPath
                 $beforeClickCheck = Test-C188R12R1SingleClickQmpEvidence $qmpBeforeClick
                 if ($beforeClickCheck.leftButtonDownCount -ne 0 -or
@@ -689,6 +724,9 @@ $finalEvidence = [ordered]@{
     expectedManagedDescriptorSelectors=@($readinessProfile.expectedDescriptorSelectors)
     readinessRuntimePackManifestSha256=[string]$readinessProfile.runtimePackManifestSha256
     clickAttempted=$clickAttempted;clickExitCode=$clickExitCode;clickTarget=$clickTarget
+    targetVisualCheck=$targetVisualCheck
+    targetVisualCheckPath=if (Test-Path -LiteralPath $targetVisualCheckPath -PathType Leaf) { $targetVisualCheckPath } else { $null }
+    targetVisualCheckSha256=if (Test-Path -LiteralPath $targetVisualCheckPath -PathType Leaf) { (Get-FileHash -LiteralPath $targetVisualCheckPath -Algorithm SHA256).Hash } else { '' }
     clickEvidence=$clickEvidence;runnerInputEvidence=$runnerInputEvidence
     pointerPositionEvidence=@($pointerPositionEvidence);pointerTargetEvidence=$pointerTargetEvidence
     earliestMissingBoundary=$earliestBoundary;ownershipDegraded=$ownershipDegraded
