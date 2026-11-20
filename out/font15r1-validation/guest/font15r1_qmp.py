@@ -972,22 +972,26 @@ class QMP:
             "size_bytes": artifact_size,
         }
 
-    def _wait_for_screenshot_artifact(self, path: Path) -> dict[str, int | str]:
-        deadline = self.clock() + SCREENSHOT_ARTIFACT_TIMEOUT_SECONDS
+    def _wait_for_screenshot_artifact(
+        self, path: Path, deadline: float | None = None
+    ) -> dict[str, int | str]:
+        artifact_deadline = self.clock() + SCREENSHOT_ARTIFACT_TIMEOUT_SECONDS
+        if deadline is not None:
+            artifact_deadline = min(artifact_deadline, deadline)
         last_error: ScreenshotArtifactError | None = None
         while True:
             try:
                 return self._ppm_artifact_info(path)
             except ScreenshotArtifactError as exc:
                 last_error = exc
-            remaining = deadline - self.clock()
+            remaining = artifact_deadline - self.clock()
             if remaining <= 0:
                 raise ScreenshotArtifactError(
                     f"screenshot artifact verification timed out: {last_error}"
                 ) from last_error
             self.sleeper(min(SCREENSHOT_ARTIFACT_POLL_SECONDS, remaining))
 
-    def screenshot(self, path: Path) -> None:
+    def screenshot(self, path: Path, *, deadline: float | None = None) -> dict[str, Any]:
         full_path = path.resolve()
         if full_path.suffix.casefold() != ".ppm":
             raise ScreenshotArtifactError("QMP screendump destination must use the .ppm suffix")
@@ -1000,12 +1004,14 @@ class QMP:
                 f"screenshot destination already exists; refusing a stale artifact: {full_path}"
             )
 
-        command_deadline = self.clock() + self.command_timeout
+        capture_started_monotonic = self.clock()
+        command_deadline = self._command_deadline(deadline)
         self._record(
             {
                 "kind": "screenshot-start",
                 "path": str(full_path),
                 "transport": "QMP human-monitor-command screendump",
+                "request_monotonic": capture_started_monotonic,
             }
         )
         try:
@@ -1030,8 +1036,9 @@ class QMP:
             raise
 
         command_ack_utc = utc_now()
+        command_ack_monotonic = self.clock()
         try:
-            artifact = self._wait_for_screenshot_artifact(full_path)
+            artifact = self._wait_for_screenshot_artifact(full_path, deadline)
         except ScreenshotArtifactError as exc:
             self._record(
                 {
@@ -1045,25 +1052,36 @@ class QMP:
                 }
             )
             raise
-        self._record(
-            {
-                "kind": "screenshot-verified",
-                "path": str(full_path),
-                "transport": "QMP human-monitor-command screendump",
-                "qmp_command_acknowledged": True,
-                "qmp_command_ack_utc": command_ack_utc,
-                "artifact_verified_utc": utc_now(),
-                **artifact,
-                "response": response,
-            }
-        )
+        artifact_verified_monotonic = self.clock()
+        verified = {
+            "kind": "screenshot-verified",
+            "path": str(full_path),
+            "transport": "QMP human-monitor-command screendump",
+            "qmp_command_acknowledged": True,
+            "qmp_command_ack_utc": command_ack_utc,
+            "artifact_verified_utc": utc_now(),
+            "request_monotonic": capture_started_monotonic,
+            "qmp_command_ack_monotonic": command_ack_monotonic,
+            "artifact_verified_monotonic": artifact_verified_monotonic,
+            "fresh_capture": True,
+            **artifact,
+            "response": response,
+        }
+        self._record(verified)
+        return verified
+
+    def verify_ownership(self, *, deadline: float | None = None) -> None:
+        """Revalidate the established connection without sending a QMP command."""
+        with self._lock:
+            remaining = self._remaining(self._command_deadline(deadline))
+            self._verify_connection(remaining)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "action",
-        choices=("query", "move", "combined-move", "drag", "click", "key", "type", "wheel", "screenshot", "quit"),
+        choices=("query", "move", "combined-move", "settle", "drag", "click", "key", "type", "wheel", "screenshot", "quit"),
     )
     parser.add_argument("--port", type=int, default=63800)
     parser.add_argument("--expected-pid", type=int, required=True, help="PID reported for this QAC-owned QEMU child")
@@ -1076,6 +1094,15 @@ def main() -> int:
     parser.add_argument("--wheel", type=int, default=0)
     parser.add_argument("--delay-ms", type=int, default=200)
     parser.add_argument("--screenshot-path", type=Path)
+    parser.add_argument("--initial-x", type=int)
+    parser.add_argument("--initial-y", type=int)
+    parser.add_argument("--cursor-source", type=Path)
+    parser.add_argument("--screenshot-directory", type=Path)
+    parser.add_argument("--deadline-seconds", type=float, default=8.0)
+    parser.add_argument("--max-screenshots", type=int, default=8)
+    parser.add_argument("--min-interval-ms", type=int, default=250)
+    parser.add_argument("--tolerance", type=int, default=1)
+    parser.add_argument("--target-rect", help="inclusive x1,y1,x2,y2 rectangle required by settle")
     args = parser.parse_args()
     delay = args.delay_ms / 1000
     if not 0 <= args.delay_ms <= MAX_DELAY_SECONDS * 1000:
@@ -1087,6 +1114,41 @@ def main() -> int:
             qmp.hmp("info mice")
         elif args.action in ("move", "combined-move"):
             qmp.relative(args.dx, args.dy, delay, args.action == "combined-move")
+        elif args.action == "settle":
+            if args.initial_x is None or args.initial_y is None:
+                raise ValueError("settle requires --initial-x and --initial-y from a verified measurement")
+            if args.cursor_source is None or args.screenshot_directory is None:
+                raise ValueError("settle requires --cursor-source and --screenshot-directory")
+            if args.deadline_seconds <= 0 or args.min_interval_ms <= 0:
+                raise ValueError("settle deadline and minimum observation interval must be positive")
+            if args.target_rect is None:
+                raise ValueError("settle requires --target-rect so the result can authorize a click")
+            try:
+                target_region = tuple(int(part.strip()) for part in args.target_rect.split(","))
+            except ValueError as exc:
+                raise ValueError("--target-rect must be four comma-separated integers") from exc
+            if len(target_region) != 4:
+                raise ValueError("--target-rect must be four comma-separated integers")
+            from font15r1_pointer_settling import CursorTemplate, settle_pointer
+
+            template = CursorTemplate.from_cpp_source(args.cursor_source)
+            deadline = qmp.clock() + args.deadline_seconds
+            outcome = settle_pointer(
+                qmp,
+                initial_position=(args.initial_x, args.initial_y),
+                dx=args.dx,
+                dy=args.dy,
+                cursor_template=template,
+                screenshot_directory=args.screenshot_directory,
+                deadline=deadline,
+                max_screenshots=args.max_screenshots,
+                min_interval=args.min_interval_ms / 1000.0,
+                tolerance=args.tolerance,
+                delay=delay,
+                target_region=target_region,
+            )
+            print(json.dumps({"action": args.action, **outcome.as_dict()}, separators=(",", ":")))
+            return 0 if outcome.click_authorized else 2
         elif args.action == "drag":
             outcome = qmp.drag(args.button, args.dx, args.dy, delay)
             print(json.dumps({"action": args.action, **outcome.as_dict()}, separators=(",", ":")))
