@@ -490,12 +490,14 @@ class QMP:
             raise QMPTimeout("QMP operation deadline expired")
         return remaining
 
-    def _verify_connection(self, timeout: float) -> None:
+    def _verify_connection(self, timeout: float, *, deadline: float | None = None) -> None:
         if self.sock is None or self._closed:
             raise QMPConnectionLost("QMP connection is closed")
-        deadline = self.clock() + timeout
+        check_deadline = self.clock() + timeout
+        if deadline is not None:
+            check_deadline = min(check_deadline, deadline)
         for attempt in range(CONNECTION_OWNER_RECHECKS + 1):
-            remaining = deadline - self.clock()
+            remaining = check_deadline - self.clock()
             if remaining <= 0:
                 raise QMPTimeout("QMP connection ownership check exceeded its deadline")
             try:
@@ -514,7 +516,7 @@ class QMP:
                 )
                 if exc.owner_pids or attempt == CONNECTION_OWNER_RECHECKS:
                     raise
-                remaining = deadline - self.clock()
+                remaining = check_deadline - self.clock()
                 if remaining <= 0:
                     raise QMPTimeout(
                         "QMP connection ownership recheck exceeded its deadline"
@@ -601,9 +603,11 @@ class QMP:
                 raise QMPConnectionLost("QMP connection is closed")
             if not self._protocol_usable:
                 raise QMPProtocolError("QMP connection is not safe to reuse")
-            if execute == "input-send-event" or execute == "quit":
-                self._verify_connection(self._remaining(self._command_deadline(deadline)))
             command_deadline = self._command_deadline(deadline)
+            if execute == "input-send-event" or execute == "quit":
+                self._verify_connection(
+                    self._remaining(command_deadline), deadline=command_deadline
+                )
             self.sequence += 1
             request: dict[str, Any] = {"execute": execute, "id": self.sequence}
             if arguments:
@@ -1015,7 +1019,9 @@ class QMP:
             }
         )
         try:
-            self._verify_connection(self._remaining(command_deadline))
+            self._verify_connection(
+                self._remaining(command_deadline), deadline=command_deadline
+            )
             response = self._command(
                 "human-monitor-command",
                 {"command-line": f"screendump {full_path}"},
@@ -1073,8 +1079,9 @@ class QMP:
     def verify_ownership(self, *, deadline: float | None = None) -> None:
         """Revalidate the established connection without sending a QMP command."""
         with self._lock:
-            remaining = self._remaining(self._command_deadline(deadline))
-            self._verify_connection(remaining)
+            absolute_deadline = self._command_deadline(deadline)
+            remaining = self._remaining(absolute_deadline)
+            self._verify_connection(remaining, deadline=absolute_deadline)
 
 
 def main() -> int:
