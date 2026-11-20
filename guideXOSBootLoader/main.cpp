@@ -33,7 +33,7 @@ Forbidden:
 #include <Guid/FileInfo.h>
 #include "bootinfo.h"          // legacy, gradually being phased out
 #include "elf.h"
-#include "guidexOSBootInfo.h"   // canonical BootInfo v2
+#include "guidexOSBootInfo.h"   // canonical BootInfo v3
 #include "uefi_shim.h"         // UEFI shims for freestanding environment
 #include "debug_helpers.h"     // Post-ExitBootServices debugging
 #include "paging.h"            // minimal identity page tables
@@ -707,6 +707,38 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     SetMem((void*)(UINTN)bootInfoPhys, EFI_PAGE_SIZE, 0);
     guideXOS::BootInfo* v1BootInfo = (guideXOS::BootInfo*)(UINTN)bootInfoPhys;
 
+    // Keep task-owned frames in a dedicated, explicitly reserved arena. The
+    // kernel treats every physical page outside this arena as unavailable.
+    // Allocation failure is non-fatal to the existing ring-0 product path;
+    // it simply leaves protected-task memory unavailable for this boot.
+    static const UINTN taskFrameArenaPages = 4096; // 16 MiB, bounded
+    EFI_PHYSICAL_ADDRESS taskFrameArenaPhys = 0;
+    EFI_STATUS taskFrameArenaStatus = SystemTable->BootServices->AllocatePages(
+        AllocateAnyPages,
+        EfiLoaderData,
+        taskFrameArenaPages,
+        &taskFrameArenaPhys);
+    if (!EFI_ERROR(taskFrameArenaStatus)) {
+        const UINT64 taskArenaBytes = (UINT64)taskFrameArenaPages * EFI_PAGE_SIZE;
+        const UINT64 identityLimit = 1ull << 47;
+        if (taskFrameArenaPhys >= identityLimit ||
+            taskArenaBytes > identityLimit - taskFrameArenaPhys) {
+            SystemTable->BootServices->FreePages(taskFrameArenaPhys, taskFrameArenaPages);
+            taskFrameArenaPhys = 0;
+            taskFrameArenaStatus = EFI_INVALID_PARAMETER;
+        }
+    }
+    if (!EFI_ERROR(taskFrameArenaStatus)) {
+        v1BootInfo->TaskFrameArenaBase = taskFrameArenaPhys;
+        v1BootInfo->TaskFrameArenaSize = (UINT64)taskFrameArenaPages * EFI_PAGE_SIZE;
+        v1BootInfo->Flags |= guideXOS::GUIDEXOS_BOOTINFO_FLAG_TASK_FRAME_ARENA_VALID;
+        Print((CONST CHAR16*)L"Task frame arena reserved at %p (%u pages)\n",
+              (VOID*)(UINTN)taskFrameArenaPhys, (UINT32)taskFrameArenaPages);
+    } else {
+        taskFrameArenaPhys = 0;
+        Print((CONST CHAR16*)L"Task frame arena unavailable; protected-task memory disabled\n");
+    }
+
     // --- ACPI RSDP (optional) ---
     RSDPDescriptor20* rsdp = FindRSDP(SystemTable);
     if (!rsdp) {
@@ -750,6 +782,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     Print(L"Kernel loaded at: %p - %p\n", (VOID*)(UINTN)kernelBase, (VOID*)(UINTN)(kernelBase + kernelTotalSize));
 
     v1BootInfo->KernelPhysicalBase = kernelBase;
+    v1BootInfo->KernelPhysicalSize = kernelTotalSize;
 
     // --- Load Ramdisk ---
     EFI_PHYSICAL_ADDRESS ramdiskPhys = 0;
@@ -814,7 +847,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         }
     }
 
-    // --- Populate BootInfo v2 BEFORE ExitBootServices ---
+    // --- Populate BootInfo v3 BEFORE ExitBootServices ---
     v1BootInfo->Magic   = guideXOS::GUIDEXOS_BOOTINFO_MAGIC;
     v1BootInfo->Version = guideXOS::GUIDEXOS_BOOTINFO_VERSION;
     v1BootInfo->Size    = (uint16_t)sizeof(guideXOS::BootInfo);
@@ -927,6 +960,13 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
                   stackTop, (VOID*)(UINTN)kernelBase, (VOID*)(UINTN)(kernelBase + kernelTotalSize));
             return EFI_ABORTED;
         }
+        v1BootInfo->BootStackBase = stackPhys;
+        v1BootInfo->BootStackSize = (UINT64)stackPages * EFI_PAGE_SIZE;
+    } else {
+        // Do not export a stale page range if all stack allocations failed.
+        stackPhys = 0;
+        v1BootInfo->BootStackBase = 0;
+        v1BootInfo->BootStackSize = 0;
     }
 
     // --- Allocate executable trampoline buffer that survives ExitBootServices ---
@@ -1089,6 +1129,14 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     ranges[rangeCount] = bootInfoPhys;
     sizes[rangeCount] = EFI_PAGE_SIZE;
     rangeCount++;
+
+    // 4a. Dedicated task-frame arena. It must remain identity mapped so the
+    // kernel can clear owned frames and build private page tables safely.
+    if (taskFrameArenaPhys != 0) {
+        ranges[rangeCount] = taskFrameArenaPhys;
+        sizes[rangeCount] = (UINTN)v1BootInfo->TaskFrameArenaSize;
+        rangeCount++;
+    }
 
     // 5. Memory map buffer
     ranges[rangeCount] = preMemMapPhys;
@@ -1297,11 +1345,11 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         }
     }
 
-    // Fill memory map section in BootInfo v2
+    // Fill memory map section in BootInfo v3
     v1BootInfo->MemoryMap               = (uint64_t)(UINTN)memoryMap;
     v1BootInfo->MemoryMapEntryCount     = (uint64_t)memoryMapCount;
     v1BootInfo->MemoryMapDescriptorSize = (uint64_t)memoryMapDescSize;
-    v1BootInfo->Flags |= (1u << 0); // memory map valid
+    v1BootInfo->Flags |= guideXOS::GUIDEXOS_BOOTINFO_FLAG_MEMORY_MAP_VALID;
 
     // === POST-EBS FRAMEBUFFER MARKER (Stage 2: Cyan = MemMap filled) ===
     if (v1BootInfo->FramebufferBase != 0) {

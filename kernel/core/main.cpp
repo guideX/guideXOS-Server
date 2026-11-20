@@ -8,6 +8,7 @@
 
 #include "include/kernel/version.h"
 #include "include/kernel/build_identity.h"
+#include "include/kernel/amd64_memory_foundation.h"
 #include "include/kernel/arch.h"
 #include "include/kernel/vga.h"
 #include "include/kernel/framebuffer.h"
@@ -766,6 +767,12 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     if (!is_multiboot && !is_bootinfo) {
         kernel::serial::puts("[KERNEL] ERROR: No valid boot method detected, halting\n");
         while(1) { }
+    }
+
+    if (is_bootinfo) {
+        // Initialize only the bounded task-frame owner. The address-space
+        // fixture remains a hosted diagnostic; no task CR3 is activated here.
+        (void)kernel::memory::initialize_amd64_task_memory(bootinfo);
     }
     
     // Initialize framebuffer for graphics mode

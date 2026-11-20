@@ -16,6 +16,7 @@ namespace paging
 
     static EFI_STATUS AllocTable(EFI_SYSTEM_TABLE* SystemTable, EFI_PHYSICAL_ADDRESS* outPhys)
     {
+        if (g_ptPageCount >= MAX_PT_PAGES) return EFI_OUT_OF_RESOURCES;
         *outPhys = 0;
         EFI_STATUS st = SystemTable->BootServices->AllocatePages(
             AllocateAnyPages,
@@ -86,10 +87,20 @@ namespace paging
 
     EFI_STATUS MapIdentityRange(EFI_SYSTEM_TABLE* SystemTable, EFI_PHYSICAL_ADDRESS pml4Phys, EFI_PHYSICAL_ADDRESS physBase, UINTN sizeBytes)
     {
+        if (!SystemTable || pml4Phys == 0) return EFI_INVALID_PARAMETER;
         if (sizeBytes == 0) return EFI_SUCCESS;
 
+        const EFI_PHYSICAL_ADDRESS identityLimit = 1ull << 47;
+        if ((EFI_PHYSICAL_ADDRESS)sizeBytes > identityLimit ||
+            physBase >= identityLimit ||
+            (EFI_PHYSICAL_ADDRESS)sizeBytes > identityLimit - physBase) {
+            return EFI_INVALID_PARAMETER;
+        }
+
         EFI_PHYSICAL_ADDRESS start = AlignDown4K(physBase);
-        EFI_PHYSICAL_ADDRESS end   = AlignUp4K(physBase + (EFI_PHYSICAL_ADDRESS)sizeBytes);
+        const EFI_PHYSICAL_ADDRESS rawEnd = physBase + (EFI_PHYSICAL_ADDRESS)sizeBytes;
+        if (rawEnd > identityLimit - 0xFFFu) return EFI_INVALID_PARAMETER;
+        EFI_PHYSICAL_ADDRESS end = AlignUp4K(rawEnd);
 
         for (EFI_PHYSICAL_ADDRESS p = start; p < end; p += 0x1000) {
             EFI_PHYSICAL_ADDRESS ptPhys = 0;

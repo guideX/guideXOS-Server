@@ -106,7 +106,16 @@ namespace guideXOS
         // NIC information (uses former Reserved space)
         NicInfo  Nic;
         uint64_t KernelPhysicalBase;
+        uint64_t KernelPhysicalSize;
+        uint64_t BootStackBase;
+        uint64_t BootStackSize;
+        // Dedicated, UEFI-reserved arena for task-owned 4 KiB frames. Pages
+        // outside this exact range remain unavailable to the task allocator.
+        uint64_t TaskFrameArenaBase;
+        uint64_t TaskFrameArenaSize;
     };
+
+    static_assert(sizeof(BootInfo) <= 4096u, "BootInfo must fit in its UEFI page allocation");
 
     static inline bool guidexos_framebuffer_descriptor_identity_matches(
         const FramebufferDescriptor* a,
@@ -207,9 +216,13 @@ namespace guideXOS
 
 namespace guideXOS
 {
-    // Magic and version constants for BootInfo v2
+    // Magic and version constants for BootInfo v3
     static const uint32_t GUIDEXOS_BOOTINFO_MAGIC   = 0x49425847; // 'GXBI'
-    static const uint16_t GUIDEXOS_BOOTINFO_VERSION = 2;
+    static const uint16_t GUIDEXOS_BOOTINFO_VERSION = 3;
+    static const uint32_t GUIDEXOS_BOOTINFO_FLAG_MEMORY_MAP_VALID = (1u << 0);
+    static const uint32_t GUIDEXOS_BOOTINFO_FLAG_FRAMEBUFFER_VALID = (1u << 1);
+    static const uint32_t GUIDEXOS_BOOTINFO_FLAG_RAMDISK_VALID = (1u << 2);
+    static const uint32_t GUIDEXOS_BOOTINFO_FLAG_TASK_FRAME_ARENA_VALID = (1u << 3);
 
     // Early panic: implemented in a .cpp file, infinite loop and/or framebuffer error.
     [[noreturn]] void guidexos_early_panic(const BootInfo* bi);
@@ -230,7 +243,7 @@ namespace guideXOS
         return (sum == 0u);
     }
 
-    // Very early, heap-less validation of BootInfo v2
+    // Very early, heap-less validation of BootInfo v3
     static inline void guidexos_validate_bootinfo_or_panic(const BootInfo* bi)
     {
         if (!bi) {
@@ -285,6 +298,18 @@ namespace guideXOS
                 bi->MemoryMapDescriptorSize == 0u) {
                 guidexos_early_panic(bi);
             }
+        }
+
+        // Task frame arena valid?
+        if (bi->Flags & GUIDEXOS_BOOTINFO_FLAG_TASK_FRAME_ARENA_VALID) {
+            if (bi->TaskFrameArenaBase == 0u || bi->TaskFrameArenaSize == 0u ||
+                (bi->TaskFrameArenaBase & 0xFFFu) != 0u ||
+                (bi->TaskFrameArenaSize & 0xFFFu) != 0u ||
+                bi->TaskFrameArenaBase > (~static_cast<uint64_t>(0u)) - bi->TaskFrameArenaSize) {
+                guidexos_early_panic(bi);
+            }
+        } else if (bi->TaskFrameArenaBase != 0u || bi->TaskFrameArenaSize != 0u) {
+            guidexos_early_panic(bi);
         }
     }
 }
