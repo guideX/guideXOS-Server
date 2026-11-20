@@ -14407,3 +14407,44 @@ hosted aggregate remains at **767/774**, with only the seven established CSS
 failures. The protected executable and all 42 generated fixtures were
 restored and verified; `.phase` remains absent. No QEMU, QAC, or guest
 execution was performed.
+
+### JS126 unified callable identity and bounded tail dispatch — partial
+
+JS126 extends the shared 48-byte `FunctionRecord` lookup to the actual hosted
+`RuntimeContext::functions_` prefix and keeps portable additions in its
+caller-backed tail store. It does not copy hosted records into a shadow
+registry. Function Values now carry a 64-bit identity composed of a per-context
+registry tag, runtime generation, and slot; `Value` remains 16 bytes. The
+resolver distinguishes foreign-context, stale-generation, invalid, User,
+Native, and Host records. The portable core identifies Native and Host Values
+but still returns explicit `UnsupportedOperation` for their invocation, while
+hosted dispatch remains on the existing evaluator.
+
+Direct returned calls in the qualified subset use an iterative transfer loop.
+Ordinary receivers, arrow lexical `this`, closures, argument side effects,
+logical depth, step limits, and caller-owned frame/argument pools remain
+covered. The focused JS126 suite passes **146/146**. With 72-byte frames and a
+64-call limit, caller-owned frame backing is 4,608 bytes; the default
+512-Value portable argument arena is 8,192 bytes.
+
+GCC 15.2.0 AMD64 `-fstack-usage` reports a 480-byte `invokeFunction` frame.
+JS125 measured 368 bytes, or 23,552 bytes across 64 nested invocation frames.
+For direct returned calls, JS126 keeps one 480-byte invocation frame across
+the transfer loop, saving 23,072 bytes in that frame component. Non-tail
+recursion remains native-recursive: its invocation frames alone contribute at
+least 30,720 bytes at depth 64, before evaluator frames. F4 is partial; no
+guest stack safety or JSON callback readiness is claimed.
+
+The C++17 AMD64 freestanding component links with zero undefined symbols and
+no TLS, constructor, hosted import, or standard-runtime dependency. The full
+matrix logs show **118/118 lane PASS markers** and **19,313/19,313 assertions
+across 76 reporting lines**; its pool summary's process exit fields were empty,
+so the per-lane output audit is preserved with the raw logs. JS109/JS110 hosted
+pages pass, the strict production build passes, and the hosted aggregate is
+**767/774**, with only the seven established CSS failures. The protected
+8,398,274-byte executable was restored with its baseline SHA-256, all 42
+generated fixtures match the saved 458,372-byte manifest, and `.phase` remains
+absent. No QEMU, QAC, or guest execution was performed. See the
+[JS126 callable identity and bounded invocation report](NAVIGATOR_JAVASCRIPT_JS126_CALLABLE_IDENTITY_STACK.md)
+for the gate table, return/error behavior, stack evidence, protected artifact
+hashes, and JS127 prerequisites.

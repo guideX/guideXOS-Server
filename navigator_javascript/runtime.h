@@ -780,6 +780,8 @@ private:
     HostAdapter* hostAdapter_ = nullptr;
     HostGenerationId hostGeneration_ = kInvalidHostGenerationId;
     RuntimeGeneration runtimeGeneration_ = kInvalidRuntimeGeneration;
+    RuntimeFunctionRegistryId functionRegistryId_ =
+        kInvalidRuntimeFunctionRegistryId;
     std::vector<HostObjectRecord> hostObjects_;
     std::vector<HostMethodRecord> hostMethods_;
     std::vector<HostGlobalSpec> hostGlobalSpecs_;

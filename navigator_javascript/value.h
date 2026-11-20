@@ -66,8 +66,55 @@ constexpr bool runtimeHandleIsValid(std::uint32_t handle,
 using RuntimeStringId = std::uint32_t;
 constexpr RuntimeStringId kInvalidRuntimeStringId = 0xffffffffu;
 
-using RuntimeFunctionId = std::uint32_t;
-constexpr RuntimeFunctionId kInvalidRuntimeFunctionId = 0xffffffffu;
+// Function identity carries a 32-bit registry tag in addition to its realm
+// generation and slot. The registry tag prevents a valid handle from one
+// RuntimeContext resolving to an unrelated record in another context that
+// happens to have the same local generation and slot.
+using RuntimeFunctionRegistryId = std::uint32_t;
+constexpr RuntimeFunctionRegistryId kInvalidRuntimeFunctionRegistryId =
+    0xffffffffu;
+using RuntimeFunctionId = std::uint64_t;
+constexpr RuntimeFunctionId kInvalidRuntimeFunctionId = 0xffffffffffffffffull;
+
+constexpr RuntimeFunctionId makeRuntimeFunctionHandle(
+    RuntimeFunctionRegistryId registry, RuntimeGeneration generation,
+    std::uint32_t slot)
+{
+    return registry == kInvalidRuntimeFunctionRegistryId ||
+        generation == kInvalidRuntimeGeneration ||
+        slot >= kRuntimeHandleInvalidPart
+        ? kInvalidRuntimeFunctionId
+        : (static_cast<std::uint64_t>(registry) << 32u) |
+            (static_cast<std::uint64_t>(generation) << 16u) | slot;
+}
+
+constexpr RuntimeFunctionRegistryId runtimeFunctionRegistry(
+    RuntimeFunctionId handle)
+{
+    return static_cast<RuntimeFunctionRegistryId>(handle >> 32u);
+}
+
+constexpr RuntimeGeneration runtimeFunctionGeneration(
+    RuntimeFunctionId handle)
+{
+    return static_cast<RuntimeGeneration>((handle >> 16u) & 0xffffu);
+}
+
+constexpr std::uint32_t runtimeFunctionSlot(RuntimeFunctionId handle)
+{
+    return static_cast<std::uint32_t>(handle & kRuntimeHandleSlotMask);
+}
+
+constexpr bool runtimeFunctionHandleIsValid(RuntimeFunctionId handle,
+    RuntimeFunctionRegistryId registry, RuntimeGeneration generation)
+{
+    return handle != kInvalidRuntimeFunctionId &&
+        registry != kInvalidRuntimeFunctionRegistryId &&
+        runtimeFunctionRegistry(handle) == registry &&
+        generation != kInvalidRuntimeGeneration &&
+        runtimeFunctionGeneration(handle) == generation &&
+        runtimeFunctionSlot(handle) != kRuntimeHandleInvalidPart;
+}
 
 using RuntimeObjectId = std::uint32_t;
 constexpr RuntimeObjectId kInvalidRuntimeObjectId = 0xffffffffu;

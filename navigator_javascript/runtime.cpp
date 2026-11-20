@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <charconv>
 #include <cmath>
 #include <cstddef>
@@ -26,6 +27,16 @@
 namespace gxos {
 namespace javascript {
 namespace {
+
+RuntimeFunctionRegistryId allocateRuntimeFunctionRegistryId()
+{
+    static std::atomic<std::uint64_t> nextRegistry{1u};
+    const std::uint64_t candidate = nextRegistry.fetch_add(
+        1u, std::memory_order_relaxed);
+    return candidate >= kInvalidRuntimeFunctionRegistryId
+        ? kInvalidRuntimeFunctionRegistryId
+        : static_cast<RuntimeFunctionRegistryId>(candidate);
+}
 
 bool isAsciiDigit(char value)
 {
@@ -5172,6 +5183,12 @@ void RuntimeContext::setEventPhase(std::uint8_t phase)
 RuntimeContext::RuntimeContext(RuntimeLimits limits)
     : limits_(limits), ast_()
 {
+    functionRegistryId_ = allocateRuntimeFunctionRegistryId();
+    if (functionRegistryId_ == kInvalidRuntimeFunctionRegistryId) {
+        setRuntimeError(RuntimeErrorCode::FunctionLimitExceeded,
+            SourceLocation());
+        return;
+    }
     reset();
 }
 
@@ -5457,8 +5474,9 @@ bool RuntimeContext::configurePortableExecutionStorage(
     FunctionStoreError functionError;
     if (!portableFunctions_.configure(
             FunctionStorageView{portableFunctionStorage_.data(),
-                portableFunctionStorage_.size()}, runtimeGeneration_,
-            static_cast<std::uint32_t>(functions_.size()), functionError)) {
+                portableFunctionStorage_.size()},
+            FunctionStoragePrefixView{functions_.data(), functions_.size()},
+            functionRegistryId_, runtimeGeneration_, 0u, functionError)) {
         error = functionError.code == FunctionStoreErrorCode::InvalidStorage ||
             functionError.code == FunctionStoreErrorCode::InvalidAlignment
             ? RuntimeErrorCode::InvalidAstState
@@ -5493,6 +5511,7 @@ RuntimeErrorCode RuntimeContext::mapPortableExecutionError(
         return RuntimeErrorCode::NotCallable;
     case PortableExecutionErrorCode::InvalidFunctionReference:
     case PortableExecutionErrorCode::InvalidEnvironmentReference:
+    case PortableExecutionErrorCode::RealmMismatch:
     case PortableExecutionErrorCode::StaleReference:
         return RuntimeErrorCode::InvalidFunction;
     case PortableExecutionErrorCode::EnvironmentCapacityExhausted:
@@ -5708,7 +5727,10 @@ bool RuntimeContext::appendFunctionRecord(const FunctionRecord& function,
         error = RuntimeErrorCode::FunctionLimitExceeded;
         return false;
     }
-    if (portableFunctions_.count() != 0u) {
+    // Once configured, FunctionStore owns the complete realm handle map.
+    // Route even its first append through tail storage so the hosted prefix
+    // view remains stable for this execution.
+    if (portableFunctions_.configured()) {
         FunctionStoreError storeError;
         if (portableFunctions_.append(function, result, storeError)) return true;
         error = storeError.code == FunctionStoreErrorCode::CapacityExceeded
@@ -5724,7 +5746,7 @@ bool RuntimeContext::appendFunctionRecord(const FunctionRecord& function,
         error = RuntimeErrorCode::AllocationFailure;
         return false;
     }
-    result = makeRuntimeHandle(runtimeGeneration_,
+    result = makeRuntimeFunctionHandle(functionRegistryId_, runtimeGeneration_,
         static_cast<std::uint32_t>(functions_.size() - 1u));
     return result != kInvalidRuntimeFunctionId;
 }
@@ -5799,14 +5821,17 @@ bool RuntimeContext::createHostMethod(RuntimeHostObjectId object,
 const RuntimeContext::FunctionRecord* RuntimeContext::functionAt(
     RuntimeFunctionId id) const
 {
-    if (!runtimeHandleIsValid(id, runtimeGeneration_)) {
+    if (portableFunctions_.configured()) {
+        FunctionStoreError error;
+        return portableFunctions_.get(id, error);
+    }
+    if (!runtimeFunctionHandleIsValid(id, functionRegistryId_,
+            runtimeGeneration_)) {
         return nullptr;
     }
-    const std::size_t slot = runtimeHandleSlot(id);
+    const std::size_t slot = runtimeFunctionSlot(id);
     if (slot < functions_.size()) return &functions_[slot];
-    if (portableFunctions_.count() == 0u) return nullptr;
-    FunctionStoreError error;
-    return portableFunctions_.get(id, error);
+    return nullptr;
 }
 
 bool RuntimeContext::createObject(bool array,

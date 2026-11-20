@@ -27,6 +27,7 @@ enum class PortableExecutionErrorCode : std::uint8_t {
     InvalidFunctionReference,
     InvalidEnvironmentReference,
     StaleReference,
+    RealmMismatch,
     EnvironmentCapacityExhausted,
     BindingCapacityExhausted,
     FunctionCapacityExhausted,
@@ -63,6 +64,7 @@ struct PortableExecutionResult {
     std::size_t functionsCreated = 0u;
     std::size_t argumentValuesHighWater = 0u;
     std::size_t callDepthHighWater = 0u;
+    std::size_t tailCallsExecuted = 0u;
 };
 
 struct PortableExecutionLimits {
@@ -226,6 +228,9 @@ public:
                     FunctionStoreErrorCode::StaleGeneration
                 ? PortableExecutionErrorCode::StaleReference
                 : functionError.code ==
+                    FunctionStoreErrorCode::RealmMismatch
+                    ? PortableExecutionErrorCode::RealmMismatch
+                : functionError.code ==
                     FunctionStoreErrorCode::InvalidReference
                     ? PortableExecutionErrorCode::InvalidFunctionReference
                     : PortableExecutionErrorCode::InternalInvariantFailure;
@@ -294,6 +299,9 @@ public:
                 fail(functionError.code ==
                         FunctionStoreErrorCode::StaleGeneration
                     ? PortableExecutionErrorCode::StaleReference
+                    : functionError.code ==
+                        FunctionStoreErrorCode::RealmMismatch
+                        ? PortableExecutionErrorCode::RealmMismatch
                     : PortableExecutionErrorCode::InvalidFunctionReference,
                     callSite);
             } else if (function->kind != FunctionRecord::Kind::User) {
@@ -315,10 +323,15 @@ public:
     }
 
 private:
-    enum class ControlKind : std::uint8_t { Normal = 0, Return };
+    enum class ControlKind : std::uint8_t { Normal = 0, Return, TailCall };
     struct Control {
         ControlKind kind = ControlKind::Normal;
         Value value = Value::undefined();
+        RuntimeFunctionId tailFunction = kInvalidRuntimeFunctionId;
+        Value tailReceiver = Value::undefined();
+        std::size_t tailArgumentMark = 0u;
+        std::size_t tailArgumentCount = 0u;
+        SourceLocation tailCallSite;
     };
 
     class EnvironmentRestore {
@@ -336,21 +349,24 @@ private:
     public:
         CallRestore(PortableExecutionCoreImpl& core,
             EnvironmentId previousEnvironment,
-            Value previousThis, std::size_t previousArgumentTop)
+            Value previousThis, std::size_t previousArgumentTop,
+            std::size_t previousCallDepth)
             : core_(core), previousEnvironment_(previousEnvironment),
-              previousThis_(previousThis), previousArgumentTop_(previousArgumentTop) {}
+              previousThis_(previousThis), previousArgumentTop_(previousArgumentTop),
+              previousCallDepth_(previousCallDepth) {}
         ~CallRestore()
         {
             core_.currentEnvironment_ = previousEnvironment_;
             core_.currentThis_ = previousThis_;
             core_.argumentTop_ = previousArgumentTop_;
-            if (core_.callDepth_ != 0u) --core_.callDepth_;
+            core_.callDepth_ = previousCallDepth_;
         }
     private:
         PortableExecutionCoreImpl& core_;
         EnvironmentId previousEnvironment_;
         Value previousThis_;
         std::size_t previousArgumentTop_;
+        std::size_t previousCallDepth_;
     };
 
     static bool validNode(const Ast& ast, AstNodeId id)
@@ -1127,6 +1143,10 @@ private:
                 fail(PortableExecutionErrorCode::IllegalReturn, node.location);
                 return false;
             }
+            if (node.expression != kInvalidAstNodeId &&
+                validNode(ast_, node.expression) &&
+                ast_.node(node.expression).kind == AstNodeKind::CallExpression)
+                return evaluateTailCall(node.expression, control);
             control.value = Value::undefined();
             if (node.expression != kInvalidAstNodeId &&
                 !evalExpression(node.expression, control.value)) return false;
@@ -1806,13 +1826,32 @@ private:
 
     bool evalCall(AstNodeId callId, const AstNode& node, Value& result)
     {
+        Value callee;
+        std::size_t mark = 0u;
+        if (!evaluateCallOperands(callId, node, callee, mark)) return false;
+        if (!callee.isFunction()) {
+            argumentTop_ = mark;
+            fail(PortableExecutionErrorCode::InvalidInvocationTarget,
+                node.location);
+            return false;
+        }
+        const bool invoked = invokeFunction(callee.functionId(),
+            storage_.argumentValues == nullptr ? nullptr
+                : storage_.argumentValues + mark,
+            node.childCount, node.location, result);
+        argumentTop_ = mark;
+        return invoked;
+    }
+
+    bool evaluateCallOperands(AstNodeId callId, const AstNode& node,
+        Value& callee, std::size_t& mark)
+    {
         if (node.childCount > limits_.maxCallArguments) {
             fail(PortableExecutionErrorCode::InvalidInvocationTarget,
                 node.location);
             return false;
         }
-        const std::size_t mark = argumentTop_;
-        Value callee;
+        mark = argumentTop_;
         if (!evalExpression(node.callee, callee)) return false;
         if (argumentTop_ > storage_.argumentCapacity ||
             node.childCount > storage_.argumentCapacity - argumentTop_) {
@@ -1831,18 +1870,29 @@ private:
             }
             storage_.argumentValues[mark + index] = argument;
         }
+        return true;
+    }
+
+    bool evaluateTailCall(AstNodeId callId, Control& control)
+    {
+        const AstNode& call = ast_.node(callId);
+        if (!consumeStep(call.location)) return false;
+        Value callee;
+        std::size_t mark = 0u;
+        if (!evaluateCallOperands(callId, call, callee, mark)) return false;
         if (!callee.isFunction()) {
             argumentTop_ = mark;
             fail(PortableExecutionErrorCode::InvalidInvocationTarget,
-                node.location);
+                call.location);
             return false;
         }
-        const bool invoked = invokeFunction(callee.functionId(),
-            storage_.argumentValues == nullptr ? nullptr
-                : storage_.argumentValues + mark,
-            node.childCount, node.location, result);
-        argumentTop_ = mark;
-        return invoked;
+        control.kind = ControlKind::TailCall;
+        control.tailFunction = callee.functionId();
+        control.tailReceiver = Value::undefined();
+        control.tailArgumentMark = mark;
+        control.tailArgumentCount = call.childCount;
+        control.tailCallSite = call.location;
+        return true;
     }
 
     bool createFunction(AstNodeId declaration, EnvironmentId closure,
@@ -1880,110 +1930,163 @@ private:
         std::size_t argumentCount, SourceLocation callSite, Value& result,
         Value receiver = Value::undefined())
     {
-        if (argumentCount != 0u && arguments == nullptr) {
-            fail(PortableExecutionErrorCode::InternalInvariantFailure,
-                callSite);
-            return false;
-        }
-        if (argumentCount > limits_.maxCallArguments) {
-            fail(PortableExecutionErrorCode::InvalidInvocationTarget,
-                callSite);
-            return false;
-        }
-        FunctionStoreError functionError;
-        const FunctionRecord* stored = functions_.get(id, functionError);
-        if (stored == nullptr) {
-            fail(functionError.code == FunctionStoreErrorCode::StaleGeneration
-                    ? PortableExecutionErrorCode::StaleReference
-                    : PortableExecutionErrorCode::InvalidFunctionReference,
-                callSite);
-            return false;
-        }
-        const FunctionRecord function = *stored;
-        if (function.kind != FunctionRecord::Kind::User ||
-            !validNode(ast_, function.declaration)) {
-            fail(PortableExecutionErrorCode::InvalidFunctionReference,
-                callSite);
-            return false;
-        }
-        if (callDepth_ >= limits_.maxCallDepth ||
-            callDepth_ >= storage_.frameCapacity) {
-            fail(PortableExecutionErrorCode::CallDepthExhausted, callSite);
-            return false;
-        }
-        const AstNode& declaration = ast_.node(function.declaration);
-        const bool arrow = declaration.kind == AstNodeKind::ArrowFunctionExpression;
-        if ((declaration.kind != AstNodeKind::FunctionDeclaration &&
-                declaration.kind != AstNodeKind::FunctionExpression && !arrow) ||
-            function.arrowFunction != arrow ||
-            !simpleParameters(ast_, function.declaration)) {
-            fail(PortableExecutionErrorCode::InvalidFunctionReference,
-                callSite);
-            return false;
-        }
-        EnvironmentError envError;
-        if (!environments_.valid(function.closureEnvironment, envError)) {
-            fail(mapEnvironmentError(envError.code), callSite);
-            return false;
-        }
-
         const EnvironmentId previousEnvironment = currentEnvironment_;
         const Value previousThis = currentThis_;
         const std::size_t previousArgumentTop = argumentTop_;
-        PortableCallFrame& frame = storage_.frames[callDepth_];
-        frame.function = id;
-        frame.previousEnvironment = previousEnvironment;
-        frame.previousThis = previousThis;
-        frame.callSite = callSite;
-        frame.argumentMark = previousArgumentTop;
-        ++callDepth_;
-        if (callDepth_ > result_.callDepthHighWater)
-            result_.callDepthHighWater = callDepth_;
         CallRestore restore(*this, previousEnvironment, previousThis,
-            previousArgumentTop);
+            previousArgumentTop, callDepth_);
+        const std::size_t tailArgumentBase = previousArgumentTop;
+        RuntimeFunctionId currentId = id;
+        const Value* currentArguments = arguments;
+        std::size_t currentArgumentCount = argumentCount;
+        SourceLocation currentCallSite = callSite;
+        Value currentReceiver = receiver;
+        bool tailTransition = false;
 
-        EnvironmentId callEnvironment = kInvalidEnvironmentId;
-        if (!environments_.create(function.closureEnvironment,
-                EnvironmentKind::Function, environmentLimits(), callEnvironment,
-                envError)) {
-            fail(mapEnvironmentError(envError.code), callSite);
-            return false;
-        }
-        ++result_.environmentsCreated;
-        frame.environment = callEnvironment;
-        currentEnvironment_ = callEnvironment;
-        currentThis_ = arrow ? function.lexicalThis : receiver;
-        for (std::size_t index = 0u; index < declaration.childCount; ++index) {
-            const AstNodeId parameter = ast_.childAt(function.declaration, index);
-            SourceView name;
-            if (!nodeName(parameter, name, ast_.node(parameter).location))
-                return false;
-            EnvironmentError parameterError;
-            const Value value = index < argumentCount
-                ? arguments[index] : Value::undefined();
-            if (!environments_.declare(callEnvironment, name, value,
-                    parameterError)) {
-                fail(mapBindingError(parameterError.code),
-                    ast_.node(parameter).location);
+        while (true) {
+            if (currentArgumentCount != 0u && currentArguments == nullptr) {
+                fail(PortableExecutionErrorCode::InternalInvariantFailure,
+                    currentCallSite);
                 return false;
             }
-        }
-        if (declaration.body != kInvalidAstNodeId) {
-            if (!instantiateFunctions(declaration.body, callEnvironment) ||
-                !instantiateLexicalBindings(declaration.body, callEnvironment))
+            if (currentArgumentCount > limits_.maxCallArguments) {
+                fail(PortableExecutionErrorCode::InvalidInvocationTarget,
+                    currentCallSite);
                 return false;
-            if (!consumeStep(ast_.node(declaration.body).location)) return false;
+            }
+            FunctionStoreError functionError;
+            const FunctionRecord* stored = functions_.get(currentId,
+                functionError);
+            if (stored == nullptr) {
+                fail(functionError.code ==
+                        FunctionStoreErrorCode::StaleGeneration
+                    ? PortableExecutionErrorCode::StaleReference
+                    : functionError.code ==
+                        FunctionStoreErrorCode::RealmMismatch
+                        ? PortableExecutionErrorCode::RealmMismatch
+                    : PortableExecutionErrorCode::InvalidFunctionReference,
+                    currentCallSite);
+                return false;
+            }
+            const FunctionRecord function = *stored;
+            if (function.kind != FunctionRecord::Kind::User) {
+                fail(function.kind == FunctionRecord::Kind::Native ||
+                        function.kind == FunctionRecord::Kind::Host
+                    ? PortableExecutionErrorCode::UnsupportedOperation
+                    : PortableExecutionErrorCode::InvalidFunctionReference,
+                    currentCallSite);
+                return false;
+            }
+            if (!validNode(ast_, function.declaration)) {
+                fail(PortableExecutionErrorCode::InvalidFunctionReference,
+                    currentCallSite);
+                return false;
+            }
+            if (callDepth_ >= limits_.maxCallDepth ||
+                callDepth_ >= storage_.frameCapacity) {
+                fail(PortableExecutionErrorCode::CallDepthExhausted,
+                    currentCallSite);
+                return false;
+            }
+            const AstNode& declaration = ast_.node(function.declaration);
+            const bool arrow = declaration.kind ==
+                AstNodeKind::ArrowFunctionExpression;
+            if ((declaration.kind != AstNodeKind::FunctionDeclaration &&
+                    declaration.kind != AstNodeKind::FunctionExpression &&
+                    !arrow) || function.arrowFunction != arrow ||
+                !simpleParameters(ast_, function.declaration)) {
+                fail(PortableExecutionErrorCode::InvalidFunctionReference,
+                    currentCallSite);
+                return false;
+            }
+            EnvironmentError envError;
+            if (!environments_.valid(function.closureEnvironment, envError)) {
+                fail(mapEnvironmentError(envError.code), currentCallSite);
+                return false;
+            }
+
+            PortableCallFrame& frame = storage_.frames[callDepth_];
+            frame.function = currentId;
+            frame.previousEnvironment = currentEnvironment_;
+            frame.previousThis = currentThis_;
+            frame.callSite = currentCallSite;
+            frame.argumentMark = argumentTop_;
+            ++callDepth_;
+            if (callDepth_ > result_.callDepthHighWater)
+                result_.callDepthHighWater = callDepth_;
+
+            EnvironmentId callEnvironment = kInvalidEnvironmentId;
+            if (!environments_.create(function.closureEnvironment,
+                    EnvironmentKind::Function, environmentLimits(),
+                    callEnvironment, envError)) {
+                fail(mapEnvironmentError(envError.code), currentCallSite);
+                return false;
+            }
+            ++result_.environmentsCreated;
+            frame.environment = callEnvironment;
+            currentEnvironment_ = callEnvironment;
+            currentThis_ = arrow ? function.lexicalThis : currentReceiver;
+            for (std::size_t index = 0u; index < declaration.childCount;
+                ++index) {
+                const AstNodeId parameter = ast_.childAt(
+                    function.declaration, index);
+                SourceView name;
+                if (!nodeName(parameter, name,
+                        ast_.node(parameter).location)) return false;
+                EnvironmentError parameterError;
+                const Value value = index < currentArgumentCount
+                    ? currentArguments[index] : Value::undefined();
+                if (!environments_.declare(callEnvironment, name, value,
+                        parameterError)) {
+                    fail(mapBindingError(parameterError.code),
+                        ast_.node(parameter).location);
+                    return false;
+                }
+            }
+            if (tailTransition) ++result_.tailCallsExecuted;
+            // Incoming values have been copied into this activation's
+            // environment. Reuse one caller-owned argument window for any
+            // subsequent tail transfer instead of growing it with depth.
+            argumentTop_ = tailArgumentBase;
+
             Control control;
-            if (!executeStatementList(declaration.body, true, control))
+            if (declaration.body != kInvalidAstNodeId) {
+                if (!instantiateFunctions(declaration.body, callEnvironment) ||
+                    !instantiateLexicalBindings(declaration.body,
+                        callEnvironment)) return false;
+                if (!consumeStep(ast_.node(declaration.body).location))
+                    return false;
+                if (!executeStatementList(declaration.body, true, control))
+                    return false;
+            } else if (validNode(ast_, declaration.expression) &&
+                ast_.node(declaration.expression).kind ==
+                    AstNodeKind::CallExpression) {
+                if (!evaluateTailCall(declaration.expression, control))
+                    return false;
+            } else if (!evalExpression(declaration.expression, control.value)) {
                 return false;
-            if (control.kind == ControlKind::Return) result = control.value;
-            else result = Value::undefined();
-            return true;
+            } else {
+                result = control.value;
+                return true;
+            }
+
+            if (control.kind == ControlKind::Return) {
+                result = control.value;
+                return true;
+            }
+            if (control.kind != ControlKind::TailCall) {
+                result = Value::undefined();
+                return true;
+            }
+            tailTransition = true;
+            currentId = control.tailFunction;
+            currentReceiver = control.tailReceiver;
+            currentCallSite = control.tailCallSite;
+            currentArgumentCount = control.tailArgumentCount;
+            currentArguments = currentArgumentCount == 0u
+                ? nullptr : storage_.argumentValues +
+                    control.tailArgumentMark;
         }
-        Control control;
-        if (!evalExpression(declaration.expression, control.value)) return false;
-        result = control.value;
-        return true;
     }
 
     Ast& ast_;

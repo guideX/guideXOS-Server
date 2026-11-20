@@ -16,6 +16,7 @@ enum class FunctionStoreErrorCode : std::uint8_t {
     InvalidAlignment,
     InvalidInput,
     InvalidReference,
+    RealmMismatch,
     StaleGeneration,
     CapacityExceeded,
     SizeOverflow,
@@ -52,6 +53,16 @@ struct FunctionStorageView {
     std::size_t capacity = 0u;
 };
 
+// Read-only prefix records are owned by the hosted RuntimeContext. The view
+// remains valid only while that realm generation is active. New portable
+// records are appended to the caller-backed storage below the same handle
+// space, so lookup has one authoritative slot map without copying hosted
+// Native/Host records into a shadow registry.
+struct FunctionStoragePrefixView {
+    const FunctionRecord* records = nullptr;
+    std::size_t count = 0u;
+};
+
 // Caller-backed, append-only records with generation checked stable handles.
 // A non-zero slot base lets a hosted RuntimeContext keep its established
 // native/host prefix while the shared core appends into portable storage.
@@ -61,9 +72,26 @@ public:
         RuntimeGeneration generation, std::uint32_t slotBase,
         FunctionStoreError& error)
     {
+        return configure(storage, FunctionStoragePrefixView(), 0u,
+            generation, slotBase, error);
+    }
+
+    bool configure(FunctionStorageView storage,
+        FunctionStoragePrefixView prefix, RuntimeGeneration generation,
+        std::uint32_t slotBase, FunctionStoreError& error)
+    {
+        return configure(storage, prefix, 0u, generation, slotBase, error);
+    }
+
+    bool configure(FunctionStorageView storage,
+        FunctionStoragePrefixView prefix,
+        RuntimeFunctionRegistryId registry, RuntimeGeneration generation,
+        std::uint32_t slotBase, FunctionStoreError& error)
+    {
         const RuntimeGeneration previousGeneration = generation_;
         error.code = FunctionStoreErrorCode::None;
         storage_ = FunctionStorageView();
+        prefix_ = FunctionStoragePrefixView();
         generation_ = kInvalidRuntimeGeneration;
         slotBase_ = 0u;
         count_ = 0u;
@@ -73,13 +101,25 @@ public:
             error.code = FunctionStoreErrorCode::InvalidStorage;
             return false;
         }
+        if ((prefix.records == nullptr && prefix.count != 0u) ||
+            (prefix.records != nullptr && prefix.count == 0u)) {
+            error.code = FunctionStoreErrorCode::InvalidStorage;
+            return false;
+        }
         if (storage.records != nullptr &&
             reinterpret_cast<std::uintptr_t>(storage.records) %
                 alignof(FunctionRecord) != 0u) {
             error.code = FunctionStoreErrorCode::InvalidAlignment;
             return false;
         }
-        if (generation == kInvalidRuntimeGeneration ||
+        if (prefix.records != nullptr &&
+            reinterpret_cast<std::uintptr_t>(prefix.records) %
+                alignof(FunctionRecord) != 0u) {
+            error.code = FunctionStoreErrorCode::InvalidAlignment;
+            return false;
+        }
+        if (registry == kInvalidRuntimeFunctionRegistryId ||
+            generation == kInvalidRuntimeGeneration ||
             slotBase >= kRuntimeHandleInvalidPart) {
             error.code = FunctionStoreErrorCode::InvalidInput;
             return false;
@@ -89,12 +129,16 @@ public:
             error.code = FunctionStoreErrorCode::StaleGeneration;
             return false;
         }
-        if (storage.capacity >
-            static_cast<std::size_t>(kRuntimeHandleInvalidPart - slotBase)) {
+        const std::size_t available = static_cast<std::size_t>(
+            kRuntimeHandleInvalidPart - slotBase);
+        if (prefix.count > available ||
+            storage.capacity > available - prefix.count) {
             error.code = FunctionStoreErrorCode::SizeOverflow;
             return false;
         }
         storage_ = storage;
+        prefix_ = prefix;
+        registry_ = registry;
         generation_ = generation;
         slotBase_ = slotBase;
         valid_ = true;
@@ -104,6 +148,7 @@ public:
     void reset(RuntimeGeneration generation)
     {
         count_ = 0u;
+        prefix_ = FunctionStoragePrefixView();
         if (generation == kInvalidRuntimeGeneration) {
             valid_ = false;
             return;
@@ -118,7 +163,7 @@ public:
     bool setSlotBase(std::uint32_t slotBase, FunctionStoreError& error)
     {
         error.code = FunctionStoreErrorCode::None;
-        if (!valid_ || count_ != 0u) {
+        if (!valid_ || prefix_.count != 0u || count_ != 0u) {
             error.code = FunctionStoreErrorCode::InvalidInput;
             return false;
         }
@@ -145,7 +190,7 @@ public:
         }
         if (count_ >= storage_.capacity ||
             count_ >= static_cast<std::size_t>(kRuntimeHandleInvalidPart -
-                slotBase_)) {
+                slotBase_ - prefix_.count)) {
             error.code = FunctionStoreErrorCode::CapacityExceeded;
             return false;
         }
@@ -154,8 +199,8 @@ public:
             return false;
         }
         storage_.records[count_] = value;
-        result = makeRuntimeHandle(generation_, slotBase_ +
-            static_cast<std::uint32_t>(count_));
+        result = makeRuntimeFunctionHandle(registry_, generation_, slotBase_ +
+            static_cast<std::uint32_t>(prefix_.count + count_));
         if (result == kInvalidRuntimeFunctionId) {
             error.code = FunctionStoreErrorCode::InternalInvariantFailure;
             return false;
@@ -174,13 +219,22 @@ public:
             error.code = FunctionStoreErrorCode::InvalidStorage;
             return false;
         }
-        if (runtimeHandleGeneration(id) != generation_) {
+        if (id == kInvalidRuntimeFunctionId) {
+            error.code = FunctionStoreErrorCode::InvalidReference;
+            return false;
+        }
+        if (runtimeFunctionRegistry(id) != registry_) {
+            error.code = FunctionStoreErrorCode::RealmMismatch;
+            return false;
+        }
+        if (runtimeFunctionGeneration(id) != generation_) {
             error.code = FunctionStoreErrorCode::StaleGeneration;
             return false;
         }
-        if (!runtimeHandleIsValid(id, generation_) || count_ == 0u ||
-            runtimeHandleSlot(id) != slotBase_ +
-                static_cast<std::uint32_t>(count_ - 1u)) {
+        if (!runtimeFunctionHandleIsValid(id, registry_, generation_) ||
+            count_ == 0u ||
+            runtimeFunctionSlot(id) != slotBase_ +
+                static_cast<std::uint32_t>(prefix_.count + count_ - 1u)) {
             error.code = FunctionStoreErrorCode::InvalidReference;
             return false;
         }
@@ -196,35 +250,49 @@ public:
             error.code = FunctionStoreErrorCode::InvalidStorage;
             return nullptr;
         }
-        if (runtimeHandleGeneration(id) != generation_) {
-            error.code = FunctionStoreErrorCode::StaleGeneration;
-            return nullptr;
-        }
-        if (!runtimeHandleIsValid(id, generation_)) {
+        if (id == kInvalidRuntimeFunctionId) {
             error.code = FunctionStoreErrorCode::InvalidReference;
             return nullptr;
         }
-        const std::uint32_t slot = runtimeHandleSlot(id);
+        if (runtimeFunctionRegistry(id) != registry_) {
+            error.code = FunctionStoreErrorCode::RealmMismatch;
+            return nullptr;
+        }
+        if (runtimeFunctionGeneration(id) != generation_) {
+            error.code = FunctionStoreErrorCode::StaleGeneration;
+            return nullptr;
+        }
+        if (!runtimeFunctionHandleIsValid(id, registry_, generation_)) {
+            error.code = FunctionStoreErrorCode::InvalidReference;
+            return nullptr;
+        }
+        const std::uint32_t slot = runtimeFunctionSlot(id);
         if (slot < slotBase_) {
             error.code = FunctionStoreErrorCode::InvalidReference;
             return nullptr;
         }
         const std::size_t index = static_cast<std::size_t>(slot - slotBase_);
-        if (index >= count_) {
+        if (index < prefix_.count) return &prefix_.records[index];
+        const std::size_t tailIndex = index - prefix_.count;
+        if (tailIndex >= count_) {
             error.code = FunctionStoreErrorCode::InvalidReference;
             return nullptr;
         }
-        return &storage_.records[index];
+        return &storage_.records[tailIndex];
     }
 
     std::size_t count() const { return count_; }
+    std::size_t totalCount() const { return prefix_.count + count_; }
     std::size_t capacity() const { return storage_.capacity; }
     std::uint32_t slotBase() const { return slotBase_; }
+    RuntimeFunctionRegistryId registry() const { return registry_; }
     RuntimeGeneration generation() const { return generation_; }
     bool configured() const { return valid_; }
 
 private:
     FunctionStorageView storage_;
+    FunctionStoragePrefixView prefix_;
+    RuntimeFunctionRegistryId registry_ = kInvalidRuntimeFunctionRegistryId;
     RuntimeGeneration generation_ = kInvalidRuntimeGeneration;
     std::uint32_t slotBase_ = 0u;
     std::size_t count_ = 0u;
