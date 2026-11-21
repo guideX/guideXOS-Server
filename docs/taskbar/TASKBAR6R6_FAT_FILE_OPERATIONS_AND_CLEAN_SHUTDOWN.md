@@ -152,7 +152,7 @@ App Model identity (25/25) and actions (55/55), compositor pointer, Window UI, a
 | R6-G5 — Guest file-reopening problem resolved or characterized | **PASS** | File Explorer enumerated/opened the text file; guest VFS reads matched the raw image. R5 used application dispatch instead of file opening. |
 | R6-G6 — Guest-initiated clean shutdown | **PASS** | Shell shutdown request reached the kernel and all four QEMU guests exited with code 0. |
 | R6-G7 — Required shutdown storage sync verified | **PASS** | Successful `ata0m` cache flush and VFS FAT32 sync precede ACPI S5 on every boot. |
-| R6-G8 — Taskbar settings and pins survive clean cold restarts | **PASS** | Boot A settings and the existing Calculator pin loaded on Boots B–D with no duplicate pin. A new pin action was not performed. |
+| R6-G8 — Taskbar settings and pins survive clean cold restarts | **PARTIAL** | Boot A settings and the existing Calculator pin loaded on Boots B–D with no duplicate pin. R6 did not save a new Calculator pin or make a second taskbar change in Boot B before Boot C. |
 | R6-G9 — Test-file contents survive and read inside guest | **PASS** | Boot B and C production VFS reads each returned the exact 27 bytes saved in Boot A. |
 | R6-G10 — Configuration/FAT safeguards remain intact | **PASS** | Injected replacement failure preserves prior bytes; raw image has identical FAT copies, no stale LFN, and no temp/backup files. No ATA failure was injected. |
 | R6-G11 — Focused regressions and builds pass | **PASS** | FAT 77/77, ATA 80/80, taskbar 113/113, settings 908/908, hosted and both AMD64 builds. |
