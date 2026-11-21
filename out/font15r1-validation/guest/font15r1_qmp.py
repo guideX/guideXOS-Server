@@ -246,12 +246,23 @@ class WindowsEndpointVerifier:
     def verify_listener(self, port: int, expected_pid: int, timeout: float) -> ProcessIdentity:
         if timeout <= 0:
             raise QMPTimeout("listener ownership check exceeded its deadline")
-        listener_pids = self.listener_pids(port)
-        if listener_pids != [expected_pid]:
-            raise EndpointIdentityError(
-                f"loopback port {port} listener PID set {listener_pids!r} does not match "
-                f"the expected QAC-owned PID {expected_pid}"
-            )
+        deadline = time.monotonic() + timeout
+        while True:
+            listener_pids = self.listener_pids(port)
+            if listener_pids == [expected_pid]:
+                break
+            if listener_pids:
+                raise EndpointIdentityError(
+                    f"loopback port {port} listener PID set {listener_pids!r} does not match "
+                    f"the expected QAC-owned PID {expected_pid}"
+                )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise EndpointIdentityError(
+                    f"loopback port {port} listener PID set {listener_pids!r} does not match "
+                    f"the expected QAC-owned PID {expected_pid} before the ownership deadline"
+                )
+            time.sleep(min(0.05, remaining))
         identity = self._process_identity(expected_pid)
         self._validate_qemu(identity, expected_pid)
         return identity
@@ -744,7 +755,15 @@ class QMP:
             {"kind": "drag-state", "button": button, "phase": phase, "state": state, **extra}
         )
 
-    def drag(self, button: str, dx: int, dy: int, delay: float) -> DragOutcome:
+    def drag(
+        self,
+        button: str,
+        dx: int,
+        dy: int,
+        delay: float,
+        *,
+        deadline: float | None = None,
+    ) -> DragOutcome:
         self._validate_delay(delay)
         if not button:
             raise ValueError("button must not be empty")
@@ -758,6 +777,8 @@ class QMP:
                 return outcome
             self._active_drag_button = button
             operation_deadline = self.clock() + MAX_DRAG_SECONDS
+            if deadline is not None:
+                operation_deadline = min(operation_deadline, deadline)
             phase = "button-down"
             try:
                 outcome.down_attempted = True

@@ -581,6 +581,7 @@ class FakeInteractiveQmp:
         self.screenshot_count = 0
         self.relative_calls: list[tuple[int, int]] = []
         self.clicks: list[tuple[str, int, int]] = []
+        self.drag_actions: list[tuple[str, int, int]] = []
         self.wheels: list[tuple[int, int]] = []
         self.trace: list[dict[str, Any]] = []
 
@@ -618,8 +619,19 @@ class FakeInteractiveQmp:
     def _record(self, record: dict[str, Any]) -> None:
         self.trace.append(record)
 
-    def drag(self, button: str, dx: int, dy: int, delay: float) -> FakeDrag:
-        self.clicks.append((button, dx, dy))
+    def drag(
+        self,
+        button: str,
+        dx: int,
+        dy: int,
+        delay: float,
+        *,
+        deadline: float | None = None,
+    ) -> FakeDrag:
+        if dx == 0 and dy == 0:
+            self.clicks.append((button, dx, dy))
+        else:
+            self.drag_actions.append((button, dx, dy))
         return self.drag_result
 
     def wheel(self, delta: int, delay: float) -> FakeDrag:
@@ -654,6 +666,84 @@ class SettledClickIntegrationTests(unittest.TestCase):
             ),
             qmp,
         )
+
+    def test_drag_requires_verified_start_and_observes_one_destination(self) -> None:
+        interactor, qmp = self.interactor([[(350, 250)], [(250, 170)]])
+        result = interactor.drag(
+            start_position=(350, 250),
+            start_region=(345, 245, 355, 255),
+            dx=-100,
+            dy=-80,
+            deadline=self.clock.now + 2,
+            min_interval=0.05,
+        )
+        self.assertEqual(result.status, "DRAG_SETTLED")
+        self.assertTrue(result.input_attempted)
+        self.assertEqual(result.expected_position, (250, 170))
+        self.assertEqual(qmp.drag_actions, [("left", -100, -80)])
+        self.assertFalse(qmp.clicks)
+        self.assertEqual(len(result.observations), 1)
+
+    def test_drag_waits_read_only_for_delayed_destination_without_resending(self) -> None:
+        interactor, qmp = self.interactor(
+            [[(350, 250)], [(300, 210)], [(250, 170)]]
+        )
+        result = interactor.drag(
+            start_position=(350, 250),
+            start_region=(345, 245, 355, 255),
+            dx=-100,
+            dy=-80,
+            deadline=self.clock.now + 2,
+            min_interval=0.1,
+        )
+        self.assertEqual(result.status, "DRAG_SETTLED")
+        self.assertEqual(len(result.observations), 2)
+        self.assertEqual(qmp.drag_actions, [("left", -100, -80)])
+        self.assertFalse(qmp.relative_calls)
+
+    def test_drag_blocks_when_pointer_is_not_at_settled_origin(self) -> None:
+        interactor, qmp = self.interactor([[(100, 100)]])
+        result = interactor.drag(
+            start_position=(350, 250),
+            start_region=(345, 245, 355, 255),
+            dx=-100,
+            dy=-80,
+            deadline=self.clock.now + 2,
+        )
+        self.assertEqual(result.status, "DRAG_BLOCKED")
+        self.assertFalse(result.input_attempted)
+        self.assertFalse(qmp.drag_actions)
+
+    def test_drag_rejects_lost_qmp_ownership_before_button_down(self) -> None:
+        interactor, qmp = self.interactor(
+            [[(350, 250)]], fail_verify_call=2
+        )
+        result = interactor.drag(
+            start_position=(350, 250),
+            start_region=(345, 245, 355, 255),
+            dx=-100,
+            dy=-80,
+            deadline=self.clock.now + 2,
+        )
+        self.assertEqual(result.status, "DRAG_BLOCKED")
+        self.assertFalse(result.input_attempted)
+        self.assertFalse(qmp.drag_actions)
+
+    def test_failed_drag_is_not_repeated(self) -> None:
+        interactor, qmp = self.interactor(
+            [[(350, 250)]],
+            drag_result=FakeDrag(success=False, button_state="release-command-acknowledged"),
+        )
+        result = interactor.drag(
+            start_position=(350, 250),
+            start_region=(345, 245, 355, 255),
+            dx=-100,
+            dy=-80,
+            deadline=self.clock.now + 2,
+        )
+        self.assertEqual(result.status, "DRAG_FAILED")
+        self.assertTrue(result.input_attempted)
+        self.assertEqual(qmp.drag_actions, [("left", -100, -80)])
 
     def test_settled_pointer_authorizes_exactly_one_click(self) -> None:
         interactor, qmp = self.interactor([[(100, 100)], [(200, 150)]])
@@ -794,6 +884,39 @@ class SettledClickIntegrationTests(unittest.TestCase):
         self.assertEqual(result.status, "CLICK_SENT")
         self.assertEqual(len(qmp_instances[0][3].clicks), 1)
 
+    def test_guest_session_drag_uses_confirmed_qac_child_and_observes_destination(self) -> None:
+        coordinator = FakeCoordinator(self.clock, [snapshot("Running", version=1)])
+        gate, _, _, _ = AdmissionIntegrationTests().make_runner(coordinator, clock=self.clock)
+        qmp_instances: list[FakeInteractiveQmp] = []
+
+        def qmp_factory(*args: Any) -> FakeInteractiveQmp:
+            qmp = FakeInteractiveQmp(
+                self.clock, [[(350, 250)], [(250, 170)]], self.template
+            )
+            qmp_instances.append(qmp)
+            return qmp
+
+        session = runner.FontsGuestAcceptanceSession(
+            gate,
+            qmp_port=63801,
+            display_port=41597,
+            qmp_trace=self.directory / "qmp-drag.jsonl",
+            screenshot_directory=self.directory,
+            cursor_template=self.template,
+            qmp_factory=qmp_factory,
+        )
+        self.assertTrue(session.start().guest_input_authorized)
+        result = session.drag_control(
+            start_position=(350, 250),
+            start_region=(345, 245, 355, 255),
+            dx=-100,
+            dy=-80,
+            deadline=self.clock.now + 2,
+            min_interval=0.05,
+        )
+        self.assertEqual(result.status, "DRAG_SETTLED")
+        self.assertEqual(qmp_instances[0].drag_actions, [("left", -100, -80)])
+
     def test_guest_session_blocks_input_when_admission_is_ambiguous(self) -> None:
         coordinator = FakeCoordinator(
             self.clock,
@@ -819,6 +942,14 @@ class SettledClickIntegrationTests(unittest.TestCase):
             deadline=self.clock.now + 2,
         )
         self.assertEqual(result.status, "GUEST_INPUT_NOT_AUTHORIZED")
+        drag = session.drag_control(
+            start_position=(100, 100),
+            start_region=(90, 90, 110, 110),
+            dx=20,
+            dy=20,
+            deadline=self.clock.now + 2,
+        )
+        self.assertEqual(drag.status, "GUEST_INPUT_NOT_AUTHORIZED")
 
     def test_session_shutdown_verifies_qac_release_and_both_endpoints_closed(self) -> None:
         coordinator = FakeCoordinator(

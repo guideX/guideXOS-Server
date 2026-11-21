@@ -336,6 +336,25 @@ class QMPDragSafetyTests(unittest.TestCase):
         finally:
             qmp.close()
 
+    def test_drag_honors_absolute_deadline_and_still_releases_button(self) -> None:
+        qmp = self.make_qmp()
+        deadline = self.clock.now + 0.1
+        try:
+            outcome = qmp.drag("left", 35, 10, 0.2, deadline=deadline)
+            self.assertFalse(outcome.success)
+            self.assertEqual(outcome.primary_error["type"], "QMPTimeout")
+            self.assertTrue(outcome.release_acknowledged)
+            events = self.input_events(self.sockets[0])
+            self.assertEqual(
+                events,
+                [
+                    {"type": "btn", "data": {"button": "left", "down": True}},
+                    {"type": "btn", "data": {"button": "left", "down": False}},
+                ],
+            )
+        finally:
+            qmp.close()
+
     def test_six_event_relative_replay_preserves_order_pacing_and_screenshot_state(self) -> None:
         qmp = self.make_qmp(self.screenshot_handler())
         screenshot = Path(self.temp.name) / "six-event-replay.ppm"
@@ -636,6 +655,44 @@ class QMPDragSafetyTests(unittest.TestCase):
             )
         self.assertEqual(self.connect_calls, 0)
 
+    def test_windows_listener_verifier_waits_for_delayed_qemu_listener(self) -> None:
+        expected_pid = 4242
+
+        class DelayedListenerVerifier(qmp_module.WindowsEndpointVerifier):
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def listener_pids(self, port: int) -> list[int]:
+                self.calls += 1
+                return [] if self.calls < 3 else [expected_pid]
+
+            @staticmethod
+            def _process_identity(pid: int) -> qmp_module.ProcessIdentity:
+                return qmp_module.ProcessIdentity(
+                    pid, "C:\\QEMU\\qemu-system-x86_64.exe", "delayed-listener"
+                )
+
+        verifier = DelayedListenerVerifier()
+        identity = verifier.verify_listener(63809, expected_pid, timeout=0.2)
+        self.assertEqual(identity.pid, expected_pid)
+        self.assertEqual(verifier.calls, 3)
+
+    def test_windows_listener_verifier_rejects_foreign_listener_immediately(self) -> None:
+        class ForeignListenerVerifier(qmp_module.WindowsEndpointVerifier):
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def listener_pids(self, port: int) -> list[int]:
+                self.calls += 1
+                return [9001]
+
+        verifier = ForeignListenerVerifier()
+        with self.assertRaisesRegex(
+            qmp_module.EndpointIdentityError, "does not match the expected QAC-owned PID"
+        ):
+            verifier.verify_listener(63810, 4242, timeout=0.2)
+        self.assertEqual(verifier.calls, 1)
+
     @unittest.skipUnless(sys.platform == "win32", "Windows TCP ownership query")
     def test_windows_owner_query_rejects_a_non_qemu_loopback_listener(self) -> None:
         fixture = LoopbackQMPFixture()
@@ -895,7 +952,7 @@ class QMPDragSafetyTests(unittest.TestCase):
                     self.trace,
                     4242,
                     verifier=FakeVerifier(),
-                    command_timeout=0.2,
+                    command_timeout=1.0,
                 )
         finally:
             fixture.close()
@@ -917,7 +974,7 @@ class QMPDragSafetyTests(unittest.TestCase):
                 command_timeout=0.2,
             )
 
-    def test_helper_cli_exits_with_failure_for_unowned_endpoint(self) -> None:
+    def test_helper_cli_exits_with_failure_for_unowned_endpoint_after_bounded_wait(self) -> None:
         probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
@@ -936,7 +993,7 @@ class QMPDragSafetyTests(unittest.TestCase):
             ],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=8,
             check=False,
         )
         self.assertEqual(completed.returncode, 2)

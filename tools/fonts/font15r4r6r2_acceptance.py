@@ -16,7 +16,7 @@ import subprocess
 import sys
 import time
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Protocol
@@ -466,6 +466,24 @@ class SettledClickResult:
         return asdict(self)
 
 
+@dataclass
+class SettledDragResult:
+    status: str
+    initial_cursor: dict[str, int] | None = None
+    initial_screenshot: dict[str, Any] | None = None
+    start_position: tuple[int, int] | None = None
+    start_region: tuple[int, int, int, int] | None = None
+    requested_delta: tuple[int, int] | None = None
+    expected_position: tuple[int, int] | None = None
+    observations: list[dict[str, Any]] = field(default_factory=list)
+    input_result: dict[str, Any] | None = None
+    input_attempted: bool = False
+    detail: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 class SettledPointerInteractor:
     """Measure, settle once, and click only after live hit-region evidence."""
 
@@ -630,6 +648,201 @@ class SettledPointerInteractor:
             detail=None if success else "bounded input did not complete cleanly; do not repeat it",
         )
         self._emit(f"pointer-{input_action}-result", **result.as_dict())
+        return result
+
+    def drag(
+        self,
+        *,
+        start_position: tuple[int, int],
+        start_region: tuple[int, int, int, int],
+        dx: int,
+        dy: int,
+        deadline: float,
+        max_screenshots: int = 8,
+        min_interval: float = 0.25,
+        tolerance: int = 1,
+        delay: float = 0.2,
+    ) -> SettledDragResult:
+        """Drag once from a freshly measured, already-settled pointer origin.
+
+        The method never moves the pointer to the drag origin. A prior settled
+        interaction must place it there. After the single drag, observations
+        are read-only; incomplete movement is never resent.
+        """
+        if dx == 0 and dy == 0:
+            raise ValueError("drag delta must be nonzero")
+        if not 1 <= max_screenshots <= pointer_settling.MAX_SETTLE_SCREENSHOTS:
+            raise ValueError("max_screenshots is outside the bounded observation range")
+        if not 0 < min_interval <= pointer_settling.MAX_MINIMUM_INTERVAL_SECONDS:
+            raise ValueError("min_interval is outside the bounded observation range")
+        if tolerance < 0:
+            raise ValueError("tolerance must be nonnegative")
+        left, top, right, bottom = start_region
+        start_x, start_y = start_position
+        if left < 0 or top < 0 or right < left or bottom < top:
+            raise ValueError("start_region must be a valid inclusive rectangle")
+        if not (left <= start_x <= right and top <= start_y <= bottom):
+            raise ValueError("start_position must lie within start_region")
+
+        result = SettledDragResult(
+            "DRAG_BLOCKED",
+            start_position=start_position,
+            start_region=start_region,
+            requested_delta=(dx, dy),
+        )
+        if self.qmp.clock() >= deadline:
+            result.detail = "deadline expired before initial drag measurement"
+            return result
+
+        measurement_path = self.screenshot_directory / f"drag-initial-{uuid.uuid4().hex}.ppm"
+        try:
+            self.qmp.verify_ownership(deadline=deadline)
+            capture = self.qmp.screenshot(measurement_path, deadline=deadline)
+            captured_at = self.qmp.clock()
+            if (
+                capture.get("fresh_capture") is not True
+                or captured_at > deadline
+                or float(capture.get("artifact_verified_monotonic", captured_at)) > deadline
+            ):
+                result.initial_screenshot = capture
+                result.detail = "initial drag-origin observation was stale or late"
+                return result
+            image = pointer_settling.PpmImage.read(measurement_path)
+            cursor = pointer_settling.locate_cursor(image, self.cursor_template)
+        except pointer_settling.AmbiguousCursorError as exc:
+            result.detail = f"ambiguous initial drag cursor: {exc}"
+            return result
+        except pointer_settling.CursorMeasurementError as exc:
+            result.detail = f"initial drag cursor unavailable: {exc}"
+            return result
+        except Exception as exc:
+            result.detail = f"initial drag observation failed: {exc}"
+            return result
+
+        result.initial_cursor = cursor.as_dict()
+        result.initial_screenshot = capture
+        if not (0 <= start_x < image.width and 0 <= start_y < image.height):
+            result.detail = "drag origin lies outside the observed framebuffer"
+            return result
+        if not (
+            left <= cursor.x <= right
+            and top <= cursor.y <= bottom
+            and abs(cursor.x - start_x) <= tolerance
+            and abs(cursor.y - start_y) <= tolerance
+        ):
+            result.detail = "pointer is not at the settled drag origin; no drag was sent"
+            return result
+
+        expected = (cursor.x + dx, cursor.y + dy)
+        result.expected_position = expected
+        if not (0 <= expected[0] < image.width and 0 <= expected[1] < image.height):
+            result.detail = "expected drag destination lies outside the observed framebuffer"
+            return result
+        try:
+            self.qmp.verify_ownership(deadline=deadline)
+        except Exception as exc:
+            result.detail = f"QMP ownership could not be reconfirmed before drag: {exc}"
+            return result
+
+        result.input_attempted = True
+        try:
+            operation = self.qmp.drag("left", dx, dy, delay, deadline=deadline)
+            result.input_result = (
+                asdict(operation)
+                if hasattr(operation, "__dataclass_fields__")
+                else dict(operation)
+            )
+        except Exception as exc:
+            result.status = "DRAG_FAILED"
+            result.detail = f"drag outcome is uncertain; do not repeat it: {exc}"
+            self._emit("pointer-drag-result", **result.as_dict())
+            return result
+
+        if not bool(getattr(operation, "success", False)):
+            result.status = "DRAG_FAILED"
+            result.detail = "bounded drag did not complete cleanly; do not repeat it"
+            self._emit("pointer-drag-result", **result.as_dict())
+            return result
+
+        for index in range(max_screenshots):
+            if self.qmp.clock() >= deadline:
+                break
+            observation_path = (
+                self.screenshot_directory
+                / f"drag-observation-{uuid.uuid4().hex}-{index + 1:02d}.ppm"
+            )
+            started = self.qmp.clock()
+            try:
+                self.qmp.verify_ownership(deadline=deadline)
+                observation_capture = self.qmp.screenshot(observation_path, deadline=deadline)
+                completed = self.qmp.clock()
+                if (
+                    observation_capture.get("fresh_capture") is not True
+                    or completed > deadline
+                    or float(
+                        observation_capture.get("artifact_verified_monotonic", completed)
+                    ) > deadline
+                ):
+                    result.status = "DRAG_OBSERVATION_FAILED"
+                    result.detail = "post-drag screenshot was stale or late"
+                    break
+                observed_image = pointer_settling.PpmImage.read(observation_path)
+                observed_cursor = pointer_settling.locate_cursor(
+                    observed_image, self.cursor_template
+                )
+            except pointer_settling.AmbiguousCursorError as exc:
+                result.status = "DRAG_OBSERVATION_FAILED"
+                result.detail = f"post-drag cursor became ambiguous: {exc}"
+                break
+            except pointer_settling.CursorMeasurementError as exc:
+                result.status = "DRAG_OBSERVATION_FAILED"
+                result.detail = f"post-drag cursor could not be measured: {exc}"
+                break
+            except Exception as exc:
+                result.status = "DRAG_OBSERVATION_FAILED"
+                result.detail = f"post-drag observation failed: {exc}"
+                break
+
+            observation = {
+                "index": index + 1,
+                "started_monotonic": started,
+                "completed_monotonic": completed,
+                "screenshot_path": str(observation_path),
+                "screenshot_fresh": True,
+                "cursor": observed_cursor.as_dict(),
+                "image_width": observed_image.width,
+                "image_height": observed_image.height,
+            }
+            result.observations.append(observation)
+            self._emit("pointer-drag-observation", **observation)
+            if (
+                abs(observed_cursor.x - expected[0]) <= tolerance
+                and abs(observed_cursor.y - expected[1]) <= tolerance
+            ):
+                result.status = "DRAG_SETTLED"
+                result.detail = None
+                break
+
+            overshot_x = (dx > 0 and observed_cursor.x > expected[0] + tolerance) or (
+                dx < 0 and observed_cursor.x < expected[0] - tolerance
+            )
+            overshot_y = (dy > 0 and observed_cursor.y > expected[1] + tolerance) or (
+                dy < 0 and observed_cursor.y < expected[1] - tolerance
+            )
+            if overshot_x or overshot_y:
+                result.status = "DRAG_DESTINATION_UNCONFIRMED"
+                result.detail = "post-drag observation overshot the expected pointer position"
+                break
+            if index + 1 >= max_screenshots or self.qmp.clock() >= deadline:
+                result.status = "DRAG_DESTINATION_UNCONFIRMED"
+                result.detail = "expected drag destination was not observed; no movement was resent"
+                break
+            self.qmp.sleeper(min(min_interval, max(0.0, deadline - self.qmp.clock())))
+
+        if result.status == "DRAG_BLOCKED":
+            result.status = "DRAG_DESTINATION_UNCONFIRMED"
+            result.detail = result.detail or "expected drag destination was not observed"
+        self._emit("pointer-drag-result", **result.as_dict())
         return result
 
     def click(self, **kwargs: Any) -> SettledClickResult:
@@ -842,6 +1055,14 @@ class FontsGuestAcceptanceSession:
                 detail="QAC admission and QMP endpoint ownership must pass before guest input",
             )
         return self.pointer.click(**kwargs)
+
+    def drag_control(self, **kwargs: Any) -> SettledDragResult:
+        if not (self.admission and self.admission.guest_input_authorized and self.pointer):
+            return SettledDragResult(
+                "GUEST_INPUT_NOT_AUTHORIZED",
+                detail="QAC admission and QMP endpoint ownership must pass before guest input",
+            )
+        return self.pointer.drag(**kwargs)
 
     def wheel_control(self, *, wheel_delta: int, **kwargs: Any) -> SettledClickResult:
         if not (self.admission and self.admission.guest_input_authorized and self.pointer):
@@ -1088,6 +1309,21 @@ def main(argv: list[str] | None = None) -> int:
                         deadline=session.qmp.clock() + float(command.get("timeoutSeconds", 8.0)),
                     )
                     _emit_json({"kind": "interaction", **result.as_dict()})
+                elif action == "drag":
+                    delta = tuple(map(int, command["delta"]))
+                    if len(delta) != 2:
+                        raise ValueError("delta must contain exactly two integers")
+                    timeout_seconds = float(command.get("timeoutSeconds", 12.0))
+                    if not 0 < timeout_seconds <= 30:
+                        raise ValueError("drag timeoutSeconds must be in (0, 30]")
+                    result = session.drag_control(
+                        start_position=tuple(map(int, command["startPosition"])),
+                        start_region=tuple(map(int, command["startRegion"])),
+                        dx=delta[0],
+                        dy=delta[1],
+                        deadline=session.qmp.clock() + timeout_seconds,
+                    )
+                    _emit_json({"kind": "drag", **result.as_dict()})
                 elif action == "capture":
                     destination = session.screenshot_directory / f"acceptance-frame-{uuid.uuid4().hex}.ppm"
                     capture = session.qmp.screenshot(destination)
@@ -1103,7 +1339,7 @@ def main(argv: list[str] | None = None) -> int:
                     _emit_json({"kind": "shutdown", **result})
                     return 0 if result["status"] == "QAC_RELEASE_VERIFIED" else 3
                 else:
-                    raise ValueError("action must be click, wheel, capture, key, query, or shutdown")
+                    raise ValueError("action must be click, wheel, drag, capture, key, query, or shutdown")
             except Exception as exc:
                 _emit_json({"kind": "command-error", "detail": str(exc)})
     finally:
