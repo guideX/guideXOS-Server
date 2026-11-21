@@ -305,6 +305,10 @@ class CommandFileContractTests(unittest.TestCase):
             "stack_marker_a": [0x110800, 0x110810],
             "stack_marker_a_expected": {
                 "LOW": 0x415F535441434B30, "HIGH": 0x415F535441434B31},
+            "a_marker_seeded": 0x10B9A0,
+            "a_resume_first": 0x10BBE0,
+            "a_resume_final": 0x10B930,
+            "stack_a": [0x100000, 0x110000],
             "switch_entry": 0x10CFC0,
             "context_b_first_entry": 0x10AEC0,
             "frontiers": {
@@ -325,6 +329,9 @@ class CommandFileContractTests(unittest.TestCase):
                 "context_a_resume_first": 0x10BBE0,
                 "context_b_resume_second": 0x10D6C0,
                 "context_a_resume_final": 0x10B930,
+                "a_markers_seeded": 0x10B9A0,
+                "a_to_b_second_switch": 0x10BD00,
+                "b_to_a_second_switch": 0x10D6D0,
                 "test_fail": 0x10DF60,
                 "context_a_final_exit": 0x10C060,
                 "context_b_unexpected_resume": 0x10CF50,
@@ -332,16 +339,17 @@ class CommandFileContractTests(unittest.TestCase):
             },
         }
 
-    def test_six_frontier_breakpoints_pass_and_capture_the_installed_list(self) -> None:
+    def test_six_frontier_breakpoints_cover_marker_resumes_and_capture_the_installed_list(self) -> None:
         symbols = self.symbols()
         frontiers = symbols["frontiers"]
         selected = diagnostic.cooperative_breakpoints(frontiers)
         self.assertEqual([label for _, label in selected], [
+            "Context A stack markers seeded before first suspension",
             "Context B first-entry bootstrap",
-            "Context B nonzero EC initialization", "Context B EC assertion passed",
+            "Context B EC assertion passed",
             "first B-to-A switch call",
             "Context A first resumption",
-            "Context B second resumption",
+            "Context A final resumption",
         ])
         text = diagnostic.make_command_file(Path("/tmp/coop-debug"), symbols)
         plan = diagnostic.validate_command_file(
@@ -389,12 +397,12 @@ class RuntimeSwitchFrontierAnalysisTests(unittest.TestCase):
     def evidence(self) -> tuple[list[dict[str, int]], list[dict[str, object]],
                                 list[dict[str, object]]]:
         stages = (
+            ("Context A stack markers seeded before first suspension", 0x10B9A0, 10, 0),
             ("Context B first-entry bootstrap", 0x10AEC0, 20, 1),
-            ("Context B nonzero EC initialization", 0x10D090, 25, 1),
             ("Context B EC assertion passed", 0x10D0A0, 30, 1),
             ("first B-to-A switch call", 0x10D6B0, 40, 3),
             ("Context A first resumption", 0x10BBE0, 50, 3),
-            ("Context B second resumption", 0x10D6C0, 60, 5),
+            ("Context A final resumption", 0x10B930, 60, 7),
         )
         values = diagnostic.EXPECTED_BRANCH_REGISTERS
         samples = [
@@ -404,19 +412,19 @@ class RuntimeSwitchFrontierAnalysisTests(unittest.TestCase):
         ]
         registers = []
         for label, _, instructions, _ in stages:
-            identity = "A" if label == "Context A first resumption" else "B"
+            identity = "A" if label in {
+                "Context A stack markers seeded before first suspension",
+                "Context A first resumption", "Context A final resumption"} else "B"
             state = dict(values[identity])
             state.update({"rsc": 3, "sp": 0x12F000})
+            if label == "Context A stack markers seeded before first suspension":
+                state["sp"] = 0x10F000
             if label == "Context B first-entry bootstrap":
                 state.update({"ec": 0, "pfs": 0})
-            elif label == "Context B nonzero EC initialization":
-                state.update({"ec": 0x2A, "pfs": 0x22})
             elif label == "Context B EC assertion passed":
                 state.update({"ec": 0x2A, "pfs": 0x22})
             elif label == "Context A first resumption":
                 state.update({"ec": 0x15, "pfs": 0x0150000000000011})
-            elif label == "Context B second resumption":
-                state.update({"ec": 0x2A, "pfs": 0x02A0000000000022})
             if label == "Context B EC assertion passed":
                 state["bsp"] = self.expected_bsp
             registers.append({"instructions": instructions, "registers": state})
@@ -442,13 +450,10 @@ class RuntimeSwitchFrontierAnalysisTests(unittest.TestCase):
             elif label == "Context A first resumption":
                 snapshot["context_a"] = context("A")
                 snapshot["context_b"] = context("B")
-            elif label == "Context B second resumption":
-                snapshot["context_a"] = context("A")
-                snapshot["context_b"] = context("B")
             snapshots.append(snapshot)
         return samples, registers, snapshots
 
-    def test_switch_frontiers_verify_through_second_context_b_return(self) -> None:
+    def test_switch_frontiers_verify_first_return_and_leave_second_return_for_run_record(self) -> None:
         samples, registers, snapshots = self.evidence()
         result = diagnostic.analyze_cooperative_switch_frontiers(
             samples, registers, snapshots, self.breakpoints, self.expected_bsp,
@@ -458,9 +463,9 @@ class RuntimeSwitchFrontierAnalysisTests(unittest.TestCase):
         self.assertTrue(result["context_b_branch_frontier_valid"])
         self.assertTrue(result["context_b_to_a_first_observed"])
         self.assertTrue(result["context_a_first_resume_verified"])
-        self.assertTrue(result["context_b_second_resume_verified"])
-        self.assertTrue(result["event_counts_at_captured_frontiers_match"])
-        self.assertTrue(result["switch_sequence_pre_final_verified"])
+        self.assertFalse(result["context_b_second_resume_verified"])
+        self.assertFalse(result["event_counts_at_captured_frontiers_match"])
+        self.assertFalse(result["switch_sequence_pre_final_verified"])
         self.assertFalse(result["full_switch_sequence_verified"])
 
     def test_bad_bsp_value_blocks_frontier_and_full_qualification(self) -> None:

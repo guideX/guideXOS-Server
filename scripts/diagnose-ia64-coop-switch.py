@@ -296,6 +296,155 @@ def parse_dd_words(text: str, expected_base: int, expected_size: int) -> list[in
     return words
 
 
+STACK_MARKER_CHECKPOINTS = (
+    ("initial_before_first_suspension", "Context A stack markers seeded before first suspension", 0),
+    ("after_first_resumption", "Context A first resumption", 3),
+    ("after_second_resumption", "Context A final resumption", 7),
+)
+
+
+def validate_stack_marker_observations(
+        observations: list[dict[str, Any]], *, expected_artifact_sha256: str,
+        actual_artifact_sha256: str, marker_address: int,
+        expected_words: tuple[int, int], checkpoint_ips: dict[str, int],
+        stack_range: tuple[int, int]) -> list[dict[str, Any]]:
+    """Require direct A-stack memory observations at each cooperative frontier."""
+    if actual_artifact_sha256 != expected_artifact_sha256:
+        raise DiagnosticError("marker observations are not bound to the selected candidate ELF")
+    if marker_address < stack_range[0] or marker_address + 16 > stack_range[1] or marker_address % 8:
+        raise DiagnosticError("candidate marker address is outside or misaligned in Context A's stack")
+    if set(checkpoint_ips) != {name for name, _, _ in STACK_MARKER_CHECKPOINTS}:
+        raise DiagnosticError("candidate is missing a required stack-marker checkpoint address")
+
+    by_name: dict[str, dict[str, Any]] = {}
+    for observation in observations:
+        name = observation.get("checkpoint")
+        if name not in {item[0] for item in STACK_MARKER_CHECKPOINTS} or name in by_name:
+            raise DiagnosticError("marker observations contain an unknown or duplicate checkpoint")
+        by_name[name] = observation
+
+    validated: list[dict[str, Any]] = []
+    previous_instructions = -1
+    for name, label, expected_event_count in STACK_MARKER_CHECKPOINTS:
+        observation = by_name.get(name)
+        if observation is None:
+            raise DiagnosticError(f"missing actual marker observation at {label}")
+        if observation.get("artifact_sha256") != expected_artifact_sha256:
+            raise DiagnosticError(f"{label} marker observation has the wrong candidate identity")
+        if observation.get("task_id") != "A":
+            raise DiagnosticError(f"{label} marker observation is not from task A")
+        if observation.get("ip") != checkpoint_ips[name]:
+            raise DiagnosticError(f"{label} marker observation is at the wrong execution position")
+        if observation.get("address") != marker_address:
+            raise DiagnosticError(f"{label} marker observation read the wrong stack address")
+        sp = observation.get("sp")
+        if not isinstance(sp, int) or not stack_range[0] <= sp <= stack_range[1] or sp % 16:
+            raise DiagnosticError(f"{label} marker observation has an invalid Context A stack pointer")
+        if observation.get("event_count") != expected_event_count:
+            raise DiagnosticError(f"{label} marker observation is not at the expected switch frontier")
+        instructions = observation.get("instructions")
+        if not isinstance(instructions, int) or instructions <= previous_instructions:
+            raise DiagnosticError("marker observation instruction counts are missing or out of order")
+        previous_instructions = instructions
+        words = observation.get("words")
+        if not isinstance(words, list) or tuple(words) != expected_words:
+            raise DiagnosticError(
+                f"{label} actual marker words changed: observed {words!r}, expected {list(expected_words)!r}")
+        validated.append({
+            "checkpoint": name,
+            "label": label,
+            "artifact_sha256": expected_artifact_sha256,
+            "task_id": "A",
+            "ip": observation["ip"],
+            "instructions": instructions,
+            "event_count": expected_event_count,
+            "sp": sp,
+            "address": marker_address,
+            "words": list(words),
+            "expected_words": list(expected_words),
+        })
+    return validated
+
+
+def _parse_addressed_marker_dump(text: str, expected_address: int) -> list[int]:
+    first_line = next((line.strip() for line in text.splitlines() if line.strip()), "")
+    if not first_line:
+        raise DiagnosticError("marker memory dump is empty")
+    address_token = first_line.split()[0].rstrip(":")
+    if address_token.lower().startswith("0x"):
+        address_token = address_token[2:]
+    if not re.fullmatch(r"[0-9a-fA-F]+", address_token) or \
+            int(address_token, 16) != expected_address:
+        raise DiagnosticError(
+            f"marker memory dump begins at {address_token!r}, expected {expected_address:#x}")
+    return parse_dd_words(text, expected_address, 16)
+
+
+def collect_stack_marker_observations(
+        capture_root: Path, samples: list[dict[str, int]],
+        register_states: list[dict[str, Any]], context_snapshots: list[dict[str, Any]],
+        run_started_ns: int, symbols: dict[str, Any], artifact_sha256: str
+        ) -> list[dict[str, Any]]:
+    register_by_count = {
+        item["instructions"]: item.get("registers", {}) for item in register_states}
+    snapshots_by_sample = {item.get("sample"): item for item in context_snapshots}
+    checkpoint_symbols = {
+        "initial_before_first_suspension": "a_marker_seeded",
+        "after_first_resumption": "a_resume_first",
+        "after_second_resumption": "a_resume_final",
+    }
+    observations: list[dict[str, Any]] = []
+    marker_address = symbols["stack_marker_a"][0]
+    for checkpoint, symbol_name in checkpoint_symbols.items():
+        target_ip = ski_breakpoint_ip(symbols[symbol_name])
+        hits = [sample for sample in samples if sample["ip"] == target_ip]
+        if len(hits) != 1:
+            raise DiagnosticError(
+                f"expected one debugger checkpoint for {checkpoint}, observed {len(hits)}")
+        sample = hits[0]
+        sample_index = sample["sample"]
+        marker_files = sorted((capture_root / "markers").glob(
+            f"{sample_index:04d}-*-a.txt"))
+        if sample_index == 0 or len(marker_files) != 1:
+            raise DiagnosticError(f"missing or ambiguous marker dump for {checkpoint}")
+        validate_fresh_records(marker_files, run_started_ns)
+        words = _parse_addressed_marker_dump(
+            marker_files[0].read_text(encoding="utf-8", errors="replace"), marker_address)
+        registers = register_by_count.get(sample["instructions"])
+        snapshot = snapshots_by_sample.get(sample_index)
+        if registers is None or snapshot is None or snapshot.get("snapshot_error"):
+            raise DiagnosticError(f"incomplete register or context snapshot for {checkpoint}")
+        probe_record = snapshot.get("probe_record") or {}
+        observations.append({
+            "checkpoint": checkpoint,
+            "artifact_sha256": artifact_sha256,
+            "task_id": "A",
+            "ip": sample["ip"],
+            "instructions": sample["instructions"],
+            "event_count": probe_record.get("event_count"),
+            "sp": registers.get("sp"),
+            "address": marker_address,
+            "words": words,
+            "dump_path": str(marker_files[0]),
+        })
+    expected_words = (
+        symbols["stack_marker_a_expected"]["LOW"],
+        symbols["stack_marker_a_expected"]["HIGH"],
+    )
+    checkpoint_ips = {
+        name: ski_breakpoint_ip(symbols[symbol_name])
+        for name, symbol_name in checkpoint_symbols.items()
+    }
+    return validate_stack_marker_observations(
+        observations,
+        expected_artifact_sha256=artifact_sha256,
+        actual_artifact_sha256=artifact_sha256,
+        marker_address=marker_address,
+        expected_words=expected_words,
+        checkpoint_ips=checkpoint_ips,
+        stack_range=tuple(symbols["stack_a"]))
+
+
 def validate_context_words(words: list[int], expected_id: int) -> dict[str, int] | None:
     if len(words) != 128:
         raise DiagnosticError(f"context record has {len(words)} qwords; expected 128")
@@ -672,6 +821,13 @@ def analyze_cooperative_switch_frontiers(
         b_branch_passed and bsp_registers.get("bsp") == expected_bsp and
         (bsp_registers.get("rsc", -1) & 0x3) == 0x3 and context_b_stack_valid
     )
+    b_ec_write_proven_at_assertion = bool(
+        b_branch_passed and event_count(b_branch_passed) == 1 and
+        b_ec_assertion_registers.get("ec") == EXPECTED_EC_B and
+        (b_ec_initialized is None or (
+            b_entry and b_entry["instructions"] < b_ec_initialized["instructions"] <
+            b_branch_passed["instructions"] and
+            b_ec_init_registers.get("ec") == EXPECTED_EC_B)))
     b_branch_registers_match = matches_expected(b_branch_registers, "B")
     first_resume_registers_match = matches_expected(a_resume_registers, "A")
     second_resume_registers_match = matches_expected(b_resume_registers, "B")
@@ -688,14 +844,12 @@ def analyze_cooperative_switch_frontiers(
         a_saved_after_second_switch_match,
     ))
     b_branch_frontier_valid = bool(
-        b_entry and b_ec_initialized and b_branch_passed and b_initial_slots_match and
+        b_entry and b_branch_passed and b_initial_slots_match and
         b_branch_registers_match and bsp_check_valid and
         event_count(b_entry) == 1 and event_count(b_branch_passed) == 1 and
-        b_entry["instructions"] < b_ec_initialized["instructions"] <
-        b_branch_passed["instructions"] and
+        b_entry["instructions"] < b_branch_passed["instructions"] and
         b_bootstrap_registers.get("ec") == 0 and b_bootstrap_registers.get("pfs") == 0 and
-        b_ec_init_registers.get("ec") == EXPECTED_EC_B and
-        b_ec_assertion_registers.get("ec") == EXPECTED_EC_B)
+        b_ec_write_proven_at_assertion)
     context_b_to_a_first_observed = bool(
         b_to_a_first and b_branch_frontier_valid and
         event_count(b_to_a_first) == 3 and
@@ -921,6 +1075,7 @@ def analyze_cooperative_switch_frontiers(
             "Context B first-entry bootstrap", [])),
         "context_b_ec_initialization_hits": len(observations.get(
             "Context B nonzero EC initialization", [])),
+        "context_b_ec_write_proven_at_assertion": b_ec_write_proven_at_assertion,
         "context_b_branch_register_pass_hits": len(observations.get(
             "Context B EC assertion passed", [])),
         "context_b_to_a_first_call_hits": len(observations.get(
@@ -980,12 +1135,13 @@ def _format_eval_and_snapshot(lines: list[str], index: int, label: str,
 
 def cooperative_breakpoints(frontiers: dict[str, int]) -> tuple[tuple[int, str], ...]:
     return (
+        (frontiers["a_markers_seeded"],
+         "Context A stack markers seeded before first suspension"),
         (frontiers["context_b_first"], "Context B first-entry bootstrap"),
-        (frontiers["b_ec_initialized"], "Context B nonzero EC initialization"),
         (frontiers["b_ec_assertion_passed"], "Context B EC assertion passed"),
         (frontiers["b_to_a_first_switch"], "first B-to-A switch call"),
         (frontiers["context_a_resume_first"], "Context A first resumption"),
-        (frontiers["context_b_resume_second"], "Context B second resumption"),
+        (frontiers["context_a_resume_final"], "Context A final resumption"),
     )
 
 
@@ -1206,24 +1362,23 @@ def preflight(args: argparse.Namespace) -> tuple[Any, Path, dict[str, Any], dict
     runner = load_runner()
     args.artifact = args.artifact.resolve()
     args.manifest = args.manifest.resolve()
-    args.kernel_artifact = args.kernel_artifact.resolve()
+    if args.kernel_artifact is not None:
+        args.kernel_artifact = args.kernel_artifact.resolve()
     args.ski_prefix = args.ski_prefix.resolve()
     args.objdump = args.objdump.resolve()
     args.capture_dir = args.capture_dir.resolve()
-    for path, expected, label in (
+    identity_checks = [
         (args.artifact, args.expected_sha256, "cooperative probe ELF"),
         (args.manifest, args.expected_manifest_sha256, "cooperative probe manifest"),
-        (args.kernel_artifact, EXPECTED_KERNEL_SHA256, "accepted kernel ELF"),
-    ):
+    ]
+    if args.kernel_artifact is not None:
+        identity_checks.append((args.kernel_artifact, EXPECTED_KERNEL_SHA256, "accepted kernel ELF"))
+    for path, expected, label in identity_checks:
         if not path.is_file():
             raise DiagnosticError(f"{label} is missing: {path}")
         actual = sha256(path)
         if actual != expected:
             raise DiagnosticError(f"{label} identity mismatch: {actual}")
-    if args.expected_sha256 != EXPECTED_PROBE_SHA256:
-        raise DiagnosticError("this diagnostic is pinned to the static IA64-5AR11 probe candidate")
-    if args.expected_manifest_sha256 != EXPECTED_MANIFEST_SHA256:
-        raise DiagnosticError("this diagnostic is pinned to the IA64-5AR11 probe manifest")
     if args.simulator_sha256 != EXPECTED_SKI_SHA256:
         raise DiagnosticError("this diagnostic is pinned to the qualified Ski 1.5.1 executable")
     if sha256(args.manifest) != args.expected_manifest_sha256:
@@ -1246,6 +1401,10 @@ def preflight(args: argparse.Namespace) -> tuple[Any, Path, dict[str, Any], dict
         "ia64_coop_b_ec_assertion_passed"]["value"]
     symbols["b_to_a_first_switch"] = elf.symbols[
         "ia64_coop_b_to_a_first_switch"]["value"]
+    symbols["a_to_b_second_switch"] = elf.symbols[
+        "ia64_coop_a_to_b_second_switch"]["value"]
+    symbols["b_to_a_second_switch"] = elf.symbols[
+        "ia64_coop_b_to_a_second_switch"]["value"]
     symbols["probe_record"] = elf.symbols["ia64_coop_probe_record"]["value"]
     if not load_ranges or not (symbols["text"][0] <= elf.entry < symbols["text"][1]):
         raise DiagnosticError("ELF entry does not match the probe text range")
@@ -1259,6 +1418,7 @@ def preflight(args: argparse.Namespace) -> tuple[Any, Path, dict[str, Any], dict
         "context_a_save": ski_breakpoint_ip(symbols["switch_flushrs"]),
         "rbs_handoff": ski_breakpoint_ip(symbols["switch_bspstore"]),
         "context_b_first": ski_breakpoint_ip(symbols["b_bootstrap_state"]),
+        "a_markers_seeded": ski_breakpoint_ip(symbols["a_marker_seeded"]),
         "b_ec_initialized": ski_breakpoint_ip(symbols["b_ec_initialized"]),
         "b_ec_assertion_passed": ski_breakpoint_ip(symbols["b_ec_assertion_passed"]),
         "bsp_bounds_valid": ski_breakpoint_ip(symbols["bsp_bounds_valid"]),
@@ -1267,6 +1427,8 @@ def preflight(args: argparse.Namespace) -> tuple[Any, Path, dict[str, Any], dict
         "b_to_a_first_switch": ski_breakpoint_ip(symbols["b_to_a_first_switch"]),
         "context_a_resume_first": ski_breakpoint_ip(symbols["a_resume_first"]),
         "context_b_resume_second": ski_breakpoint_ip(symbols["b_resume_second"]),
+        "a_to_b_second_switch": ski_breakpoint_ip(symbols["a_to_b_second_switch"]),
+        "b_to_a_second_switch": ski_breakpoint_ip(symbols["b_to_a_second_switch"]),
         "context_a_resume_final": ski_breakpoint_ip(symbols["a_resume_final"]),
         "test_fail": ski_breakpoint_ip(symbols["test_fail"]),
         "context_a_final_exit": ski_breakpoint_ip(symbols["a_final_exit"]),
@@ -1441,6 +1603,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--artifact", type=Path, default=PROBE)
     parser.add_argument("--manifest", type=Path, default=MANIFEST)
     parser.add_argument("--kernel-artifact", type=Path, default=KERNEL)
+    parser.add_argument("--skip-kernel-artifact", action="store_true",
+                        help="do not require the unrelated historical early-exec kernel artifact")
     parser.add_argument("--ski-prefix", type=Path, default=SKI_PREFIX)
     parser.add_argument("--objdump", type=Path, default=OBJDUMP)
     parser.add_argument("--capture-dir", type=Path, default=CAPTURE)
@@ -1456,6 +1620,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--authorize-one-diagnostic-guest-execution", action="store_true",
                         help="consume the request's one allowed cooperative diagnostic launch")
     args = parser.parse_args(argv)
+    if args.skip_kernel_artifact:
+        args.kernel_artifact = None
     try:
         runner, simulator, symbols, elf_facts = preflight(args)
         command_text = make_command_file(args.capture_dir, symbols, args.instruction_budget)
@@ -1470,7 +1636,8 @@ def main(argv: list[str] | None = None) -> int:
                               "simulator_sha256": args.simulator_sha256,
                               "probe_sha256": args.expected_sha256,
                               "manifest_sha256": args.expected_manifest_sha256,
-                              "kernel_sha256": EXPECTED_KERNEL_SHA256,
+                              "kernel_sha256": (sha256(args.kernel_artifact)
+                                                if args.kernel_artifact is not None else None),
                               "elf_entry": elf_facts["elf_entry"],
                               "text": symbols["text"],
                               "frontiers": elf_facts["frontiers"],
@@ -1590,6 +1757,14 @@ def main(argv: list[str] | None = None) -> int:
             args.capture_dir, samples, run_started_ns,
             symbols["context_a"], symbols["context_b"], symbols["probe_record"],
             symbols["probe_record_size"])
+        marker_observations: list[dict[str, Any]] = []
+        marker_validation_error: str | None = None
+        try:
+            marker_observations = collect_stack_marker_observations(
+                args.capture_dir, samples, register_states, memory_analysis["snapshots"],
+                run_started_ns, symbols, args.expected_sha256)
+        except (DiagnosticError, OSError) as exc:
+            marker_validation_error = str(exc)
         breakpoints = cooperative_breakpoints(symbols["frontiers"])
         disassembly_text = capture_disassembly_path.read_text(
             encoding="utf-8", errors="replace")
@@ -1615,7 +1790,8 @@ def main(argv: list[str] | None = None) -> int:
             "probe_sha256": args.expected_sha256,
             "manifest_sha256": args.expected_manifest_sha256,
             "simulator_sha256": args.simulator_sha256,
-            "kernel_sha256": EXPECTED_KERNEL_SHA256,
+            "kernel_sha256": (sha256(args.kernel_artifact)
+                              if args.kernel_artifact is not None else None),
             "run_status": status,
             "run_result": result,
             "guest_execution_count": 1,
@@ -1690,6 +1866,8 @@ def main(argv: list[str] | None = None) -> int:
             "register_snapshot_freshness_error": freshness_error,
             "context_and_event_snapshots": memory_analysis["snapshots"],
             "context_and_event_snapshot_errors": memory_analysis["snapshot_errors"],
+            "stack_marker_observations": marker_observations,
+            "stack_marker_validation_error": marker_validation_error,
             "last_observation": samples[-1] if samples else None,
             "captured_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
@@ -1748,7 +1926,7 @@ def main(argv: list[str] | None = None) -> int:
             debugger_initialization["failure_frontier"]
             if debugger_initialization is not None else
             runtime_frontiers["furthest_proven_frontier"])
-        if output_valid and intentional_exit and installed_breakpoints_match_plan and \
+        if output_valid and marker_validation_error is None and intentional_exit and installed_breakpoints_match_plan and \
                 runtime_frontiers["full_switch_sequence_verified"]:
             analysis["outcome"] = "IA64_COOPERATIVE_PROBE_QUALIFIED"
         else:

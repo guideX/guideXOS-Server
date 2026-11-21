@@ -1,0 +1,92 @@
+{
+  "schema": "guidexos-ia64-5ar13-evidence-v1",
+  "date": "2026-11-21",
+  "outcome": "C_GUEST_QUALIFICATION_BLOCKED",
+  "repository": {
+    "branch": "IA64_SUPPORT",
+    "requested_start_head": "de20e044a33b56bef7235bfb1891675ce5e7a1e9",
+    "actual_start_head": "de20e044a33b56bef7235bfb1891675ce5e7a1e9",
+    "newer_preserved_local_commit": "f83aa275024a3de9f9bd20e6c2a364c2f7dd190e",
+    "upstream": "origin/IA64_SUPPORT",
+    "upstream_head_at_preflight": "9be0a05ecbbf00057ca17d0bdcedc065980fb82d",
+    "ahead_before_this_phase_commit": 7,
+    "push_performed": false
+  },
+  "selected_candidate": {
+    "elf": "out/ia64-5ar12-coop-probe-20261119-r2-static/ia64-cooperative-context-probe.elf",
+    "elf_sha256": "8209d2f779363fdde9cdb23f5ec68ae88884a87d01d75aeb5955128eb1a1c4c1",
+    "manifest": "out/ia64-5ar12-coop-probe-20261119-r2-static/ia64-cooperative-context-probe.manifest.json",
+    "manifest_sha256": "43a6897c903f18c73435659c98a7856bc75d0e0d956231f21d5529c19a5599f9",
+    "static_validation_record": {
+      "path": "out/ia64-5ar12-coop-probe-20261119-r2-static/preflight/static-validation.log",
+      "sha256": "83c32c9a157274779191f87697e820a3aae0ca6045e805321278b25861fca7d3",
+      "result": "COOPERATIVE_CONTEXT_STATIC_PASS"
+    }
+  },
+  "rejected_candidate": {
+    "qualification": "IA64-5AR11-r4",
+    "elf_sha256": "17b2afa102d50bd6aa8e907333b3b0c7aacc42c889368b4767d06a72dc7825c9",
+    "manifest_sha256": "32e53c2d066a9f62afe1687631f3f31c125ba8ef90b8c9918d5b236e0d54c923",
+    "reason": "marker expectations were derived from initializer values; not executed"
+  },
+  "historical_reference": {
+    "qualification": "IA64-5AR11-r3",
+    "elf_sha256": "d827b017a3af2924dced50891cbe153c1f0fe9e43f7e6354f9848a2aab907734",
+    "manifest_sha256": "e7cee9bc70d804b727cbc425df79d0cdeeb57d8a21510b190271b0ed1515d134",
+    "result": "A low stack marker failed after first A resumption; no second resumption"
+  },
+  "host_test_runs": [
+    {
+      "command": "python -m unittest discover -s tests -p 'ia64*test.py'",
+      "result": "PASS",
+      "tests_run": 214,
+      "passed": 206,
+      "skipped": 8,
+      "log": "out/ia64-5ar13-preflight-20261121/full-ia64-host-suite.log",
+      "log_sha256": "1fcff842c9cf488b08c31c89953c46331f996cd66f7336b7eaaa03c5a014ce15"
+    },
+    {
+      "command": "python tests/ia64_cooperative_context_switch_contract_test.py",
+      "result": "PASS",
+      "tests_run": 57,
+      "log": "out/ia64-5ar13-preflight-20261121/cooperative-context-tests.log",
+      "log_sha256": "285fd92bcb4f814ce25f53912916bc8aff355b356293955fcfa0c2561e1740ee"
+    },
+    {
+      "command": "python tests/ia64_coop_debug_contract_test.py",
+      "result": "PASS",
+      "tests_run": 31,
+      "log": "out/ia64-5ar13-preflight-20261121/debugger-contract-tests.log",
+      "log_sha256": "77390a816995006ccc386159412dfe674d9aa547f9ee509736a14cbea5e8e8db"
+    },
+    {
+      "command": "python tests/ia64_cooperative_stack_marker_evidence_test.py",
+      "result": "PASS",
+      "tests_run": 10,
+      "log": "out/ia64-5ar13-preflight-20261121/stack-marker-negative-tests.log",
+      "log_sha256": "24a1c6d8e2aa2bc0811bd584ce7f0b0becac39bc8cb3ec6d3f15139b51c81957"
+    }
+  ],
+  "guest_attempt": {
+    "guest_launch_count": 0,
+    "guest_elf_loaded": false,
+    "ski_started": false,
+    "qac_reservation": "not applicable to the standalone Ski probe; none used",
+    "blocker": "WSL startup failed with Wsl/Service/E_UNEXPECTED",
+    "blocker_record": {
+      "path": "out/ia64-5ar13-preflight-20261121/wsl-launch-blocker.txt",
+      "sha256": "4e0461107f1758c829e814a2e0dc0574455e6dd0a9ef7b4f362dc2177bd0307d",
+      "raw_wsl_stdout_stderr_retained": false
+    },
+    "actual_marker_observations": 0,
+    "kernel_built_or_run": false
+  },
+  "closeout": {
+    "report": "docs/IA64-5AR13_COOPERATIVE_GUEST_QUALIFICATION.md",
+    "support_index": "docs/IA64_SUPPORT.md",
+    "diff_check": "pending final commit preparation",
+    "local_commit_sha": "pending",
+    "final_worktree_status": "pending",
+    "push_performed": false
+  }
+}

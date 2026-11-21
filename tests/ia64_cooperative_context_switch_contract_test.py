@@ -678,24 +678,24 @@ class CooperativeSetupReturnLinkTests(unittest.TestCase):
 
 
 class CooperativeDiagnosticFrontierTests(unittest.TestCase):
-    def test_debugger_plan_keeps_six_branch_and_switch_frontiers(self) -> None:
+    def test_debugger_plan_keeps_six_marker_and_switch_frontiers(self) -> None:
         frontiers = {
+            "a_markers_seeded": 0x10C7F0,
             "context_b_first": 0x10B7C0,
-            "b_ec_initialized": 0x10D000,
             "b_ec_assertion_passed": 0x10D0A0,
             "b_to_a_first_switch": 0x10D6B0,
             "context_a_resume_first": 0x10BBE0,
-            "context_b_resume_second": 0x10D6C0,
+            "context_a_resume_final": 0x10D520,
         }
         plan = diagnostic.cooperative_breakpoints(frontiers)
         self.assertEqual(len(plan), 6)
         self.assertEqual([label for _, label in plan], [
+            "Context A stack markers seeded before first suspension",
             "Context B first-entry bootstrap",
-            "Context B nonzero EC initialization",
             "Context B EC assertion passed",
             "first B-to-A switch call",
             "Context A first resumption",
-            "Context B second resumption",
+            "Context A final resumption",
         ])
         self.assertEqual(len({address for address, _ in plan}), 6)
 
