@@ -109,4 +109,3 @@ Implementation commit `198764d19fc5d5b130d0afd9503413a4f9887aa7` contains the re
 - `tests/test_font15r1_qac_admission.py`
 - `tests/test_font15r4r6r2_acceptance_runner.py`
 - `docs/fonts/FONT15R4R6R2_BOUNDED_QAC_AND_MINIMUM_SIZE_ACCEPTANCE.md`
-
