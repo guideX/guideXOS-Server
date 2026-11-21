@@ -1602,6 +1602,20 @@ static char to_upper(char c)
     return c;
 }
 
+static bool is_fat_short_name_character(char value)
+{
+    const char c = to_upper(value);
+    if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) return true;
+    switch (c) {
+        case '$': case '%': case '\'': case '-': case '_': case '@':
+        case '~': case '`': case '!': case '(': case ')': case '{':
+        case '}': case '^': case '#': case '&':
+            return true;
+        default:
+            return false;
+    }
+}
+
 static bool name_matches(const char* a, const char* b)
 {
     while (*a && *b) {
@@ -1637,6 +1651,9 @@ static void copy_string(char* dst, const char* src, uint32_t maxLen)
     dst[i] = '\0';
 }
 
+// New directory-entry names are intentionally limited to the ASCII FAT 8.3
+// character set. Lookup can resolve checksum-valid existing VFAT LFNs, but
+// this create/rename path does not generate arbitrary long-name entries.
 static bool make_short_name(const char* name, char out[11])
 {
     if (!name || !*name) return false;
@@ -1646,24 +1663,25 @@ static bool make_short_name(const char* name, char out[11])
     uint32_t len = str_len(name);
     for (uint32_t i = 0; i < len; ++i) {
         if (name[i] == '.') {
+            if (dot != 0xFFFFFFFF) return false;
             dot = i;
-            break;
         }
     }
 
     uint32_t baseLen = (dot == 0xFFFFFFFF) ? len : dot;
     uint32_t extStart = (dot == 0xFFFFFFFF) ? len : dot + 1;
-    if (baseLen == 0 || baseLen > 8 || len - extStart > 3) return false;
+    if (baseLen == 0 || baseLen > 8 || len - extStart > 3 ||
+        (dot != 0xFFFFFFFF && extStart == len)) return false;
 
     for (uint32_t i = 0; i < baseLen; ++i) {
         char c = to_upper(name[i]);
-        if (c == ' ' || c == '/' || c == '\\') return false;
+        if (!is_fat_short_name_character(c)) return false;
         out[i] = c;
     }
 
     for (uint32_t i = 0; extStart + i < len; ++i) {
         char c = to_upper(name[extStart + i]);
-        if (c == ' ' || c == '.' || c == '/' || c == '\\') return false;
+        if (!is_fat_short_name_character(c)) return false;
         out[8 + i] = c;
     }
 
@@ -2204,7 +2222,12 @@ FileWriteStatus create_file_path_status(uint8_t volumeIndex, const char* path,
     serial::puts(fileName);
     serial::puts("\n");
     if (!make_short_name(fileName, shortName)) {
-        serial::puts("FAT_FILE_DIR_ENTRY_RESULT=FAT_FILE_WRITE_INVALID_NAME\n");
+        serial::puts("[FAT_FILE_CREATE_VALIDATION] stage=short-name-generation path=");
+        serial::puts(path);
+        serial::puts(" component=");
+        serial::puts(fileName);
+        serial::puts(" supported-format=8.3 result=invalid\n");
+        serial::puts("FAT_FILE_DIR_ENTRY_RESULT=FAT_FILE_WRITE_INVALID_NAME stage=short-name-generation\n");
         return FILE_WRITE_INVALID_NAME;
     }
 

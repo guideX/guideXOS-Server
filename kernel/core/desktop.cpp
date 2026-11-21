@@ -263,27 +263,49 @@ static inline void disable_interrupts()
 #endif
 
 // Perform system shutdown (extern for shell access)
-void perform_shutdown()
+bool perform_shutdown(const char* caller)
 {
 #if defined(ARCH_X86) || defined(ARCH_AMD64)
-    kernel::serial::puts("[SHUTDOWN] final reason=system-shutdown exitCode=0 caller=desktop expected=1 runtime=none app=none\n");
-    // Method 1: QEMU debug exit (cleanest for QEMU with isa-debug-exit device)
-    // Exit code will be (0 << 1) | 1 = 1, indicating success
-    outb_power(QEMU_DEBUG_EXIT_PORT, 0x00);
-    
-    // Method 2: QEMU/Bochs ACPI shutdown
-    // S5 sleep state = shutdown (SLP_TYPa=5, SLP_EN=1)
-    // Value: (5 << 10) | (1 << 13) = 0x2000 | 0x1400 = 0x3400
-    outw_power(ACPI_PM1A_CNT, 0x2000);
-    
-    // Method 3: Bochs-specific shutdown port
+    kernel::serial::puts("[SHUTDOWN] request_received caller=");
+    kernel::serial::puts(caller ? caller : "unknown");
+    kernel::serial::puts(" action=normal\n");
+    kernel::serial::puts("[SHUTDOWN] storage_sync_begin\n");
+    const kernel::vfs::Status syncStatus = kernel::vfs::sync_all();
+    if (syncStatus != kernel::vfs::VFS_OK) {
+        kernel::serial::puts("[SHUTDOWN] aborted stage=storage-sync status=");
+        kernel::serial::puts(kernel::vfs::status_name(syncStatus));
+        kernel::serial::putc('\n');
+        return false;
+    }
+    kernel::serial::puts("[SHUTDOWN] storage_sync_complete\n");
+
+    // QEMU's ACPI S5 request requires both SLP_TYP (5) and SLP_EN (bit 13).
+    // Keep the guest alive until the firmware/platform consumes this request.
+    kernel::serial::puts("[SHUTDOWN] poweroff_request method=acpi-s5 pm1a=0x3400\n");
+    outw_power(ACPI_PM1A_CNT, 0x3400);
+
+    // Retain the existing Bochs-compatible fallback for platforms that return
+    // from the ACPI write without entering the powered-off state.
     outw_power(BOCHS_SHUTDOWN_PORT, 0x2000);
     
-    // If we're still here, just halt
+    // A non-returning halt keeps the guest from accepting more writes while
+    // waiting for a platform power-off event.
     while (true) {
         halt_cpu();
     }
 #elif defined(ARCH_RISCV64)
+    kernel::serial::puts("[SHUTDOWN] request_received caller=");
+    kernel::serial::puts(caller ? caller : "unknown");
+    kernel::serial::puts(" action=normal\n");
+    kernel::serial::puts("[SHUTDOWN] storage_sync_begin\n");
+    const kernel::vfs::Status syncStatus = kernel::vfs::sync_all();
+    if (syncStatus != kernel::vfs::VFS_OK) {
+        kernel::serial::puts("[SHUTDOWN] aborted stage=storage-sync status=");
+        kernel::serial::puts(kernel::vfs::status_name(syncStatus));
+        kernel::serial::putc('\n');
+        return false;
+    }
+    kernel::serial::puts("[SHUTDOWN] storage_sync_complete\n");
     // RISC-V uses SBI shutdown
     // SBI_EXT_SHUTDOWN = 0x08
     asm volatile (
@@ -1451,30 +1473,10 @@ static bool bare_metal_save_display_options(const BareMetalDisplayOptionsData& s
         *outPrimaryWrite = primaryWrite;
     }
 
-    vfs::write_file(kBareMetalDisplayOptionsLegacyStorePath, text, (uint32_t)pos);
-
-    const char* taskbar = store.taskbarPosition[0] ? store.taskbarPosition : "bottom";
-    vfs::write_file("/desktop.taskbar.position", taskbar, (uint32_t)desktop_strlen(taskbar));
-
-    char buffer[160];
-    pos = 0;
-    desktop_append_text(buffer, &pos, sizeof(buffer), "Trash=");
-    desktop_append_text(buffer, &pos, sizeof(buffer), store.showDesktopTrash ? "1\n" : "0\n");
-    desktop_append_text(buffer, &pos, sizeof(buffer), "ThisSystem=");
-    desktop_append_text(buffer, &pos, sizeof(buffer), store.showDesktopThisSystem ? "1\n" : "0\n");
-    desktop_append_text(buffer, &pos, sizeof(buffer), "FileManager=");
-    desktop_append_text(buffer, &pos, sizeof(buffer), store.showDesktopFileManager ? "1\n" : "0\n");
-    desktop_append_text(buffer, &pos, sizeof(buffer), "SystemSettings=");
-    desktop_append_text(buffer, &pos, sizeof(buffer), store.showDesktopSystemSettings ? "1\n" : "0\n");
-    vfs::write_file("/desktop.system.icons", buffer, (uint32_t)pos);
-
-    if (store.wallpaperId[0]) {
-        vfs::write_file(kBareMetalWallpaperIdStorePath, store.wallpaperId, (uint32_t)desktop_strlen(store.wallpaperId));
-        vfs::write_file(kBareMetalWallpaperIdLegacyStorePath, store.wallpaperId, (uint32_t)desktop_strlen(store.wallpaperId));
-    }
-    const char* mode = store.backgroundScaleMode[0] ? store.backgroundScaleMode : "fill";
-    vfs::write_file("/desktop.background.scale", mode, (uint32_t)desktop_strlen(mode));
-
+    // /desktop.cfg is the canonical writable record for these settings. The
+    // old sidecars remain read-only migration inputs above; recreating them
+    // used names outside the FAT creator's supported 8.3 subset and duplicated
+    // fields already committed in the primary file.
     return primaryWriteOk;
 }
 
@@ -1516,7 +1518,7 @@ static void persist_taskbar_position()
             saveStatus == vfs::VFS_ERR_IO;
         if (!retryableIoStatus || attempt == 2u) {
             serial::puts("[desktop] taskbar settings persistence failed status=");
-            serial::put_hex32(static_cast<uint32_t>(saveStatus));
+            serial::puts(vfs::status_name(static_cast<vfs::Status>(saveStatus)));
             serial::putc('\n');
             return;
         }
@@ -1761,7 +1763,9 @@ static bool bare_metal_prepare_desktop_directory(const char* path)
 static bool bare_metal_ensure_standard_user_folders()
 {
     static const char* kFolders[] = {
-        "/Documents",
+        // New directory entries use the FAT writer's supported 8.3 subset.
+        // The Start Menu still reads an existing /Documents VFAT LFN below.
+        "/DOCS",
         "/Pictures",
         "/Music",
         "/Network",
@@ -2165,7 +2169,8 @@ static const char* const kStaticAllProgramsList[] = {
 static const int kStaticAllProgramsCount = sizeof(kStaticAllProgramsList) / sizeof(kStaticAllProgramsList[0]);
 static const char* s_allProgramsList[16 + kMaxDiscoveredStartMenuApps] = {};
 static int s_allProgramsCount = kStaticAllProgramsCount;
-static const char* kStartMenuRecentProgramsPath = "/.startmenu_recent";
+static const char* kStartMenuRecentProgramsPath = "/STARTMNU.REC";
+static const char* kStartMenuRecentProgramsLegacyPath = "/.startmenu_recent";
 
 struct AppModelDemoRow {
     const char* displayName;
@@ -2830,7 +2835,14 @@ static void activate_start_menu_control_panel(int rightIndex = 5)
 static const char* bare_metal_start_menu_folder_path_for_label(const char* label)
 {
     if (desktop_str_eq(label, "Computer") || desktop_str_eq(label, "This System")) return "/";
-    if (desktop_str_eq(label, "Documents")) return "/Documents";
+    if (desktop_str_eq(label, "Documents")) {
+        vfs::FileInfo info{};
+        if (vfs::stat("/Documents", &info) == vfs::VFS_OK &&
+            info.type == vfs::FILE_TYPE_DIRECTORY) {
+            return "/Documents";
+        }
+        return "/DOCS";
+    }
     if (desktop_str_eq(label, "Pictures")) return "/Pictures";
     if (desktop_str_eq(label, "Music")) return "/Music";
     if (desktop_str_eq(label, "Network")) return "/Network";
@@ -5290,7 +5302,17 @@ static void persist_start_menu_recent_programs()
         desktop_append_text(buffer, &pos, sizeof(buffer), "\n");
     }
     int32_t written = vfs::write_file(kStartMenuRecentProgramsPath, buffer, (uint32_t)pos);
-    serial::puts(written == pos ? "[desktop] Start menu recent programs persisted\n" : "[desktop] Start menu recent programs persistence failure\n");
+    if (written == pos) {
+        serial::puts("[desktop] Start menu recent programs persisted path=");
+        serial::puts(kStartMenuRecentProgramsPath);
+        serial::putc('\n');
+    } else {
+        serial::puts("[desktop] Start menu recent programs persistence failure path=");
+        serial::puts(kStartMenuRecentProgramsPath);
+        serial::puts(" status=");
+        serial::puts(vfs::status_name(static_cast<vfs::Status>(written)));
+        serial::putc('\n');
+    }
 }
 
 static void load_persisted_start_menu_recent_programs()
@@ -5298,6 +5320,12 @@ static void load_persisted_start_menu_recent_programs()
     s_startMenuRecentProgramCount = 0;
     char buffer[4096];
     int32_t count = vfs::read_file(kStartMenuRecentProgramsPath, buffer, sizeof(buffer) - 1);
+    if (count <= 0) {
+        // Preserve read compatibility with images that contain the former
+        // long-name location, while all new writes use a valid 8.3 name.
+        count = vfs::read_file(kStartMenuRecentProgramsLegacyPath, buffer,
+                               sizeof(buffer) - 1);
+    }
     if (count <= 0) {
         serial::puts("[desktop] Start menu recent programs loaded: none persisted\n");
         return;
@@ -13527,8 +13555,15 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                 draw_cursor(mx, my);
                 
                 // Actually perform the shutdown
-                perform_shutdown();
-                // If we return here, shutdown failed - stay in the system
+                if (!perform_shutdown("desktop-ui")) {
+                    s_notification.title = "Shutdown failed";
+                    s_notification.message = "Storage sync failed; system remains running.";
+                    s_notification.visible = true;
+                    draw();
+                    draw_cursor(mx, my);
+                }
+                // A returned failure leaves the guest running so the user can
+                // retry after the storage problem has been resolved.
                 return;
             } else if (btn == 1) {
                 // No - close dialog

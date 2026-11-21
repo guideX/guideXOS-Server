@@ -589,6 +589,88 @@ int main(int argc, char** argv)
               std::memcmp(payload.data(), "short replacement appended", 26) == 0,
           "appended content is readable in the expected order");
 
+    check(kernel::vfs::create_file("/Documents/ABCDEFGH.TXT", "8.3 boundary", 12) == 12 &&
+              kernel::vfs::stat("/Documents/ABCDEFGH.TXT", &info) == kernel::vfs::VFS_OK &&
+              kernel::vfs::unlink("/Documents/ABCDEFGH.TXT") == kernel::vfs::VFS_OK,
+          "accept a legal eight-character base and three-character extension");
+    check(kernel::vfs::create_file("/Documents/ABCDEFGH", "base only", 9) == 9 &&
+              kernel::vfs::unlink("/Documents/ABCDEFGH") == kernel::vfs::VFS_OK,
+          "accept the eight-character filename boundary without an extension");
+    check(kernel::vfs::mkdir("/Documents/DOCS") == kernel::vfs::VFS_OK &&
+              kernel::vfs::stat("/Documents/DOCS", &info) == kernel::vfs::VFS_OK &&
+              info.type == kernel::vfs::FILE_TYPE_DIRECTORY &&
+              kernel::vfs::rmdir("/Documents/DOCS") == kernel::vfs::VFS_OK,
+          "create and remove the supported short-name Documents backing directory");
+    const int32_t invalidNameStatus = kernel::vfs::create_file(
+        "/Documents/ABCDEFGHI.TXT", "invalid", 7);
+    check(invalidNameStatus == kernel::vfs::VFS_ERR_INVALID &&
+              kernel::vfs::last_open_status() == kernel::vfs::VFS_ERR_INVALID,
+          "reject a nine-character base and preserve the invalid-name status");
+    check(kernel::vfs::create_file("/Documents/FILE.TOOLONG", "invalid", 7) ==
+              kernel::vfs::VFS_ERR_INVALID &&
+              kernel::vfs::create_file("/Documents/DOUBLE.DOT.TXT", "invalid", 7) ==
+              kernel::vfs::VFS_ERR_INVALID &&
+              kernel::vfs::create_file("/Documents/TRAIL.", "invalid", 7) ==
+              kernel::vfs::VFS_ERR_INVALID &&
+              kernel::vfs::create_file("/Documents/.HIDDEN", "invalid", 7) ==
+              kernel::vfs::VFS_ERR_INVALID,
+          "reject overlong extensions, multiple dots, trailing dots, and leading dots");
+    check(kernel::vfs::create_file("/Documents/BAD:NAME.TXT", "invalid", 7) ==
+              kernel::vfs::VFS_ERR_INVALID &&
+              kernel::vfs::create_file("/Documents/BAD?NAME.TXT", "invalid", 7) ==
+              kernel::vfs::VFS_ERR_INVALID &&
+              kernel::vfs::create_file("/Documents/BAD\\NAME.TXT", "invalid", 7) ==
+              kernel::vfs::VFS_ERR_INVALID,
+          "reject FAT-reserved filename characters and a backslash separator");
+    static const char* legacyAuxiliaryPaths[] = {
+        "/Documents/display-options.cfg",
+        "/Documents/desktop.taskbar.position",
+        "/Documents/desktop.system.icons",
+        "/Documents/desktop.background.scale",
+        "/Documents/.startmenu_recent",
+    };
+    bool legacyAuxiliaryPathsRejected = true;
+    for (const char* path : legacyAuxiliaryPaths) {
+        if (kernel::vfs::create_file(path, "invalid", 7) != kernel::vfs::VFS_ERR_INVALID ||
+            kernel::vfs::last_open_status() != kernel::vfs::VFS_ERR_INVALID) {
+            legacyAuxiliaryPathsRejected = false;
+        }
+    }
+    check(legacyAuxiliaryPathsRejected,
+          "reject each exact legacy auxiliary settings filename and preserve invalid-name status");
+    bool legacyAuxiliaryWritesRejected = true;
+    for (const char* path : legacyAuxiliaryPaths) {
+        if (kernel::vfs::write_file(path, "invalid", 7) != kernel::vfs::VFS_ERR_INVALID) {
+            legacyAuxiliaryWritesRejected = false;
+        }
+    }
+    check(legacyAuxiliaryWritesRejected,
+          "propagate the invalid-name error from each exact legacy auxiliary settings write");
+    char normalizedLegacyPath[kernel::vfs::VFS_MAX_PATH]{};
+    kernel::vfs::normalize_path("/Documents//./desktop.taskbar.position",
+                                normalizedLegacyPath, sizeof(normalizedLegacyPath));
+    check(std::strcmp(normalizedLegacyPath, "/Documents/desktop.taskbar.position") == 0 &&
+              kernel::vfs::create_file(normalizedLegacyPath, "invalid", 7) ==
+                  kernel::vfs::VFS_ERR_INVALID &&
+              kernel::vfs::last_open_status() == kernel::vfs::VFS_ERR_INVALID,
+          "normalize separators before preserving the legacy invalid-name status");
+    check(kernel::vfs::create_file("/Documents/MISSING/CHILD.TXT", "invalid", 7) ==
+              kernel::vfs::VFS_ERR_NOT_FOUND,
+          "report a missing parent directory separately from an invalid filename");
+
+    check(kernel::vfs::write_file("/Documents/DESKTOP.TMP", "save-one", 8) == 8 &&
+              kernel::vfs::write_file("/Documents/DESKTOP.TMP", "save-two", 8) == 8 &&
+              kernel::vfs::write_file("/Documents/DESKTOP.TMP", "save-three", 10) == 10 &&
+              kernel::vfs::rename("/Documents/DESKTOP.TMP", "/Documents/DESKTOP.NEW") ==
+                  kernel::vfs::VFS_OK &&
+              kernel::vfs::read_file("/Documents/DESKTOP.NEW", payload.data(),
+                  static_cast<uint32_t>(payload.size())) == 10 &&
+              std::memcmp(payload.data(), "save-three", 10) == 0 &&
+              kernel::vfs::stat("/Documents/DESKTOP.TMP", &info) ==
+                  kernel::vfs::VFS_ERR_NOT_FOUND &&
+              kernel::vfs::unlink("/Documents/DESKTOP.NEW") == kernel::vfs::VFS_OK,
+          "repeatedly replace a settings-style temporary file and reopen its renamed contents");
+
     static const char pinStoreInitial[] = "version=1\n";
     static const char pinStoreFirst[] = "version=1\nappId=com.guidexos.pacman\n";
     static const char pinStoreSecond[] =
@@ -716,6 +798,21 @@ int main(int argc, char** argv)
               static_cast<uint32_t>(payload.size())) == 26 &&
               std::memcmp(payload.data(), "Short EDITacement appended", 26) == 0,
           "filesystem teardown and remount recover saved bytes from the image");
+
+    const uint8_t syncHandle = kernel::vfs::open("/Documents/NOTES/REPORT.BIN",
+                                                 kernel::vfs::OPEN_RDWR);
+    const bool syncWriteReady = syncHandle != 0xFF &&
+        kernel::vfs::seek(syncHandle, 0,
+            static_cast<kernel::vfs::SeekOrigin>(0)) == kernel::vfs::VFS_OK &&
+        kernel::vfs::write(syncHandle, "S", 1) == 1;
+    g_flushFailureStatus = kernel::block::BLOCK_ERR_TIMEOUT;
+    g_flushFailuresRemaining = 1;
+    const kernel::vfs::Status failedSync = kernel::vfs::sync_all();
+    check(syncWriteReady && failedSync == kernel::vfs::VFS_ERR_IO_TIMEOUT &&
+              kernel::vfs::get_handle(syncHandle) == nullptr,
+          "shutdown sync closes outstanding writes and propagates a close-time flush timeout");
+    check(kernel::vfs::sync_all() == kernel::vfs::VFS_OK,
+          "filesystem synchronization succeeds after the injected flush failure clears");
     reset_mounts();
 
     g_writesUntilFailure = 2;
