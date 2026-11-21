@@ -141,6 +141,9 @@ const char* gxos_ca_manifest_status_name(GxosCaManifestStatus status);
 bool gxos_ca_store_load_once();
 GxosCaStoreInfo gxos_ca_store_info();
 GxosCaStoreParseInfo gxos_ca_store_parse_info();
+#if defined(GXOS_NAVIGATOR_NAVHTTPS24_G5_CANDIDATE_QUALIFICATION_ACTIVE)
+bool gxos_tls_navhttps24_candidate_qualification_run();
+#endif
 
 enum class GxosTrustStoreSource {
     None,

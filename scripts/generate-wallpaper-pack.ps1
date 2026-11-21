@@ -31,6 +31,9 @@ $NavigatorCaBundleManifestScript = Join-Path $ScriptDir "validate-navigator-ca-b
 $NavigatorProductionCaBundleSourcePath = Join-Path $RootDir "assets\certs\mozilla-cacert-2026-08-13.pem"
 $NavigatorProductionCaBundleGeneratedUtc = "2026-08-13T03:12:01.0000000Z"
 $NavigatorProductionCaBundleRotationId = "mozilla-2026-08-13"
+$NavigatorNavhttps24CandidateManifestPath = Join-Path $RootDir "assets\certs\candidates\digicert-tls-ecc-p384-root-g5-navhttps24-qualification.json"
+$NavigatorNavhttps24CandidateManifestSha256 = "4dbfe2cad8f72494b846bbb8543579933a7963b534c52f0efdb42d180e4a97c9"
+$NavigatorNavhttps24CandidateBundleSha256 = "05161ad2ac04a0df956ef803e127aa877cc5131e0a727ed8e5de43f02e8868c4"
 # Fixture manifests are payload inputs, so keep their provenance timestamp
 # stable across repeated smoke staging. Production uses its own pinned value.
 $NavigatorFixtureCaBundleGeneratedUtc = "2026-08-13T03:12:02.0000000Z"
@@ -471,10 +474,17 @@ function Write-NavigatorTrustProfile {
         [Parameter(Mandatory = $true)][string]$ProfilePath,
         [Parameter(Mandatory = $true)]$Manifest,
         [Parameter(Mandatory = $true)][ValidateSet("fixture-only", "candidate")][string]$ProfileClass,
-        [Parameter(Mandatory = $true)][string]$SourceDate
+        [Parameter(Mandatory = $true)][string]$SourceDate,
+        [AllowNull()][string]$CandidateQualificationManifestSha256
     )
 
     $profile = New-NavigatorTrustProfileDocument -Manifest $Manifest -ProfileClass $ProfileClass -SourceDate $SourceDate
+    if (-not [string]::IsNullOrWhiteSpace($CandidateQualificationManifestSha256)) {
+        if ($ProfileClass -ne "candidate" -or $CandidateQualificationManifestSha256 -notmatch '^[0-9a-fA-F]{64}$') {
+            throw "NAVHTTPS24 qualification metadata can only bind a candidate profile to a valid manifest SHA-256."
+        }
+        $profile["navhttps24_candidate_qualification_manifest_sha256"] = $CandidateQualificationManifestSha256.ToLowerInvariant()
+    }
     $json = $profile | ConvertTo-Json -Depth 6
     [System.IO.File]::WriteAllText($ProfilePath, $json + [Environment]::NewLine, [System.Text.Encoding]::ASCII)
     return $profile
@@ -1243,9 +1253,45 @@ if ($SmokeCaFixture -or $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -eq "1") {
             $profileClass = if ($httpsPolicyToken -and $httpsPolicyToken.Equals("controlled-qualification", [System.StringComparison]::OrdinalIgnoreCase)) { "fixture-only" } else { "candidate" }
             $sourceDate = if ($usingDefaultProductionCaSource) { "2026-08-13" } elseif ($candidateRotationId -match '20[0-9]{2}-[0-9]{2}-[0-9]{2}') { $Matches[0] } else { "unknown" }
             $targetTrustProfile = Join-Path $certsDir "trust-profile.json"
-            $null = Write-NavigatorTrustProfile -ProfilePath $targetTrustProfile -Manifest $productionManifest.Manifest -ProfileClass $profileClass -SourceDate $sourceDate
+            $navhttps24QualificationManifestSha256 = $null
+            if ($candidateRotationId -eq "navhttps24-digicert-g5") {
+                if (-not $candidateCaSource -or
+                    (Get-FileHash -LiteralPath $candidateCaSource -Algorithm SHA256).Hash.ToLowerInvariant() -ne $NavigatorNavhttps24CandidateBundleSha256) {
+                    throw "NAVHTTPS24 requires the exact NAVHTTPS23 DigiCert G5 candidate bundle bytes."
+                }
+                if (-not (Test-Path -LiteralPath $NavigatorNavhttps24CandidateManifestPath -PathType Leaf) -or
+                    (Get-FileHash -LiteralPath $NavigatorNavhttps24CandidateManifestPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $NavigatorNavhttps24CandidateManifestSha256) {
+                    throw "NAVHTTPS24 qualification manifest is missing or differs from its pinned SHA-256."
+                }
+                $navhttps24QualificationManifestSha256 = $NavigatorNavhttps24CandidateManifestSha256
+            }
+            $null = Write-NavigatorTrustProfile -ProfilePath $targetTrustProfile -Manifest $productionManifest.Manifest -ProfileClass $profileClass -SourceDate $sourceDate -CandidateQualificationManifestSha256 $navhttps24QualificationManifestSha256
             Update-NavigatorTrustProfileMode -ProfilePath $targetTrustProfile -Mode $trustProfileMode
             if (Test-Path -LiteralPath $targetTrustProfile -PathType Leaf) { $staged += Get-Item $targetTrustProfile }
+            if ($candidateRotationId -eq "navhttps24-digicert-g5") {
+                $targetNavhttps24Manifest = Join-Path $certsDir "navhttps24-candidate-manifest.json"
+                Copy-Item -LiteralPath $NavigatorNavhttps24CandidateManifestPath -Destination $targetNavhttps24Manifest -Force
+                $staged += Get-Item -LiteralPath $targetNavhttps24Manifest
+                $navhttps24FixtureMappings = @(
+                    @{ Source = "tests\fixtures\navhttps24\g5-self-signed-path.pem"; Target = "navhttps24-g5-self-signed-path.pem"; Sha256 = "19bee1bcd5609bc62b369a42165370aa9b97bbd35161f58881fef58171abdcdd" },
+                    @{ Source = "tests\fixtures\navhttps24\global-g3-cross-signed-path.pem"; Target = "navhttps24-global-g3-cross-signed-path.pem"; Sha256 = "ec6241a29684ccf5baeef3e3ebe28c75b72616e5b6d196e7a13603f7597be987" },
+                    @{ Source = "tests\fixtures\navhttps24\leaf-only-chain.pem"; Target = "navhttps24-leaf-only-chain.pem"; Sha256 = "9a2fb9481215b3f56e6717f4cf33e4094bf1ba49017c82909715a90500dd470a" },
+                    @{ Source = "tests\fixtures\navhttps24\global-root-g3.pem"; Target = "navhttps24-global-root-g3.pem"; Sha256 = "1914cd2d4cde263315f9e32c7683fc0e1b921919ad12b256d49bf782011c03cc" },
+                    @{ Source = "tests\fixtures\navhttps23\expired_g5_chain.pem"; Target = "navhttps24-expired_g5_chain.pem"; Sha256 = "712a122c72de097391abf703e777ca28cbac135622c6e6c60c214db9b8041e8d" },
+                    @{ Source = "tests\fixtures\navhttps23\tampered_leaf_chain.pem"; Target = "navhttps24-tampered_leaf_chain.pem"; Sha256 = "77255b9436bc88769740f561595d72e8f11272803ad4d7e7c0058e3ec4d44547" },
+                    @{ Source = "tests\fixtures\navhttps23\tampered_issuing_ca_chain.pem"; Target = "navhttps24-tampered_issuing_ca_chain.pem"; Sha256 = "67dcb4b658898cd5b6383c076decb7a4441c6bd14f3fa83b5ed1b7a372744e42" }
+                )
+                foreach ($fixture in $navhttps24FixtureMappings) {
+                    $fixtureSource = Join-Path $RootDir $fixture.Source
+                    if (-not (Test-Path -LiteralPath $fixtureSource -PathType Leaf) -or
+                        (Get-FileHash -LiteralPath $fixtureSource -Algorithm SHA256).Hash.ToLowerInvariant() -ne $fixture.Sha256) {
+                        throw "NAVHTTPS24 fixture failed its pinned integrity check: $($fixture.Source)"
+                    }
+                    $fixtureTarget = Join-Path $certsDir $fixture.Target
+                    Copy-Item -LiteralPath $fixtureSource -Destination $fixtureTarget -Force
+                    $staged += Get-Item -LiteralPath $fixtureTarget
+                }
+            }
         }
         $staged += Get-Item $targetCa
         if (Test-Path -LiteralPath $targetCaManifest -PathType Leaf) {

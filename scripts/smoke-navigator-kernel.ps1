@@ -159,6 +159,9 @@ function Invoke-KernelBuildForSmoke {
     if ($Navhttps19NameConstraintsQualification) {
         $flags += ' -DGXOS_NAVHTTPS19_GUEST_QUALIFICATION_ACTIVE'
     }
+    if ($navhttps24CandidateScenarioSelected) {
+        $flags += ' -DGXOS_NAVIGATOR_NAVHTTPS24_G5_CANDIDATE_QUALIFICATION_ACTIVE'
+    }
     $oldBuildErrorActionPreference = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
@@ -2222,6 +2225,58 @@ $scenarioDefinitions = @(
         RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsExplicitPolicyTrustMismatchRegexChecks
     },
     [pscustomobject]@{
+        Name = "navhttps24_g5_candidate_qualification"
+        HttpsPolicy = "public-pilot-candidate"
+        HttpsFaultMode = $null
+        UseSmokeFixture = $false
+        UserCaSource = $null
+        ProductionCaSource = $null
+        TlsCert = $defaultHttpsCert
+        TlsKey = $defaultHttpsKey
+        TrustProfileMode = "normal"
+        PublicPilotEnabled = $false
+        Checks = $commonChecks + @(
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_path=/certs/ca-bundle.pem",
+            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=ShippedRootCandidate",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_bundle_type=shipped-root-candidate",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_rotation_id=navhttps24-digicert-g5",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_root_count=1",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_hash_match=yes",
+            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_public_ready=no",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=PublicPilotCandidate",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=Disabled",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_validated_navigation_enabled=no",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_requested=no",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_broad_public_enabled=no",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_production_ready=no",
+            "[NAVIGATOR-SMOKE] tls_readiness=no",
+            "[NAVHTTPS24-GUEST] transport=offline test_context=disabled-candidate-qualification",
+            "[NAVHTTPS24-GUEST] candidate_root_sha256=018e13f0772532cf809bd1b17281867283fc48c6e13be9c69812854a490c1b05",
+            "[NAVHTTPS24-GUEST] manifest_sha256=4dbfe2cad8f72494b846bbb8543579933a7963b534c52f0efdb42d180e4a97c9",
+            "[NAVHTTPS24-GUEST] profile_class=candidate",
+            "[NAVHTTPS24-GUEST] time_assurance_scope=offline-certificate-validity-test-only;not-clock-evidence-or-authorization",
+            "[NAVHTTPS24-GUEST] identity_and_integrity=PASS",
+            "[NAVHTTPS24-GUEST] public_authorization_boundary=PASS",
+            "[NAVHTTPS24-GUEST] case=valid-exact-g5-anchor-correct-hostname result=PASS verify_result=00000000 verify_flags=0x00000000 anchor_sha256=018e13f0772532cf809bd1b17281867283fc48c6e13be9c69812854a490c1b05",
+            "[NAVHTTPS24-GUEST] case=wrong-hostname result=PASS",
+            "[NAVHTTPS24-GUEST] case=expired-public-leaf result=PASS",
+            "[NAVHTTPS24-GUEST] case=future-dated-public-leaf result=PASS",
+            "[NAVHTTPS24-GUEST] case=missing-intermediate result=PASS",
+            "[NAVHTTPS24-GUEST] case=modified-leaf-signature-synthetic result=PASS",
+            "[NAVHTTPS24-GUEST] case=invalid-intermediate-signature-synthetic result=PASS",
+            "[NAVHTTPS24-GUEST] case=incorrect-g3-anchor-for-exact-g5-path result=PASS",
+            "[NAVHTTPS24-GUEST] case=cross-signed-alternate-with-exact-g5-anchor result=PASS",
+            "[NAVHTTPS24-GUEST] case=cross-signed-alternate-with-explicit-g3-anchor result=PASS",
+            "[NAVHTTPS24-GUEST] candidate_enabled=no production_approved=no public_https_enabled=no general_public_browsing=no plaintext_fallback=no",
+            "[NAVHTTPS24-GUEST] result=PASS cases=10/10",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_requested=no",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_broad_public_enabled=no",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.enabled=no",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.result=PASS"
+        )
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsExplicitPolicyTrustMismatchRegexChecks
+    },
+    [pscustomobject]@{
         Name = "persistent_navigation_scheduler"
         HttpsPolicy = "public-pilot-candidate"
         HttpsFaultMode = $null
@@ -2530,6 +2585,7 @@ $scenarioDefinitions = @(
 
 $publicPilotScenarioNames = @(
     "production_public_pilot_enabled",
+    "navhttps24_g5_candidate_qualification",
     "persistent_navigation_scheduler"
 )
 
@@ -2612,6 +2668,19 @@ if ($resolvedCandidateBundlePath) {
         throw "CandidateBundlePath is only supported for the PublicPilot lane. Use -ScenarioGroup PublicPilot, -IncludePublicPilot with ScenarioFilter, or filter directly to public-pilot scenarios."
     }
 }
+$navhttps24CandidateScenarioSelected = $ScenarioFilter -contains 'navhttps24_g5_candidate_qualification'
+if ($navhttps24CandidateScenarioSelected) {
+    if (-not $resolvedCandidateBundlePath -or $effectiveCandidateRotationId -ne 'navhttps24-digicert-g5' -or $CandidateReviewed) {
+        throw 'NAVHTTPS24 requires the exact disabled DigiCert G5 candidate bundle and rotation id; CandidateReviewed is prohibited.'
+    }
+    if ($realPublicProbeEnabled -or $realPublicProbeRequired) {
+        throw 'NAVHTTPS24 refuses any real public HTTPS probe flags; this scenario is offline-only.'
+    }
+    $expectedNavhttps24BundleSha256 = '05161ad2ac04a0df956ef803e127aa877cc5131e0a727ed8e5de43f02e8868c4'
+    if ((Get-FileHash -LiteralPath $resolvedCandidateBundlePath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedNavhttps24BundleSha256) {
+        throw 'NAVHTTPS24 candidate bundle does not match the exact NAVHTTPS23 DigiCert G5 bundle bytes.'
+    }
+}
 
 Write-Host "Kernel smoke scenario selection: group=$effectiveScenarioGroup count=$($selectedScenarios.Count)"
 
@@ -2623,6 +2692,9 @@ $qualificationCompileDefinitions = @(
 if ($GuestDnsQualification) {
     $qualificationCompileDefinitions += 'GXOS_NAVIGATOR_GUEST_DNS_QUALIFICATION_ACTIVE'
 }
+if ($navhttps24CandidateScenarioSelected) {
+    $qualificationCompileDefinitions += 'GXOS_NAVIGATOR_NAVHTTPS24_G5_CANDIDATE_QUALIFICATION_ACTIVE'
+}
 
 function Get-NavigatorHttpsSourceFingerprint {
     $relativePaths = @(
@@ -2633,6 +2705,7 @@ function Get-NavigatorHttpsSourceFingerprint {
         'kernel/core/tcp.cpp',
         'guide_web_http.cpp',
         'gxos_tls_foundation.cpp',
+        'gxos_tls_foundation.h',
         'guidexos/mbedtls_sources.mk',
         'guidexos/mbedtls_config.h',
         'scripts/smoke-navigator-kernel.ps1',
@@ -2641,6 +2714,16 @@ function Get-NavigatorHttpsSourceFingerprint {
         'scripts/test_navigator_controlled_dns_fixture.py',
         'scripts/navigator_kernel_http_server.py',
         'scripts/generate-wallpaper-pack.ps1',
+        'scripts/build_navhttps24_candidate_manifest.py',
+        'assets/certs/candidates/digicert-tls-ecc-p384-root-g5-navhttps24-qualification.json',
+        'tests/fixtures/navhttps24/capture-manifest.json',
+        'tests/fixtures/navhttps24/g5-self-signed-path.pem',
+        'tests/fixtures/navhttps24/global-g3-cross-signed-path.pem',
+        'tests/fixtures/navhttps24/leaf-only-chain.pem',
+        'tests/fixtures/navhttps24/global-root-g3.pem',
+        'tests/fixtures/navhttps23/expired_g5_chain.pem',
+        'tests/fixtures/navhttps23/tampered_leaf_chain.pem',
+        'tests/fixtures/navhttps23/tampered_issuing_ca_chain.pem',
         'scripts/fixtures/navigator-validated-root-ca-bundle.pem',
         'scripts/fixtures/navigator-policy-prod.guidexos.test.crt',
         'scripts/fixtures/navigator-policy-prod.guidexos.test.key'

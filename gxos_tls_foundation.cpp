@@ -806,6 +806,59 @@ bool json_skip_value(const char*& cursor, const char* end, int depth)
     return false;
 }
 
+bool json_parse_known_string_array(const char*& cursor, const char* end,
+                                   const char* const* knownValues, size_t knownValueCount,
+                                   uint32_t* valueMask, size_t* itemCount, bool* unknownValue)
+{
+    if (!knownValues || !valueMask || !itemCount || !unknownValue ||
+        knownValueCount > 32u || cursor >= end || *cursor != '[') return false;
+    ++cursor;
+    json_skip_whitespace(cursor, end);
+    *valueMask = 0;
+    *itemCount = 0;
+    *unknownValue = false;
+    if (cursor < end && *cursor == ']') {
+        ++cursor;
+        return true;
+    }
+    while (cursor < end) {
+        char value[96];
+        if (!json_parse_string(cursor, end, value, sizeof(value))) return false;
+        size_t index = 0;
+        while (index < knownValueCount && !text_equals(value, knownValues[index])) ++index;
+        if (index == knownValueCount || ((*valueMask & (static_cast<uint32_t>(1u) << index)) != 0)) {
+            *unknownValue = true;
+        } else {
+            *valueMask |= static_cast<uint32_t>(1u) << index;
+        }
+        ++(*itemCount);
+        json_skip_whitespace(cursor, end);
+        if (cursor >= end) return false;
+        if (*cursor == ']') {
+            ++cursor;
+            return true;
+        }
+        if (*cursor != ',') return false;
+        ++cursor;
+        json_skip_whitespace(cursor, end);
+    }
+    return false;
+}
+
+constexpr const char* kTrustProfileSupportedRestrictionValues[] = {
+    "chain-signatures", "validity-periods", "basic-constraints", "path-length",
+    "leaf-server-auth-eku", "leaf-key-usage", "requested-hostname"
+};
+constexpr const char* kTrustProfileUnsupportedRestrictionValues[] = {
+    "name-constraints", "mozilla-trust-purpose-bits", "mozilla-domain-restrictions",
+    "certificate-policy-tree", "root-distrust-after-policy"
+};
+constexpr const char* kTrustProfileRequiredCapabilityValues[] = {
+    "strict-pem-accounting", "sha256-integrity-match", "hostname-verification",
+    "server-auth-eku", "plausible-clock-fixture-only", "authenticated-time",
+    "signed-approval-verification"
+};
+
 bool json_parse_yes_no_or_bool(const char*& cursor, const char* end, bool* valueOut)
 {
     if (!valueOut) return false;
@@ -1019,6 +1072,16 @@ struct ParsedTrustProfile {
     bool hasAuthorizationEvidence = false;
     bool hasApprovalAuthenticated = false;
     bool hasProfileClass = false;
+    bool hasNavhttps24CandidateQualificationManifestSha256 = false;
+    uint32_t supportedRestrictionMask = 0;
+    uint32_t unsupportedRestrictionMask = 0;
+    uint32_t requiredCapabilityMask = 0;
+    size_t supportedRestrictionCount = 0;
+    size_t unsupportedRestrictionCount = 0;
+    size_t requiredCapabilityCount = 0;
+    bool unknownSupportedRestriction = false;
+    bool unknownUnsupportedRestriction = false;
+    bool unknownRequiredCapability = false;
     char schemaVersion[64] = {};
     char profileId[96] = {};
     char bundleIdentity[128] = {};
@@ -1032,6 +1095,7 @@ struct ParsedTrustProfile {
     char approvalState[32] = {};
     char authorizationEvidence[96] = {};
     char profileClass[32] = {};
+    char navhttps24CandidateQualificationManifestSha256[65] = {};
     uint64_t profileVersion = 0;
     uint64_t trustPolicyVersion = 0;
     bool approvalAuthenticated = false;
@@ -1086,11 +1150,23 @@ bool parse_trust_profile_json(const uint8_t* bytes,
         } else if (text_equals(key, "trust_purpose")) {
             profile->hasTrustPurpose = json_parse_string(cursor, end, profile->trustPurpose, sizeof(profile->trustPurpose));
         } else if (text_equals(key, "supported_restrictions")) {
-            profile->hasSupportedRestrictions = cursor < end && *cursor == '[' && json_skip_value(cursor, end, 0);
+            profile->hasSupportedRestrictions = json_parse_known_string_array(cursor, end,
+                kTrustProfileSupportedRestrictionValues,
+                sizeof(kTrustProfileSupportedRestrictionValues) / sizeof(kTrustProfileSupportedRestrictionValues[0]),
+                &profile->supportedRestrictionMask, &profile->supportedRestrictionCount,
+                &profile->unknownSupportedRestriction);
         } else if (text_equals(key, "unsupported_restrictions")) {
-            profile->hasUnsupportedRestrictions = cursor < end && *cursor == '[' && json_skip_value(cursor, end, 0);
+            profile->hasUnsupportedRestrictions = json_parse_known_string_array(cursor, end,
+                kTrustProfileUnsupportedRestrictionValues,
+                sizeof(kTrustProfileUnsupportedRestrictionValues) / sizeof(kTrustProfileUnsupportedRestrictionValues[0]),
+                &profile->unsupportedRestrictionMask, &profile->unsupportedRestrictionCount,
+                &profile->unknownUnsupportedRestriction);
         } else if (text_equals(key, "required_verifier_capabilities")) {
-            profile->hasRequiredCapabilities = cursor < end && *cursor == '[' && json_skip_value(cursor, end, 0);
+            profile->hasRequiredCapabilities = json_parse_known_string_array(cursor, end,
+                kTrustProfileRequiredCapabilityValues,
+                sizeof(kTrustProfileRequiredCapabilityValues) / sizeof(kTrustProfileRequiredCapabilityValues[0]),
+                &profile->requiredCapabilityMask, &profile->requiredCapabilityCount,
+                &profile->unknownRequiredCapability);
         } else if (text_equals(key, "trust_policy_version")) {
             profile->hasTrustPolicyVersion = json_parse_unsigned(cursor, end, &profile->trustPolicyVersion);
         } else if (text_equals(key, "clock_assurance")) {
@@ -1105,6 +1181,10 @@ bool parse_trust_profile_json(const uint8_t* bytes,
             profile->hasApprovalAuthenticated = json_parse_yes_no_or_bool(cursor, end, &profile->approvalAuthenticated);
         } else if (text_equals(key, "profile_class")) {
             profile->hasProfileClass = json_parse_string(cursor, end, profile->profileClass, sizeof(profile->profileClass));
+        } else if (text_equals(key, "navhttps24_candidate_qualification_manifest_sha256")) {
+            profile->hasNavhttps24CandidateQualificationManifestSha256 = json_parse_string(
+                cursor, end, profile->navhttps24CandidateQualificationManifestSha256,
+                sizeof(profile->navhttps24CandidateQualificationManifestSha256));
         } else if (!json_skip_value(cursor, end, 0)) {
             copy_text(error, errorSize, "Trust profile contains an unsupported JSON value.");
             return false;
@@ -1127,7 +1207,10 @@ bool parse_trust_profile_json(const uint8_t* bytes,
             (text_equals(key, "approval_state") && !profile->hasApprovalState) ||
             (text_equals(key, "authorization_evidence") && !profile->hasAuthorizationEvidence) ||
             (text_equals(key, "approval_authenticated") && !profile->hasApprovalAuthenticated) ||
-            (text_equals(key, "profile_class") && !profile->hasProfileClass)) {
+            (text_equals(key, "profile_class") && !profile->hasProfileClass) ||
+            (text_equals(key, "navhttps24_candidate_qualification_manifest_sha256") &&
+                (!profile->hasNavhttps24CandidateQualificationManifestSha256 ||
+                 !normalize_sha256_hex_in_place(profile->navhttps24CandidateQualificationManifestSha256)))) {
             copy_text(error, errorSize, "Trust profile contains a malformed required field.");
             return false;
         }
@@ -1664,12 +1747,15 @@ struct BareMetalCaStoreState {
     bool trustProfileValid = false;
     bool trustProfileBundleHashMatch = false;
     bool trustProfileApprovalAuthenticated = false;
+    bool trustProfileHasNavhttps24ManifestSha256 = false;
+    bool trustProfileNavhttps24RestrictionsExact = false;
     char trustProfileSchemaVersion[64] = {};
     char trustProfileId[96] = {};
     char trustProfileClass[32] = {};
     char trustProfileClockAssurance[80] = {};
     char trustProfileApprovalState[32] = {};
     char trustProfileAuthorizationEvidence[96] = {};
+    char trustProfileNavhttps24ManifestSha256[65] = {};
     char trustProfileError[160] = {};
     uint8_t trustProfileBytes[4097] = {};
 };
@@ -1906,12 +1992,15 @@ bool load_selected_ca_bundle_trust_profile(BareMetalCaStoreState& state,
     state.trustProfileValid = false;
     state.trustProfileBundleHashMatch = false;
     state.trustProfileApprovalAuthenticated = false;
+    state.trustProfileHasNavhttps24ManifestSha256 = false;
+    state.trustProfileNavhttps24RestrictionsExact = false;
     state.trustProfileSchemaVersion[0] = '\0';
     state.trustProfileId[0] = '\0';
     state.trustProfileClass[0] = '\0';
     state.trustProfileClockAssurance[0] = '\0';
     state.trustProfileApprovalState[0] = '\0';
     state.trustProfileAuthorizationEvidence[0] = '\0';
+    state.trustProfileNavhttps24ManifestSha256[0] = '\0';
     state.trustProfileError[0] = '\0';
 
     kernel::vfs::FileInfo info{};
@@ -1945,6 +2034,19 @@ bool load_selected_ca_bundle_trust_profile(BareMetalCaStoreState& state,
     copy_text(state.trustProfileApprovalState, sizeof(state.trustProfileApprovalState), parsed.approvalState);
     copy_text(state.trustProfileAuthorizationEvidence, sizeof(state.trustProfileAuthorizationEvidence), parsed.authorizationEvidence);
     state.trustProfileApprovalAuthenticated = parsed.approvalAuthenticated;
+    state.trustProfileNavhttps24RestrictionsExact =
+        parsed.supportedRestrictionMask == 0x7Fu && parsed.supportedRestrictionCount == 7u &&
+        !parsed.unknownSupportedRestriction &&
+        parsed.unsupportedRestrictionMask == 0x1Fu && parsed.unsupportedRestrictionCount == 5u &&
+        !parsed.unknownUnsupportedRestriction &&
+        parsed.requiredCapabilityMask == 0x6Fu && parsed.requiredCapabilityCount == 6u &&
+        !parsed.unknownRequiredCapability;
+    state.trustProfileHasNavhttps24ManifestSha256 = parsed.hasNavhttps24CandidateQualificationManifestSha256;
+    if (parsed.hasNavhttps24CandidateQualificationManifestSha256) {
+        copy_text(state.trustProfileNavhttps24ManifestSha256,
+            sizeof(state.trustProfileNavhttps24ManifestSha256),
+            parsed.navhttps24CandidateQualificationManifestSha256);
+    }
     if (state.info.manifest.status != GxosCaManifestStatus::Loaded ||
         !state.info.manifest.manifestSha256 ||
         !text_equals(parsed.bundleSha256, state.info.manifest.manifestSha256) ||
@@ -4474,6 +4576,237 @@ bool gxos_ca_store_load_once()
     return true;
 #endif
 }
+
+#if defined(GXOS_BARE_METAL) && GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED && \
+    defined(GXOS_NAVIGATOR_NAVHTTPS24_G5_CANDIDATE_QUALIFICATION_ACTIVE)
+namespace {
+constexpr const char* kNavhttps24RootSha256 = "018e13f0772532cf809bd1b17281867283fc48c6e13be9c69812854a490c1b05";
+constexpr const char* kNavhttps24BundleSha256 = "05161ad2ac04a0df956ef803e127aa877cc5131e0a727ed8e5de43f02e8868c4";
+constexpr const char* kNavhttps24QualificationManifestSha256 = "4dbfe2cad8f72494b846bbb8543579933a7963b534c52f0efdb42d180e4a97c9";
+constexpr const char* kNavhttps24G3RootSha256 = "31ad6648f8104138c738f39ea4320133393e3a18cc02296ef97c2ac9ef6731d0";
+constexpr const int64_t kNavhttps24ValidUnixTime = 1795089600;
+constexpr const int64_t kNavhttps24FutureUnixTime = 1794614399;
+static int64_t g_navhttps24EvaluationUnixTime = kNavhttps24ValidUnixTime;
+
+int64_t navhttps24_time_callback(int64_t* timer)
+{
+    if (timer) *timer = g_navhttps24EvaluationUnixTime;
+    return g_navhttps24EvaluationUnixTime;
+}
+
+bool navhttps24_hash_bytes(const uint8_t* bytes, size_t length, char output[65])
+{
+    uint8_t digest[32] = {};
+    size_t digestLength = 0;
+    if (!bytes || !output || psa_hash_compute(PSA_ALG_SHA_256, bytes, length,
+            digest, sizeof(digest), &digestLength) != PSA_SUCCESS || digestLength != sizeof(digest)) {
+        if (output) output[0] = '\0';
+        return false;
+    }
+    bytes_to_lower_hex(digest, sizeof(digest), output, 65u);
+    return true;
+}
+
+bool navhttps24_read_pinned_fixture(const char* path, const char* expectedSha256,
+                                    uint8_t** bytes, size_t* byteCount)
+{
+    if (!path || !expectedSha256 || !bytes || !byteCount) return false;
+    kernel::vfs::FileInfo info{};
+    if (kernel::vfs::stat(path, &info) != kernel::vfs::VFS_OK ||
+        info.type != kernel::vfs::FILE_TYPE_REGULAR || info.size == 0 ||
+        info.size >= sizeof(runtime_state().pemScratch)) return false;
+    const int32_t read = kernel::vfs::read_file(path,
+        reinterpret_cast<uint8_t*>(runtime_state().pemScratch),
+        static_cast<uint32_t>(sizeof(runtime_state().pemScratch) - 1u));
+    if (read <= 0 || static_cast<uint64_t>(read) != info.size) return false;
+    runtime_state().pemScratch[read] = '\0';
+    char foundSha256[65] = {};
+    if (!navhttps24_hash_bytes(reinterpret_cast<const uint8_t*>(runtime_state().pemScratch),
+            static_cast<size_t>(read), foundSha256) || !text_equals(foundSha256, expectedSha256)) return false;
+    *bytes = reinterpret_cast<uint8_t*>(runtime_state().pemScratch);
+    *byteCount = static_cast<size_t>(read);
+    return true;
+}
+
+bool navhttps24_read_pinned_manifest()
+{
+    constexpr const char* path = "/certs/navhttps24-candidate-manifest.json";
+    BareMetalCaStoreState& state = ca_store_state();
+    kernel::vfs::FileInfo info{};
+    if (kernel::vfs::stat(path, &info) != kernel::vfs::VFS_OK ||
+        info.type != kernel::vfs::FILE_TYPE_REGULAR || info.size == 0 ||
+        info.size > kGxosMaxCaManifestBytes) return false;
+    const int32_t read = kernel::vfs::read_file(path, state.manifestBytes,
+        static_cast<uint32_t>(kGxosMaxCaManifestBytes));
+    if (read <= 0 || static_cast<uint64_t>(read) != info.size) return false;
+    char foundSha256[65] = {};
+    return navhttps24_hash_bytes(state.manifestBytes, static_cast<size_t>(read), foundSha256) &&
+        text_equals(foundSha256, kNavhttps24QualificationManifestSha256);
+}
+
+bool navhttps24_anchor_sha256(const mbedtls_x509_crt* trust, char output[65])
+{
+    return trust && trust->raw.p && trust->raw.len &&
+        navhttps24_hash_bytes(trust->raw.p, trust->raw.len, output);
+}
+
+bool navhttps24_verify_case(const char* caseName, const char* path, const char* fileSha256,
+                            mbedtls_x509_crt* trust, const char* hostname,
+                            int64_t evaluationTime, bool expectSuccess,
+                            uint32_t requiredFlags, const char* expectedAnchorSha256,
+                            uint32_t* outputFlags)
+{
+    mbedtls_x509_crt chain;
+    uint8_t* fixtureBytes = nullptr;
+    size_t fixtureByteCount = 0;
+    uint32_t flags = 0;
+    char anchorSha256[65] = {};
+    bool pass = false;
+    int parseResult = -1;
+    int verifyResult = -1;
+    mbedtls_x509_crt_init(&chain);
+    const bool fixtureReady = navhttps24_read_pinned_fixture(path, fileSha256,
+        &fixtureBytes, &fixtureByteCount);
+    if (fixtureReady && navhttps24_anchor_sha256(trust, anchorSha256)) {
+        parseResult = mbedtls_x509_crt_parse(&chain, fixtureBytes, fixtureByteCount + 1u);
+        if (parseResult == 0) {
+            g_navhttps24EvaluationUnixTime = evaluationTime;
+            mbedtls_platform_set_time(navhttps24_time_callback);
+            verifyResult = mbedtls_x509_crt_verify_with_profile(&chain, trust, nullptr,
+                &mbedtls_x509_crt_profile_default, hostname, &flags, nullptr, nullptr);
+            mbedtls_platform_set_time(gxos_mbedtls_time_callback);
+            pass = expectSuccess ? (verifyResult == 0 && flags == 0)
+                : ((verifyResult != 0 || flags != 0) &&
+                    ((flags & requiredFlags) == requiredFlags));
+            if (expectedAnchorSha256 && !text_equals(anchorSha256, expectedAnchorSha256)) pass = false;
+        }
+    }
+    if (outputFlags) *outputFlags = flags;
+    kernel::serial::puts("[NAVHTTPS24-GUEST] case=");
+    kernel::serial::puts(caseName);
+    kernel::serial::puts(" result=");
+    kernel::serial::puts(pass ? "PASS" : "FAIL");
+    kernel::serial::puts(" verify_result=");
+    kernel::serial::put_hex32(static_cast<uint32_t>(verifyResult));
+    kernel::serial::puts(" verify_flags=0x");
+    kernel::serial::put_hex32(flags);
+    kernel::serial::puts(" anchor_sha256=");
+    kernel::serial::puts(anchorSha256[0] ? anchorSha256 : "unavailable");
+    kernel::serial::puts("\n");
+    mbedtls_x509_crt_free(&chain);
+    return pass;
+}
+}
+
+bool gxos_tls_navhttps24_candidate_qualification_run()
+{
+    gxos_ca_store_load_once();
+    BareMetalCaStoreState& state = ca_store_state();
+    BareMetalTlsRuntimeState& runtime = runtime_state();
+    const GxosValidatedHttpsPolicyInfo policy = gxos_validated_https_policy_info();
+    char rootSha256[65] = {};
+    const bool candidateIdentity = state.info.status == GxosCaStoreStatus::Loaded &&
+        state.info.parseStatus == GxosCaParseStatus::Parsed &&
+        state.info.parsedCertificateCount == 1 && state.info.manifest.rootCount == 1 &&
+        state.info.manifest.status == GxosCaManifestStatus::Loaded &&
+        state.info.manifest.hashMatch && !state.info.manifest.productionReady &&
+        !state.info.manifest.testOnly && state.info.manifest.bundleType &&
+        text_equals(state.info.manifest.bundleType, "shipped-root-candidate") &&
+        state.info.manifest.rotationId &&
+        text_equals(state.info.manifest.rotationId, "navhttps24-digicert-g5") &&
+        state.computedSha256[0] && text_equals(state.computedSha256, kNavhttps24BundleSha256) &&
+        count_ca_chain(&runtime.caChain) == 1 &&
+        navhttps24_anchor_sha256(&runtime.caChain, rootSha256) &&
+        text_equals(rootSha256, kNavhttps24RootSha256) &&
+        state.trustProfilePresent && state.trustProfileValid &&
+        text_equals(state.trustProfileClass, "candidate") &&
+        text_equals(state.trustProfileId, "navigator-candidate-navhttps24-digicert-g5") &&
+        text_equals(state.trustProfileClockAssurance, "authenticated-fresh-rollback-protected-required") &&
+        text_equals(state.trustProfileApprovalState, "pending") &&
+        text_equals(state.trustProfileAuthorizationEvidence, "none") &&
+        !state.trustProfileApprovalAuthenticated &&
+        state.trustProfileHasNavhttps24ManifestSha256 &&
+        state.trustProfileNavhttps24RestrictionsExact &&
+        text_equals(state.trustProfileNavhttps24ManifestSha256, kNavhttps24QualificationManifestSha256) &&
+        navhttps24_read_pinned_manifest();
+    const bool authorizationBoundary = policy.selectedState == GxosValidatedHttpsPolicyState::PublicPilotCandidate &&
+        policy.state == GxosValidatedHttpsPolicyState::Disabled && !policy.publicHttpsPilotRequested &&
+        !policy.broadPublicHttpsEnabled && !policy.validatedNavigationEnabled && !policy.productionReady;
+    kernel::serial::puts("[NAVHTTPS24-GUEST] transport=offline test_context=disabled-candidate-qualification\n");
+    kernel::serial::puts("[NAVHTTPS24-GUEST] candidate_root_sha256=");
+    kernel::serial::puts(rootSha256[0] ? rootSha256 : "unavailable");
+    kernel::serial::puts("\n[NAVHTTPS24-GUEST] manifest_sha256=");
+    kernel::serial::puts(state.trustProfileNavhttps24ManifestSha256[0]
+        ? state.trustProfileNavhttps24ManifestSha256 : "unavailable");
+    kernel::serial::puts("\n[NAVHTTPS24-GUEST] profile_class=");
+    kernel::serial::puts(state.trustProfileClass[0] ? state.trustProfileClass : "unavailable");
+    kernel::serial::puts("\n[NAVHTTPS24-GUEST] time_assurance_scope=offline-certificate-validity-test-only;not-clock-evidence-or-authorization\n");
+    kernel::serial::puts("[NAVHTTPS24-GUEST] identity_and_integrity=");
+    kernel::serial::puts(candidateIdentity ? "PASS\n" : "FAIL\n");
+    kernel::serial::puts("[NAVHTTPS24-GUEST] public_authorization_boundary=");
+    kernel::serial::puts(authorizationBoundary ? "PASS\n" : "FAIL\n");
+    if (!candidateIdentity || !authorizationBoundary || !ensure_psa_initialized()) {
+        kernel::serial::puts("[NAVHTTPS24-GUEST] result=FAIL cases=0/10\n");
+        return false;
+    }
+
+    bool passed = true;
+    uint32_t flags = 0;
+    mbedtls_x509_crt g3Trust;
+    mbedtls_x509_crt_init(&g3Trust);
+    uint8_t* g3Bytes = nullptr;
+    size_t g3ByteCount = 0;
+    const bool g3Ready = navhttps24_read_pinned_fixture(
+        "/certs/navhttps24-global-root-g3.pem",
+        "1914cd2d4cde263315f9e32c7683fc0e1b921919ad12b256d49bf782011c03cc",
+        &g3Bytes, &g3ByteCount) &&
+        mbedtls_x509_crt_parse(&g3Trust, g3Bytes, g3ByteCount + 1u) == 0;
+    char g3Sha256[65] = {};
+    const bool g3Identity = g3Ready && navhttps24_anchor_sha256(&g3Trust, g3Sha256) &&
+        text_equals(g3Sha256, kNavhttps24G3RootSha256);
+#define NAV24_CASE(n, p, h, host, tm, ok, req, anchor) \
+    do { const bool one = navhttps24_verify_case(n, p, h, \
+        text_equals(anchor, kNavhttps24G3RootSha256) ? &g3Trust : &runtime.caChain, \
+        host, tm, ok, req, anchor, &flags); passed = one && passed; } while (0)
+    NAV24_CASE("valid-exact-g5-anchor-correct-hostname", "/certs/navhttps24-g5-self-signed-path.pem",
+        "19bee1bcd5609bc62b369a42165370aa9b97bbd35161f58881fef58171abdcdd",
+        "digicert-tls-ecc-p384-root-g5.chain-demos.digicert.com", kNavhttps24ValidUnixTime, true, 0, kNavhttps24RootSha256);
+    NAV24_CASE("wrong-hostname", "/certs/navhttps24-g5-self-signed-path.pem",
+        "19bee1bcd5609bc62b369a42165370aa9b97bbd35161f58881fef58171abdcdd",
+        "wrong.example", kNavhttps24ValidUnixTime, false, MBEDTLS_X509_BADCERT_CN_MISMATCH, kNavhttps24RootSha256);
+    NAV24_CASE("expired-public-leaf", "/certs/navhttps24-expired_g5_chain.pem",
+        "712a122c72de097391abf703e777ca28cbac135622c6e6c60c214db9b8041e8d",
+        "digicert-tls-ecc-p384-root-g5-expired.chain-demos.digicert.com", kNavhttps24ValidUnixTime, false, MBEDTLS_X509_BADCERT_EXPIRED, kNavhttps24RootSha256);
+    NAV24_CASE("future-dated-public-leaf", "/certs/navhttps24-g5-self-signed-path.pem",
+        "19bee1bcd5609bc62b369a42165370aa9b97bbd35161f58881fef58171abdcdd",
+        "digicert-tls-ecc-p384-root-g5.chain-demos.digicert.com", kNavhttps24FutureUnixTime, false, MBEDTLS_X509_BADCERT_FUTURE, kNavhttps24RootSha256);
+    NAV24_CASE("missing-intermediate", "/certs/navhttps24-leaf-only-chain.pem",
+        "9a2fb9481215b3f56e6717f4cf33e4094bf1ba49017c82909715a90500dd470a",
+        "digicert-tls-ecc-p384-root-g5.chain-demos.digicert.com", kNavhttps24ValidUnixTime, false, MBEDTLS_X509_BADCERT_NOT_TRUSTED, kNavhttps24RootSha256);
+    NAV24_CASE("modified-leaf-signature-synthetic", "/certs/navhttps24-tampered_leaf_chain.pem",
+        "77255b9436bc88769740f561595d72e8f11272803ad4d7e7c0058e3ec4d44547",
+        "digicert-tls-ecc-p384-root-g5.chain-demos.digicert.com", kNavhttps24ValidUnixTime, false, 0, kNavhttps24RootSha256);
+    NAV24_CASE("invalid-intermediate-signature-synthetic", "/certs/navhttps24-tampered_issuing_ca_chain.pem",
+        "67dcb4b658898cd5b6383c076decb7a4441c6bd14f3fa83b5ed1b7a372744e42",
+        "digicert-tls-ecc-p384-root-g5.chain-demos.digicert.com", kNavhttps24ValidUnixTime, false, 0, kNavhttps24RootSha256);
+    NAV24_CASE("incorrect-g3-anchor-for-exact-g5-path", "/certs/navhttps24-g5-self-signed-path.pem",
+        "19bee1bcd5609bc62b369a42165370aa9b97bbd35161f58881fef58171abdcdd",
+        "digicert-tls-ecc-p384-root-g5.chain-demos.digicert.com", kNavhttps24ValidUnixTime, false, 0, kNavhttps24G3RootSha256);
+    passed = g3Identity && passed;
+    NAV24_CASE("cross-signed-alternate-with-exact-g5-anchor", "/certs/navhttps24-global-g3-cross-signed-path.pem",
+        "ec6241a29684ccf5baeef3e3ebe28c75b72616e5b6d196e7a13603f7597be987",
+        "digicert-tls-ecc-p384-root-g5.chain-demos.digicert.com", kNavhttps24ValidUnixTime, true, 0, kNavhttps24RootSha256);
+    NAV24_CASE("cross-signed-alternate-with-explicit-g3-anchor", "/certs/navhttps24-global-g3-cross-signed-path.pem",
+        "ec6241a29684ccf5baeef3e3ebe28c75b72616e5b6d196e7a13603f7597be987",
+        "digicert-tls-ecc-p384-root-g5.chain-demos.digicert.com", kNavhttps24ValidUnixTime, true, 0, kNavhttps24G3RootSha256);
+#undef NAV24_CASE
+    mbedtls_x509_crt_free(&g3Trust);
+    kernel::serial::puts("[NAVHTTPS24-GUEST] candidate_enabled=no production_approved=no public_https_enabled=no general_public_browsing=no plaintext_fallback=no\n");
+    kernel::serial::puts("[NAVHTTPS24-GUEST] result=");
+    kernel::serial::puts(passed ? "PASS cases=10/10\n" : "FAIL cases=0/10\n");
+    return passed;
+}
+#endif
 
 GxosCaStoreInfo gxos_ca_store_info()
 {

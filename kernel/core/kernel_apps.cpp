@@ -18521,6 +18521,12 @@ static bool printNavigatorRuntimeSmokePreamble()
     const char* tlsReadinessBlocker = gxos::gxos_tls_prerequisites_blocker_reason();
     const NavigatorHttpsSmokeFaultMode faultMode = navigator_https_smoke_fault_mode();
     serial::puts("[NAVIGATOR-SMOKE] BEGIN\n");
+#if defined(GXOS_NAVIGATOR_NAVHTTPS24_G5_CANDIDATE_QUALIFICATION_ACTIVE)
+    const bool navhttps24CandidateQualificationPassed =
+        gxos::gxos_tls_navhttps24_candidate_qualification_run();
+#else
+    const bool navhttps24CandidateQualificationPassed = true;
+#endif
     serial::puts("[NAVIGATOR-SMOKE] build_mode=bare-metal/kernel\n");
     serial::puts("[NAVIGATOR-SMOKE] registered=");
     serial::puts(registered ? "true\n" : "false\n");
@@ -18848,7 +18854,8 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial::puts("\n[NAVIGATOR-SMOKE] tls_readiness_blocker=");
     serial::puts(tlsReady ? "(none)" : tlsReadinessBlocker);
     serial::puts("\n");
-    return registered && rngConsistent && wallClockPlausible && wallClockUtcAvailable;
+    return registered && rngConsistent && wallClockPlausible && wallClockUtcAvailable &&
+        navhttps24CandidateQualificationPassed;
 }
 
 static bool printNavigatorPolicyValidatedTlsSmokeCase()
