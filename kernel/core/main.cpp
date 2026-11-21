@@ -713,6 +713,85 @@ static bool mount_persistent_storage()
     return false;
 }
 
+#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)
+static void log_sn10_vfs_mount_snapshot(const char* checkpoint, const char* path)
+{
+    kernel::serial::puts("[SN10-VFS] checkpoint=");
+    kernel::serial::puts(checkpoint ? checkpoint : "unknown");
+    kernel::serial::puts(" path=");
+    kernel::serial::puts(path ? path : "(null)");
+
+    const uint8_t selectedIndex = path ? kernel::vfs::mount_index_for_path(path) : 0xFFu;
+    const kernel::vfs::MountLookupResult lookup = kernel::vfs::last_mount_lookup_result();
+    kernel::serial::puts(" lookup=");
+    kernel::serial::puts(kernel::vfs::mount_lookup_result_name(lookup));
+    kernel::serial::puts(" selectedIndex=0x");
+    kernel::serial::put_hex8(selectedIndex);
+    kernel::serial::puts(" registeredMountCount=0x");
+    kernel::serial::put_hex8(kernel::vfs::mount_count());
+    kernel::serial::puts(" activeMounts=[");
+
+    bool first = true;
+    uint8_t activeSlots = 0;
+    for (uint8_t index = 0; index < kernel::vfs::VFS_MAX_MOUNTS; ++index) {
+        const kernel::vfs::MountPoint* mount = kernel::vfs::get_mount_by_index(index);
+        if (!mount) continue;
+        ++activeSlots;
+        if (!first) kernel::serial::putc(';');
+        first = false;
+        kernel::serial::puts("index=0x");
+        kernel::serial::put_hex8(index);
+        kernel::serial::puts(" path=");
+        kernel::serial::puts(mount->path);
+        kernel::serial::puts(" fs=0x");
+        kernel::serial::put_hex8(static_cast<uint8_t>(mount->fsType));
+        kernel::serial::puts(" deviceIndex=0x");
+        kernel::serial::put_hex8(mount->blockDevIndex);
+        kernel::serial::puts(" recordedGeneration=0x");
+        kernel::serial::put_hex64(mount->blockDeviceGeneration);
+        kernel::serial::puts(" currentGeneration=0x");
+        kernel::serial::put_hex64(kernel::block::device_generation(mount->blockDevIndex));
+        kernel::serial::puts(" device=");
+        const kernel::block::BlockDevice* device = kernel::block::get_device(mount->blockDevIndex);
+        if (device) {
+            kernel::serial::puts(device->name);
+            kernel::serial::puts(" driverIndex=0x");
+            kernel::serial::put_hex8(device->driverIndex);
+            kernel::serial::puts(" sectors=0x");
+            kernel::serial::put_hex64(device->totalSectors);
+        } else {
+            kernel::serial::puts("(missing)");
+        }
+        kernel::serial::puts(" alias=");
+        kernel::serial::puts(mount->alias ? "1" : "0");
+    }
+
+    kernel::serial::puts("] activeSlots=0x");
+    kernel::serial::put_hex8(activeSlots);
+    kernel::serial::putc('\n');
+}
+
+static void log_sn10_discovered_navigator_mount()
+{
+    const kernel::native_elf::PackageInfo* package =
+        kernel::native_elf::lookup_package("com.guidexos.stellarnavigator");
+    kernel::serial::puts("[SN10-VFS] checkpoint=appmodel-discovery package=");
+    if (package) {
+        kernel::serial::puts(package->id);
+        kernel::serial::puts(" root=");
+        kernel::serial::puts(package->root);
+        kernel::serial::puts(" executableRelative=");
+        kernel::serial::puts(package->executable);
+        kernel::serial::puts(" bytes=0x");
+        kernel::serial::put_hex64(package->executableBytes);
+    } else {
+        kernel::serial::puts("missing");
+    }
+    kernel::serial::putc('\n');
+    log_sn10_vfs_mount_snapshot("B-appmodel-discovery", "/Apps/StellarNavigator/bin/amd64/stellarnavigator.elf");
+}
+#endif
+
 extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 {
 #if ARCH_HAS_PIC_8259
@@ -976,6 +1055,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::putc('\n');
         
         const bool mounted = mount_persistent_storage();
+#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)
+        log_sn10_vfs_mount_snapshot("A-root-mount-established", "/");
+#endif
 
         if (is_bootinfo && bootinfo && bootinfo->RamdiskBase != 0 && bootinfo->RamdiskSize != 0) {
             kernel::serial::puts("[KERNEL] Boot wallpaper pack found in ramdisk.img\n");
@@ -983,18 +1065,33 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             mount_navigator_boot_ca_store_if_available();
             mount_navigator_boot_config_if_available();
         }
+#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)
+        log_sn10_vfs_mount_snapshot("boot-ramdisk-mounts-complete", "/Apps/StellarNavigator/bin/amd64/stellarnavigator.elf");
+#endif
 
         kernel::desktop::reload_persisted_wallpaper();
+#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)
+        log_sn10_vfs_mount_snapshot("persisted-wallpaper-load-complete", "/Apps/StellarNavigator/bin/amd64/stellarnavigator.elf");
+#endif
 #if defined(GXOS_BARE_METAL)
         kernel::desktop::refresh_bare_metal_desktop_folders_after_vfs_ready();
+#endif
+#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)
+        log_sn10_vfs_mount_snapshot("desktop-folder-initialization-complete", "/Apps/StellarNavigator/bin/amd64/stellarnavigator.elf");
 #endif
         // Discover external NativeElf packages only after the persistent FAT
         // filesystem is mounted. The loader consumes /Apps through VFS and
         // never reaches back to a host filesystem path at runtime.
         kernel::native_elf::discover();
+#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)
+        log_sn10_discovered_navigator_mount();
+#endif
         // The first desktop draw happens before VFS and the boot ramdisk are ready.
         // Redraw now so bare-metal thumbnails and the selected wallpaper use /system/wallpapers.
         kernel::desktop::draw();
+#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)
+        log_sn10_vfs_mount_snapshot("post-discovery-desktop-draw", "/Apps/StellarNavigator/bin/amd64/stellarnavigator.elf");
+#endif
 
 #if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
 #if defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_PERSISTENCE_ACTIVE)
@@ -1144,6 +1241,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             printNetworkAddress(" dns=", adapter.dns);
             kernel::serial::putc('\n');
         }
+#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)
+        log_sn10_vfs_mount_snapshot("network-initialization-complete", "/Apps/StellarNavigator/bin/amd64/stellarnavigator.elf");
+#endif
 #if defined(GXOS_QEMU_NETWORK_CONFIGURATION_TRANSACTION_PROOF)
         kernel::qemu_network_configuration_proof::run();
 #endif
@@ -1171,6 +1271,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::input::init(kernel::framebuffer::get_width(),
                             kernel::framebuffer::get_height());
         kernel::serial::puts("[KERNEL] Input manager initialized\n");
+#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)
+        log_sn10_vfs_mount_snapshot("input-manager-initialization-complete", "/Apps/StellarNavigator/bin/amd64/stellarnavigator.elf");
+#endif
         
         // Update feature report for input devices
         kernel::feature_report::complete_init(kernel::feature_report::INPUT_PS2_KB);
@@ -1186,7 +1289,13 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::desktop::draw_cursor(kernel::input::mouse_x(),
                                      kernel::input::mouse_y());
         kernel::desktop_capabilities::log_current(true, true);
+#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)
+        log_sn10_vfs_mount_snapshot("before-navigator-runtime-smoke", "/Apps/StellarNavigator/bin/amd64/stellarnavigator.elf");
+#endif
         kernel::apps::printNavigatorRuntimeSmokeReport();
+#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)
+        log_sn10_vfs_mount_snapshot("after-navigator-runtime-smoke", "/Apps/StellarNavigator/bin/amd64/stellarnavigator.elf");
+#endif
 #ifdef GXOS_DESKTOP_CLEANUP_RUNTIME_PASS
         kernel::serial::puts("[KERNEL] desktopCleanupRuntimePass=2 launch-smoke begin\n");
         const bool cleanupDisplayOptionsLaunched = kernel::desktop::launch_app("DisplayOptions");
@@ -1239,6 +1348,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         bool stellarNavigatorProofLaunchPending = true;
 #endif
         kernel::serial::puts("[KERNEL] Entering main loop (waiting for input)...\n");
+#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)
+        log_sn10_vfs_mount_snapshot("C-desktop-init-complete", "/Apps/StellarNavigator/bin/amd64/stellarnavigator.elf");
+#endif
         
         
         // Main kernel loop â€” poll input and redraw cursor
@@ -1273,13 +1385,25 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 
             // Poll input manager for updates (handles USB HID polling)
             kernel::input::poll();
+#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)
+            if (stellarNavigatorProofLaunchPending)
+                log_sn10_vfs_mount_snapshot("loop-after-input-poll", "/Apps/StellarNavigator/bin/amd64/stellarnavigator.elf");
+#endif
 
             // Service bounded host-runtime requests on the dedicated COM2
             // channel. This reads current kernel providers per request.
             kernel::system_service_bridge::poll();
+#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)
+            if (stellarNavigatorProofLaunchPending)
+                log_sn10_vfs_mount_snapshot("loop-after-system-service", "/Apps/StellarNavigator/bin/amd64/stellarnavigator.elf");
+#endif
             
             // Poll network for received packets
             kernel::ipv4::poll_network();
+#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)
+            if (stellarNavigatorProofLaunchPending)
+                log_sn10_vfs_mount_snapshot("loop-after-network-poll", "/Apps/StellarNavigator/bin/amd64/stellarnavigator.elf");
+#endif
 
             int8_t wheelDelta = kernel::input::mouse_scroll_y();
             
@@ -1308,6 +1432,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                 kernel::desktop::request_redraw();
 #endif
             }
+#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)
+            if (stellarNavigatorProofLaunchPending)
+                log_sn10_vfs_mount_snapshot("loop-after-input-dispatch", "/Apps/StellarNavigator/bin/amd64/stellarnavigator.elf");
+#endif
             
             // Process buffered keyboard input from PS/2 IRQ handler
             if (kernel::ps2keyboard::has_key()) {
@@ -1333,6 +1461,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             }
 
             kernel::desktop::tick();
+#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)
+            if (stellarNavigatorProofLaunchPending)
+                log_sn10_vfs_mount_snapshot("loop-after-desktop-tick", "/Apps/StellarNavigator/bin/amd64/stellarnavigator.elf");
+#endif
 
             // MC6: sustain the bare-metal audio pump on the desktop cadence
             // even when no application is running. Without this, mixer
@@ -1340,6 +1472,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             // the DMA ring would loop stale content instead of decaying to
             // silence. Bounded, non-blocking, never sleeps.
             kernel::native_elf::app_audio_pump();
+#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)
+            if (stellarNavigatorProofLaunchPending)
+                log_sn10_vfs_mount_snapshot("loop-after-audio-pump", "/Apps/StellarNavigator/bin/amd64/stellarnavigator.elf");
+#endif
 
             // Check if any other source triggered a redraw
             if (kernel::desktop::needs_redraw()) {
@@ -1348,10 +1484,18 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                     kernel::input::mouse_x(),
                     kernel::input::mouse_y());
             }
+#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)
+            if (stellarNavigatorProofLaunchPending)
+                log_sn10_vfs_mount_snapshot("loop-after-desktop-render", "/Apps/StellarNavigator/bin/amd64/stellarnavigator.elf");
+#endif
 
             // The virtio-gpu live path consumes the normal desktop update
             // cadence; it does not own desktop/window state or input routing.
             kernel::virtio::gpu::presentation_tick();
+#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)
+            if (stellarNavigatorProofLaunchPending)
+                log_sn10_vfs_mount_snapshot("loop-after-presentation", "/Apps/StellarNavigator/bin/amd64/stellarnavigator.elf");
+#endif
 
             uint64_t workEndTicks = kernel::pit::ticks();
             if (workEndTicks >= workStartTicks) {
@@ -1364,6 +1508,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                 // repeat the proof launch on a later desktop iteration.
                 stellarNavigatorProofLaunchPending = false;
                 kernel::serial::puts("[SN10-GUEST] input-ready source=ps2 irq1=registered input-manager=initialized desktop-loop=operational\n");
+                log_sn10_vfs_mount_snapshot("D-deferred-native-launch", "/Apps/StellarNavigator/bin/amd64/stellarnavigator.elf");
                 kernel::serial::puts("[SN10-GUEST] appmodel-launch begin id=com.guidexos.stellarnavigator\n");
                 const bool stellarNavigatorLaunched =
                     kernel::desktop::launch_app("com.guidexos.stellarnavigator");

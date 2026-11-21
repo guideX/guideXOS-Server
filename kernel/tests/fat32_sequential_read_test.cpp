@@ -461,6 +461,13 @@ int main() {
     kernel::fs_fat::unmount(afterRemountVolume);
 
     kernel::vfs::init();
+    const uint8_t initiallyMissingHandle = kernel::vfs::open(
+        "/Apps/StellarNavigator/bin/amd64/stellarnavigator.elf",
+        kernel::vfs::OPEN_READ);
+    const bool initiallyMissingClassified = initiallyMissingHandle == 0xFFu &&
+        kernel::vfs::last_mount_lookup_result() == kernel::vfs::MOUNT_NOT_FOUND;
+    if (!check_root_mount(initiallyMissingClassified,
+            "absolute application path without a registered mount is MOUNT_NOT_FOUND")) return 1;
     const uint8_t vfsMount = kernel::vfs::mount_type("/", 0u,
         kernel::vfs::FS_TYPE_FAT32);
     const uint8_t vfsHandle = kernel::vfs::open("/TEST.BIN", kernel::vfs::OPEN_READ);
@@ -562,8 +569,54 @@ int main() {
             "manifest opens and closes leave root mount selected and generation stable")) return 1;
 
     const char* elfPath = "/Apps/StellarNavigator/bin/amd64/stellarnavigator.elf";
-    const uint8_t elfHandle = kernel::vfs::open(elfPath, kernel::vfs::OPEN_READ);
     uint8_t observedElfHeader[sizeof(elfHeader)] = {};
+    // The deferred launch runs after desktop startup work. Exercise an
+    // idempotent VFS init and directory traversal between discovery and the
+    // first ELF open, then repeat valid opens on the original mount.
+    kernel::vfs::init();
+    const uint8_t delayedMountIndex = kernel::vfs::mount_index_for_path(
+        "/Apps/StellarNavigator/bin/amd64/stellarnavigator.elf");
+    rootOwner = kernel::vfs::get_mount("/");
+    bool delayedDesktopTraversal = delayedMountIndex == packageMount && rootOwner &&
+        rootOwner->active && rootOwner->blockDevIndex == 0u &&
+        rootOwner->blockDeviceGeneration == packageGeneration;
+    const uint8_t appsIterator = kernel::vfs::opendir("/Apps");
+    bool navigatorListed = false;
+    if (appsIterator == 0xFFu) {
+        delayedDesktopTraversal = false;
+    } else {
+        kernel::vfs::DirEntry directoryEntry{};
+        while (kernel::vfs::readdir(appsIterator, &directoryEntry)) {
+            if (std::strcmp(directoryEntry.name, "StellarNavigator") == 0 &&
+                directoryEntry.type == kernel::vfs::FILE_TYPE_DIRECTORY) {
+                navigatorListed = true;
+            }
+        }
+        kernel::vfs::closedir(appsIterator);
+    }
+
+    bool repeatedDelayedElfOpens = delayedDesktopTraversal && navigatorListed;
+    for (uint32_t openIndex = 0; openIndex < 3u && repeatedDelayedElfOpens; ++openIndex) {
+        const uint8_t delayedHandle = kernel::vfs::open(elfPath, kernel::vfs::OPEN_READ);
+        std::memset(observedElfHeader, 0, sizeof(observedElfHeader));
+        const int32_t delayedBytes = delayedHandle == 0xFFu ? 0 :
+            kernel::vfs::read(delayedHandle, observedElfHeader, sizeof(observedElfHeader));
+        const kernel::vfs::Status delayedClose = delayedHandle == 0xFFu
+            ? kernel::vfs::VFS_ERR_INVALID : kernel::vfs::close(delayedHandle);
+        repeatedDelayedElfOpens = delayedBytes == static_cast<int32_t>(sizeof(elfHeader)) &&
+            delayedClose == kernel::vfs::VFS_OK &&
+            std::memcmp(observedElfHeader, elfHeader, sizeof(elfHeader)) == 0 &&
+            kernel::vfs::mount_index_for_path(elfPath) == packageMount &&
+            kernel::block::device_generation(0u) == packageGeneration;
+    }
+    rootOwner = kernel::vfs::get_mount("/");
+    repeatedDelayedElfOpens = repeatedDelayedElfOpens && rootOwner && rootOwner->active &&
+        rootOwner->blockDevIndex == 0u &&
+        rootOwner->blockDeviceGeneration == packageGeneration;
+    if (!check_root_mount(repeatedDelayedElfOpens,
+            "desktop-delay traversal preserves the valid root mount for repeated Native ELF opens")) return 1;
+
+    const uint8_t elfHandle = kernel::vfs::open(elfPath, kernel::vfs::OPEN_READ);
     const int32_t elfHeaderBytes = elfHandle == 0xFFu ? 0 :
         kernel::vfs::read(elfHandle, observedElfHeader, sizeof(observedElfHeader));
     const kernel::vfs::Status elfClose = elfHandle == 0xFFu

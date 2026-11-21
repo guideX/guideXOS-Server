@@ -7305,6 +7305,20 @@ NavigatorApp::~NavigatorApp() {
     releaseImageResources();
 }
 
+// NavigatorApp owns large fixed-capacity document and form buffers. The
+// kernel entry stack is only 16 KiB, so smoke fixtures must keep this object
+// on the kernel heap rather than as an automatic local.
+class NavigatorAppHeapLease {
+public:
+    NavigatorAppHeapLease() : m_app(new NavigatorApp()) {}
+    ~NavigatorAppHeapLease() { delete m_app; }
+
+    NavigatorApp* get() const { return m_app; }
+
+private:
+    NavigatorApp* m_app;
+};
+
 bool NavigatorApp::init()
 {
     if (m_window) return true;
@@ -7443,7 +7457,9 @@ static bool nav_starts_with(const char* value, const char* prefix);
 
 bool NavigatorApp::smokeTypographyPhase7A()
 {
-    NavigatorApp app;
+    NavigatorAppHeapLease appLease;
+    if (!appLease.get()) return false;
+    NavigatorApp& app = *appLease.get();
     app::KernelWindow smokeWindow;
     smokeWindow.w = 640;
     smokeWindow.h = 480;
@@ -7575,7 +7591,9 @@ bool NavigatorApp::smokeScrollbarPointerInput()
         "<p>scroll line 37</p><p>scroll line 38</p><p>scroll line 39</p>"
         "<p>scroll line 40</p><p>scroll line 41</p><p>scroll line 42</p>";
 
-    NavigatorApp app;
+    NavigatorAppHeapLease appLease;
+    if (!appLease.get()) return false;
+    NavigatorApp& app = *appLease.get();
     app::KernelWindow smokeWindow;
     smokeWindow.x = 96;
     smokeWindow.y = 72;
@@ -14957,7 +14975,9 @@ bool NavigatorApp::smokeControlledLocalHttpsNavigation(const char* url,
     const int plainAttemptsBefore = s_kernelHttpPlainTcpConnectAttempts;
     const int tlsAttemptsBefore = s_kernelHttpTlsConnectAttempts;
     const int httpsLoadsBefore = s_kernelHttpControlledLocalHttpsLoads;
-    NavigatorApp app;
+    NavigatorAppHeapLease appLease;
+    if (!appLease.get()) return false;
+    NavigatorApp& app = *appLease.get();
     app.loadUrl(url);
     const int plainAttempts = s_kernelHttpPlainTcpConnectAttempts - plainAttemptsBefore;
     const int tlsAttempts = s_kernelHttpTlsConnectAttempts - tlsAttemptsBefore;
@@ -15218,7 +15238,9 @@ bool NavigatorApp::smokeFormsLitePost(const char* action, int* statusCode, char*
         return false;
     }
 
-    NavigatorApp app;
+    NavigatorAppHeapLease appLease;
+    if (!appLease.get()) return false;
+    NavigatorApp& app = *appLease.get();
     app.submitFormsLitePost(action, formBody, formBodyBytes, "application/x-www-form-urlencoded");
     KernelHttpResponse* response = &s_kernelHttpResponse;
     int renderedBlocks = app.m_blockCount;
@@ -15295,7 +15317,9 @@ bool NavigatorApp::smokeInteractiveFormsLitePost(const char* formUrl, int* statu
     if (error && errorLen > 0) error[0] = '\0';
     if (submittedBodyBytes) *submittedBodyBytes = 0;
 
-    NavigatorApp app;
+    NavigatorAppHeapLease appLease;
+    if (!appLease.get()) return false;
+    NavigatorApp& app = *appLease.get();
     app.loadUrl(formUrl);
     auto findControl = [&app](BlockKind kind, const char* name, const char* value = nullptr) {
         for (int i = 0; i < app.m_blockCount; ++i) {
@@ -15392,7 +15416,9 @@ bool NavigatorApp::smokeInteractiveFormsLiteGet(const char* formUrl, char* final
     if (finalUrl && finalUrlLen > 0) finalUrl[0] = '\0';
     if (parsedBlocks) *parsedBlocks = 0;
     if (error && errorLen > 0) error[0] = '\0';
-    NavigatorApp app;
+    NavigatorAppHeapLease appLease;
+    if (!appLease.get()) return false;
+    NavigatorApp& app = *appLease.get();
     app.loadUrl(formUrl);
     auto findControl = [&app](BlockKind kind, const char* name, const char* value = nullptr) {
         for (int i = 0; i < app.m_blockCount; ++i) {
@@ -15568,7 +15594,9 @@ bool NavigatorApp::smokeHttpsUnsupportedDocument(const char* url, const char* ex
 {
     int plainAttemptsBefore = s_kernelHttpPlainTcpConnectAttempts;
     int tlsAttemptsBefore = s_kernelHttpTlsConnectAttempts;
-    NavigatorApp app;
+    NavigatorAppHeapLease appLease;
+    if (!appLease.get()) return false;
+    NavigatorApp& app = *appLease.get();
     app.loadUrl(url);
     int plainAttempts = s_kernelHttpPlainTcpConnectAttempts - plainAttemptsBefore;
     int tlsAttempts = s_kernelHttpTlsConnectAttempts - tlsAttemptsBefore;
