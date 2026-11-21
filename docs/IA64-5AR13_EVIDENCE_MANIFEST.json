@@ -84,9 +84,18 @@
   "closeout": {
     "report": "docs/IA64-5AR13_COOPERATIVE_GUEST_QUALIFICATION.md",
     "support_index": "docs/IA64_SUPPORT.md",
-    "diff_check": "pending final commit preparation",
-    "local_commit_sha": "pending",
-    "final_worktree_status": "pending",
+    "diff_check": "PASS",
+    "qualification_commit_sha": "953fa2769c84b8f86abd6f88309b6aa080d5c276",
+    "tracked_worktree_after_qualification_commit": "clean",
+    "upstream_divergence_after_qualification_commit": {
+      "ahead": 8,
+      "behind": 0
+    },
+    "final_tracked_worktree_status": "clean after a report-only closeout commit; untracked Python caches preserved",
+    "final_upstream_divergence": {
+      "ahead": 9,
+      "behind": 0
+    },
     "push_performed": false
   }
 }

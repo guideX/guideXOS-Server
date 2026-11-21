@@ -68,4 +68,4 @@ Restore WSL command startup, repeat the exact-hash six-breakpoint no-guest debug
 
 ## Local closeout
 
-The implementation, host tests, report, and evidence manifest were committed locally on `IA64_SUPPORT`; nothing was pushed. The final commit IDs, final upstream divergence, and final worktree status are recorded below after commit.
+The implementation, host tests, report, and evidence manifest were committed locally as `953fa2769c84b8f86abd6f88309b6aa080d5c276` on `IA64_SUPPORT`. `git diff --check` passed. At that commit, the tracked worktree was clean and the branch was eight commits ahead of `origin/IA64_SUPPORT` with no commits behind. This report and manifest received a separate local closeout update; the resulting final HEAD and nine-commit upstream divergence are given in the task closeout. Untracked Python caches were preserved, and nothing was pushed.
