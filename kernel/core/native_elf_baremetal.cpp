@@ -27,6 +27,9 @@
 #include <psa/crypto.h>
 #endif
 
+extern "C" uint32_t gxos_amd64_record_user_fault(
+    uint64_t vector, uint64_t errorCode, uint64_t rip, uint64_t cs, uint64_t cr2);
+
 namespace kernel {
 namespace native_elf {
 
@@ -2490,6 +2493,23 @@ extern "C" uint64_t gxos_native_exception_dispatch(const NativeExceptionFrame* f
     Runtime* runtime = s_activeRuntime;
     if (!frame) {
         serial::puts("[NATIVE-ELF-FAULT] missing exception frame; kernel halted\n");
+        for (;;) arch::halt();
+    }
+
+    // A CPL3 fault must never enter the ring-0 Native ELF recovery trampoline.
+    // The current protected diagnostic is deliberately non-faulting; until a
+    // full user-fault return/reaper path is qualified, record and stop safely.
+    if ((frame->cs & 3u) == 3u) {
+        const uint64_t cr2 = arch::read_cr2();
+        const uint32_t taskId = gxos_amd64_record_user_fault(
+            frame->vector, frame->errorCode, frame->rip, frame->cs, cr2);
+        serial::puts("[USER-FAULT] task=0x"); serial::put_hex32(taskId);
+        serial::puts(" vector=0x"); serial::put_hex64(frame->vector);
+        serial::puts(" error=0x"); serial::put_hex64(frame->errorCode);
+        serial::puts(" RIP=0x"); serial::put_hex64(frame->rip);
+        serial::puts(" CS=0x"); serial::put_hex64(frame->cs);
+        serial::puts(" CR2=0x"); serial::put_hex64(cr2);
+        serial::puts(" policy=halt-no-recovery\n");
         for (;;) arch::halt();
     }
 

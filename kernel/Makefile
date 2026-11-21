@@ -96,6 +96,10 @@ MBEDTLS_GUIDEXOS_IMPORT_STATE_DEPS := \
 CFLAGS := -std=c++14 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-rtti
 CFLAGS += -nostdlib -nostdinc++ -fno-builtin
 CFLAGS += -DGXOS_BARE_METAL
+CPL3_DIAGNOSTIC ?= 0
+ifeq ($(CPL3_DIAGNOSTIC),1)
+CFLAGS += -DGXOS_ENABLE_CPL3_DIAGNOSTIC
+endif
 CFLAGS += -I. -I.. -Icore/include -Iarch/$(ARCH)/include
 CFLAGS += $(EXTRA_CFLAGS)
 ifneq ($(MBEDTLS_GUIDEXOS_COMPILE_PROBE_ENABLED),0)

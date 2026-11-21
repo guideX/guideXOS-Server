@@ -218,12 +218,12 @@ void init()
     write_msr(MSR_EFER, efer);
     
     // STAR MSR: bits 47:32 = SYSRET CS/SS base, bits 63:48 = SYSCALL CS/SS base
-    // Assuming GDT layout: 0x08 = kernel code, 0x10 = kernel data,
-    //                      0x18 = user code, 0x20 = user data
+    // GDT layout: 0x08 = kernel code, 0x10 = kernel data,
+    //             0x18 = user data, 0x20 = user code, 0x28 = TSS
     // SYSCALL loads CS from bits 47:32, SS from bits 47:32 + 8
     // SYSRET loads CS from bits 63:48 + 16 (64-bit) or +0 (32-bit), SS from bits 63:48 + 8
     uint64_t star = ((uint64_t)0x08 << 32) |  // SYSCALL: kernel CS = 0x08
-                    ((uint64_t)0x18 << 48);   // SYSRET: user CS base = 0x18
+                    ((uint64_t)0x10 << 48);   // SYSRET base -> CS 0x23, SS 0x1B
     write_msr(MSR_STAR, star);
     
     // LSTAR MSR: SYSCALL entry point (64-bit mode)

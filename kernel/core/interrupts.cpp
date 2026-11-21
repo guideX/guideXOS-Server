@@ -15,9 +15,16 @@
 #include "include/kernel/arch.h"
 #include "include/kernel/native_elf_fault.h"
 #include "include/kernel/serial_debug.h"
+#include "include/kernel/amd64_protected_task_contract.h"
 
 namespace kernel {
 namespace interrupts {
+
+#if defined(__x86_64__)
+extern "C" void gxos_amd64_user_exit_stub();
+extern "C" uint8_t gxos_amd64_user_entry_stack_bottom[];
+extern "C" uint8_t gxos_amd64_user_entry_stack_top[];
+#endif
 
 // ================================================================
 // x86 / amd64  —  IDT + 8259 PIC implementation
@@ -104,6 +111,8 @@ struct TSS64 {
     uint16_t reserved3;
     uint16_t iomapBase;
 } PACKED;
+static_assert(sizeof(TSS64) == sizeof(amd64_protected_task::Tss64Layout),
+              "TSS64 hardware layout must match the privilege contract");
 
 struct GDTPtr {
     uint16_t limit;
@@ -142,9 +151,12 @@ static const uint8_t kIRQBase       = 32;
 // ----------------------------------------------------------------
 
 #if defined(__x86_64__) || defined(_M_X64)
-// GDT: null, code, data, and a 64-bit TSS descriptor (two slots).
-static GDTEntry s_gdt[5];
+// GDT: null, kernel code/data, user data/code, and a 64-bit TSS (two slots).
+static GDTEntry s_gdt[7];
 static TSS64 s_tss;
+static bool s_user_selectors_valid = false;
+static bool s_tss_loaded = false;
+static bool s_user_exit_gate_valid = false;
 #else
 // GDT: 3 entries - null, code, data
 static GDTEntry s_gdt[3];
@@ -176,6 +188,31 @@ static void set_gdt_entry(int index, uint32_t base, uint32_t limit, uint8_t acce
 }
 
 #if defined(__x86_64__) || defined(_M_X64)
+static bool segment_descriptor_matches(int index, uint8_t access, uint8_t flags)
+{
+    return index >= 0 && index < 5 && s_gdt[index].base_low == 0u &&
+           s_gdt[index].base_mid == 0u && s_gdt[index].base_high == 0u &&
+           s_gdt[index].limit_low == 0xFFFFu &&
+           s_gdt[index].access == access &&
+           s_gdt[index].flags_limit_high ==
+               static_cast<uint8_t>(0x0Fu | (flags & 0xF0u));
+}
+
+static bool tss_descriptor_matches()
+{
+    const uint64_t base = static_cast<uint64_t>(s_gdt[5].base_low) |
+        (static_cast<uint64_t>(s_gdt[5].base_mid) << 16) |
+        (static_cast<uint64_t>(s_gdt[5].base_high) << 24) |
+        (static_cast<uint64_t>(s_gdt[6].limit_low) << 32) |
+        (static_cast<uint64_t>(s_gdt[6].base_low) << 48);
+    return base == reinterpret_cast<uintptr_t>(&s_tss) &&
+           s_gdt[5].limit_low == sizeof(TSS64) - 1u &&
+           s_gdt[5].flags_limit_high == 0u &&
+           s_gdt[5].access == 0x89u &&
+           s_gdt[6].base_mid == 0u && s_gdt[6].access == 0u &&
+           s_gdt[6].flags_limit_high == 0u && s_gdt[6].base_high == 0u;
+}
+
 static void set_tss_descriptor(int index, uint64_t base, uint32_t limit)
 {
     set_gdt_entry(index, static_cast<uint32_t>(base), limit, 0x89, 0x00);
@@ -197,16 +234,45 @@ static void gdt_init()
     // Entry 1: 64-bit code segment (selector 0x08)
     // Access: Present (0x80) | DPL=0 (0x00) | Type=code,exec,read (0x1A) = 0x9A
     // Flags: Long mode (0x20) = 0x20 (no 4K granularity needed in 64-bit)
-    set_gdt_entry(1, 0, 0xFFFFF, 0x9A, 0x20);
+    set_gdt_entry(1, 0, 0xFFFFF,
+                  amd64_protected_task::kKernelCodeAccess,
+                  amd64_protected_task::kLongCodeFlags);
     
     // Entry 2: 64-bit data segment (selector 0x10)
     // Access: Present (0x80) | DPL=0 (0x00) | Type=data,read,write (0x12) = 0x92
     // Flags: 0x00 (no long mode bit for data segments)
-    set_gdt_entry(2, 0, 0xFFFFF, 0x92, 0x00);
+    set_gdt_entry(2, 0, 0xFFFFF,
+                  amd64_protected_task::kKernelDataAccess,
+                  amd64_protected_task::kLongDataFlags);
+
+    // Entry 3: user data segment (selector 0x18, RPL3 selector 0x1B).
+    set_gdt_entry(3, 0, 0xFFFFF,
+                  amd64_protected_task::kUserDataAccess, 0xC0);
+
+    // Entry 4: 64-bit user code segment (selector 0x20, RPL3 selector 0x23).
+    set_gdt_entry(4, 0, 0xFFFFF,
+                  amd64_protected_task::kUserCodeAccess,
+                  amd64_protected_task::kLongCodeFlags);
+
     s_tss = {};
     s_tss.iomapBase = sizeof(TSS64);
     s_tss.ist1 = (reinterpret_cast<uint64_t>(gxos_exception_stack) + sizeof(gxos_exception_stack)) & ~0x0Full;
-    set_tss_descriptor(3, reinterpret_cast<uint64_t>(&s_tss), sizeof(TSS64) - 1u);
+    set_tss_descriptor(5, reinterpret_cast<uint64_t>(&s_tss), sizeof(TSS64) - 1u);
+    s_user_selectors_valid =
+        amd64_protected_task::valid_selector_layout() &&
+        segment_descriptor_matches(1,
+            amd64_protected_task::kKernelCodeAccess,
+            amd64_protected_task::kLongCodeFlags) &&
+        segment_descriptor_matches(2,
+            amd64_protected_task::kKernelDataAccess,
+            amd64_protected_task::kLongDataFlags) &&
+        segment_descriptor_matches(3,
+            amd64_protected_task::kUserDataAccess, 0xC0u) &&
+        segment_descriptor_matches(4,
+            amd64_protected_task::kUserCodeAccess,
+            amd64_protected_task::kLongCodeFlags) &&
+        tss_descriptor_matches() &&
+        s_tss.iomapBase == sizeof(TSS64);
 #else
     // Entry 1: 32-bit code segment (selector 0x08)
     // Access: Present (0x80) | DPL=0 (0x00) | Type=code,exec,read (0x1A) = 0x9A
@@ -271,8 +337,13 @@ static void gdt_init()
 #endif
 
 #if defined(__x86_64__)
-    const uint16_t tssSelector = 0x18;
+    const uint16_t tssSelector = amd64_protected_task::kTssSelector;
     asm volatile ("ltr %0" : : "r"(tssSelector) : "memory");
+    uint16_t loadedTaskRegister = 0u;
+    asm volatile ("str %0" : "=rm"(loadedTaskRegister));
+    s_tss_loaded = loadedTaskRegister == amd64_protected_task::kTssSelector &&
+                   s_gdt[5].access == 0x8Bu &&
+                   (s_gdtPtr.limit == sizeof(s_gdt) - 1u);
     serial::puts("[GDT] GDT loaded with code/data/TSS entries, segments reloaded\n");
 #else
     serial::puts("[GDT] GDT loaded with 3 entries, segments reloaded\n");
@@ -383,9 +454,9 @@ extern "C" void irq_dispatch(uint32_t irq_number)
 #if defined(__x86_64__)
 
 // 64-bit ISR stubs
-// Stack must be 16-byte aligned before 'call'. After interrupt pushes
-// SS/RSP/RFLAGS/CS/RIP (40 bytes) and we push 9 regs (72 bytes), total
-// is 112 bytes. We need to sub 8 to make it 120 (divisible by 16) before call.
+// The configured IST stack top is 16-byte aligned. A 64-bit stack switch
+// pushes SS/RSP/RFLAGS/CS/RIP, then this stub saves volatile GPRs. Align each
+// ABI call explicitly and restore the exact interrupted frame pointer.
 //
 // MinGW uses Microsoft x64 ABI (first arg in RCX)
 // Linux/ELF uses System V ABI (first arg in RDI)
@@ -405,10 +476,10 @@ extern "C" void irq_dispatch(uint32_t irq_number)
         "    push %r9\n"                                   \
         "    push %r10\n"                                  \
         "    push %r11\n"                                  \
-        "    sub $40, %rsp\n"                              \
+        "    sub $32, %rsp\n"                              \
         "    mov $" #n ", %ecx\n"                          \
         "    call irq_dispatch\n"                          \
-        "    add $40, %rsp\n"                              \
+        "    add $32, %rsp\n"                              \
         "    pop %r11\n"                                   \
         "    pop %r10\n"                                   \
         "    pop %r9\n"                                    \
@@ -436,10 +507,13 @@ extern "C" void irq_dispatch(uint32_t irq_number)
         "    push %r9\n"                                   \
         "    push %r10\n"                                  \
         "    push %r11\n"                                  \
-        "    sub $8, %rsp\n"                               \
+        "    push %r12\n"                                  \
+        "    mov %rsp, %r12\n"                             \
+        "    and $-16, %rsp\n"                             \
         "    mov $" #n ", %edi\n"                          \
         "    call irq_dispatch\n"                          \
-        "    add $8, %rsp\n"                               \
+        "    mov %r12, %rsp\n"                             \
+        "    pop %r12\n"                                   \
         "    pop %r11\n"                                   \
         "    pop %r10\n"                                   \
         "    pop %r9\n"                                    \
@@ -527,10 +601,10 @@ static stub_fn s_stubs[16] = {
         "    mov r12, rsp\n"                               \
         "    lea rsp, [rip + gxos_exception_stack + 16384]\n" \
         "    and rsp, -16\n"                               \
-        "    sub rsp, 40\n"                                \
+        "    sub rsp, 32\n"                                \
         "    mov rcx, r12\n"                               \
         "    call gxos_native_exception_dispatch\n"         \
-        "    add rsp, 40\n"                                \
+        "    add rsp, 32\n"                                \
         "    test rax, rax\n"                              \
         "    jnz .native_exception_recover_" #n "\n"       \
         "    mov rsp, r12\n"                               \
@@ -582,10 +656,10 @@ static stub_fn s_stubs[16] = {
         "    mov r12, rsp\n"                               \
         "    lea rsp, [rip + gxos_exception_stack + 16384]\n" \
         "    and rsp, -16\n"                               \
-        "    sub rsp, 40\n"                                \
+        "    sub rsp, 32\n"                                \
         "    mov rcx, r12\n"                               \
         "    call gxos_native_exception_dispatch\n"         \
-        "    add rsp, 40\n"                                \
+        "    add rsp, 32\n"                                \
         "    test rax, rax\n"                              \
         "    jnz .native_exception_recover_" #n "\n"       \
         "    mov rsp, r12\n"                               \
@@ -733,6 +807,20 @@ void init()
 #endif
     }
 
+#if defined(__x86_64__) && defined(GXOS_ENABLE_CPL3_DIAGNOSTIC)
+    set_idt_entry(0x80, reinterpret_cast<uint64_t>(gxos_amd64_user_exit_stub),
+                  0xEE); // Present, DPL3, 64-bit interrupt gate.
+    s_user_exit_gate_valid = s_idt[0x80].selector ==
+            amd64_protected_task::kKernelCodeSelector &&
+        s_idt[0x80].type_attr == 0xEEu && s_idt[0x80].reserved == 0u &&
+        s_idt[0x80].offset_low ==
+            static_cast<uint16_t>(reinterpret_cast<uintptr_t>(gxos_amd64_user_exit_stub)) &&
+        s_idt[0x80].offset_mid == static_cast<uint16_t>(
+            reinterpret_cast<uintptr_t>(gxos_amd64_user_exit_stub) >> 16) &&
+        s_idt[0x80].offset_high == static_cast<uint32_t>(
+            reinterpret_cast<uintptr_t>(gxos_amd64_user_exit_stub) >> 32);
+#endif
+
     load_idt();
     arch::enable_interrupts();
 
@@ -762,6 +850,46 @@ void register_irq(uint8_t irq, irq_handler_t handler)
         serial::put_hex8(arch::inb(kPICSlaveData));
         serial::putc('\n');
     }
+}
+
+bool set_user_entry_stack(uint64_t stackBase, uint64_t stackBytes)
+{
+#if defined(__x86_64__)
+    const uint64_t expectedBase =
+        reinterpret_cast<uintptr_t>(gxos_amd64_user_entry_stack_bottom);
+    const uint64_t expectedTop =
+        reinterpret_cast<uintptr_t>(gxos_amd64_user_entry_stack_top);
+    if (!s_user_selectors_valid || !s_tss_loaded || expectedTop <= expectedBase ||
+        stackBase != expectedBase || stackBytes != expectedTop - expectedBase ||
+        (expectedBase & 0xFu) != 0u || (expectedTop & 0xFu) != 0u ||
+        stackBytes < 4096u) {
+        return false;
+    }
+    s_tss.rsp0 = expectedTop;
+    return s_tss.rsp0 == expectedTop;
+#else
+    (void)stackBase;
+    (void)stackBytes;
+    return false;
+#endif
+}
+
+bool user_selectors_valid()
+{
+#if defined(__x86_64__)
+    return s_user_selectors_valid && s_tss_loaded;
+#else
+    return false;
+#endif
+}
+
+bool user_exit_gate_valid()
+{
+#if defined(__x86_64__) && defined(GXOS_ENABLE_CPL3_DIAGNOSTIC)
+    return s_user_exit_gate_valid && user_selectors_valid();
+#else
+    return false;
+#endif
 }
 
 #else // !ARCH_HAS_PIC_8259

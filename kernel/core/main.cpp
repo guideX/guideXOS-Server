@@ -9,6 +9,7 @@
 #include "include/kernel/version.h"
 #include "include/kernel/build_identity.h"
 #include "include/kernel/amd64_memory_foundation.h"
+#include "include/kernel/protected_task.h"
 #include "include/kernel/arch.h"
 #include "include/kernel/vga.h"
 #include "include/kernel/framebuffer.h"
@@ -896,6 +897,12 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::pit::init(100);
         kernel::interrupts::register_irq(0, kernel::pit::irq_handler);
         kernel::serial::puts("[KERNEL] PIT timer initialized, IRQ0 registered\n");
+
+#if defined(GXOS_ENABLE_CPL3_DIAGNOSTIC)
+        // Development-only, bounded CPL3 proof. The task runs on dedicated
+        // kernel lifecycle/entry stacks and exits before normal services start.
+        (void)kernel::protected_task::run_cpl3_diagnostic();
+#endif
 
         // MC6: detect HDA audio controllers once at boot (bounded PCI
         // scan + CORB/RIRB + codec enumeration; no DMA here). The desktop
