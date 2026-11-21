@@ -10,7 +10,7 @@ static_assert(sizeof(FunctionRecord) == 48u,
 static_assert(sizeof(EnvironmentRecord) == 24u,
     "JS119 AMD64 environment record size");
 static_assert(sizeof(Binding) == 40u, "JS119 AMD64 binding size");
-static_assert(sizeof(PortableCallFrame) == 72u,
+static_assert(sizeof(PortableCallFrame) == 80u,
     "JS119 AMD64 portable call frame size");
 static_assert(sizeof(PortableExecutionCore) == 304u,
     "JS119 AMD64 portable execution context size");

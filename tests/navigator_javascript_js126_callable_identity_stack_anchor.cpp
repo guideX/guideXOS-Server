@@ -12,7 +12,7 @@ static_assert(sizeof(FunctionRecord) == 48u, "JS126 AMD64 function record size")
 static_assert(sizeof(EnvironmentRecord) == 24u,
     "JS126 AMD64 environment record size");
 static_assert(sizeof(Binding) == 40u, "JS126 AMD64 binding size");
-static_assert(sizeof(PortableCallFrame) == 72u,
+static_assert(sizeof(PortableCallFrame) == 80u,
     "JS126 AMD64 invocation frame size");
 static_assert(sizeof(PortablePropertyKeySnapshotEntry) == 8u,
     "JS126 AMD64 property snapshot entry size");

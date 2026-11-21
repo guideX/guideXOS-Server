@@ -8,7 +8,7 @@ static_assert(sizeof(Value) == 16u, "JS120 AMD64 Value size");
 static_assert(sizeof(EnvironmentRecord) == 24u,
     "JS120 AMD64 environment record size");
 static_assert(sizeof(Binding) == 40u, "JS120 AMD64 binding size");
-static_assert(sizeof(PortableCallFrame) == 72u,
+static_assert(sizeof(PortableCallFrame) == 80u,
     "JS120 AMD64 call frame size");
 static_assert(sizeof(PortableObjectRecord) == 28u,
     "JS120 AMD64 object record size");

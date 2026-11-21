@@ -85,6 +85,9 @@ struct PortableCallFrame {
     Value previousThis = Value::undefined();
     SourceLocation callSite;
     std::size_t argumentMark = 0u;
+    // For the qualified non-tail self-recursion shape, the child frame owns
+    // the caller's pending AST operation until the child returns.
+    AstNodeId continuationNode = kInvalidAstNodeId;
 };
 
 struct PortableExecutionStorageView {
@@ -356,6 +359,16 @@ private:
               previousCallDepth_(previousCallDepth) {}
         ~CallRestore()
         {
+            if (core_.storage_.frames != nullptr) {
+                const std::size_t end = core_.callDepth_ <
+                        core_.storage_.frameCapacity
+                    ? core_.callDepth_ : core_.storage_.frameCapacity;
+                for (std::size_t index = previousCallDepth_; index < end;
+                    ++index) {
+                    core_.storage_.frames[index].continuationNode =
+                        kInvalidAstNodeId;
+                }
+            }
             core_.currentEnvironment_ = previousEnvironment_;
             core_.currentThis_ = previousThis_;
             core_.argumentTop_ = previousArgumentTop_;
@@ -1674,6 +1687,12 @@ private:
         Value right;
         if (!evalExpression(node.left, left) ||
             !evalExpression(node.right, right)) return false;
+        return applyBinaryValues(node, left, right, result);
+    }
+
+    bool applyBinaryValues(const AstNode& node, Value left, Value right,
+        Value& result)
+    {
         if (node.binaryOperator == AstBinaryOperator::Add) {
             if (left.isString() || right.isString()) {
                 fail(PortableExecutionErrorCode::UnsupportedOperation,
@@ -1826,6 +1845,13 @@ private:
 
     bool evalCall(AstNodeId callId, const AstNode& node, Value& result)
     {
+        AstNodeId continuationNode = kInvalidAstNodeId;
+        if (callDepth_ != 0u &&
+            matchesSelfArithmeticContinuation(callId,
+                continuationNode)) {
+            return invokeSelfArithmeticContinuation(callId,
+                continuationNode, result);
+        }
         Value callee;
         std::size_t mark = 0u;
         if (!evaluateCallOperands(callId, node, callee, mark)) return false;
@@ -1841,6 +1867,368 @@ private:
             node.childCount, node.location, result);
         argumentTop_ = mark;
         return invoked;
+    }
+
+    static bool sameIdentifier(const Ast& ast, AstNodeId left,
+        AstNodeId right)
+    {
+        if (!validNode(ast, left) || !validNode(ast, right) ||
+            ast.node(left).kind != AstNodeKind::Identifier ||
+            ast.node(right).kind != AstNodeKind::Identifier) return false;
+        const SourceView leftName = ast.nodeText(left);
+        const SourceView rightName = ast.nodeText(right);
+        return equalName(leftName, rightName);
+    }
+
+    AstNodeId functionReturnExpression(const AstNode& declaration) const
+    {
+        if (declaration.body == kInvalidAstNodeId)
+            return declaration.expression;
+        if (!validNode(ast_, declaration.body) ||
+            ast_.node(declaration.body).kind != AstNodeKind::BlockStatement ||
+            ast_.node(declaration.body).childCount != 1u)
+            return kInvalidAstNodeId;
+        const AstNodeId statement = ast_.childAt(declaration.body, 0u);
+        if (!validNode(ast_, statement) ||
+            ast_.node(statement).kind != AstNodeKind::ReturnStatement)
+            return kInvalidAstNodeId;
+        return ast_.node(statement).expression;
+    }
+
+    bool matchesSelfArithmeticContinuation(AstNodeId callId,
+        AstNodeId& continuationNode) const
+    {
+        continuationNode = kInvalidAstNodeId;
+        if (callDepth_ == 0u || storage_.frames == nullptr ||
+            !validNode(ast_, callId) ||
+            ast_.node(callId).kind != AstNodeKind::CallExpression)
+            return false;
+        const PortableCallFrame& active = storage_.frames[callDepth_ - 1u];
+        FunctionStoreError functionError;
+        const FunctionRecord* function = functions_.get(active.function,
+            functionError);
+        if (function == nullptr ||
+            function->kind != FunctionRecord::Kind::User ||
+            !validNode(ast_, function->declaration) ||
+            !simpleParameters(ast_, function->declaration)) return false;
+        const AstNode& declaration = ast_.node(function->declaration);
+        if (declaration.childCount != 1u) return false;
+        const AstNodeId parameter = ast_.childAt(function->declaration, 0u);
+        if (!validNode(ast_, parameter) ||
+            ast_.node(parameter).kind != AstNodeKind::Identifier) return false;
+        const AstNodeId expression = functionReturnExpression(declaration);
+        if (!validNode(ast_, expression) ||
+            ast_.node(expression).kind != AstNodeKind::LogicalExpression)
+            return false;
+        const AstNode& logical = ast_.node(expression);
+        if ((logical.logicalOperator != AstLogicalOperator::And &&
+                logical.logicalOperator != AstLogicalOperator::Or) ||
+            !sameIdentifier(ast_, logical.left, parameter) ||
+            !validNode(ast_, logical.right) ||
+            ast_.node(logical.right).kind != AstNodeKind::BinaryExpression)
+            return false;
+        const AstNodeId binaryId = logical.right;
+        const AstNode& binary = ast_.node(binaryId);
+        if (binary.left != callId ||
+            (binary.binaryOperator != AstBinaryOperator::Add &&
+                binary.binaryOperator != AstBinaryOperator::Subtract &&
+                binary.binaryOperator != AstBinaryOperator::Multiply &&
+                binary.binaryOperator != AstBinaryOperator::Divide) ||
+            !validNode(ast_, binary.right) ||
+            ast_.node(binary.right).kind != AstNodeKind::NumericLiteral)
+            return false;
+        const AstNode& call = ast_.node(callId);
+        if (!validNode(ast_, call.callee) ||
+            ast_.node(call.callee).kind != AstNodeKind::Identifier ||
+            call.childCount != 1u) return false;
+        const AstNodeId argumentId = ast_.childAt(callId, 0u);
+        if (!validNode(ast_, argumentId) ||
+            ast_.node(argumentId).kind != AstNodeKind::BinaryExpression)
+            return false;
+        const AstNode& argument = ast_.node(argumentId);
+        if (argument.binaryOperator != AstBinaryOperator::Subtract ||
+            !sameIdentifier(ast_, argument.left, parameter) ||
+            !validNode(ast_, argument.right) ||
+            ast_.node(argument.right).kind != AstNodeKind::NumericLiteral)
+            return false;
+        continuationNode = binaryId;
+        return true;
+    }
+
+    bool pushFunctionActivation(RuntimeFunctionId id,
+        const Value* arguments, std::size_t argumentCount,
+        SourceLocation callSite, Value receiver,
+        AstNodeId continuationNode, FunctionRecord& function)
+    {
+        if (argumentCount != 0u && arguments == nullptr) {
+            fail(PortableExecutionErrorCode::InternalInvariantFailure,
+                callSite);
+            return false;
+        }
+        if (argumentCount > limits_.maxCallArguments) {
+            fail(PortableExecutionErrorCode::InvalidInvocationTarget,
+                callSite);
+            return false;
+        }
+        FunctionStoreError functionError;
+        const FunctionRecord* stored = functions_.get(id, functionError);
+        if (stored == nullptr) {
+            fail(functionError.code == FunctionStoreErrorCode::StaleGeneration
+                    ? PortableExecutionErrorCode::StaleReference
+                    : functionError.code == FunctionStoreErrorCode::RealmMismatch
+                        ? PortableExecutionErrorCode::RealmMismatch
+                        : PortableExecutionErrorCode::InvalidFunctionReference,
+                callSite);
+            return false;
+        }
+        function = *stored;
+        if (function.kind != FunctionRecord::Kind::User) {
+            fail(function.kind == FunctionRecord::Kind::Native ||
+                    function.kind == FunctionRecord::Kind::Host
+                    ? PortableExecutionErrorCode::UnsupportedOperation
+                    : PortableExecutionErrorCode::InvalidFunctionReference,
+                callSite);
+            return false;
+        }
+        if (!validNode(ast_, function.declaration)) {
+            fail(PortableExecutionErrorCode::InvalidFunctionReference,
+                callSite);
+            return false;
+        }
+        if (callDepth_ >= limits_.maxCallDepth ||
+            callDepth_ >= storage_.frameCapacity) {
+            fail(PortableExecutionErrorCode::CallDepthExhausted, callSite);
+            return false;
+        }
+        const AstNode& declaration = ast_.node(function.declaration);
+        const bool arrow = declaration.kind ==
+            AstNodeKind::ArrowFunctionExpression;
+        if ((declaration.kind != AstNodeKind::FunctionDeclaration &&
+                declaration.kind != AstNodeKind::FunctionExpression && !arrow) ||
+            function.arrowFunction != arrow ||
+            !simpleParameters(ast_, function.declaration)) {
+            fail(PortableExecutionErrorCode::InvalidFunctionReference,
+                callSite);
+            return false;
+        }
+        EnvironmentError environmentError;
+        if (!environments_.valid(function.closureEnvironment,
+                environmentError)) {
+            fail(mapEnvironmentError(environmentError.code), callSite);
+            return false;
+        }
+
+        PortableCallFrame& frame = storage_.frames[callDepth_];
+        frame.function = id;
+        frame.previousEnvironment = currentEnvironment_;
+        frame.previousThis = currentThis_;
+        frame.callSite = callSite;
+        frame.argumentMark = argumentTop_;
+        frame.continuationNode = continuationNode;
+        ++callDepth_;
+        if (callDepth_ > result_.callDepthHighWater)
+            result_.callDepthHighWater = callDepth_;
+
+        EnvironmentId callEnvironment = kInvalidEnvironmentId;
+        if (!environments_.create(function.closureEnvironment,
+                EnvironmentKind::Function, environmentLimits(),
+                callEnvironment, environmentError)) {
+            fail(mapEnvironmentError(environmentError.code), callSite);
+            return false;
+        }
+        ++result_.environmentsCreated;
+        frame.environment = callEnvironment;
+        currentEnvironment_ = callEnvironment;
+        currentThis_ = arrow ? function.lexicalThis : receiver;
+        for (std::size_t index = 0u; index < declaration.childCount; ++index) {
+            const AstNodeId parameter = ast_.childAt(function.declaration,
+                index);
+            SourceView parameterName;
+            if (!nodeName(parameter, parameterName,
+                    ast_.node(parameter).location)) return false;
+            const Value argument = index < argumentCount
+                ? arguments[index] : Value::undefined();
+            if (!environments_.declare(callEnvironment, parameterName,
+                    argument, environmentError)) {
+                fail(mapBindingError(environmentError.code),
+                    ast_.node(parameter).location);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool prepareFunctionBody(const FunctionRecord& function,
+        SourceLocation callSite)
+    {
+        if (function.declaration == kInvalidAstNodeId ||
+            !validNode(ast_, function.declaration)) {
+            fail(PortableExecutionErrorCode::InvalidFunctionReference,
+                callSite);
+            return false;
+        }
+        const AstNode& declaration = ast_.node(function.declaration);
+        if (declaration.body == kInvalidAstNodeId) return true;
+        if (!instantiateFunctions(declaration.body, currentEnvironment_) ||
+            !instantiateLexicalBindings(declaration.body, currentEnvironment_))
+            return false;
+        return true;
+    }
+
+    bool invokeSelfArithmeticContinuation(AstNodeId firstCallId,
+        AstNodeId firstContinuation, Value& result)
+    {
+        const std::size_t startDepth = callDepth_;
+        const EnvironmentId previousEnvironment = currentEnvironment_;
+        const Value previousThis = currentThis_;
+        const std::size_t previousArgumentTop = argumentTop_;
+        CallRestore restore(*this, previousEnvironment, previousThis,
+            previousArgumentTop, startDepth);
+        const RuntimeFunctionId recursiveFunction =
+            storage_.frames[startDepth - 1u].function;
+        FunctionStoreError initialFunctionError;
+        const FunctionRecord* initialFunction = functions_.get(
+            recursiveFunction, initialFunctionError);
+        if (initialFunction == nullptr ||
+            !validNode(ast_, initialFunction->declaration)) {
+            fail(PortableExecutionErrorCode::InvalidFunctionReference,
+                ast_.node(firstCallId).location);
+            return false;
+        }
+        const AstNodeId initialReturn = functionReturnExpression(
+            ast_.node(initialFunction->declaration));
+        if (!validNode(ast_, initialReturn) ||
+            ast_.node(initialReturn).kind != AstNodeKind::LogicalExpression ||
+            ast_.node(initialReturn).right != firstContinuation) {
+            fail(PortableExecutionErrorCode::InternalInvariantFailure,
+                ast_.node(firstCallId).location);
+            return false;
+        }
+        const AstNode& firstCall = ast_.node(firstCallId);
+        Value firstCallee;
+        std::size_t firstMark = 0u;
+        if (!evaluateCallOperands(firstCallId, firstCall, firstCallee,
+                firstMark)) return false;
+        if (!firstCallee.isFunction()) {
+            argumentTop_ = firstMark;
+            fail(PortableExecutionErrorCode::InvalidInvocationTarget,
+                firstCall.location);
+            return false;
+        }
+        const Value firstArgument = storage_.argumentValues[firstMark];
+        argumentTop_ = firstMark;
+        if (firstCallee.functionId() != recursiveFunction) {
+            return invokeFunction(firstCallee.functionId(), &firstArgument,
+                1u, firstCall.location, result);
+        }
+
+        RuntimeFunctionId pendingFunction = firstCallee.functionId();
+        Value pendingArgument = firstArgument;
+        SourceLocation pendingCallSite = firstCall.location;
+        AstNodeId incomingContinuation = kInvalidAstNodeId;
+        Value returned = Value::undefined();
+
+        while (true) {
+            FunctionRecord function;
+            if (!pushFunctionActivation(pendingFunction, &pendingArgument, 1u,
+                    pendingCallSite, Value::undefined(),
+                    incomingContinuation, function) ||
+                !prepareFunctionBody(function, pendingCallSite)) return false;
+            if (pendingFunction != recursiveFunction) {
+                fail(PortableExecutionErrorCode::InternalInvariantFailure,
+                    pendingCallSite);
+                return false;
+            }
+            const AstNode& declaration = ast_.node(function.declaration);
+            const AstNodeId expression = functionReturnExpression(declaration);
+            const AstNode& logical = ast_.node(expression);
+            if (declaration.body != kInvalidAstNodeId) {
+                if (!consumeStep(ast_.node(declaration.body).location) ||
+                    !consumeStep(ast_.node(ast_.childAt(
+                        declaration.body, 0u)).location)) return false;
+            }
+            if (!consumeStep(logical.location)) return false;
+            Value test;
+            if (!evalExpression(logical.left, test)) return false;
+            bool testTruthy = false;
+            if (!truthy(test, testTruthy)) return false;
+            const bool shouldRecurse = logical.logicalOperator ==
+                    AstLogicalOperator::And
+                ? testTruthy : !testTruthy;
+            if (!shouldRecurse) {
+                returned = test;
+                break;
+            }
+
+            const AstNodeId binaryId = logical.right;
+            const AstNode& binary = ast_.node(binaryId);
+            const AstNodeId callId = binary.left;
+            if (!consumeStep(binary.location) ||
+                !consumeStep(ast_.node(callId).location)) return false;
+            Value nextCallee;
+            std::size_t nextMark = 0u;
+            if (!evaluateCallOperands(callId, ast_.node(callId), nextCallee,
+                    nextMark)) return false;
+            if (!nextCallee.isFunction()) {
+                argumentTop_ = nextMark;
+                fail(PortableExecutionErrorCode::InvalidInvocationTarget,
+                    ast_.node(callId).location);
+                return false;
+            }
+            const Value nextArgument = storage_.argumentValues[nextMark];
+            const RuntimeFunctionId nextFunction = nextCallee.functionId();
+            argumentTop_ = nextMark;
+            if (nextFunction != recursiveFunction) {
+                if (!invokeFunction(nextFunction, &nextArgument, 1u,
+                        ast_.node(callId).location, returned)) return false;
+                Value right;
+                if (!evalExpression(binary.right, right) ||
+                    !applyBinaryValues(binary, returned, right, returned))
+                    return false;
+                break;
+            }
+            pendingFunction = nextFunction;
+            pendingArgument = nextArgument;
+            pendingCallSite = ast_.node(callId).location;
+            incomingContinuation = binaryId;
+        }
+
+        while (callDepth_ > startDepth) {
+            const std::size_t childIndex = callDepth_ - 1u;
+            const AstNodeId pending =
+                storage_.frames[childIndex].continuationNode;
+            const EnvironmentId parentEnvironment =
+                storage_.frames[childIndex].previousEnvironment;
+            const Value parentThis = storage_.frames[childIndex].previousThis;
+            storage_.frames[childIndex].continuationNode =
+                kInvalidAstNodeId;
+            --callDepth_;
+            currentEnvironment_ = parentEnvironment;
+            currentThis_ = parentThis;
+            if (pending == kInvalidAstNodeId) {
+                if (callDepth_ != startDepth) {
+                    fail(PortableExecutionErrorCode::InternalInvariantFailure,
+                        ast_.node(firstCallId).location);
+                    return false;
+                }
+                result = returned;
+                return true;
+            }
+            if (!validNode(ast_, pending) ||
+                ast_.node(pending).kind != AstNodeKind::BinaryExpression) {
+                fail(PortableExecutionErrorCode::InternalInvariantFailure,
+                    ast_.node(firstCallId).location);
+                return false;
+            }
+            const AstNode& continuation = ast_.node(pending);
+            Value right;
+            if (!evalExpression(continuation.right, right) ||
+                !applyBinaryValues(continuation, returned, right, returned))
+                return false;
+        }
+        fail(PortableExecutionErrorCode::InternalInvariantFailure,
+            ast_.node(firstCallId).location);
+        return false;
     }
 
     bool evaluateCallOperands(AstNodeId callId, const AstNode& node,
@@ -1944,105 +2332,11 @@ private:
         bool tailTransition = false;
 
         while (true) {
-            if (currentArgumentCount != 0u && currentArguments == nullptr) {
-                fail(PortableExecutionErrorCode::InternalInvariantFailure,
-                    currentCallSite);
-                return false;
-            }
-            if (currentArgumentCount > limits_.maxCallArguments) {
-                fail(PortableExecutionErrorCode::InvalidInvocationTarget,
-                    currentCallSite);
-                return false;
-            }
-            FunctionStoreError functionError;
-            const FunctionRecord* stored = functions_.get(currentId,
-                functionError);
-            if (stored == nullptr) {
-                fail(functionError.code ==
-                        FunctionStoreErrorCode::StaleGeneration
-                    ? PortableExecutionErrorCode::StaleReference
-                    : functionError.code ==
-                        FunctionStoreErrorCode::RealmMismatch
-                        ? PortableExecutionErrorCode::RealmMismatch
-                    : PortableExecutionErrorCode::InvalidFunctionReference,
-                    currentCallSite);
-                return false;
-            }
-            const FunctionRecord function = *stored;
-            if (function.kind != FunctionRecord::Kind::User) {
-                fail(function.kind == FunctionRecord::Kind::Native ||
-                        function.kind == FunctionRecord::Kind::Host
-                    ? PortableExecutionErrorCode::UnsupportedOperation
-                    : PortableExecutionErrorCode::InvalidFunctionReference,
-                    currentCallSite);
-                return false;
-            }
-            if (!validNode(ast_, function.declaration)) {
-                fail(PortableExecutionErrorCode::InvalidFunctionReference,
-                    currentCallSite);
-                return false;
-            }
-            if (callDepth_ >= limits_.maxCallDepth ||
-                callDepth_ >= storage_.frameCapacity) {
-                fail(PortableExecutionErrorCode::CallDepthExhausted,
-                    currentCallSite);
-                return false;
-            }
+            FunctionRecord function;
+            if (!pushFunctionActivation(currentId, currentArguments,
+                    currentArgumentCount, currentCallSite, currentReceiver,
+                    kInvalidAstNodeId, function)) return false;
             const AstNode& declaration = ast_.node(function.declaration);
-            const bool arrow = declaration.kind ==
-                AstNodeKind::ArrowFunctionExpression;
-            if ((declaration.kind != AstNodeKind::FunctionDeclaration &&
-                    declaration.kind != AstNodeKind::FunctionExpression &&
-                    !arrow) || function.arrowFunction != arrow ||
-                !simpleParameters(ast_, function.declaration)) {
-                fail(PortableExecutionErrorCode::InvalidFunctionReference,
-                    currentCallSite);
-                return false;
-            }
-            EnvironmentError envError;
-            if (!environments_.valid(function.closureEnvironment, envError)) {
-                fail(mapEnvironmentError(envError.code), currentCallSite);
-                return false;
-            }
-
-            PortableCallFrame& frame = storage_.frames[callDepth_];
-            frame.function = currentId;
-            frame.previousEnvironment = currentEnvironment_;
-            frame.previousThis = currentThis_;
-            frame.callSite = currentCallSite;
-            frame.argumentMark = argumentTop_;
-            ++callDepth_;
-            if (callDepth_ > result_.callDepthHighWater)
-                result_.callDepthHighWater = callDepth_;
-
-            EnvironmentId callEnvironment = kInvalidEnvironmentId;
-            if (!environments_.create(function.closureEnvironment,
-                    EnvironmentKind::Function, environmentLimits(),
-                    callEnvironment, envError)) {
-                fail(mapEnvironmentError(envError.code), currentCallSite);
-                return false;
-            }
-            ++result_.environmentsCreated;
-            frame.environment = callEnvironment;
-            currentEnvironment_ = callEnvironment;
-            currentThis_ = arrow ? function.lexicalThis : currentReceiver;
-            for (std::size_t index = 0u; index < declaration.childCount;
-                ++index) {
-                const AstNodeId parameter = ast_.childAt(
-                    function.declaration, index);
-                SourceView name;
-                if (!nodeName(parameter, name,
-                        ast_.node(parameter).location)) return false;
-                EnvironmentError parameterError;
-                const Value value = index < currentArgumentCount
-                    ? currentArguments[index] : Value::undefined();
-                if (!environments_.declare(callEnvironment, name, value,
-                        parameterError)) {
-                    fail(mapBindingError(parameterError.code),
-                        ast_.node(parameter).location);
-                    return false;
-                }
-            }
             if (tailTransition) ++result_.tailCallsExecuted;
             // Incoming values have been copied into this activation's
             // environment. Reuse one caller-owned argument window for any
@@ -2051,9 +2345,8 @@ private:
 
             Control control;
             if (declaration.body != kInvalidAstNodeId) {
-                if (!instantiateFunctions(declaration.body, callEnvironment) ||
-                    !instantiateLexicalBindings(declaration.body,
-                        callEnvironment)) return false;
+                if (!prepareFunctionBody(function, currentCallSite))
+                    return false;
                 if (!consumeStep(ast_.node(declaration.body).location))
                     return false;
                 if (!executeStatementList(declaration.body, true, control))

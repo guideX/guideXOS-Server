@@ -1092,6 +1092,163 @@ void testHostedParityAndReset()
     (void)functionError;
 }
 
+#if defined(GXOS_NAVIGATOR_JS127_CONTINUATION_TESTS)
+void testNonTailContinuations()
+{
+    PortableFixture fixture(
+        "function recurse(n){return n&&recurse(n-1)+1;}"
+        "let recursiveResult=recurse(63);", 1024u);
+    const bool initialized = fixture.initialize();
+    expect(initialized && fixture.run(),
+        "JS127 bounded non-tail recursion parses and executes");
+    if (!initialized || !fixture.runResult_.completed) return;
+
+    Value recursiveResult;
+    expect(fixture.global("recursiveResult", recursiveResult) &&
+        sameNumber(recursiveResult, 63.0) &&
+        fixture.runResult_.callDepthHighWater == 64u &&
+        fixture.runResult_.tailCallsExecuted == 0u &&
+        fixture.runResult_.argumentValuesHighWater == 2u,
+        "depth-64 non-tail arithmetic returns through explicit continuations");
+    bool continuationFramesReleased = true;
+    for (const PortableCallFrame& frame : fixture.frames_)
+        continuationFramesReleased = continuationFramesReleased &&
+            frame.continuationNode == kInvalidAstNodeId;
+    expect(continuationFramesReleased,
+        "completed non-tail continuations leave no active frame records");
+
+    Value recurse;
+    expect(fixture.global("recurse", recurse) && recurse.isFunction(),
+        "continuation test keeps the shared function identity");
+    const std::size_t depths[] = {0u, 15u, 31u, 62u, 63u};
+    for (const std::size_t depth : depths) {
+        const Value argument = Value::number(static_cast<double>(depth));
+        PortableExecutionResult result;
+        const bool invoked = fixture.core_.invokeCallable(recurse,
+            Value::undefined(), &argument, 1u, result);
+        expect(invoked && sameNumber(result.finalValue,
+                static_cast<double>(depth)) &&
+            result.callDepthHighWater == depth + 1u &&
+            result.tailCallsExecuted == 0u,
+            "non-tail recursion preserves results and logical depth");
+    }
+
+    const Value oneBeyond = Value::number(64.0);
+    PortableExecutionResult exhausted;
+    expect(!fixture.core_.invokeCallable(recurse, Value::undefined(),
+            &oneBeyond, 1u, exhausted) &&
+        exhausted.error.code == PortableExecutionErrorCode::CallDepthExhausted &&
+        exhausted.callDepthHighWater == 64u,
+        "one call beyond the accepted depth reports bounded exhaustion");
+    continuationFramesReleased = true;
+    for (const PortableCallFrame& frame : fixture.frames_)
+        continuationFramesReleased = continuationFramesReleased &&
+            frame.continuationNode == kInvalidAstNodeId;
+    expect(continuationFramesReleased,
+        "depth exhaustion clears suspended continuation records");
+    if (exhausted.error.code != PortableExecutionErrorCode::CallDepthExhausted ||
+        exhausted.callDepthHighWater != 64u)
+        std::cerr << "JS127 depth diagnostic completed=" << exhausted.completed
+            << " error=" << static_cast<unsigned>(exhausted.error.code)
+            << " depth=" << exhausted.callDepthHighWater << '\n';
+    const Value base = Value::number(0.0);
+    PortableExecutionResult recovered;
+    expect(fixture.core_.invokeCallable(recurse, Value::undefined(), &base,
+            1u, recovered) && sameNumber(recovered.finalValue, 0.0) &&
+        recovered.callDepthHighWater == 1u,
+        "continuation frames unwind and remain reusable after depth failure");
+    if (!recovered.completed || !sameNumber(recovered.finalValue, 0.0) ||
+        recovered.callDepthHighWater != 1u)
+        std::cerr << "JS127 recovery diagnostic completed=" << recovered.completed
+            << " error=" << static_cast<unsigned>(recovered.error.code)
+            << " depth=" << recovered.callDepthHighWater << '\n';
+
+    PortableFixture arrowFixture(
+        "let arrowRecurse=(n)=>n&&arrowRecurse(n-1)+1;"
+        "let arrowResult=arrowRecurse(15);");
+    const bool arrowRan = arrowFixture.initialize() && arrowFixture.run();
+    Value arrowResult;
+    expect(arrowRan && arrowFixture.global("arrowResult", arrowResult) &&
+        sameNumber(arrowResult, 15.0) &&
+        arrowFixture.runResult_.callDepthHighWater == 16u,
+        "expression-bodied arrow self-recursion resumes through bounded frames");
+
+    PortableFixture mutualFixture(
+        "function even(n){return n&&odd(n-1)+1;}"
+        "function odd(n){return n&&even(n-1)+1;}"
+        "let mutualResult=even(8);");
+    const bool mutualRan = mutualFixture.initialize() && mutualFixture.run();
+    Value mutualResult;
+    expect(mutualRan && mutualFixture.global("mutualResult", mutualResult) &&
+        sameNumber(mutualResult, 8.0) &&
+        mutualFixture.runResult_.callDepthHighWater == 9u,
+        "mutual non-tail recursion retains correct nested dispatch behavior");
+
+    PortableFixture orderFixture(
+        "let events=0;let state={value:0};"
+        "function first(){events=events*10+1;return 5;}"
+        "function second(){events=events*10+2;return 7;}"
+        "function combine(a,b){return a*10+b;}"
+        "let aggregate=combine(first(),second());"
+        "let rightArithmetic=2+second();"
+        "state.value=second();let shorted=0&&second();"
+        "let compared=first()>0;");
+    const bool orderRan = orderFixture.initialize() && orderFixture.run();
+    Value aggregate;
+    Value rightArithmetic;
+    Value events;
+    Value shorted;
+    Value compared;
+    Value state;
+    Value stateValue;
+    PortableObjectError propertyError;
+    bool propertyFound = false;
+    const bool orderValues = orderFixture.global("aggregate", aggregate) &&
+        orderFixture.global("rightArithmetic", rightArithmetic) &&
+        orderFixture.global("events", events) &&
+        orderFixture.global("shorted", shorted) &&
+        orderFixture.global("compared", compared) &&
+        orderFixture.global("state", state) && state.isObject() &&
+        orderFixture.objects_.getProperty(state.objectId(), view("value"),
+            stateValue, propertyFound, propertyError);
+    expect(orderRan && orderValues && sameNumber(aggregate, 57.0) &&
+        sameNumber(rightArithmetic, 9.0) && sameNumber(events, 12221.0) &&
+        sameNumber(stateValue, 7.0) && propertyFound &&
+        sameNumber(shorted, 0.0) && compared.isBoolean() &&
+        compared.booleanValue(),
+        "non-tail arguments, arithmetic, assignment, comparison, and short-circuit order persist");
+
+    PortableFixture shortFrames(
+        "function recurse(n){return n&&recurse(n-1)+1;}", 32u, 3u, 16u);
+    const bool shortFramesReady = shortFrames.initialize() && shortFrames.run();
+    Value shortFunction;
+    const Value needsFourFrames = Value::number(3.0);
+    PortableExecutionResult frameExhausted;
+    expect(shortFramesReady && shortFrames.global("recurse", shortFunction) &&
+        !shortFrames.core_.invokeCallable(shortFunction, Value::undefined(),
+            &needsFourFrames, 1u, frameExhausted) &&
+        frameExhausted.error.code ==
+            PortableExecutionErrorCode::CallDepthExhausted,
+        "caller-backed frame capacity fails explicitly");
+
+    PortableFixture noArgumentScratch(
+        "function recurse(n){return n&&recurse(n-1)+1;}", 32u, 64u, 0u);
+    const bool noArgumentScratchReady = noArgumentScratch.initialize() &&
+        noArgumentScratch.run();
+    Value noScratchFunction;
+    const Value needsArgumentScratch = Value::number(1.0);
+    PortableExecutionResult argumentExhausted;
+    expect(noArgumentScratchReady &&
+        noArgumentScratch.global("recurse", noScratchFunction) &&
+        !noArgumentScratch.core_.invokeCallable(noScratchFunction,
+            Value::undefined(), &needsArgumentScratch, 1u,
+            argumentExhausted) &&
+        argumentExhausted.error.code ==
+            PortableExecutionErrorCode::ArgumentCapacityExhausted,
+        "recursive argument arena exhaustion remains explicit");
+}
+#endif
+
 } // namespace
 
 int main()
@@ -1102,7 +1259,17 @@ int main()
     testPropertyOperationsAndSnapshots();
     testPropertyCapacityFailureSafety();
     testHostedParityAndReset();
+#if defined(GXOS_NAVIGATOR_JS127_CONTINUATION_TESTS)
+    const int js127ChecksBefore = checks;
+    const int js127FailuresBefore = failures;
+    testNonTailContinuations();
+    std::cout << "Navigator JavaScript JS127 non-tail continuation checks: "
+        << (checks - failures - js127ChecksBefore + js127FailuresBefore)
+        << '/' << (checks - js127ChecksBefore) << " passed\n";
+#endif
+#if !defined(GXOS_NAVIGATOR_JS127_CONTINUATION_TESTS)
     std::cout << "Navigator JavaScript JS126 callable-identity/stack checks: "
         << (checks - failures) << '/' << checks << " passed\n";
+#endif
     return failures == 0 ? 0 : 1;
 }

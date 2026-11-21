@@ -14448,3 +14448,30 @@ absent. No QEMU, QAC, or guest execution was performed. See the
 [JS126 callable identity and bounded invocation report](NAVIGATOR_JAVASCRIPT_JS126_CALLABLE_IDENTITY_STACK.md)
 for the gate table, return/error behavior, stack evidence, protected artifact
 hashes, and JS127 prerequisites.
+
+### JS127 bounded non-tail continuation slice — partial
+
+JS127 adds an explicit continuation to the existing 80-byte caller-owned
+call frame and shares function activation setup with the normal dispatcher.
+The continuation loop flattens one documented self-recursive form,
+`n && f(n - 1) + 1` (and matching numeric arithmetic variants), while other
+non-tail call positions and mutual recursion remain native-recursive. The
+focused JS127 suite passes **17/17**; the unchanged JS126 suite passes
+**146/146**, and JS125 remains **121/121**. The AMD64 freestanding dependency
+and stack-usage audits pass. The repaired subprocess collector passes
+**119/119 matrix lanes**, with **19,330/19,330 assertions across 76 reporting
+lanes** and verified exit code 0 for every lane. Standalone JS109 and JS110
+hosted pages both pass against the strict C++17 production candidate; the
+candidate is 9,395,086 B (SHA-256
+`8D225C8A5CF8F25DA04354801CE3D56F6C18FB64222AAEB518F707D4F20988A6`). The
+hosted Navigator aggregate remains at **767/774**, with only the established
+seven CSS failures in phases 3C, 3G, 6A, three in 6B, and 6C. The protected
+8,398,274-byte executable was restored with its baseline SHA-256; all 42
+fixtures match the 458,372-byte saved manifest, and `.phase` remains absent.
+No QEMU, QAC, guest execution, or kernel-format integration was run.
+
+JS127 is **Outcome B — `JS127_NONTAIL_CONTINUATIONS_PARTIAL`**. This partial
+conversion does not establish total interpreter or guest-stack safety. See
+the [JS127 non-tail continuation report](NAVIGATOR_JAVASCRIPT_JS127_NONTAIL_CONTINUATIONS.md)
+for the full call-position inventory, architecture, gate table, stack
+accounting, test evidence, and JS128 scope.
