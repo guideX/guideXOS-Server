@@ -60,6 +60,8 @@ All commands below ran on the Windows host, not in an IA-64 guest:
 | Kernel build/boot and QAC reservation | NOT RUN / not applicable to the standalone Ski probe |
 | `git diff --check` | See closeout commit record |
 
+During test development, one new raw-dump fixture assertion and the full-suite run containing it failed because the fixture expected the word `incomplete`, while the parser correctly reported `has 1 qwords, expected 2`. The test was corrected to assert the parser's specific message. The final marker suite and final full suite both passed; there are no unresolved test failures.
+
 Captured Windows test logs and the exact artifact identities are indexed in [the 5AR13 evidence manifest](IA64-5AR13_EVIDENCE_MANIFEST.json). The host tests establish the diagnostic's rejection behavior and the static acceptance structure. They do not establish runtime marker survival, all preserved-register behavior, RSE/RNAT/NaT preservation across both transitions, or application completion.
 
 ## Follow-up
@@ -68,4 +70,4 @@ Restore WSL command startup, repeat the exact-hash six-breakpoint no-guest debug
 
 ## Local closeout
 
-The implementation, host tests, report, and evidence manifest were committed locally as `953fa2769c84b8f86abd6f88309b6aa080d5c276` on `IA64_SUPPORT`. `git diff --check` passed. At that commit, the tracked worktree was clean and the branch was eight commits ahead of `origin/IA64_SUPPORT` with no commits behind. This report and manifest received a separate local closeout update; the resulting final HEAD and nine-commit upstream divergence are given in the task closeout. Untracked Python caches were preserved, and nothing was pushed.
+The implementation, host tests, report, and evidence manifest were committed locally as `953fa2769c84b8f86abd6f88309b6aa080d5c276` on `IA64_SUPPORT`. `git diff --check` passed. At that commit, the tracked worktree was clean and the branch was eight commits ahead of `origin/IA64_SUPPORT` with no commits behind. The initial closeout update was committed as `e2bd7e9ed22a36cfe39339c230f74811f1da01c0`; this final report update records the transient test assertion. The final HEAD and ten-commit upstream divergence are given in the task closeout. Untracked Python caches were preserved, and nothing was pushed.

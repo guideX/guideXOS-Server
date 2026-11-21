@@ -67,6 +67,11 @@
       "log_sha256": "24a1c6d8e2aa2bc0811bd584ce7f0b0becac39bc8cb3ec6d3f15139b51c81957"
     }
   ],
+  "test_iteration": {
+    "transient_failure": "The first raw-memory-dump fixture run, and the full-suite run containing it, failed because the assertion expected 'incomplete' while the parser reported 'has 1 qwords, expected 2'.",
+    "resolution": "Updated the fixture to assert the parser's specific incomplete-qword message; the final 10-test marker suite and 214-test full suite both passed.",
+    "unresolved_test_failures": 0
+  },
   "guest_attempt": {
     "guest_launch_count": 0,
     "guest_elf_loaded": false,
@@ -93,7 +98,7 @@
     },
     "final_tracked_worktree_status": "clean after a report-only closeout commit; untracked Python caches preserved",
     "final_upstream_divergence": {
-      "ahead": 9,
+      "ahead": 10,
       "behind": 0
     },
     "push_performed": false
