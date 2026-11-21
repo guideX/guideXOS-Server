@@ -288,7 +288,7 @@ class QacAdmissionTests(unittest.TestCase):
             calls.append((args, kwargs))
             class Completed:
                 returncode = 0
-                stdout = '{"id":"' + REQUEST_ID + '","state":"Cancelled","owner":"guideX (PID 11)","ownerLiveness":"Verified","processId":null,"degraded":false}'
+                stdout = '{"id":"' + REQUEST_ID + '","state":"Cancelled","owner":"guideX (PID 11)","ownerLiveness":"Verified","processId":null,"degraded":false,"requestedAtUtc":"2026-11-21T18:00:00Z","grantedAtUtc":null,"ownerProcessStartedAtUtc":"2026-11-21T17:59:59Z","processStartTimeUtc":null,"processIdentity":null}'
                 stderr = ""
             return Completed()
 
@@ -300,6 +300,8 @@ class QacAdmissionTests(unittest.TestCase):
             admission.subprocess.run = original_run
         self.assertEqual(result.request_id, REQUEST_ID)
         self.assertEqual(result.state, "Cancelled")
+        self.assertEqual(result.requested_at_utc, "2026-11-21T18:00:00Z")
+        self.assertIsNone(result.granted_at_utc)
         self.assertEqual(calls[0][0], ["qac.exe", "cancel", REQUEST_ID])
         self.assertEqual(calls[0][1]["timeout"], 0.2)
 

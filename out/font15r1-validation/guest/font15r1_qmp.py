@@ -246,17 +246,7 @@ class WindowsEndpointVerifier:
     def verify_listener(self, port: int, expected_pid: int, timeout: float) -> ProcessIdentity:
         if timeout <= 0:
             raise QMPTimeout("listener ownership check exceeded its deadline")
-        rows = self._tcp_rows(self.TCP_TABLE_OWNER_PID_LISTENER)
-        listener_pids = sorted(
-            {
-                int(row.owning_pid)
-                for row in rows
-                # The listener-specific table is already filtered by Windows.
-                # Some current Windows builds report dwState=0 for these rows.
-                if self._row_address(row.local_address) == QMP_HOST
-                and self._row_port(row.local_port) == port
-            }
-        )
+        listener_pids = self.listener_pids(port)
         if listener_pids != [expected_pid]:
             raise EndpointIdentityError(
                 f"loopback port {port} listener PID set {listener_pids!r} does not match "
@@ -265,6 +255,22 @@ class WindowsEndpointVerifier:
         identity = self._process_identity(expected_pid)
         self._validate_qemu(identity, expected_pid)
         return identity
+
+    def listener_pids(self, port: int) -> list[int]:
+        """Return owners of loopback listeners on ``port`` for cleanup checks."""
+        if not 1 <= int(port) <= 65535:
+            raise ValueError("listener port must be between 1 and 65535")
+        rows = self._tcp_rows(self.TCP_TABLE_OWNER_PID_LISTENER)
+        return sorted(
+            {
+                int(row.owning_pid)
+                for row in rows
+                # The listener-specific table is already filtered by Windows.
+                # Some current Windows builds report dwState=0 for these rows.
+                if self._row_address(row.local_address) == QMP_HOST
+                and self._row_port(row.local_port) == int(port)
+            }
+        )
 
     def verify_connection(
         self,

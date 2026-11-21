@@ -46,6 +46,11 @@ class ReservationSnapshot:
     degraded: bool = False
     version: int | None = None
     detail: str | None = None
+    requested_at_utc: str | None = None
+    granted_at_utc: str | None = None
+    owner_started_at_utc: str | None = None
+    child_started_at_utc: str | None = None
+    child_executable: str | None = None
 
 
 @dataclass
@@ -57,6 +62,11 @@ class AdmissionResult:
     owner_verified: bool = False
     child_pid: int | None = None
     degraded: bool | None = None
+    requested_at_utc: str | None = None
+    granted_at_utc: str | None = None
+    owner_started_at_utc: str | None = None
+    child_started_at_utc: str | None = None
+    child_executable: str | None = None
     guest_input_authorized: bool = False
     owner_process_must_remain_alive: bool = True
     reconciliation_complete: bool = False
@@ -116,6 +126,11 @@ class QacCliCoordinator:
                 child_pid=int(process_id) if process_id is not None else None,
                 degraded=bool(value.get("degraded", False)),
                 detail=value.get("reason"),
+                requested_at_utc=value.get("requestedAtUtc"),
+                granted_at_utc=value.get("grantedAtUtc"),
+                owner_started_at_utc=value.get("ownerProcessStartedAtUtc"),
+                child_started_at_utc=value.get("processStartTimeUtc"),
+                child_executable=value.get("processIdentity"),
             )
         except (TypeError, ValueError, json.JSONDecodeError) as exc:
             raise CoordinatorError(f"QAC {action} returned invalid reservation JSON: {exc}") from exc
@@ -139,6 +154,11 @@ def _coerce_snapshot(snapshot: ReservationSnapshot | dict[str, Any]) -> Reservat
         degraded=bool(snapshot.get("degraded", False)),
         version=snapshot.get("version"),
         detail=snapshot.get("detail", snapshot.get("reason")),
+        requested_at_utc=snapshot.get("requested_at_utc", snapshot.get("requestedAtUtc")),
+        granted_at_utc=snapshot.get("granted_at_utc", snapshot.get("grantedAtUtc")),
+        owner_started_at_utc=snapshot.get("owner_started_at_utc", snapshot.get("ownerProcessStartedAtUtc")),
+        child_started_at_utc=snapshot.get("child_started_at_utc", snapshot.get("processStartTimeUtc")),
+        child_executable=snapshot.get("child_executable", snapshot.get("processIdentity")),
     )
 
 
@@ -164,9 +184,8 @@ def wait_for_owned_admission(
         raise ValueError("request_id must be the exact 32-character QAC reservation ID")
     if expected_owner_pid <= 0:
         raise ValueError("expected_owner_pid must identify this phase's QAC run client")
-    if deadline <= clock():
-        raise ValueError("deadline must be a future monotonic timestamp")
-    if deadline - clock() > MAX_ADMISSION_WINDOW_SECONDS:
+    now = clock()
+    if deadline - now > MAX_ADMISSION_WINDOW_SECONDS:
         raise ValueError(f"admission window must be no more than {MAX_ADMISSION_WINDOW_SECONDS:g} seconds")
     if (
         poll_interval <= 0
@@ -246,6 +265,11 @@ def wait_for_owned_admission(
             result.owner_verified = snapshot.owner_verified
             result.child_pid = snapshot.child_pid
             result.degraded = snapshot.degraded
+            result.requested_at_utc = snapshot.requested_at_utc
+            result.granted_at_utc = snapshot.granted_at_utc
+            result.owner_started_at_utc = snapshot.owner_started_at_utc
+            result.child_started_at_utc = snapshot.child_started_at_utc
+            result.child_executable = snapshot.child_executable
 
     def finish(status: str, *, reconciled: bool, guest_input: bool = False, detail: str | None = None) -> AdmissionResult:
         update_final(last_snapshot)
