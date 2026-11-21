@@ -362,7 +362,7 @@ class CommandFileContractTests(unittest.TestCase):
         marker_start, marker_end = symbols["stack_marker_a"]
         marker_dump = f"dd 0x{marker_start:x} 0x{marker_end - 1:x}"
         self.assertEqual(text.count(marker_dump), diagnostic.STEP_QUANTA + 2)
-        self.assertIn("/markers/0001-startup-frontier-a.txt", text)
+        self.assertIn("/markers/0001-startup-frontier-a.txt", text.replace("\\", "/"))
         self.assertEqual(symbols["stack_marker_a_expected"], {
             "LOW": 0x415F535441434B30, "HIGH": 0x415F535441434B31})
 
