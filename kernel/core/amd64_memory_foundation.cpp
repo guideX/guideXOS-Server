@@ -6,10 +6,9 @@
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include "include/kernel/arch.h"
+#include "../arch/amd64/include/arch/cpu_capabilities.h"
 #if defined(_MSC_VER)
 #include <intrin.h>
-#else
-#include <cpuid.h>
 #endif
 #endif
 
@@ -127,25 +126,9 @@ static uint64_t current_cr3(void*)
     return kernel::arch::read_cr3();
 }
 
-static bool cpu_supports_nx()
-{
-#if defined(_MSC_VER)
-    int registers[4] = {};
-    __cpuid(registers, 0x80000000);
-    if (static_cast<uint32_t>(registers[0]) < 0x80000001u) return false;
-    __cpuid(registers, 0x80000001);
-    return (static_cast<uint32_t>(registers[3]) & (1u << 20)) != 0u;
-#else
-    unsigned int eax = 0, ebx = 0, ecx = 0, edx = 0;
-    if (__get_cpuid_max(0x80000000u, nullptr) < 0x80000001u) return false;
-    if (!__get_cpuid(0x80000001u, &eax, &ebx, &ecx, &edx)) return false;
-    return (edx & (1u << 20)) != 0u;
-#endif
-}
-
 static bool ensure_nx_enabled(void*)
 {
-    if (!cpu_supports_nx()) return false;
+    if (!kernel::arch::amd64::cpu_supports_nx()) return false;
     uint64_t efer = kernel::arch::read_msr(kIa32Efer);
     if ((efer & kEferNxEnable) == 0u) {
         kernel::arch::write_msr(kIa32Efer, efer | kEferNxEnable);

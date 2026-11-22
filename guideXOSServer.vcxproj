@@ -194,6 +194,7 @@
     <ClInclude Include="image_viewer.h" />
     <ClInclude Include="icon_theme_manager.h" />
     <ClInclude Include="kernel\arch\amd64\include\arch\context_switch.h" />
+    <ClInclude Include="kernel\arch\amd64\include\arch\cpu_capabilities.h" />
     <ClInclude Include="kernel\arch\amd64\include\arch\graphics.h" />
     <ClInclude Include="kernel\arch\amd64\include\arch\pci_audio.h" />
     <ClInclude Include="kernel\arch\amd64\include\arch\syscall.h" />
@@ -449,6 +450,7 @@
       <ObjectFileName>$(IntDir)arch_amd64.obj</ObjectFileName>
     </ClCompile>
     <ClCompile Include="kernel\arch\amd64\context_switch.cpp" />
+    <ClCompile Include="kernel\arch\amd64\cpu_capabilities.cpp" />
     <ClCompile Include="kernel\arch\amd64\graphics.cpp" />
     <ClCompile Include="kernel\arch\amd64\pci_audio.cpp" />
     <ClCompile Include="kernel\arch\amd64\syscall.cpp" />

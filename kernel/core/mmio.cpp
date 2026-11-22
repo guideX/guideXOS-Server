@@ -12,8 +12,8 @@
 #include "include/kernel/arch.h"
 #include "include/kernel/serial_debug.h"
 
-#if defined(_MSC_VER)
-#include <intrin.h>
+#if defined(ARCH_AMD64) && defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE)
+#include "../arch/amd64/include/arch/cpu_capabilities.h"
 #endif
 
 #if defined(_MSC_VER)
@@ -91,41 +91,6 @@ static uint64_t* current_cr3_root()
     return reinterpret_cast<uint64_t*>(kernel::arch::read_cr3() & ~0xFFFULL);
 }
 
-static bool cpu_supports_nx()
-{
-#if defined(_MSC_VER)
-    int regs[4] = {};
-    __cpuid(regs, 0x80000000);
-    if (static_cast<uint32_t>(regs[0]) < 0x80000001u) {
-        return false;
-    }
-
-    __cpuid(regs, 0x80000001);
-    return (static_cast<uint32_t>(regs[3]) & (1u << 20)) != 0u;
-#elif defined(__GNUC__) || defined(__clang__)
-    uint32_t eax = 0;
-    uint32_t ebx = 0;
-    uint32_t ecx = 0;
-    uint32_t edx = 0;
-
-    __asm__ volatile(
-        "cpuid"
-        : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx)
-        : "a"(0x80000000u), "c"(0u));
-    if (eax < 0x80000001u) {
-        return false;
-    }
-
-    __asm__ volatile(
-        "cpuid"
-        : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx)
-        : "a"(0x80000001u), "c"(0u));
-    return (edx & (1u << 20)) != 0u;
-#else
-    return false;
-#endif
-}
-
 static bool ensure_nx_enabled(const char** reasonOut)
 {
     if (s_nxStateKnown) {
@@ -140,7 +105,7 @@ static bool ensure_nx_enabled(const char** reasonOut)
         return true;
     }
 
-    if (!cpu_supports_nx()) {
+    if (!kernel::arch::amd64::cpu_supports_nx()) {
         if (reasonOut != nullptr) {
             *reasonOut = "CPU lacks NXE support for non-executable MMIO mappings";
         }

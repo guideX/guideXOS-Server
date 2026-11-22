@@ -228,6 +228,9 @@
     <ClInclude Include="kernel\arch\amd64\include\arch\amd64.h">
       <Filter>Header Files\Architecture\amd64</Filter>
     </ClInclude>
+    <ClInclude Include="kernel\arch\amd64\include\arch\cpu_capabilities.h">
+      <Filter>Header Files\Architecture\amd64</Filter>
+    </ClInclude>
     <ClInclude Include="kernel\arch\amd64\include\arch\graphics.h">
       <Filter>Header Files\Architecture\amd64</Filter>
     </ClInclude>
@@ -480,6 +483,9 @@
       <Filter>Source Files\Architecture\x86</Filter>
     </ClCompile>
     <ClCompile Include="kernel\arch\amd64\arch.cpp">
+      <Filter>Source Files\Architecture\amd64</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\amd64\cpu_capabilities.cpp">
       <Filter>Source Files\Architecture\amd64</Filter>
     </ClCompile>
     <ClCompile Include="kernel\arch\amd64\graphics.cpp">
