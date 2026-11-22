@@ -1,0 +1,6 @@
+2026-11-21T23:51:03.8124573Z {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-11-21T23:51:03.8221295Z {"return": {}}
+2026-11-21T23:51:03.8227361Z {"return": {"status": "running", "running": true}}
+GATE_A_FAILED=CPL3_SKIPPED_FRAME_OWNER_UNAVAILABLE
+SHUTDOWN_ACTION=QMP quit requested by verified QAC reservation owner
+2026-11-21T23:51:03.8241532Z {"timestamp": {"seconds": 1795305063, "microseconds": 823663}, "event": "SHUTDOWN", "data": {"guest": false, "reason": "host-qmp-quit"}}

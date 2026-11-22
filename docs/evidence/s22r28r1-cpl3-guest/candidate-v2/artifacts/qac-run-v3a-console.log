@@ -1,0 +1,7 @@
+QAC reservation requested: id=c886e8ec2f29474c9ccaa52a02c5cb5b project=guideXOSServer mode=acceptance
+QAC exclusive reservation granted: id=c886e8ec2f29474c9ccaa52a02c5cb5b
+QAC QEMU launched: reservation=c886e8ec2f29474c9ccaa52a02c5cb5b pid=29196 executable=C:\Program Files\qemu\qemu-system-x86_64.exe launch_utc=2026-11-22T00:03:18.3005190+00:00
+{"reservationId":"c886e8ec2f29474c9ccaa52a02c5cb5b","state":"Running","childProcessId":29196,"processIdentity":"C:\\Program Files\\qemu\\qemu-system-x86_64.exe","processStartTimeUtc":"2026-11-22T00:03:18.300519+00:00"}
+qemu: could not load PC BIOS 'C:\Program Files\qemu\share\edk2-x86_64-code.fd'
+QAC QEMU exited: reservation=c886e8ec2f29474c9ccaa52a02c5cb5b pid=29196 exitCode=1 exit_utc=2026-11-22T00:03:18.9693402Z
+QAC reservation released: id=c886e8ec2f29474c9ccaa52a02c5cb5b pid=29196

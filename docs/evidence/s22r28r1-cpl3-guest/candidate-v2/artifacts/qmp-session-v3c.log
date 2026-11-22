@@ -1,0 +1,11 @@
+2026-11-22T00:08:35.0633276Z GREETING {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-11-22T00:08:35.1044913Z SEND {"execute":"qmp_capabilities"}
+2026-11-22T00:08:35.1107607Z RECV {"return": {}}
+2026-11-22T00:08:35.6686973Z SEND {"execute":"query-status"}
+2026-11-22T00:08:35.6692893Z RECV {"return": {"status": "prelaunch", "running": false}}
+2026-11-22T00:08:35.8169263Z SEND {"execute":"cont"}
+2026-11-22T00:08:35.8174630Z RECV {"timestamp": {"seconds": 1795306115, "microseconds": 815845}, "event": "RESUME"}
+2026-11-22T00:08:36.1470211Z SEND {"execute":"query-status"}
+2026-11-22T00:08:36.1472595Z RECV {"return": {}}
+2026-11-22T00:08:36.5187128Z SEND {"execute":"query-status"}
+2026-11-22T00:08:36.5189420Z RECV {"return": {"status": "running", "running": true}}

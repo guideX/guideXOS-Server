@@ -1,0 +1,24 @@
+{
+  "format": "guideXOS-iso-verification",
+  "isoBytes": 90245120,
+  "primaryVolumeDescriptorLba": 16,
+  "bootRecordLba": 17,
+  "bootCatalogLba": 31,
+  "uefiPlatformId": "0xEF",
+  "bootable": true,
+  "mediaType": "no-emulation",
+  "bootImageLba": 32,
+  "bootImageDataEndLba": 44064,
+  "bootImageSectorCount512": 0,
+  "bootImagePath": "UEFI_BOOT.IMG",
+  "bootImageBytes": 90177536,
+  "bootImageSha256": "ff30c034ff5066f69a5b03cc2c84ca56398101f23f5434e456afd4c4740f8634",
+  "files": [
+    {
+      "path": "README.TXT",
+      "size": 406,
+      "sha256": "02a43d4a7169520c73ee00110ff9706d926f67500c1ff070c145f80c61921562",
+      "lba": 44064
+    }
+  ]
+}

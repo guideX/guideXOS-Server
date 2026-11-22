@@ -1,0 +1,77 @@
+{
+  "sourceCommit": "14be308b7282a2131b0f124eeccd662a5378014d",
+  "branch": "main",
+  "tests": [
+    {
+      "result": "PASS",
+      "exeSha256": "32f5e35ab1039f5c03f76ca83580cc6cc8b46136c6fb960ce065b73dc623e7f2",
+      "name": "AMD64 protected task contract",
+      "command": "scripts/test-amd64-protected-task-contract.ps1"
+    },
+    {
+      "result": "PASS",
+      "exeSha256": "412e3009c5ba674965673501bc4920748b201e2edc8bf17f3b081bf228c40f0b",
+      "name": "AMD64 memory foundation",
+      "command": "scripts/test-amd64-memory-foundation.ps1"
+    },
+    {
+      "result": "PASS",
+      "exeSha256": "877014e0baf515ccbd458028cdaee92dbb6f6f9092107579305a2358574fe4a8",
+      "name": "AMD64 context switch",
+      "command": "scripts/test-amd64-context-switch.ps1"
+    },
+    {
+      "result": "PASS; 29 checks; failures=0",
+      "name": "Native ELF security policy",
+      "command": "scripts/test-native-elf-security-policy.ps1"
+    },
+    {
+      "result": "PASS; 16 KiB contract; minimum modeled headroom 4520 bytes",
+      "name": "Boot stack budget guard",
+      "command": "tests/boot_stack_budget_guard_test.ps1"
+    }
+  ],
+  "builds": {
+    "toolchain": {
+      "nasm": "2.16.03",
+      "ld": "GNU ld 2.46.0.20260210",
+      "gxx": "MinGW-W64 x86_64 15.2.0",
+      "msvc": "19.51.36263.0",
+      "msbuild": "18.11.1.51303"
+    },
+    "stack": {
+      "fullCallChainProved": false,
+      "contractBytes": 16384,
+      "cxxStackBytes": {
+        "exitDispatcher": 80,
+        "run_diagnostic_cycles": 288,
+        "run_cpl3_diagnostic": 96,
+        "kernel_main": 864,
+        "cleanup": 144,
+        "faultRecorder": 8
+      },
+      "minimumModeledHeadroomBytes": 4520,
+      "separateAssemblyStacks": [
+        "16 KiB lifecycle stack",
+        "16 KiB TSS RSP0/user-entry stack",
+        "16 KiB IST1 exception stack",
+        "16 KiB boot stack"
+      ],
+      "exitStub": "40-byte hardware frame + 120-byte 15-GPR save + 32-byte Microsoft shadow space"
+    },
+    "symbolAudit": "PASS; ELF64 AMD64 ET_EXEC; 55 UND rows / 22 unique; no relocation or import sections",
+    "diagnosticKernelBytes": 2846392,
+    "originalRecordedDiagnosticOff": "2b9c39a27d082e03f9b9c37eb1c091f6fe879c83275fd63c31fe5c5d002268e3",
+    "publicProfileDiagnosticOff": "3b1c383b4f141c43653054b58998492e55077df95c92b75cbaaf84a0ff9630eb",
+    "originalRecordedDiagnosticOn": "264701d1d30e8a44702da6f375b6beabe37e655f26cda7d82e735eadecfbad64",
+    "candidateKernelConfiguration": [
+      "GXOS_ENABLE_CPL3_DIAGNOSTIC",
+      "GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE"
+    ],
+    "publicProfileDiagnosticOn": "47d4409e9d37e6e593b2f6068f45c970ad666ecb3831706b6b4b52ce15336c3b",
+    "warningCounts": {
+      "diagnosticOn": 265,
+      "diagnosticOff": 267
+    }
+  }
+}

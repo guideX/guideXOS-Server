@@ -1,0 +1,7 @@
+2026-11-22T00:11:29.5968005Z GREETING {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-11-22T00:11:29.6086476Z SEND {"execute":"qmp_capabilities"}
+2026-11-22T00:11:29.6138848Z RECV {"return": {}}
+2026-11-22T00:11:29.6140875Z SEND {"execute":"query-status"}
+2026-11-22T00:11:29.6145937Z RECV {"return": {"status": "running", "running": true}}
+2026-11-22T00:11:29.6320027Z SEND {"execute":"quit"}
+2026-11-22T00:11:29.6325570Z RECV {"timestamp": {"seconds": 1795306289, "microseconds": 632269}, "event": "SHUTDOWN", "data": {"guest": false, "reason": "host-qmp-quit"}}

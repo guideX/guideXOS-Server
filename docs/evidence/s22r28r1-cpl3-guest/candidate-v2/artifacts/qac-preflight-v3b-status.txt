@@ -1,0 +1,9 @@
+Coordinator: Online
+Name: guideXOS QAC
+Version: 2.0.0
+PID: 1532
+Started (UTC): 2026-11-20T18:55:16.4997427+00:00
+Uptime: 104956s
+QEMU processes: 0 (0 foreign)
+Managed development limit: 2
+Managed sessions: 0; queued: 0; blocked: 0

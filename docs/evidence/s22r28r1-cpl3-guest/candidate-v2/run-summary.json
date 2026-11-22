@@ -1,0 +1,55 @@
+{
+  "milestone": "S22R28R1",
+  "outcome": "CPL3_GUEST_EXECUTION_PARTIAL",
+  "qacReservationId": "3f013306fc01476d9fcff14d6eaac41d",
+  "qacOwner": "LEON2_RDT\\guideX",
+  "qacOwnerPid": 30508,
+  "qemuChildPid": 17308,
+  "qemuPath": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+  "qemuStartUtc": "2026-11-22T00:06:57.8067089Z",
+  "qmpPort": 49286,
+  "exactIsoPath": "E:\\CodexArtifacts\\S22R28R1\\candidate-v2\\guideXOS-S22R28R1-CPL3-DIAGNOSTIC-BOOTINFO-V3-NOT-PUBLIC-RELEASE.iso",
+  "isoSha256": "3168d943af704a730110ab1e669ab482c3e93f282bbd7d2f73283f490b2d785c",
+  "qmpPreContinue": {
+    "running": false,
+    "status": "prelaunch",
+    "utc": "2026-11-22T00:08:35.6692893Z"
+  },
+  "qmpContinueUtc": "2026-11-22T00:08:35.8174630Z",
+  "qmpObservedRunningUtc": "2026-11-22T00:08:36.5189420Z",
+  "qmpQuitUtc": "2026-11-22T00:11:29.6325570Z",
+  "qmpShutdownReason": "host-qmp-quit",
+  "qacChildExitCode": 0,
+  "qacChildExitUtc": "2026-11-22T00:11:29.7680934Z",
+  "qacReleased": true,
+  "qacReleaseReason": "Managed child exited.",
+  "qacDurationSeconds": 272,
+  "activeGuestRuntimeSeconds": 174,
+  "serialSha256": "C6750038FF91A2E78CA9562D9D0B276A3933BC2B7C7B250AD1D5DF578397E09E",
+  "guestMarkers": {
+    "result": "42",
+    "diagnostic": "passed; nonfaulting=1; preemption=0",
+    "mainLoopObserved": true,
+    "cleanup": "verified; state=reaped",
+    "cr3Restored": true,
+    "lastPitHeartbeat": "0x2134",
+    "desktopEventLoop": "true",
+    "cycles": 3,
+    "exitVector": "0x80",
+    "userCs": "0x23",
+    "frameOwner": "ready; arena-pages=4096; free-pages=4096"
+  },
+  "limitations": [
+    "VFS root image mount failed; /Apps absent; user-data mount failed because trusted system source was unavailable.",
+    "Input response was not exercised; display backend was none.",
+    "No PacMan process, fault injection, preemption, data volume, or guest-initiated shutdown was tested."
+  ],
+  "qemuFirmware": {
+    "mode": "x86_64 UEFI pflash",
+    "codePath": "C:\\Program Files\\qemu\\share\\edk2-x86_64-code.fd",
+    "varsTemplateSha256": "5D2AC383371B408398ACCEE7EC27C8C09EA5B74A0DE0CEEA6513388B15BE5D1E",
+    "varsTemplate": "C:\\Program Files\\qemu\\share\\edk2-i386-vars.fd",
+    "disposableVarsCopy": "ovmf-vars-v3c.fd",
+    "codeSha256": "33090CC07675BAA5190D9F1E84BF5176B33BCBFA9BACAC522961150CDB6DBB2A"
+  }
+}

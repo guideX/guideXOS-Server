@@ -1,0 +1,60 @@
+{
+  "milestone": "S22R28R1 First AMD64 CPL3 Guest Acceptance",
+  "esp": {
+    "imageBytes": 90177536,
+    "independentlyVerified": true,
+    "sha256": "ff30c034ff5066f69a5b03cc2c84ca56398101f23f5434e456afd4c4740f8634",
+    "fileCount": 17,
+    "embeddedImageSha256": "ff30c034ff5066f69a5b03cc2c84ca56398101f23f5434e456afd4c4740f8634"
+  },
+  "source": {
+    "commit": "14be308b7282a2131b0f124eeccd662a5378014d",
+    "worktreeTrackedClean": true,
+    "branch": "main",
+    "preexistingUntracked": [
+      "assets/Backgrounds/troncity.png"
+    ]
+  },
+  "iso": {
+    "path": "E:\\CodexArtifacts\\S22R28R1\\candidate\\guideXOS-S22R28R1-CPL3-DIAGNOSTIC-NOT-PUBLIC-RELEASE.iso",
+    "sha256": "527533609310eafe0e7d2cec64444d0e06de918d7f96a49bc88dda8c1054c5d2",
+    "activation": "EFI/BOOT/BOOTX64.EFI loads kernel.elf; kernel diagnostic compile flag active",
+    "bytes": 90245120,
+    "independentlyVerified": true
+  },
+  "classification": "DIAGNOSTIC — NOT PUBLIC RELEASE CANDIDATE",
+  "packagePolicy": {
+    "publicPreviewSecurityProfile": true,
+    "packageAllowlist": [
+      "PacMan"
+    ],
+    "pacmanManifestSha256": "3f3592e6c76053e323f16d48073e98c67d7f5702b8e47f0b507d6bfb3d126449",
+    "normalNativeElfPathPreserved": true,
+    "diagnosticActivation": "compile-time CPL3_DIAGNOSTIC=1",
+    "pacmanElfSha256": "eeb544bbb2e2574eeaed7bb7f0bad61ea24f6945231b7757223a225b30b8e1cc"
+  },
+  "base": {
+    "bootloaderSha256": "f3ef0f7ce57f707d06be74b657a51355507149ff4c9f675e6f5c4d5befcc5f6b",
+    "sourceCommit": "67dc2e111ea4d6e7208a8d5fac7dbd1a389d8491",
+    "acceptedIsoBytes": 90245120,
+    "acceptedIsoSha256": "8d397659e0a6ec8f1be113ae4f5be14dbcaf1ef22ccda41a6e5ee5014919cf40",
+    "releaseProfile": "ServerV03PublicPreviewPacManOnly",
+    "packages": [
+      "PacMan"
+    ]
+  },
+  "build": {
+    "symbolAudit": "PASS; ELF64 AMD64 ET_EXEC; no relocations/imports; 55 undefined .symtab rows; 22 unique",
+    "assembler": "NASM version 2.16.03 compiled on Mar 28 2026",
+    "defines": [
+      "GXOS_ENABLE_CPL3_DIAGNOSTIC",
+      "GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE"
+    ],
+    "kernelSha256": "47d4409e9d37e6e593b2f6068f45c970ad666ecb3831706b6b4b52ce15336c3b",
+    "compiler": "g++.exe (MinGW-W64 x86_64-msvcrt-posix-seh, built by Brecht Sanders, r7) 15.2.0",
+    "arch": "amd64",
+    "kernelBytes": 2846392,
+    "linker": "GNU ld (Binutils for MinGW-W64 x86_64, built by Brecht Sanders, r7) 2.46.0.20260210",
+    "stackGuard": "PASS; 16 KiB contract; at least 4520 bytes modeled headroom"
+  }
+}

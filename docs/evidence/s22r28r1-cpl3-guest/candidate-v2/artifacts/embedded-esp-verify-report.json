@@ -1,0 +1,92 @@
+{
+  "format": "guideXOS-fat32-esp",
+  "fatType": "FAT32",
+  "imageBytes": 90177536,
+  "files": [
+    {
+      "path": "Apps/PacMan/app.json",
+      "size": 956,
+      "sha256": "3f3592e6c76053e323f16d48073e98c67d7f5702b8e47f0b507d6bfb3d126449"
+    },
+    {
+      "path": "Apps/PacMan/bin/amd64/pacman.elf",
+      "size": 63640,
+      "sha256": "eeb544bbb2e2574eeaed7bb7f0bad61ea24f6945231b7757223a225b30b8e1cc"
+    },
+    {
+      "path": "Apps/PacMan/resources/audio/EatPill.wav",
+      "size": 7156,
+      "sha256": "510a52e5776573197aef14d77e393185b6c7148d1b59dac535d45c5ca0498686"
+    },
+    {
+      "path": "Apps/PacMan/resources/audio/extralife.wav",
+      "size": 21248,
+      "sha256": "767db1552130e676398c121ec605f90f20c89bbbab272305bc781adc8e91d1cd"
+    },
+    {
+      "path": "Apps/PacMan/resources/audio/fruiteat.wav",
+      "size": 5120,
+      "sha256": "82c96a997ac2e837de4e418f29f4f4fa6142dd2a0c38f764b6d989d8bd98605d"
+    },
+    {
+      "path": "Apps/PacMan/resources/audio/ghosteat.wav",
+      "size": 9090,
+      "sha256": "225168072b38671c89c1fc775d513ca86fbb899e3e82c8032445f6a6dc5e1b95"
+    },
+    {
+      "path": "Apps/PacMan/resources/audio/killed.wav",
+      "size": 17008,
+      "sha256": "1c3e91df8e19041ea5783185c5a8a9f2321993b43481c215d8caf3df590290de"
+    },
+    {
+      "path": "Apps/PacMan/resources/audio/StartMusic.wav",
+      "size": 68318,
+      "sha256": "062cdc7196c54033f8bf11878d6659fd5b0ba11cd6945640ec8fac4376919421"
+    },
+    {
+      "path": "Apps/PacMan/resources/audio/startmusicold.wav",
+      "size": 46592,
+      "sha256": "a6e1c14f6cbc59cb5244c0119c728d412252370eea48bc574c1307a774c83caf"
+    },
+    {
+      "path": "Apps/PacMan/resources/level1.gximg",
+      "size": 888860,
+      "sha256": "535b37e66d7159078df8a16ce059a6f7ab038588cc9875e152033d046ff47fe1"
+    },
+    {
+      "path": "Apps/PacMan/resources/pacpics.gximg",
+      "size": 360476,
+      "sha256": "57a605df8f24ac9641ff6c9d39df551a17ffbcd68466a561adf5f045de259d50"
+    },
+    {
+      "path": "build-identity.txt",
+      "size": 1078,
+      "sha256": "be3ea229d799b5362f568bf955a3a1462f68f7403c91cb4de1eb30e3c0c3cd0e"
+    },
+    {
+      "path": "DIAGNOSTIC-NOT-PUBLIC-RELEASE.txt",
+      "size": 234,
+      "sha256": "d26212643db4997152e98977b68a0b77144a3754ef7d04baf37257203912a46f"
+    },
+    {
+      "path": "EFI/BOOT/BOOTX64.EFI",
+      "size": 57856,
+      "sha256": "81258f7ad179494a3cdf289b87170370d3a281900e1e386caf41041e00fb00d4"
+    },
+    {
+      "path": "kernel-symbol-audit.txt",
+      "size": 8262,
+      "sha256": "ba954891bcebabce5daf0a344929eff9a75e2b23978c371d96a57c78263dff1d"
+    },
+    {
+      "path": "kernel.elf",
+      "size": 2846392,
+      "sha256": "47d4409e9d37e6e593b2f6068f45c970ad666ecb3831706b6b4b52ce15336c3b"
+    },
+    {
+      "path": "ramdisk.img",
+      "size": 67108864,
+      "sha256": "ead5105aa131dee575e0021fac1650a28330df422bd211ca6baccdd267179f05"
+    }
+  ]
+}

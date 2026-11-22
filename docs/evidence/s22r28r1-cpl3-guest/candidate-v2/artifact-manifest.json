@@ -1,0 +1,66 @@
+{
+  "milestone": "S22R28R1 First AMD64 CPL3 Guest Acceptance",
+  "policy": {
+    "packageAllowlist": [
+      "PacMan"
+    ],
+    "pacmanElfSha256": "eeb544bbb2e2574eeaed7bb7f0bad61ea24f6945231b7757223a225b30b8e1cc",
+    "diagnosticActivation": "compile-time only",
+    "nativeElfExecutionPathUnchanged": true,
+    "publicPreviewSecurityProfile": true,
+    "pacmanManifestSha256": "3f3592e6c76053e323f16d48073e98c67d7f5702b8e47f0b507d6bfb3d126449"
+  },
+  "iso": {
+    "path": "E:\\CodexArtifacts\\S22R28R1\\candidate-v2\\guideXOS-S22R28R1-CPL3-DIAGNOSTIC-BOOTINFO-V3-NOT-PUBLIC-RELEASE.iso",
+    "sha256": "3168d943af704a730110ab1e669ab482c3e93f282bbd7d2f73283f490b2d785c",
+    "bytes": 90245120,
+    "independentlyVerified": true
+  },
+  "bootloader": {
+    "sourceCommit": "14be308b7282a2131b0f124eeccd662a5378014d",
+    "taskArenaMemoryType": "EfiLoaderData",
+    "taskArenaBytes": 16777216,
+    "sha256": "81258f7ad179494a3cdf289b87170370d3a281900e1e386caf41041e00fb00d4",
+    "configuration": "Release|x64",
+    "bootInfoVersion": 3,
+    "msbuildVersion": "18.11.1.51303",
+    "compiler": "MSVC 19.51.36263.0",
+    "bytes": 57856
+  },
+  "source": {
+    "branch": "main",
+    "trackedWorktreeCleanBeforeDocs": true,
+    "preexistingUntracked": [
+      "assets/Backgrounds/troncity.png"
+    ],
+    "commit": "14be308b7282a2131b0f124eeccd662a5378014d"
+  },
+  "kernel": {
+    "sha256": "47d4409e9d37e6e593b2f6068f45c970ad666ecb3831706b6b4b52ce15336c3b",
+    "bytes": 2846392,
+    "symbolAudit": "PASS; ELF64 AMD64 ET_EXEC; 55 UND rows/22 unique; no relocations/imports",
+    "configuration": [
+      "GXOS_ENABLE_CPL3_DIAGNOSTIC",
+      "GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE"
+    ]
+  },
+  "classification": "DIAGNOSTIC — NOT PUBLIC RELEASE CANDIDATE",
+  "esp": {
+    "embeddedImageSha256": "fb1eb4975b823a790d70fa2be4682a2e3a4ba1ec017ff95d324336b15ce0d049",
+    "sha256": "fb1eb4975b823a790d70fa2be4682a2e3a4ba1ec017ff95d324336b15ce0d049",
+    "independentlyVerified": true,
+    "imageBytes": 90177536,
+    "fileCount": 17
+  },
+  "base": {
+    "sourceCommit": "67dc2e111ea4d6e7208a8d5fac7dbd1a389d8491",
+    "releaseProfile": "ServerV03PublicPreviewPacManOnly",
+    "acceptedBootInfoVersion": 2,
+    "acceptedIsoBytes": 90245120,
+    "acceptedBootloaderSha256": "f3ef0f7ce57f707d06be74b657a51355507149ff4c9f675e6f5c4d5befcc5f6b",
+    "packages": [
+      "PacMan"
+    ],
+    "acceptedIsoSha256": "8d397659e0a6ec8f1be113ae4f5be14dbcaf1ef22ccda41a6e5ee5014919cf40"
+  }
+}
