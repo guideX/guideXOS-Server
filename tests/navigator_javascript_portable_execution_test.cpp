@@ -18,6 +18,8 @@ constexpr std::size_t kTestStringBytes = 256u * 1024u;
 constexpr std::size_t kTestFunctionCapacity = 4096u;
 constexpr std::size_t kTestFrameCapacity = 64u;
 constexpr std::size_t kTestArgumentCapacity = 512u;
+constexpr std::size_t kTestExecutionFrameCapacity =
+    kDefaultPortableExecutionFrameCapacity;
 constexpr std::size_t kTestObjectCapacity = 1024u;
 constexpr std::size_t kTestPropertyCapacity = 4096u;
 constexpr std::size_t kTestArrayElementCapacity = 4096u;
@@ -36,6 +38,7 @@ char stringStorage[kTestStringBytes];
 FunctionRecord functionStorage[kTestFunctionCapacity];
 PortableCallFrame callFrameStorage[kTestFrameCapacity];
 Value argumentStorage[kTestArgumentCapacity];
+PortableExecutionFrame executionFrameStorage[kTestExecutionFrameCapacity];
 PortableObjectRecord objectRecordStorage[kTestObjectCapacity];
 PortablePropertyRecord portablePropertyStorage[kTestPropertyCapacity];
 PortableArrayElementRecord portableArrayElementStorage[
@@ -63,6 +66,7 @@ struct UsageHighWater {
     std::size_t arrayElements = 0u;
     std::size_t callDepth = 0u;
     std::size_t argumentValues = 0u;
+    std::size_t executionFrames = 0u;
 } usageHighWater;
 
 void check(bool condition, const char* label)
@@ -90,6 +94,7 @@ struct TestOptions {
     std::size_t functionCapacity = kTestFunctionCapacity;
     std::size_t frameCapacity = kTestFrameCapacity;
     std::size_t argumentCapacity = kTestArgumentCapacity;
+    std::size_t executionFrameCapacity = kTestExecutionFrameCapacity;
     PortableObjectLimits objectLimits;
 };
 
@@ -184,7 +189,10 @@ struct TestRun {
             options.frameCapacity == 0u ? nullptr : callFrameStorage,
             options.frameCapacity,
             options.argumentCapacity == 0u ? nullptr : argumentStorage,
-            options.argumentCapacity};
+            options.argumentCapacity,
+            options.executionFrameCapacity == 0u ? nullptr
+                : executionFrameStorage,
+            options.executionFrameCapacity};
         PortableObjectExecutionCore core(ast, strings, environments, functions,
             objects, storage, options.limits, steps);
         succeeded = core.run(rootNode, environment, finalValue, result);
@@ -212,6 +220,8 @@ struct TestRun {
             usageHighWater.callDepth = result.callDepthHighWater;
         if (result.argumentValuesHighWater > usageHighWater.argumentValues)
             usageHighWater.argumentValues = result.argumentValuesHighWater;
+        if (result.executionFrameHighWater > usageHighWater.executionFrames)
+            usageHighWater.executionFrames = result.executionFrameHighWater;
         return true;
     }
 
@@ -801,7 +811,8 @@ void testBudgetsAndRecovery()
     TestOptions defaults;
     check(recovery.configure(defaults), "recovery: initial stores configure");
     PortableExecutionStorageView storage{callFrameStorage,
-        kTestFrameCapacity, argumentStorage, kTestArgumentCapacity};
+        kTestFrameCapacity, argumentStorage, kTestArgumentCapacity,
+        executionFrameStorage, kTestExecutionFrameCapacity};
     PortableExecutionCore first(recovery.ast, recovery.strings,
         recovery.environments, recovery.functions, storage, defaults.limits,
         recovery.steps);

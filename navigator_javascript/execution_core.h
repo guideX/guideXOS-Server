@@ -48,6 +48,7 @@ enum class PortableExecutionErrorCode : std::uint8_t {
     InvalidArrayLength,
     PrototypeDepthExceeded,
     InternalInvariantFailure,
+    ExecutionFrameCapacityExhausted,
 };
 
 struct PortableExecutionError {
@@ -65,7 +66,10 @@ struct PortableExecutionResult {
     std::size_t argumentValuesHighWater = 0u;
     std::size_t callDepthHighWater = 0u;
     std::size_t tailCallsExecuted = 0u;
+    std::size_t executionFrameHighWater = 0u;
 };
+
+constexpr std::size_t kDefaultPortableExecutionFrameCapacity = 4096u;
 
 struct PortableExecutionLimits {
     std::size_t maxCallDepth = 64u;
@@ -76,6 +80,7 @@ struct PortableExecutionLimits {
     std::size_t maxBindingNameLength = 256u;
     std::size_t maxRuntimeStringLength = 64u * 1024u;
     std::size_t maxAstDepth = 256u;
+    std::size_t maxExecutionFrames = kDefaultPortableExecutionFrameCapacity;
 };
 
 struct PortableCallFrame {
@@ -90,11 +95,40 @@ struct PortableCallFrame {
     AstNodeId continuationNode = kInvalidAstNodeId;
 };
 
+enum class PortableExecutionFrameKind : std::uint8_t {
+    Empty = 0,
+    StatementList,
+    Statement,
+    Expression,
+    FunctionBoundary,
+};
+
+// One stable, caller-owned record for a suspended statement or expression.
+// `cursor`, `mark`, and `callFrameIndex` are offsets/indices; no pointer into
+// the arena or a native stack frame is retained across a nested call.
+struct PortableExecutionFrame {
+    PortableExecutionFrameKind kind = PortableExecutionFrameKind::Empty;
+    std::uint8_t stage = 0u;
+    std::uint16_t flags = 0u;
+    AstNodeId node = kInvalidAstNodeId;
+    AstNodeId auxiliaryNode = kInvalidAstNodeId;
+    std::size_t cursor = 0u;
+    std::size_t mark = 0u;
+    std::size_t callFrameIndex = 0u;
+    EnvironmentId savedEnvironment = kInvalidEnvironmentId;
+    Value a = Value::undefined();
+    Value b = Value::undefined();
+    Value c = Value::undefined();
+    Value childValue = Value::undefined();
+};
+
 struct PortableExecutionStorageView {
     PortableCallFrame* frames = nullptr;
     std::size_t frameCapacity = 0u;
     Value* argumentValues = nullptr;
     std::size_t argumentCapacity = 0u;
+    PortableExecutionFrame* executionFrames = nullptr;
+    std::size_t executionFrameCapacity = 0u;
 };
 
 // Shared evaluator for the initial portable JavaScript execution slice. It
@@ -164,7 +198,9 @@ public:
             (objects_ != nullptr && !objects_->configured()) ||
             (storage_.frameCapacity != 0u && storage_.frames == nullptr) ||
             (storage_.argumentCapacity != 0u &&
-                storage_.argumentValues == nullptr)) {
+                storage_.argumentValues == nullptr) ||
+            (storage_.executionFrameCapacity != 0u &&
+                storage_.executionFrames == nullptr)) {
             fail(PortableExecutionErrorCode::InternalInvariantFailure,
                 SourceLocation());
             return finish(result, finalValue);
@@ -189,6 +225,9 @@ public:
         finalValue_ = Value::undefined();
         callDepth_ = 0u;
         argumentTop_ = 0u;
+        executionFrameTop_ = 0u;
+        machineReturning_ = false;
+        machineReturnValue_ = Value::undefined();
         result_ = PortableExecutionResult();
 
         if (!preflightGlobalBindings(root) ||
@@ -196,13 +235,18 @@ public:
             !instantiateLexicalBindings(root, globalEnvironment)) {
             return finish(result, finalValue);
         }
-        Control control;
-        if (!executeStatement(root, false, control))
-            return finish(result, finalValue);
-        if (control.kind != ControlKind::Normal) {
-            fail(PortableExecutionErrorCode::IllegalReturn,
-                ast_.node(root).location);
-            return finish(result, finalValue);
+        if (storage_.executionFrameCapacity != 0u) {
+            if (!runExecutionMachine(root, finalValue_))
+                return finish(result, finalValue);
+        } else {
+            Control control;
+            if (!executeStatement(root, false, control))
+                return finish(result, finalValue);
+            if (control.kind != ControlKind::Normal) {
+                fail(PortableExecutionErrorCode::IllegalReturn,
+                    ast_.node(root).location);
+                return finish(result, finalValue);
+            }
         }
         result_.completed = true;
         result_.finalValue = finalValue_;
@@ -584,12 +628,27 @@ private:
                 supportsExpression(ast, node.right, maxArgs, maxDepth,
                     depth + 1u, allowObjects);
         case AstNodeKind::CallExpression: {
-            if (!validNode(ast, node.callee) ||
-                ast.node(node.callee).kind != AstNodeKind::Identifier ||
-                node.childCount > maxArgs) return false;
-            SourceView name;
-            if (!isIdentifierName(ast, node.callee, name) ||
-                !declaredFunctionLike(ast, name)) return false;
+            if (!validNode(ast, node.callee) || node.childCount > maxArgs)
+                return false;
+            if (ast.node(node.callee).kind == AstNodeKind::Identifier) {
+                SourceView name;
+                if (!isIdentifierName(ast, node.callee, name) ||
+                    !declaredFunctionLike(ast, name)) return false;
+            } else if (allowObjects && ast.node(node.callee).kind ==
+                    AstNodeKind::MemberExpression) {
+                const AstNode& member = ast.node(node.callee);
+                if (!validNode(ast, member.object) ||
+                    !validNode(ast, member.property) ||
+                    !supportsExpression(ast, member.object, maxArgs,
+                        maxDepth, depth + 1u, allowObjects) ||
+                    (member.computed
+                        ? !supportsExpression(ast, member.property, maxArgs,
+                            maxDepth, depth + 1u, allowObjects)
+                        : ast.node(member.property).kind !=
+                            AstNodeKind::Identifier)) return false;
+            } else {
+                return false;
+            }
             for (std::size_t index = 0u; index < node.childCount; ++index) {
                 if (!supportsExpression(ast, ast.childAt(id, index), maxArgs,
                         maxDepth, depth + 1u, allowObjects)) return false;
@@ -1098,6 +1157,1190 @@ private:
             if (child.kind == AstNodeKind::VariableDeclaration) return true;
         }
         return false;
+    }
+
+    enum MachineFrameFlags : std::uint16_t {
+        MachineInFunction = 0x0001u,
+        MachineRestoreEnvironment = 0x0002u,
+        MachineChargeNode = 0x0004u,
+        MachineTailPosition = 0x0008u,
+        MachineChildReady = 0x0010u,
+    };
+
+    bool machinePush(PortableExecutionFrameKind kind, AstNodeId node,
+        bool inFunction, bool chargeNode, bool restoreEnvironment = false,
+        bool tailPosition = false)
+    {
+        const std::size_t capacity = storage_.executionFrameCapacity <
+                limits_.maxExecutionFrames
+            ? storage_.executionFrameCapacity : limits_.maxExecutionFrames;
+        if (executionFrameTop_ >= capacity) {
+            fail(PortableExecutionErrorCode::ExecutionFrameCapacityExhausted,
+                validNode(ast_, node) ? ast_.node(node).location
+                    : SourceLocation());
+            return false;
+        }
+        PortableExecutionFrame& frame =
+            storage_.executionFrames[executionFrameTop_++];
+        frame = PortableExecutionFrame();
+        frame.kind = kind;
+        frame.node = node;
+        if (inFunction) frame.flags |= MachineInFunction;
+        if (chargeNode) frame.flags |= MachineChargeNode;
+        if (restoreEnvironment) frame.flags |= MachineRestoreEnvironment;
+        if (tailPosition) frame.flags |= MachineTailPosition;
+        if (executionFrameTop_ > result_.executionFrameHighWater)
+            result_.executionFrameHighWater = executionFrameTop_;
+        return true;
+    }
+
+    bool machinePushExpression(AstNodeId node, bool inFunction,
+        bool tailPosition = false)
+    {
+        if (!validNode(ast_, node)) {
+            fail(PortableExecutionErrorCode::InvalidAst, SourceLocation());
+            return false;
+        }
+        return machinePush(PortableExecutionFrameKind::Expression, node,
+            inFunction, false, false, tailPosition);
+    }
+
+    bool machinePushStatement(AstNodeId node, bool inFunction)
+    {
+        if (!validNode(ast_, node)) {
+            fail(PortableExecutionErrorCode::InvalidAst, SourceLocation());
+            return false;
+        }
+        return machinePush(PortableExecutionFrameKind::Statement, node,
+            inFunction, false);
+    }
+
+    bool machinePushStatementList(AstNodeId node, bool inFunction,
+        bool chargeNode, bool restoreEnvironment = false)
+    {
+        if (!validNode(ast_, node)) {
+            fail(PortableExecutionErrorCode::InvalidAst, SourceLocation());
+            return false;
+        }
+        return machinePush(PortableExecutionFrameKind::StatementList, node,
+            inFunction, chargeNode, restoreEnvironment);
+    }
+
+    void machinePop(bool hasValue, Value value = Value::undefined())
+    {
+        if (executionFrameTop_ == 0u) {
+            fail(PortableExecutionErrorCode::InternalInvariantFailure,
+                SourceLocation());
+            return;
+        }
+        PortableExecutionFrame& top =
+            storage_.executionFrames[executionFrameTop_ - 1u];
+        if (top.kind == PortableExecutionFrameKind::StatementList &&
+            (top.flags & MachineRestoreEnvironment) != 0u)
+            currentEnvironment_ = top.savedEnvironment;
+        top = PortableExecutionFrame();
+        --executionFrameTop_;
+        if (executionFrameTop_ != 0u) {
+            PortableExecutionFrame& parent =
+                storage_.executionFrames[executionFrameTop_ - 1u];
+            parent.childValue = hasValue ? value : Value::undefined();
+            parent.flags |= MachineChildReady;
+        } else if (hasValue) {
+            machineRootValue_ = value;
+        }
+    }
+
+    void machineDiscardTop()
+    {
+        if (executionFrameTop_ == 0u) return;
+        PortableExecutionFrame& frame =
+            storage_.executionFrames[executionFrameTop_ - 1u];
+        if (frame.kind == PortableExecutionFrameKind::StatementList &&
+            (frame.flags & MachineRestoreEnvironment) != 0u)
+            currentEnvironment_ = frame.savedEnvironment;
+        frame = PortableExecutionFrame();
+        --executionFrameTop_;
+    }
+
+    bool machinePropertyKey(AstNodeId keyNode, PropertyReference& reference,
+        SourceLocation location)
+    {
+        if (!validNode(ast_, keyNode)) {
+            fail(PortableExecutionErrorCode::InvalidAst, location);
+            return false;
+        }
+        const AstNode& key = ast_.node(keyNode);
+        if (key.kind == AstNodeKind::Identifier) {
+            reference.key = ast_.nodeText(keyNode);
+            return true;
+        }
+        if (key.kind != AstNodeKind::StringLiteral) {
+            fail(PortableExecutionErrorCode::InvalidAst, location);
+            return false;
+        }
+        RuntimeStringId decoded = kInvalidRuntimeStringId;
+        RuntimeStringError stringError;
+        if (!strings_.createDecodedStringLiteral(ast_.nodeText(keyNode),
+                limits_.maxRuntimeStringLength, decoded, stringError)) {
+            fail(stringError.code == RuntimeStringErrorCode::CapacityExceeded
+                    ? PortableExecutionErrorCode::StringCapacityExhausted
+                    : stringError.code == RuntimeStringErrorCode::StaleGeneration
+                        ? PortableExecutionErrorCode::StaleReference
+                        : PortableExecutionErrorCode::InternalInvariantFailure,
+                location);
+            return false;
+        }
+        if (!strings_.view(decoded, reference.key, stringError)) {
+            fail(PortableExecutionErrorCode::InternalInvariantFailure,
+                location);
+            return false;
+        }
+        return true;
+    }
+
+    bool machineReadProperty(Value receiver, AstNodeId keyNode,
+        bool computed, Value keyValue, SourceLocation location, Value& value)
+    {
+        if constexpr (!EnableObjectOperations) {
+            (void)receiver;
+            (void)keyNode;
+            (void)computed;
+            (void)keyValue;
+            (void)value;
+            fail(PortableExecutionErrorCode::UnsupportedOperation, location);
+            return false;
+        } else {
+            if (objects_ == nullptr || !receiver.isObject()) {
+                fail(receiver.isObject()
+                        ? PortableExecutionErrorCode::UnsupportedOperation
+                        : PortableExecutionErrorCode::TypeError,
+                    location);
+                return false;
+            }
+            PropertyReference reference;
+            reference.object = receiver.objectId();
+            if (computed) {
+                if (!propertyKeyFromValue(keyValue, reference, location))
+                    return false;
+            } else if (!machinePropertyKey(keyNode, reference, location)) {
+                return false;
+            }
+            bool found = false;
+            PortableObjectError error;
+            if (!objects_->getProperty(reference.object, reference.key, value,
+                    found, error)) {
+                failObject(error, location);
+                return false;
+            }
+            return true;
+        }
+    }
+
+    bool machineWriteProperty(Value receiver, AstNodeId keyNode,
+        bool computed, Value keyValue, Value value, SourceLocation location)
+    {
+        if constexpr (!EnableObjectOperations) {
+            (void)receiver;
+            (void)keyNode;
+            (void)computed;
+            (void)keyValue;
+            (void)value;
+            fail(PortableExecutionErrorCode::UnsupportedOperation, location);
+            return false;
+        } else {
+            if (objects_ == nullptr || !receiver.isObject()) {
+                fail(receiver.isObject()
+                        ? PortableExecutionErrorCode::UnsupportedOperation
+                        : PortableExecutionErrorCode::TypeError,
+                    location);
+                return false;
+            }
+            PropertyReference reference;
+            reference.object = receiver.objectId();
+            if (computed) {
+                if (!propertyKeyFromValue(keyValue, reference, location))
+                    return false;
+            } else if (!machinePropertyKey(keyNode, reference, location)) {
+                return false;
+            }
+            PortableObjectError error;
+            if (!objects_->setOwnProperty(reference.object, reference.key,
+                    value, error)) {
+                failObject(error, location);
+                return false;
+            }
+            return true;
+        }
+    }
+
+    bool machineApplyUnary(const AstNode& node, Value argument, Value& result)
+    {
+        switch (node.unaryOperator) {
+        case AstUnaryOperator::LogicalNot: {
+            bool value = false;
+            if (!truthy(argument, value)) return false;
+            result = Value::boolean(!value);
+            return true;
+        }
+        case AstUnaryOperator::Plus:
+        case AstUnaryOperator::Minus: {
+            double number = 0.0;
+            if (!toNumber(argument, number, node.location)) return false;
+            result = Value::number(node.unaryOperator == AstUnaryOperator::Minus
+                ? -number : number);
+            return true;
+        }
+        }
+        fail(PortableExecutionErrorCode::InvalidAst, node.location);
+        return false;
+    }
+
+    bool machineAssignmentValue(const AstNode& node, Value oldValue,
+        Value right, Value& result)
+    {
+        if (node.assignmentOperator == AstAssignmentOperator::Assign) {
+            result = right;
+            return true;
+        }
+        AstNode binary;
+        binary.kind = AstNodeKind::BinaryExpression;
+        binary.location = node.location;
+        switch (node.assignmentOperator) {
+        case AstAssignmentOperator::Add:
+            binary.binaryOperator = AstBinaryOperator::Add;
+            break;
+        case AstAssignmentOperator::Subtract:
+            binary.binaryOperator = AstBinaryOperator::Subtract;
+            break;
+        case AstAssignmentOperator::Multiply:
+            binary.binaryOperator = AstBinaryOperator::Multiply;
+            break;
+        case AstAssignmentOperator::Divide:
+            binary.binaryOperator = AstBinaryOperator::Divide;
+            break;
+        default:
+            fail(PortableExecutionErrorCode::UnsupportedOperation,
+                node.location);
+            return false;
+        }
+        return applyBinaryValues(binary, oldValue, right, result);
+    }
+
+    bool machineGetCallable(Value value, RuntimeFunctionId& function,
+        SourceLocation location)
+    {
+        if (!value.isFunction()) {
+            fail(PortableExecutionErrorCode::InvalidInvocationTarget,
+                location);
+            return false;
+        }
+        FunctionStoreError error;
+        const FunctionRecord* record = functions_.get(value.functionId(), error);
+        if (record == nullptr) {
+            fail(error.code == FunctionStoreErrorCode::StaleGeneration
+                    ? PortableExecutionErrorCode::StaleReference
+                    : error.code == FunctionStoreErrorCode::RealmMismatch
+                        ? PortableExecutionErrorCode::RealmMismatch
+                        : PortableExecutionErrorCode::InvalidFunctionReference,
+                location);
+            return false;
+        }
+        if (record->kind != FunctionRecord::Kind::User) {
+            fail(PortableExecutionErrorCode::UnsupportedOperation, location);
+            return false;
+        }
+        function = value.functionId();
+        return true;
+    }
+
+    void machineFinishFunction(std::size_t boundaryIndex, Value value)
+    {
+        if (boundaryIndex >= executionFrameTop_ || callDepth_ == 0u) {
+            fail(PortableExecutionErrorCode::InternalInvariantFailure,
+                SourceLocation());
+            return;
+        }
+        PortableExecutionFrame& boundary =
+            storage_.executionFrames[boundaryIndex];
+        const std::size_t frameIndex = boundary.callFrameIndex;
+        const std::size_t firstFrameIndex = boundary.cursor;
+        if (frameIndex + 1u != callDepth_ ||
+            firstFrameIndex > frameIndex ||
+            frameIndex >= storage_.frameCapacity) {
+            fail(PortableExecutionErrorCode::InternalInvariantFailure,
+                validNode(ast_, boundary.node) ? ast_.node(boundary.node).location
+                    : SourceLocation());
+            return;
+        }
+        const PortableCallFrame call = storage_.frames[firstFrameIndex];
+        currentEnvironment_ = call.previousEnvironment;
+        currentThis_ = call.previousThis;
+        for (std::size_t index = firstFrameIndex; index < callDepth_; ++index)
+            storage_.frames[index].continuationNode = kInvalidAstNodeId;
+        callDepth_ = firstFrameIndex;
+        argumentTop_ = boundary.mark;
+        executionFrameTop_ = boundaryIndex + 1u;
+        machinePop(true, value);
+    }
+
+    bool machineStartCall(PortableExecutionFrame& frame)
+    {
+        const AstNode& call = ast_.node(frame.node);
+        if (call.childCount > limits_.maxCallArguments) {
+            fail(PortableExecutionErrorCode::InvalidInvocationTarget,
+                call.location);
+            return false;
+        }
+        frame.mark = argumentTop_;
+        if (argumentTop_ > storage_.argumentCapacity ||
+            call.childCount > storage_.argumentCapacity - argumentTop_) {
+            fail(PortableExecutionErrorCode::ArgumentCapacityExhausted,
+                call.location);
+            return false;
+        }
+        argumentTop_ += call.childCount;
+        if (argumentTop_ > result_.argumentValuesHighWater)
+            result_.argumentValuesHighWater = argumentTop_;
+        frame.cursor = 0u;
+        frame.stage = 4u;
+        if (call.childCount == 0u) return machineInvokeCall(frame);
+        return machinePushExpression(ast_.childAt(frame.node, 0u),
+            (frame.flags & MachineInFunction) != 0u);
+    }
+
+    bool machineTailReplace(PortableExecutionFrame& callFrame,
+        RuntimeFunctionId target, Value receiver)
+    {
+        std::size_t boundaryIndex = executionFrameTop_;
+        for (std::size_t cursor = executionFrameTop_; cursor != 0u; --cursor) {
+            if (storage_.executionFrames[cursor - 1u].kind ==
+                    PortableExecutionFrameKind::FunctionBoundary) {
+                boundaryIndex = cursor - 1u;
+                break;
+            }
+        }
+        if (boundaryIndex == executionFrameTop_ || callDepth_ == 0u) {
+            fail(PortableExecutionErrorCode::InternalInvariantFailure,
+                ast_.node(callFrame.node).location);
+            return false;
+        }
+        const std::size_t oldIndex = callDepth_ - 1u;
+        const PortableCallFrame oldFrame = storage_.frames[oldIndex];
+        const std::size_t tailBase = callFrame.mark;
+        const std::size_t argumentCount = ast_.node(callFrame.node).childCount;
+        const Value* arguments = argumentCount == 0u ? nullptr
+            : storage_.argumentValues + tailBase;
+        // Reuse the current logical activation slot. The new activation first
+        // captures the active environment; its restore destination is then
+        // redirected to the original caller held by the replaced frame.
+        FunctionRecord function;
+        if (!pushFunctionActivation(target, arguments, argumentCount,
+                ast_.node(callFrame.node).location, receiver,
+                kInvalidAstNodeId, function)) return false;
+        const std::size_t newIndex = callDepth_ - 1u;
+        storage_.frames[newIndex].previousEnvironment =
+            oldFrame.previousEnvironment;
+        storage_.frames[newIndex].previousThis = oldFrame.previousThis;
+        ++result_.tailCallsExecuted;
+        argumentTop_ = tailBase;
+
+        for (std::size_t index = boundaryIndex + 1u;
+            index < executionFrameTop_; ++index)
+            storage_.executionFrames[index] = PortableExecutionFrame();
+        executionFrameTop_ = boundaryIndex + 1u;
+        PortableExecutionFrame& boundary =
+            storage_.executionFrames[boundaryIndex];
+        boundary.stage = 0u;
+        boundary.flags &= static_cast<std::uint16_t>(~MachineChildReady);
+        boundary.callFrameIndex = newIndex;
+        boundary.node = function.declaration;
+        return true;
+    }
+
+    bool machineInvokeCall(PortableExecutionFrame& frame)
+    {
+        RuntimeFunctionId function = kInvalidRuntimeFunctionId;
+        if (!machineGetCallable(frame.a, function,
+                ast_.node(frame.node).location)) return false;
+        const std::size_t count = ast_.node(frame.node).childCount;
+        const Value* arguments = count == 0u ? nullptr
+            : storage_.argumentValues + frame.mark;
+        if ((frame.flags & MachineTailPosition) != 0u && callDepth_ != 0u)
+            return machineTailReplace(frame, function, frame.b);
+
+        FunctionRecord activated;
+        if (!pushFunctionActivation(function, arguments, count,
+                ast_.node(frame.node).location, frame.b,
+                kInvalidAstNodeId, activated)) return false;
+        const std::size_t activation = callDepth_ - 1u;
+        argumentTop_ = frame.mark;
+        frame.stage = 5u;
+        if (!machinePush(PortableExecutionFrameKind::FunctionBoundary,
+                activated.declaration, true, false)) return false;
+        PortableExecutionFrame& boundary =
+            storage_.executionFrames[executionFrameTop_ - 1u];
+        boundary.callFrameIndex = activation;
+        boundary.cursor = activation;
+        boundary.mark = frame.mark;
+        return true;
+    }
+
+    bool machineRunExpression(PortableExecutionFrame& frame)
+    {
+        const AstNode& node = ast_.node(frame.node);
+        const bool inFunction = (frame.flags & MachineInFunction) != 0u;
+        const bool childReady = (frame.flags & MachineChildReady) != 0u;
+        Value value = Value::undefined();
+        if (frame.stage == 0u) {
+            if (!consumeStep(node.location)) return false;
+            switch (node.kind) {
+            case AstNodeKind::Identifier:
+                if (!readIdentifier(frame.node, value)) return false;
+                machinePop(true, value);
+                return result_.error.code == PortableExecutionErrorCode::None;
+            case AstNodeKind::NumericLiteral: {
+                double number = 0.0;
+                if (!parseNumber(ast_.nodeText(frame.node), number)) {
+                    fail(PortableExecutionErrorCode::InvalidAst, node.location);
+                    return false;
+                }
+                machinePop(true, Value::number(number));
+                return result_.error.code == PortableExecutionErrorCode::None;
+            }
+            case AstNodeKind::StringLiteral: {
+                RuntimeStringId string = kInvalidRuntimeStringId;
+                RuntimeStringError error;
+                if (!strings_.createDecodedStringLiteral(ast_.nodeText(frame.node),
+                        limits_.maxRuntimeStringLength, string, error)) {
+                    fail(error.code == RuntimeStringErrorCode::CapacityExceeded
+                            ? PortableExecutionErrorCode::StringCapacityExhausted
+                            : error.code == RuntimeStringErrorCode::StaleGeneration
+                                ? PortableExecutionErrorCode::StaleReference
+                                : PortableExecutionErrorCode::InternalInvariantFailure,
+                        node.location);
+                    return false;
+                }
+                machinePop(true, Value::string(string));
+                return result_.error.code == PortableExecutionErrorCode::None;
+            }
+            case AstNodeKind::BooleanLiteral:
+                machinePop(true, Value::boolean(
+                    nameEquals(ast_.nodeText(frame.node), "true")));
+                return true;
+            case AstNodeKind::NullLiteral:
+                machinePop(true, Value::nullValue());
+                return true;
+            case AstNodeKind::ThisExpression:
+                machinePop(true, currentThis_);
+                return true;
+            case AstNodeKind::FunctionExpression:
+            case AstNodeKind::ArrowFunctionExpression:
+                if (!createFunction(frame.node, currentEnvironment_,
+                        currentThis_, value)) return false;
+                machinePop(true, value);
+                return true;
+            case AstNodeKind::UnaryExpression:
+                frame.stage = 1u;
+                return machinePushExpression(node.argument, inFunction);
+            case AstNodeKind::BinaryExpression:
+            case AstNodeKind::LogicalExpression:
+                frame.stage = 1u;
+                return machinePushExpression(node.left, inFunction);
+            case AstNodeKind::AssignmentExpression:
+                if (validNode(ast_, node.left) &&
+                    ast_.node(node.left).kind == AstNodeKind::Identifier) {
+                    frame.auxiliaryNode = node.left;
+                    if (node.assignmentOperator != AstAssignmentOperator::Assign) {
+                        if (!readIdentifier(node.left, frame.a)) return false;
+                    }
+                    frame.stage = 3u;
+                    return machinePushExpression(node.right, inFunction);
+                }
+                if constexpr (!EnableObjectOperations) {
+                    fail(PortableExecutionErrorCode::UnsupportedOperation,
+                        node.location);
+                    return false;
+                } else {
+                    if (!validNode(ast_, node.left) ||
+                        ast_.node(node.left).kind != AstNodeKind::MemberExpression ||
+                        node.assignmentOperator != AstAssignmentOperator::Assign) {
+                        fail(PortableExecutionErrorCode::UnsupportedOperation,
+                            node.location);
+                        return false;
+                    }
+                    frame.stage = 1u;
+                    return machinePushExpression(ast_.node(node.left).object,
+                        inFunction);
+                }
+            case AstNodeKind::MemberExpression:
+                if constexpr (!EnableObjectOperations) {
+                    fail(PortableExecutionErrorCode::UnsupportedOperation,
+                        node.location);
+                    return false;
+                } else {
+                    frame.stage = 1u;
+                    return machinePushExpression(node.object, inFunction);
+                }
+            case AstNodeKind::ObjectLiteral: {
+                if constexpr (!EnableObjectOperations) {
+                    fail(PortableExecutionErrorCode::UnsupportedOperation,
+                        node.location);
+                    return false;
+                } else {
+                    RuntimeObjectId object = kInvalidRuntimeObjectId;
+                    PortableObjectError error;
+                    if (objects_ == nullptr || !objects_->createObject(
+                            kInvalidRuntimeObjectId, object, error)) {
+                        if (objects_ == nullptr)
+                            fail(PortableExecutionErrorCode::UnsupportedOperation,
+                                node.location);
+                        else failObject(error, node.location);
+                        return false;
+                    }
+                    frame.a = Value::object(object);
+                    frame.cursor = 0u;
+                    frame.stage = 1u;
+                    if (node.childCount == 0u) {
+                        machinePop(true, frame.a);
+                        return true;
+                    }
+                    const AstNodeId propertyId = ast_.childAt(frame.node, 0u);
+                    if (!validNode(ast_, propertyId) ||
+                        ast_.node(propertyId).kind != AstNodeKind::ObjectProperty) {
+                        fail(PortableExecutionErrorCode::InvalidAst,
+                            node.location);
+                        return false;
+                    }
+                    const AstNode& property = ast_.node(propertyId);
+                    if (!consumeStep(property.location)) return false;
+                    frame.auxiliaryNode = propertyId;
+                    return machinePushExpression(property.initializer,
+                        inFunction);
+                }
+            }
+            case AstNodeKind::ArrayLiteral: {
+                if constexpr (!EnableObjectOperations) {
+                    fail(PortableExecutionErrorCode::UnsupportedOperation,
+                        node.location);
+                    return false;
+                } else {
+                    RuntimeObjectId array = kInvalidRuntimeObjectId;
+                    PortableObjectError error;
+                    if (objects_ == nullptr || !objects_->createArray(
+                            node.childCount, kInvalidRuntimeObjectId,
+                            array, error)) {
+                        if (objects_ == nullptr)
+                            fail(PortableExecutionErrorCode::UnsupportedOperation,
+                                node.location);
+                        else failObject(error, node.location);
+                        return false;
+                    }
+                    frame.a = Value::object(array);
+                    frame.cursor = 0u;
+                    frame.stage = 1u;
+                    while (frame.cursor < node.childCount &&
+                        ast_.node(ast_.childAt(frame.node, frame.cursor)).kind ==
+                            AstNodeKind::ArrayElision)
+                        ++frame.cursor;
+                    if (frame.cursor == node.childCount) {
+                        machinePop(true, frame.a);
+                        return true;
+                    }
+                    return machinePushExpression(ast_.childAt(frame.node,
+                        frame.cursor), inFunction);
+                }
+            }
+            case AstNodeKind::CallExpression: {
+                if (node.childCount > limits_.maxCallArguments) {
+                    fail(PortableExecutionErrorCode::InvalidInvocationTarget,
+                        node.location);
+                    return false;
+                }
+                if (validNode(ast_, node.callee) &&
+                    ast_.node(node.callee).kind == AstNodeKind::MemberExpression) {
+                    if constexpr (!EnableObjectOperations) {
+                        fail(PortableExecutionErrorCode::UnsupportedOperation,
+                            node.location);
+                        return false;
+                    } else {
+                        const AstNode& member = ast_.node(node.callee);
+                        if (!consumeStep(member.location)) return false;
+                        frame.stage = 1u;
+                        return machinePushExpression(member.object, inFunction);
+                    }
+                }
+                frame.stage = 10u;
+                return machinePushExpression(node.callee, inFunction);
+            }
+            default:
+                fail(PortableExecutionErrorCode::UnsupportedOperation,
+                    node.location);
+                return false;
+            }
+        }
+
+        if (node.kind == AstNodeKind::UnaryExpression && frame.stage == 1u) {
+            if (!childReady) {
+                fail(PortableExecutionErrorCode::InternalInvariantFailure,
+                    node.location);
+                return false;
+            }
+            value = frame.childValue;
+            frame.flags &= static_cast<std::uint16_t>(~MachineChildReady);
+            if (!machineApplyUnary(node, value, value)) return false;
+            machinePop(true, value);
+            return true;
+        }
+
+        if (node.kind == AstNodeKind::BinaryExpression) {
+            if (frame.stage == 1u) {
+                if (!childReady) {
+                    fail(PortableExecutionErrorCode::InternalInvariantFailure,
+                        node.location);
+                    return false;
+                }
+                frame.a = frame.childValue;
+                frame.flags &= static_cast<std::uint16_t>(~MachineChildReady);
+                frame.stage = 2u;
+                return machinePushExpression(node.right, inFunction);
+            }
+            if (frame.stage == 2u && childReady) {
+                frame.b = frame.childValue;
+                frame.flags &= static_cast<std::uint16_t>(~MachineChildReady);
+                if (!applyBinaryValues(node, frame.a, frame.b, value))
+                    return false;
+                machinePop(true, value);
+                return true;
+            }
+        }
+
+        if (node.kind == AstNodeKind::LogicalExpression) {
+            if (frame.stage == 1u) {
+                if (!childReady) {
+                    fail(PortableExecutionErrorCode::InternalInvariantFailure,
+                        node.location);
+                    return false;
+                }
+                frame.a = frame.childValue;
+                frame.flags &= static_cast<std::uint16_t>(~MachineChildReady);
+                bool truth = false;
+                if (!truthy(frame.a, truth)) return false;
+                if ((node.logicalOperator == AstLogicalOperator::And && !truth) ||
+                    (node.logicalOperator == AstLogicalOperator::Or && truth)) {
+                    machinePop(true, frame.a);
+                    return true;
+                }
+                frame.stage = 2u;
+                return machinePushExpression(node.right, inFunction);
+            }
+            if (frame.stage == 2u && childReady) {
+                value = frame.childValue;
+                frame.flags &= static_cast<std::uint16_t>(~MachineChildReady);
+                machinePop(true, value);
+                return true;
+            }
+        }
+
+        if (node.kind == AstNodeKind::AssignmentExpression) {
+            if (frame.stage == 1u && childReady) {
+                frame.b = frame.childValue;
+                frame.flags &= static_cast<std::uint16_t>(~MachineChildReady);
+                if (!frame.b.isObject()) {
+                    fail(PortableExecutionErrorCode::TypeError,
+                        ast_.node(node.left).location);
+                    return false;
+                }
+                const AstNode& target = ast_.node(node.left);
+                if (target.computed) {
+                    frame.stage = 2u;
+                    return machinePushExpression(target.property, inFunction);
+                }
+                frame.auxiliaryNode = target.property;
+                frame.stage = 3u;
+                return machinePushExpression(node.right, inFunction);
+            }
+            if (frame.stage == 2u && childReady) {
+                frame.c = frame.childValue;
+                frame.flags &= static_cast<std::uint16_t>(~MachineChildReady);
+                frame.stage = 3u;
+                return machinePushExpression(node.right, inFunction);
+            }
+            if (frame.stage == 3u && childReady) {
+                Value right = frame.childValue;
+                frame.flags &= static_cast<std::uint16_t>(~MachineChildReady);
+                if (validNode(ast_, node.left) &&
+                    ast_.node(node.left).kind == AstNodeKind::Identifier) {
+                    SourceView name;
+                    if (!nodeName(frame.auxiliaryNode, name,
+                            ast_.node(frame.auxiliaryNode).location)) return false;
+                    if (!machineAssignmentValue(node, frame.a, right, value))
+                        return false;
+                    EnvironmentError error;
+                    if (!environments_.assignChain(currentEnvironment_, name,
+                            value, error)) {
+                        fail(mapEnvironmentError(error.code), node.location);
+                        return false;
+                    }
+                } else {
+                    value = right;
+                    const AstNode& target = ast_.node(node.left);
+                    if (!machineWriteProperty(frame.b, frame.auxiliaryNode,
+                            target.computed, frame.c, value, node.location))
+                        return false;
+                }
+                machinePop(true, value);
+                return true;
+            }
+        }
+
+        if (node.kind == AstNodeKind::MemberExpression) {
+            if (frame.stage == 1u && childReady) {
+                frame.a = frame.childValue;
+                frame.flags &= static_cast<std::uint16_t>(~MachineChildReady);
+                if (!frame.a.isObject()) {
+                    fail(PortableExecutionErrorCode::TypeError,
+                        node.location);
+                    return false;
+                }
+                if (node.computed) {
+                    frame.stage = 2u;
+                    return machinePushExpression(node.property, inFunction);
+                }
+                if (!machineReadProperty(frame.a, node.property, false,
+                        Value::undefined(), node.location, value)) return false;
+                machinePop(true, value);
+                return true;
+            }
+            if (frame.stage == 2u && childReady) {
+                frame.b = frame.childValue;
+                frame.flags &= static_cast<std::uint16_t>(~MachineChildReady);
+                if (!machineReadProperty(frame.a, node.property, true,
+                        frame.b, node.location, value)) return false;
+                machinePop(true, value);
+                return true;
+            }
+        }
+
+        if (node.kind == AstNodeKind::ObjectLiteral && frame.stage == 1u) {
+            if (!childReady) {
+                fail(PortableExecutionErrorCode::InternalInvariantFailure,
+                    node.location);
+                return false;
+            }
+            const AstNode& property = ast_.node(frame.auxiliaryNode);
+            frame.flags &= static_cast<std::uint16_t>(~MachineChildReady);
+            if (!machineWriteProperty(frame.a, property.key, false,
+                    Value::undefined(), frame.childValue,
+                    property.location)) return false;
+            ++frame.cursor;
+            if (frame.cursor == node.childCount) {
+                machinePop(true, frame.a);
+                return true;
+            }
+            const AstNodeId propertyId = ast_.childAt(frame.node, frame.cursor);
+            if (!validNode(ast_, propertyId) ||
+                ast_.node(propertyId).kind != AstNodeKind::ObjectProperty) {
+                fail(PortableExecutionErrorCode::InvalidAst, node.location);
+                return false;
+            }
+            const AstNode& next = ast_.node(propertyId);
+            if (!consumeStep(next.location)) return false;
+            frame.auxiliaryNode = propertyId;
+            return machinePushExpression(next.initializer, inFunction);
+        }
+
+        if (node.kind == AstNodeKind::ArrayLiteral && frame.stage == 1u &&
+            childReady) {
+            if constexpr (!EnableObjectOperations) {
+                fail(PortableExecutionErrorCode::UnsupportedOperation,
+                    node.location);
+                return false;
+            } else {
+                const std::size_t index = frame.cursor;
+                frame.flags &= static_cast<std::uint16_t>(~MachineChildReady);
+                PortableObjectError error;
+                if (!objects_->setArrayElement(frame.a.objectId(), index,
+                        frame.childValue, error)) {
+                    failObject(error,
+                        ast_.node(ast_.childAt(frame.node, index)).location);
+                    return false;
+                }
+                ++frame.cursor;
+                while (frame.cursor < node.childCount &&
+                    ast_.node(ast_.childAt(frame.node, frame.cursor)).kind ==
+                        AstNodeKind::ArrayElision)
+                    ++frame.cursor;
+                if (frame.cursor == node.childCount) {
+                    machinePop(true, frame.a);
+                    return true;
+                }
+                return machinePushExpression(ast_.childAt(frame.node,
+                    frame.cursor), inFunction);
+            }
+        }
+
+        if (node.kind == AstNodeKind::CallExpression) {
+            if (frame.stage == 1u && childReady) {
+                frame.b = frame.childValue;
+                frame.flags &= static_cast<std::uint16_t>(~MachineChildReady);
+                if (!frame.b.isObject()) {
+                    fail(PortableExecutionErrorCode::TypeError,
+                        node.location);
+                    return false;
+                }
+                const AstNode& member = ast_.node(node.callee);
+                if (member.computed) {
+                    frame.stage = 2u;
+                    return machinePushExpression(member.property, inFunction);
+                }
+                frame.auxiliaryNode = member.property;
+                if (!machineReadProperty(frame.b, frame.auxiliaryNode, false,
+                        Value::undefined(), member.location, frame.a)) return false;
+                return machineStartCall(frame);
+            }
+            if (frame.stage == 2u && childReady) {
+                frame.c = frame.childValue;
+                frame.flags &= static_cast<std::uint16_t>(~MachineChildReady);
+                const AstNode& member = ast_.node(node.callee);
+                if (!machineReadProperty(frame.b, member.property, true,
+                        frame.c, member.location, frame.a)) return false;
+                return machineStartCall(frame);
+            }
+            if (frame.stage == 10u && childReady) {
+                frame.a = frame.childValue;
+                frame.b = Value::undefined();
+                frame.flags &= static_cast<std::uint16_t>(~MachineChildReady);
+                return machineStartCall(frame);
+            }
+            if (frame.stage == 4u && childReady) {
+                storage_.argumentValues[frame.mark + frame.cursor] =
+                    frame.childValue;
+                frame.flags &= static_cast<std::uint16_t>(~MachineChildReady);
+                ++frame.cursor;
+                if (frame.cursor < node.childCount)
+                    return machinePushExpression(ast_.childAt(frame.node,
+                        frame.cursor), inFunction);
+                return machineInvokeCall(frame);
+            }
+            if (frame.stage == 5u && childReady) {
+                value = frame.childValue;
+                frame.flags &= static_cast<std::uint16_t>(~MachineChildReady);
+                argumentTop_ = frame.mark;
+                machinePop(true, value);
+                return true;
+            }
+        }
+
+        fail(PortableExecutionErrorCode::InternalInvariantFailure,
+            node.location);
+        return false;
+    }
+
+    bool machineRunStatement(PortableExecutionFrame& frame)
+    {
+        const AstNode& node = ast_.node(frame.node);
+        const bool inFunction = (frame.flags & MachineInFunction) != 0u;
+        const bool childReady = (frame.flags & MachineChildReady) != 0u;
+        if (frame.stage == 0u) {
+            if (!consumeStep(node.location)) return false;
+            switch (node.kind) {
+            case AstNodeKind::Program:
+                frame.stage = 1u;
+                return machinePushStatementList(frame.node, inFunction,
+                    false);
+            case AstNodeKind::BlockStatement: {
+                const EnvironmentId previous = currentEnvironment_;
+                EnvironmentId block = previous;
+                bool restore = false;
+                if (hasDirectLexicalBindings(frame.node)) {
+                    EnvironmentError error;
+                    if (!environments_.create(currentEnvironment_,
+                            EnvironmentKind::Block, environmentLimits(),
+                            block, error)) {
+                        fail(mapEnvironmentError(error.code), node.location);
+                        return false;
+                    }
+                    ++result_.environmentsCreated;
+                    currentEnvironment_ = block;
+                    restore = true;
+                    if (!instantiateLexicalBindings(frame.node, block))
+                        return false;
+                }
+                frame.stage = 1u;
+                if (!machinePushStatementList(frame.node, inFunction, false,
+                        restore)) return false;
+                if (restore)
+                    storage_.executionFrames[executionFrameTop_ - 1u]
+                        .savedEnvironment = previous;
+                return true;
+            }
+            case AstNodeKind::EmptyStatement:
+            case AstNodeKind::FunctionDeclaration:
+                machinePop(false);
+                return true;
+            case AstNodeKind::VariableDeclaration:
+                frame.cursor = 0u;
+                frame.stage = 2u;
+                break;
+            case AstNodeKind::ExpressionStatement:
+                frame.stage = 1u;
+                return machinePushExpression(node.expression, inFunction);
+            case AstNodeKind::ReturnStatement:
+                if (!inFunction) {
+                    fail(PortableExecutionErrorCode::IllegalReturn,
+                        node.location);
+                    return false;
+                }
+                if (node.expression == kInvalidAstNodeId) {
+                    machineReturning_ = true;
+                    machineReturnValue_ = Value::undefined();
+                    return true;
+                }
+                frame.stage = 1u;
+                return machinePushExpression(node.expression, true,
+                    ast_.node(node.expression).kind ==
+                        AstNodeKind::CallExpression);
+            default:
+                fail(PortableExecutionErrorCode::InvalidAst, node.location);
+                return false;
+            }
+        }
+        if (node.kind == AstNodeKind::ExpressionStatement &&
+            frame.stage == 1u && childReady) {
+            finalValue_ = frame.childValue;
+            frame.flags &= static_cast<std::uint16_t>(~MachineChildReady);
+            machinePop(false);
+            return true;
+        }
+        if (node.kind == AstNodeKind::ReturnStatement &&
+            frame.stage == 1u && childReady) {
+            machineReturnValue_ = frame.childValue;
+            machineReturning_ = true;
+            frame.flags &= static_cast<std::uint16_t>(~MachineChildReady);
+            return true;
+        }
+        if (node.kind == AstNodeKind::VariableDeclaration && frame.stage == 2u) {
+            if (childReady) {
+                const AstNode& declarator = ast_.node(frame.auxiliaryNode);
+                SourceView name;
+                if (!nodeName(declarator.name, name, declarator.location))
+                    return false;
+                EnvironmentError error;
+                if (!environments_.initializeChain(currentEnvironment_, name,
+                        frame.childValue, error)) {
+                    fail(mapEnvironmentError(error.code), declarator.location);
+                    return false;
+                }
+                frame.flags &= static_cast<std::uint16_t>(~MachineChildReady);
+                ++frame.cursor;
+            }
+            const std::size_t count = node.childCount;
+            if (frame.cursor >= count) {
+                machinePop(false);
+                return true;
+            }
+            const AstNodeId declaratorId = ast_.childAt(frame.node,
+                frame.cursor);
+            if (!validNode(ast_, declaratorId) ||
+                ast_.node(declaratorId).kind != AstNodeKind::VariableDeclarator) {
+                fail(PortableExecutionErrorCode::InvalidAst, node.location);
+                return false;
+            }
+            const AstNode& declarator = ast_.node(declaratorId);
+            SourceView name;
+            if (!nodeName(declarator.name, name, declarator.location))
+                return false;
+            if (declarator.initializer == kInvalidAstNodeId) {
+                EnvironmentError error;
+                if (!environments_.initializeChain(currentEnvironment_, name,
+                        Value::undefined(), error)) {
+                    fail(mapEnvironmentError(error.code), declarator.location);
+                    return false;
+                }
+                ++frame.cursor;
+                return true;
+            }
+            frame.auxiliaryNode = declaratorId;
+            return machinePushExpression(declarator.initializer, inFunction);
+        }
+        if (node.kind == AstNodeKind::Program ||
+            node.kind == AstNodeKind::BlockStatement) {
+            if (childReady) frame.flags &= static_cast<std::uint16_t>(
+                ~MachineChildReady);
+            machinePop(false);
+            return true;
+        }
+        fail(PortableExecutionErrorCode::InternalInvariantFailure,
+            node.location);
+        return false;
+    }
+
+    bool machineRunStatementList(PortableExecutionFrame& frame)
+    {
+        const AstNode& list = ast_.node(frame.node);
+        if (frame.stage == 0u) {
+            if ((frame.flags & MachineChargeNode) != 0u &&
+                !consumeStep(list.location)) return false;
+            frame.stage = 1u;
+        }
+        if (frame.flags & MachineChildReady)
+            frame.flags &= static_cast<std::uint16_t>(~MachineChildReady);
+        if (frame.cursor >= list.childCount) {
+            machinePop(false);
+            return true;
+        }
+        const AstNodeId statement = ast_.childAt(frame.node, frame.cursor++);
+        return machinePushStatement(statement,
+            (frame.flags & MachineInFunction) != 0u);
+    }
+
+    bool machineRunFunctionBoundary(PortableExecutionFrame& frame)
+    {
+        if (frame.stage == 0u) {
+            if (frame.callFrameIndex >= callDepth_ ||
+                frame.callFrameIndex >= storage_.frameCapacity) {
+                fail(PortableExecutionErrorCode::InternalInvariantFailure,
+                    SourceLocation());
+                return false;
+            }
+            const RuntimeFunctionId functionId =
+                storage_.frames[frame.callFrameIndex].function;
+            FunctionStoreError error;
+            const FunctionRecord* stored = functions_.get(functionId, error);
+            if (stored == nullptr || !validNode(ast_, stored->declaration)) {
+                fail(PortableExecutionErrorCode::InvalidFunctionReference,
+                    SourceLocation());
+                return false;
+            }
+            const FunctionRecord function = *stored;
+            const AstNode& declaration = ast_.node(function.declaration);
+            if (!prepareFunctionBody(function,
+                    storage_.frames[frame.callFrameIndex].callSite))
+                return false;
+            frame.node = function.declaration;
+            frame.stage = 1u;
+            if (declaration.body != kInvalidAstNodeId)
+                return machinePushStatementList(declaration.body, true, true);
+            frame.stage = 2u;
+            return machinePushExpression(declaration.expression, true,
+                validNode(ast_, declaration.expression) &&
+                    ast_.node(declaration.expression).kind ==
+                        AstNodeKind::CallExpression);
+        }
+        if ((frame.flags & MachineChildReady) == 0u) {
+            fail(PortableExecutionErrorCode::InternalInvariantFailure,
+                validNode(ast_, frame.node) ? ast_.node(frame.node).location
+                    : SourceLocation());
+            return false;
+        }
+        const Value returned = frame.stage == 2u
+            ? frame.childValue : Value::undefined();
+        frame.flags &= static_cast<std::uint16_t>(~MachineChildReady);
+        const std::size_t index = executionFrameTop_ - 1u;
+        machineFinishFunction(index, returned);
+        return result_.error.code == PortableExecutionErrorCode::None;
+    }
+
+    void machineUnwindReturn()
+    {
+        while (machineReturning_ && executionFrameTop_ != 0u &&
+            result_.error.code == PortableExecutionErrorCode::None) {
+            PortableExecutionFrame& frame =
+                storage_.executionFrames[executionFrameTop_ - 1u];
+            if (frame.kind == PortableExecutionFrameKind::FunctionBoundary) {
+                const std::size_t index = executionFrameTop_ - 1u;
+                const Value returned = machineReturnValue_;
+                machineReturning_ = false;
+                machineFinishFunction(index, returned);
+                return;
+            }
+            machineDiscardTop();
+        }
+        if (machineReturning_ && executionFrameTop_ == 0u) {
+            machineReturning_ = false;
+            fail(PortableExecutionErrorCode::IllegalReturn,
+                SourceLocation());
+        }
+    }
+
+    void machineAbort(std::size_t oldCallDepth,
+        EnvironmentId oldEnvironment, Value oldThis, std::size_t oldArgumentTop)
+    {
+        while (executionFrameTop_ != 0u) {
+            storage_.executionFrames[executionFrameTop_ - 1u] =
+                PortableExecutionFrame();
+            --executionFrameTop_;
+        }
+        for (std::size_t index = oldCallDepth;
+            index < callDepth_ && index < storage_.frameCapacity; ++index)
+            storage_.frames[index].continuationNode = kInvalidAstNodeId;
+        callDepth_ = oldCallDepth;
+        currentEnvironment_ = oldEnvironment;
+        currentThis_ = oldThis;
+        argumentTop_ = oldArgumentTop;
+        machineReturning_ = false;
+    }
+
+    bool runExecutionMachine(AstNodeId root, Value& result)
+    {
+        const std::size_t oldCallDepth = callDepth_;
+        const EnvironmentId oldEnvironment = currentEnvironment_;
+        const Value oldThis = currentThis_;
+        const std::size_t oldArgumentTop = argumentTop_;
+        executionFrameTop_ = 0u;
+        machineReturning_ = false;
+        machineRootValue_ = Value::undefined();
+        if (!machinePushStatementList(root, false, true)) {
+            machineAbort(oldCallDepth, oldEnvironment, oldThis,
+                oldArgumentTop);
+            return false;
+        }
+        while (executionFrameTop_ != 0u &&
+            result_.error.code == PortableExecutionErrorCode::None) {
+            if (machineReturning_) {
+                machineUnwindReturn();
+                continue;
+            }
+            PortableExecutionFrame& frame =
+                storage_.executionFrames[executionFrameTop_ - 1u];
+            bool ok = false;
+            switch (frame.kind) {
+            case PortableExecutionFrameKind::StatementList:
+                ok = machineRunStatementList(frame);
+                break;
+            case PortableExecutionFrameKind::Statement:
+                ok = machineRunStatement(frame);
+                break;
+            case PortableExecutionFrameKind::Expression:
+                ok = machineRunExpression(frame);
+                break;
+            case PortableExecutionFrameKind::FunctionBoundary:
+                ok = machineRunFunctionBoundary(frame);
+                break;
+            case PortableExecutionFrameKind::Empty:
+            default:
+                fail(PortableExecutionErrorCode::InternalInvariantFailure,
+                    SourceLocation());
+                ok = false;
+                break;
+            }
+            if (!ok) break;
+        }
+        if (result_.error.code != PortableExecutionErrorCode::None ||
+            executionFrameTop_ != 0u || callDepth_ != oldCallDepth ||
+            machineReturning_) {
+            if (result_.error.code == PortableExecutionErrorCode::None)
+                fail(PortableExecutionErrorCode::InternalInvariantFailure,
+                    SourceLocation());
+            machineAbort(oldCallDepth, oldEnvironment, oldThis,
+                oldArgumentTop);
+            return false;
+        }
+        result = finalValue_;
+        currentEnvironment_ = oldEnvironment;
+        currentThis_ = oldThis;
+        argumentTop_ = oldArgumentTop;
+        return true;
     }
 
     bool executeStatementList(AstNodeId container, bool inFunction,
@@ -2397,6 +3640,10 @@ private:
     Value finalValue_ = Value::undefined();
     std::size_t callDepth_ = 0u;
     std::size_t argumentTop_ = 0u;
+    std::size_t executionFrameTop_ = 0u;
+    bool machineReturning_ = false;
+    Value machineReturnValue_ = Value::undefined();
+    Value machineRootValue_ = Value::undefined();
 };
 
 using PortableExecutionCore = PortableExecutionCoreImpl<false>;

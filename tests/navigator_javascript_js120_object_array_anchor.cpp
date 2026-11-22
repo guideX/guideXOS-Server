@@ -18,9 +18,9 @@ static_assert(sizeof(PortableArrayElementRecord) == 32u,
     "JS120 AMD64 Array element record size");
 static_assert(sizeof(PortableObjectStore) == 200u,
     "JS120 AMD64 object store metadata size");
-static_assert(sizeof(PortableExecutionCore) == 304u,
+static_assert(sizeof(PortableExecutionCore) == 392u,
     "JS120 AMD64 portable execution context size");
-static_assert(sizeof(PortableObjectExecutionCore) == 304u,
+static_assert(sizeof(PortableObjectExecutionCore) == 392u,
     "JS120 AMD64 object-enabled execution context size");
 static_assert(alignof(Value) == 8u, "JS120 AMD64 Value alignment");
 static_assert(alignof(PortableObjectRecord) == 4u,

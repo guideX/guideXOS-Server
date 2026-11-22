@@ -5464,6 +5464,8 @@ bool RuntimeContext::configurePortableExecutionStorage(
         portableFunctionStorage_.resize(functionCapacity);
         portableCallFrameStorage_.resize(limits_.maxCallDepth);
         portableArgumentStorage_.resize(limits_.maxPortableArgumentValues);
+        portableExecutionFrameStorage_.resize(
+            kDefaultPortableExecutionFrameCapacity);
     } catch (const std::bad_alloc&) {
         error = RuntimeErrorCode::AllocationFailure;
         return false;
@@ -5523,6 +5525,7 @@ RuntimeErrorCode RuntimeContext::mapPortableExecutionError(
     case PortableExecutionErrorCode::StringCapacityExhausted:
         return RuntimeErrorCode::StringLimitExceeded;
     case PortableExecutionErrorCode::ArgumentCapacityExhausted:
+    case PortableExecutionErrorCode::ExecutionFrameCapacityExhausted:
         return RuntimeErrorCode::PortableCapacityExceeded;
     case PortableExecutionErrorCode::StepBudgetExhausted:
         return RuntimeErrorCode::ExecutionBudgetExceeded;
@@ -7815,7 +7818,9 @@ ScriptResult RuntimeContext::execute(SourceView source)
                     portableCallFrameStorage_.data(),
                     portableCallFrameStorage_.size(),
                     portableArgumentStorage_.data(),
-                    portableArgumentStorage_.size()};
+                    portableArgumentStorage_.size(),
+                    portableExecutionFrameStorage_.data(),
+                    portableExecutionFrameStorage_.size()};
                 const PortableExecutionLimits executionLimits{
                     limits_.maxCallDepth,
                     limits_.parser.maxCallArguments,

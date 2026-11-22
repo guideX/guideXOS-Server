@@ -14475,3 +14475,45 @@ conversion does not establish total interpreter or guest-stack safety. See
 the [JS127 non-tail continuation report](NAVIGATOR_JAVASCRIPT_JS127_NONTAIL_CONTINUATIONS.md)
 for the full call-position inventory, architecture, gate table, stack
 accounting, test evidence, and JS128 scope.
+
+### JS128 general resumable execution machine — partial
+
+JS128 adds a bounded, caller-backed execution-frame arena to the shared
+portable execution core. The `run()` script path evaluates supported
+expressions and statements through resumable stages, retaining completed
+operands, argument Values, receivers, assignment destinations, lexical
+environments, and statement positions while nested calls execute. The
+JS128-focused suite covers nested arguments and side effects, initializer and
+assignment continuations, sequential statements, non-tail arithmetic and
+mutual recursion, direct tail dispatch, member receivers, arrow lexical
+`this`, closures, frame/argument/step/depth limits, error unwinding, and reuse
+after failure. It passes **19/19** checks, with a measured high-water of 453
+execution frames (50,736 bytes) and logical call depth 64.
+
+The `run()` path uses a single executor loop for the qualified portable script
+subset, including generic non-tail call positions. The public
+`invokeCallable()` callback entry, hosted evaluator fallback, and recursive
+capability preflight retain native recursion and are outside the flattening
+claim. A 4,096-frame arena adds 458,752 bytes to the runtime's configured
+invocation scratch; this is caller-owned heap/vector backing rather than native
+stack storage. GCC 15.2 AMD64 stack-usage reports and the component audit pass,
+with no standard runtime, TLS, constructor, exception, or platform imports.
+This does not establish whole-interpreter or 16 KiB kernel boot-stack safety.
+
+The full matrix passes **120/120 unique lanes** and **19,349/19,349 reported
+assertions across 77 lanes**. JS109/JS110 hosted pages pass against the
+production candidate. The hosted Navigator aggregate remains **767/774**,
+with only the seven established CSS failures. The strict production build
+passes; its 9,429,318-byte candidate was tested and then kept separately while
+the original executable was restored. All 42 generated fixtures match their
+baseline hashes and `.phase` remains absent. Matrix evidence records 121
+completed child processes, all with verified exit code 0, including one
+duplicate JS26 run. An earlier JS27 attempt was terminated before exit-code or
+stdout/stderr collection and is explicitly classified as indeterminate; its
+completed retry passed. No QEMU, QAC, or guest execution was performed.
+
+JS128 is **Outcome B — `JS128_GENERAL_EXECUTION_PARTIAL`** because callback
+invocation and hosted fallback have not yet moved to the shared machine. See
+the [JS128 general resumable execution report](NAVIGATOR_JAVASCRIPT_JS128_GENERAL_RESUMABLE_EXECUTION.md)
+for the R0–R10 table, architecture, memory and stack evidence, complete test
+results, protected artifacts, remaining native recursion, and JS129 scope.

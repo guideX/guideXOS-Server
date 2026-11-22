@@ -705,6 +705,7 @@ private:
     FunctionStore portableFunctions_;
     std::vector<PortableCallFrame> portableCallFrameStorage_;
     std::vector<Value> portableArgumentStorage_;
+    std::vector<PortableExecutionFrame> portableExecutionFrameStorage_;
     std::vector<RuntimeStringRecord> runtimeStringRecordStorage_;
     std::vector<char> runtimeStringStorage_;
     RuntimeStringStore stringStore_;

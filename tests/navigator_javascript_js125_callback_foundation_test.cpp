@@ -67,10 +67,12 @@ public:
           functions_(), functionsStorage_(128u), objects_(),
           objectRecords_(128u), properties_(512u), arrayElements_(512u),
           propertyNames_(16384u), frames_(64u), arguments_(512u),
+          executionFrames_(kDefaultPortableExecutionFrameCapacity),
           core_(ast_, strings_, environments_,
               functions_, objects_,
               PortableExecutionStorageView{frames_.data(), frames_.size(),
-                  arguments_.data(), arguments_.size()},
+                  arguments_.data(), arguments_.size(),
+                  executionFrames_.data(), executionFrames_.size()},
               limits_, steps_)
     {
     }
@@ -168,6 +170,7 @@ public:
     PortableExecutionLimits limits_;
     std::vector<PortableCallFrame> frames_;
     std::vector<Value> arguments_;
+    std::vector<PortableExecutionFrame> executionFrames_;
     std::size_t steps_ = 0u;
     PortableObjectExecutionCore core_;
     EnvironmentId root_ = kInvalidEnvironmentId;
