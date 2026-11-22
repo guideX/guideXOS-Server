@@ -262,6 +262,78 @@ static const uint32_t XHCI_MAX_PROTOCOLS      = 4u;
 static const uint32_t XHCI_EXT_CAP_MAX_DWORDS = 64u;
 static const uint32_t XHCI_EXT_CAP_MAX_WALK   = 64u;
 
+enum class XhciExtCapWalkStatus : uint8_t {
+    Complete = 0,
+    InvalidInput,
+    Malformed,
+    TooManyCapabilities,
+    DuplicateLegacySupport
+};
+
+struct XhciExtCapWalkResult {
+    XhciExtCapWalkStatus status;
+    uint32_t capabilityCount;
+    uint32_t legacyOffsetDword;
+    bool legacyFound;
+};
+
+// Walk from an absolute DWORD offset in the supplied MMIO snapshot. The next
+// pointer is relative to the current header in DWORDs. All reads, including
+// the second USBLEGCTLSTS DWORD, are checked against the mapped snapshot.
+inline XhciExtCapWalkResult walk_xhci_extended_capabilities(
+    const volatile uint32_t* mmioWords, uint32_t wordCount,
+    uint32_t firstDword)
+{
+    XhciExtCapWalkResult result{};
+    result.status = XhciExtCapWalkStatus::InvalidInput;
+    if (mmioWords == nullptr || firstDword >= wordCount) return result;
+
+    uint32_t index = firstDword;
+    for (uint32_t walk = 0u; walk < XHCI_EXT_CAP_MAX_WALK; ++walk) {
+        if (index >= wordCount) {
+            result.status = XhciExtCapWalkStatus::Malformed;
+            return result;
+        }
+        const uint32_t header = mmioWords[index];
+        const uint32_t capId = header & 0xFFu;
+        const uint32_t next = (header >> 8) & 0xFFu;
+        if (capId == 0u) {
+            result.status = next == 0u ? XhciExtCapWalkStatus::Complete
+                                      : XhciExtCapWalkStatus::Malformed;
+            return result;
+        }
+        ++result.capabilityCount;
+        if (capId == XHCI_EXT_CAP_USB_LEGACY) {
+            if (result.legacyFound) {
+                result.status = XhciExtCapWalkStatus::DuplicateLegacySupport;
+                return result;
+            }
+            if (index + 1u >= wordCount) {
+                result.status = XhciExtCapWalkStatus::Malformed;
+                return result;
+            }
+            result.legacyFound = true;
+            result.legacyOffsetDword = index;
+        } else if (capId == XHCI_EXT_CAP_SUPPORTED_PROTOCOL &&
+                   index + 2u >= wordCount) {
+            result.status = XhciExtCapWalkStatus::Malformed;
+            return result;
+        }
+        if (next == 0u) {
+            result.status = XhciExtCapWalkStatus::Complete;
+            return result;
+        }
+        if (next > UINT32_MAX - index || index + next <= index ||
+            index + next >= wordCount) {
+            result.status = XhciExtCapWalkStatus::Malformed;
+            return result;
+        }
+        index += next;
+    }
+    result.status = XhciExtCapWalkStatus::TooManyCapabilities;
+    return result;
+}
+
 struct XhciProtocol {
     uint8_t majorRevision;   // e.g. 3 for USB 3.x, 2 for USB 2.0
     uint8_t minorRevision;   // e.g. 0
@@ -301,23 +373,21 @@ inline uint32_t parse_xhci_supported_protocols(const uint32_t* xecp,
         return 0u;
     }
 
-    uint32_t found       = 0u;
-    uint32_t index       = 0u; // dword index relative to xecp
-    uint32_t iterations  = 0u;
+    const XhciExtCapWalkResult validation =
+        walk_xhci_extended_capabilities(xecp, words, 0u);
+    if (validation.status != XhciExtCapWalkStatus::Complete) return 0u;
 
-    while (index < words && iterations < XHCI_EXT_CAP_MAX_WALK) {
-        ++iterations;
-
+    uint32_t found = 0u;
+    uint32_t index = 0u;
+    for (uint32_t iteration = 0u;
+         iteration < validation.capabilityCount && index < words;
+         ++iteration) {
         const uint32_t dw0   = xecp[index];
         const uint32_t capId = dw0 & 0xFFu;
         const uint32_t next  = (dw0 >> 8) & 0xFFu;
 
-        if (capId == 0u) {
-            break; // end of extended capability list
-        }
-
         if (capId == XHCI_EXT_CAP_SUPPORTED_PROTOCOL &&
-            (index + 2u) < words && found < maxOut) {
+            found < maxOut) {
             XhciProtocol p;
             xhci_zero_protocol(&p);
 
@@ -341,15 +411,8 @@ inline uint32_t parse_xhci_supported_protocols(const uint32_t* xecp,
             ++found;
         }
 
-        if (next == 0u) {
-            break; // last capability
-        }
-
-        const uint32_t nextIndex = index + next;
-        if (nextIndex <= index) {
-            break; // malformed (non-advancing) next pointer
-        }
-        index = nextIndex;
+        if (next == 0u) break;
+        index += next;
     }
 
     return found;

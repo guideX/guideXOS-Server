@@ -300,7 +300,8 @@ void test_protocols_malformed()
                "protocols truncated entry");
     }
     {
-        // Malformed next pointer that runs off the buffer must terminate.
+        // A valid first node followed by an off-buffer pointer invalidates
+        // the complete chain; partial protocol results are not usable.
         uint32_t ext[8] = {0};
         ext[0] = 0x02u | (200u << 8) | (3u << 24);
         ext[1] = 0x33425355u;
@@ -308,7 +309,49 @@ void test_protocols_malformed()
         XhciProtocol p[XHCI_MAX_PROTOCOLS];
         const uint32_t n = parse_xhci_supported_protocols(
             ext, 8u, p, XHCI_MAX_PROTOCOLS);
-        expect(n == 1u, "protocols off-buffer next terminates");
+        expect(n == 0u, "protocols off-buffer next rejects the chain");
+    }
+    {
+        // Legacy Support may appear after an unrelated capability. The next
+        // field is relative to the current DWORD index.
+        uint32_t ext[8] = {0};
+        ext[0] = 0x05u | (2u << 8);
+        ext[2] = 0x01u;
+        const XhciExtCapWalkResult walk =
+            walk_xhci_extended_capabilities(ext, 8u, 0u);
+        expect(walk.status == XhciExtCapWalkStatus::Complete &&
+               walk.legacyFound && walk.legacyOffsetDword == 2u &&
+               walk.capabilityCount == 2u,
+               "legacy capability is found through relative next pointers");
+    }
+    {
+        uint32_t ext[8] = {0};
+        ext[0] = 0x05u | (2u << 8);
+        ext[2] = 0x01u | (2u << 8);
+        ext[4] = 0x01u;
+        const XhciExtCapWalkResult walk =
+            walk_xhci_extended_capabilities(ext, 8u, 0u);
+        expect(walk.status == XhciExtCapWalkStatus::DuplicateLegacySupport,
+               "duplicate USBLEGSUP capabilities are rejected");
+    }
+    {
+        uint32_t ext[8] = {0};
+        ext[0] = 0x05u | (1u << 8);
+        ext[1] = 0x06u | (0xFFu << 8);
+        const XhciExtCapWalkResult walk =
+            walk_xhci_extended_capabilities(ext, 8u, 0u);
+        expect(walk.status == XhciExtCapWalkStatus::Malformed,
+               "extended capability next pointer cannot escape the mapped span");
+    }
+    {
+        uint32_t ext[70] = {};
+        for (uint32_t i = 0u; i < 70u; ++i) {
+            ext[i] = 0x05u | (1u << 8);
+        }
+        const XhciExtCapWalkResult walk =
+            walk_xhci_extended_capabilities(ext, 70u, 0u);
+        expect(walk.status == XhciExtCapWalkStatus::TooManyCapabilities,
+               "extended capability chains terminate at the traversal bound");
     }
     {
         // More protocols than capacity: only capacity entries are written.

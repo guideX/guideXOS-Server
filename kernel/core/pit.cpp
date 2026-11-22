@@ -23,7 +23,11 @@ static const uint16_t kCommandReg   = 0x43;
 // PIT oscillator frequency (~1.193182 MHz)
 static const uint32_t kBaseFrequency = 1193182;
 
-static volatile uint64_t s_ticks = 0;
+// A split counter keeps snapshots consistent on 32-bit x86. IRQ0 increments
+// both halves on the same CPU, and readers retry only across a high-word wrap.
+static volatile uint32_t s_ticksLow = 0;
+static volatile uint32_t s_ticksHigh = 0;
+static volatile uint32_t s_tickRateHz = 0;
 static volatile bool s_heartbeatSeen = false;
 
 void init(uint32_t hz)
@@ -39,7 +43,9 @@ void init(uint32_t hz)
     arch::outb(kChannel0Data, static_cast<uint8_t>(divisor & 0xFF));
     arch::outb(kChannel0Data, static_cast<uint8_t>((divisor >> 8) & 0xFF));
 
-    s_ticks = 0;
+    s_ticksLow = 0;
+    s_ticksHigh = 0;
+    s_tickRateHz = kBaseFrequency / divisor;
     s_heartbeatSeen = false;
 
     serial::puts("[PIT] Timer configured at ~");
@@ -51,18 +57,33 @@ void init(uint32_t hz)
 
 void irq_handler()
 {
-    ++s_ticks;
+    ++s_ticksLow;
+    if (s_ticksLow == 0u) ++s_ticksHigh;
     s_heartbeatSeen = true;
-    if ((s_ticks % 100u) == 0u) {
+    const uint64_t now = (static_cast<uint64_t>(s_ticksHigh) << 32u) | s_ticksLow;
+    if ((now % 100u) == 0u) {
         serial::puts("[KERNEL-HEARTBEAT] ticks=");
-        serial::put_hex64(s_ticks);
+        serial::put_hex64(now);
         serial::puts(" source=PIT_IRQ0\n");
     }
 }
 
 uint64_t ticks()
 {
-    return s_ticks;
+    uint32_t highBefore = 0u;
+    uint32_t highAfter = 0u;
+    uint32_t low = 0u;
+    do {
+        highBefore = s_ticksHigh;
+        low = s_ticksLow;
+        highAfter = s_ticksHigh;
+    } while (highBefore != highAfter);
+    return (static_cast<uint64_t>(highAfter) << 32u) | low;
+}
+
+uint32_t ticks_per_second()
+{
+    return s_tickRateHz;
 }
 
 bool heartbeat_seen()
@@ -75,6 +96,7 @@ bool heartbeat_seen()
 void     init(uint32_t) { }
 void     irq_handler()  { }
 uint64_t ticks()        { return 0; }
+uint32_t ticks_per_second() { return 0; }
 bool     heartbeat_seen() { return false; }
 
 #endif // ARCH_HAS_PORT_IO

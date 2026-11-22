@@ -310,10 +310,13 @@ struct XhciErstEntry {
 // ================================================================
 
 static const uint32_t XHCI_USBLEGSUP_CAPID = 0x01;
-static const uint32_t XHCI_USBLEGSUP_BIOS_OWNED = 0x00000100;
-static const uint32_t XHCI_USBLEGSUP_OS_OWNED   = 0x00000001;
-static const uint32_t XHCI_USBLEGSUP_HC_OS_OWNED_SEM = 0x00010000;
-static const uint32_t XHCI_USBLEGSUP_HC_BIOS_OWNED_SEM = 0x00020000;
+static const uint32_t XHCI_USBLEGSUP_HC_BIOS_OWNED_SEM = 0x00010000u;
+static const uint32_t XHCI_USBLEGSUP_HC_OS_OWNED_SEM   = 0x01000000u;
+static const uint32_t XHCI_USBLEGCTLSTS_SMI_ENABLE_MASK =
+    (1u << 0) | (1u << 4) | (1u << 13) | (1u << 14) | (1u << 15);
+static const uint32_t XHCI_USBLEGCTLSTS_RESERVED_P_MASK = 0x000E1FEEu;
+static const uint32_t XHCI_USBLEGCTLSTS_RW1C_MASK =
+    (1u << 29) | (1u << 30) | (1u << 31);
 
 // ================================================================
 // Controller state machine
@@ -333,9 +336,13 @@ enum class XhciControllerState : uint8_t {
 // ================================================================
 
 enum class XhciOwnershipState : uint8_t {
-    NoCapability = 0,
+    Unknown = 0,
+    NoCapability,
+    Unowned,
     BiosOwned,
     OsOwned,
+    Conflict,
+    SmiDisableFailure,
     HandoffTimeout,
 };
 
@@ -546,6 +553,22 @@ inline bool erst_size_valid(uint32_t size)
     return size >= 1 && size <= XHCI_ERST_MAX_ENTRIES;
 }
 
+enum class XhciErstRegisterWrite : uint8_t {
+    Size = 0,
+    DequeuePointer,
+    BaseAddress
+};
+
+inline uint32_t xhci_erst_register_write_order(
+    XhciErstRegisterWrite* output, uint32_t capacity)
+{
+    if (output == nullptr || capacity < 3u) return 0u;
+    output[0] = XhciErstRegisterWrite::Size;
+    output[1] = XhciErstRegisterWrite::DequeuePointer;
+    output[2] = XhciErstRegisterWrite::BaseAddress;
+    return 3u;
+}
+
 inline uint64_t erst_encode_base(uint64_t base)
 {
     return base & XHCI_ERSTBA_PTR_MASK;
@@ -692,8 +715,8 @@ inline const char* xhci_mmio_access_failure_name(XhciMmioAccessFailure failure)
 }
 
 // Return the exclusive byte span needed by this bounded xHCI driver. Includes
-// the capability block, the first xECP dword, operational/port registers,
-// interrupter zero, and doorbells through MaxSlots.
+// the capability block, a bounded 64-DWORD xECP walk, operational/port
+// registers, interrupter zero, and doorbells through MaxSlots.
 inline bool xhci_required_mmio_span(const XhciCapabilities& caps,
                                     uint64_t* spanOut)
 {
@@ -703,7 +726,8 @@ inline bool xhci_required_mmio_span(const XhciCapabilities& caps,
     }
     const uint64_t capSpan = XHCI_CAP_DWORD_COUNT * 4u;
     const uint64_t xecpSpan = caps.xecp == 0u
-        ? 0u : static_cast<uint64_t>(caps.xecpBase) + 4u;
+        ? 0u : static_cast<uint64_t>(caps.xecpBase) +
+              static_cast<uint64_t>(XHCI_EXT_CAP_MAX_DWORDS) * 4u;
     const uint64_t opSpan = static_cast<uint64_t>(caps.opBase) + 0x400u +
         static_cast<uint64_t>(caps.maxPorts) * 0x10u;
     const uint64_t runtimeSpan = static_cast<uint64_t>(caps.rtBase) + 0x40u;
@@ -759,6 +783,10 @@ static const uint32_t XHCI_MAX_DMA_SCRATCHPAD_PAGE_SIZE = 64u * 1024u;
 static const uint32_t XHCI_DMA_SCRATCHPAD_STORAGE_SIZE =
     (XHCI_MAX_DMA_SCRATCHPAD_BUFFERS + 1u) * XHCI_MAX_DMA_SCRATCHPAD_PAGE_SIZE;
 
+// xHCI requires the controller to enter HCHalted within 16 ms after software
+// clears Run/Stop. The 100 Hz kernel PIT rounds this deadline up to two ticks.
+static const uint32_t XHCI_HALT_TIMEOUT_MS = 16u;
+
 enum class XhciDeviceDmaTranslationEvidence : uint8_t {
     Unknown = 0,
     NoAcpiRemappingTable,
@@ -776,8 +804,192 @@ inline bool xhci_controller_state_change_allowed(bool dmaVerified,
                                                   bool workspaceExclusive,
                                                   bool selectedController)
 {
-    return dmaVerified && ownershipResolved && workspaceExclusive &&
-           selectedController;
+    // Halting and reset are quiescence steps required to make DMA safe. They
+    // are allowed after exclusive ownership is resolved, before workspace DMA
+    // authorization. This avoids the BME-on-entry admission deadlock.
+    (void)dmaVerified;
+    return ownershipResolved && workspaceExclusive && selectedController;
+}
+
+inline bool xhci_dma_authorization_allowed(bool ownershipResolved,
+                                            bool controllerHalted,
+                                            bool resetCompleted,
+                                            bool workspaceQualified,
+                                            bool protectionQualified,
+                                            bool busMasterDisabled)
+{
+    return ownershipResolved && controllerHalted && resetCompleted &&
+           workspaceQualified && protectionQualified && busMasterDisabled;
+}
+
+inline bool xhci_ownership_acquired(uint32_t legsup)
+{
+    return (legsup & 0x01000000u) != 0u &&
+           (legsup & 0x00010000u) == 0u;
+}
+
+enum class XhciOwnershipHandoffResult : uint8_t {
+    Wait = 0,
+    Acquired,
+    Timeout
+};
+
+inline XhciOwnershipHandoffResult xhci_ownership_handoff_result(
+    uint32_t legsup, bool timeoutExpired)
+{
+    if (xhci_ownership_acquired(legsup)) {
+        return XhciOwnershipHandoffResult::Acquired;
+    }
+    return timeoutExpired ? XhciOwnershipHandoffResult::Timeout
+                          : XhciOwnershipHandoffResult::Wait;
+}
+
+inline uint32_t xhci_usb_legacy_smi_disable_value(uint32_t ctlsts)
+{
+    // The caller writes only Reserved-P readback values; all SMI enables,
+    // RO status bits, and RW1C status bits are written as zero.
+    return ctlsts & XHCI_USBLEGCTLSTS_RESERVED_P_MASK;
+}
+
+inline uint64_t xhci_timeout_ticks(uint32_t timeoutMs, uint32_t tickRateHz)
+{
+    if (timeoutMs == 0u || tickRateHz == 0u) return 0u;
+    const uint64_t scaled = static_cast<uint64_t>(timeoutMs) * tickRateHz;
+    return (scaled + 999u) / 1000u;
+}
+
+// A snapshot of the periodic PIT counter can begin anywhere within a tick.
+// Add one tick beyond the rounded conversion so a requested minimum delay is
+// not shortened by the counter's phase. This may add at most one tick.
+inline uint64_t xhci_timeout_ticks_with_phase_guard(uint32_t timeoutMs,
+                                                    uint32_t tickRateHz)
+{
+    const uint64_t ticks = xhci_timeout_ticks(timeoutMs, tickRateHz);
+    return ticks == 0u ? 0u : ticks + 1u;
+}
+
+inline uint32_t xhci_link_cycle_before_toggle(uint32_t producerCycleAfterToggle)
+{
+    return (producerCycleAfterToggle ^ 1u) & 1u;
+}
+
+inline bool xhci_controller_dma_enable_allowed(bool dmaAuthorized,
+                                                bool busMasterReadback)
+{
+    return dmaAuthorized && busMasterReadback;
+}
+
+inline bool xhci_range_within_boundary(uint64_t base, uint64_t length,
+                                       uint32_t boundaryBytes)
+{
+    if (length == 0u || boundaryBytes == 0u ||
+        (boundaryBytes & (boundaryBytes - 1u)) != 0u ||
+        length > boundaryBytes ||
+        length - 1u > (~static_cast<uint64_t>(0) - base)) {
+        return false;
+    }
+    return (base / boundaryBytes) ==
+           ((base + length - 1u) / boundaryBytes);
+}
+
+struct XhciTransferRingState {
+    uint32_t ringSize;
+    uint32_t producerIndex;
+    uint32_t producerCycle;
+    uint32_t outstandingTrbs;
+    bool poisoned;
+};
+
+inline bool xhci_transfer_ring_initialize(XhciTransferRingState* state,
+                                           uint32_t ringSize,
+                                           uint32_t initialCycle)
+{
+    if (state == nullptr || !ring_is_power_of_two(ringSize) ||
+        ringSize < 4u || ringSize > XHCI_RING_MAX_SIZE || initialCycle > 1u) {
+        return false;
+    }
+    state->ringSize = ringSize;
+    state->producerIndex = 0u;
+    state->producerCycle = initialCycle;
+    state->outstandingTrbs = 0u;
+    state->poisoned = false;
+    return true;
+}
+
+// Reserve a complete TD on a single-segment transfer ring. The final entry
+// is always the Link TRB. When the reservation crosses it, linkCycleOut is
+// the producer cycle that belongs on that Link TRB before TC toggles the xHC.
+inline bool xhci_transfer_ring_reserve(XhciTransferRingState* state,
+                                       uint32_t trbCount,
+                                       uint32_t* indices,
+                                       uint8_t* cycles,
+                                       uint32_t outputCapacity,
+                                       bool* crossedLink,
+                                       uint8_t* linkCycleOut)
+{
+    if (crossedLink != nullptr) *crossedLink = false;
+    if (linkCycleOut != nullptr) *linkCycleOut = 0u;
+    if (state == nullptr || indices == nullptr || cycles == nullptr ||
+        crossedLink == nullptr || linkCycleOut == nullptr ||
+        state->poisoned || trbCount == 0u || trbCount > outputCapacity ||
+        !ring_is_power_of_two(state->ringSize) || state->ringSize < 4u ||
+        state->producerIndex >= state->ringSize - 1u ||
+        state->producerCycle > 1u ||
+        state->outstandingTrbs > state->ringSize - 1u ||
+        trbCount > (state->ringSize - 1u - state->outstandingTrbs)) {
+        return false;
+    }
+
+    for (uint32_t i = 0u; i < trbCount; ++i) {
+        indices[i] = state->producerIndex;
+        cycles[i] = static_cast<uint8_t>(state->producerCycle);
+        ++state->producerIndex;
+        if (state->producerIndex == state->ringSize - 1u) {
+            *crossedLink = true;
+            *linkCycleOut = static_cast<uint8_t>(state->producerCycle);
+            state->producerIndex = 0u;
+            state->producerCycle ^= 1u;
+        }
+    }
+    state->outstandingTrbs += trbCount;
+    return true;
+}
+
+inline bool xhci_transfer_ring_complete(XhciTransferRingState* state,
+                                        uint32_t trbCount)
+{
+    if (state == nullptr || trbCount == 0u ||
+        trbCount > state->outstandingTrbs) return false;
+    state->outstandingTrbs -= trbCount;
+    return true;
+}
+
+inline void xhci_transfer_ring_poison(XhciTransferRingState* state)
+{
+    if (state != nullptr) state->poisoned = true;
+}
+
+inline bool xhci_transfer_event_matches(uint64_t eventTrbPointer,
+                                         uint64_t ringBase,
+                                         const uint32_t* trbIndices,
+                                         uint32_t trbCount)
+{
+    if (trbIndices == nullptr || trbCount == 0u ||
+        ringBase > UINT64_MAX - (static_cast<uint64_t>(XHCI_RING_MAX_SIZE) - 1u) *
+                                  XHCI_TRB_SIZE) return false;
+    for (uint32_t i = 0u; i < trbCount; ++i) {
+        if (trbIndices[i] >= XHCI_RING_MAX_SIZE) return false;
+        const uint64_t expected = ringBase +
+            static_cast<uint64_t>(trbIndices[i]) * XHCI_TRB_SIZE;
+        if (eventTrbPointer == expected) return true;
+    }
+    return false;
+}
+
+inline bool xhci_command_completion_matches(uint64_t eventTrbPointer,
+                                             uint64_t expectedTrbPointer)
+{
+    return expectedTrbPointer != 0u && eventTrbPointer == expectedTrbPointer;
 }
 
 // PCI bus mastering may be cleared after a failed Run transition only when
@@ -787,6 +999,15 @@ inline bool xhci_pci_bus_master_disable_allowed(bool haltObservedWithinBound,
                                                 bool runStopClear)
 {
     return haltObservedWithinBound && halted && runStopClear;
+}
+
+inline bool xhci_controller_reset_allowed(bool haltObservedWithinBound,
+                                          bool runStopClear,
+                                          bool halted,
+                                          bool busMasterDisabled)
+{
+    return haltObservedWithinBound && runStopClear && halted &&
+           busMasterDisabled;
 }
 
 enum class XhciScratchpadPlanError : uint8_t {
@@ -935,13 +1156,20 @@ inline bool build_xhci_scratchpad_array(uint32_t count,
 
 inline XhciOwnershipState detect_ownership(uint32_t legsup)
 {
-    if ((legsup & XHCI_USBLEGSUP_HC_BIOS_OWNED_SEM) != 0) {
+    const bool biosOwned =
+        (legsup & XHCI_USBLEGSUP_HC_BIOS_OWNED_SEM) != 0u;
+    const bool osOwned =
+        (legsup & XHCI_USBLEGSUP_HC_OS_OWNED_SEM) != 0u;
+    if (biosOwned && osOwned) {
+        return XhciOwnershipState::Conflict;
+    }
+    if (biosOwned) {
         return XhciOwnershipState::BiosOwned;
     }
-    if ((legsup & XHCI_USBLEGSUP_HC_OS_OWNED_SEM) != 0) {
+    if (osOwned) {
         return XhciOwnershipState::OsOwned;
     }
-    return XhciOwnershipState::NoCapability;
+    return XhciOwnershipState::Unowned;
 }
 
 // ================================================================
@@ -1115,6 +1343,38 @@ static const uint32_t XHCI_CONTEXT_SIZE_32 = 32;
 static const uint32_t XHCI_CONTEXT_SIZE_64 = 64;
 static const uint32_t XHCI_CONTEXT_ALIGNMENT = 64;
 
+inline uint32_t xhci_input_context_bytes(bool csz64)
+{
+    // One Input Control Context plus Slot and all 31 Endpoint Contexts.
+    return 33u * (csz64 ? XHCI_CONTEXT_SIZE_64 : XHCI_CONTEXT_SIZE_32);
+}
+
+inline uint32_t xhci_device_context_bytes(bool csz64)
+{
+    // One Slot Context plus all 31 Endpoint Contexts.
+    return 32u * (csz64 ? XHCI_CONTEXT_SIZE_64 : XHCI_CONTEXT_SIZE_32);
+}
+
+inline bool xhci_ep0_mps_from_descriptor(uint8_t speed,
+                                         uint8_t descriptorMps,
+                                         uint32_t* mpsOut)
+{
+    if (mpsOut == nullptr) return false;
+    if (speed == XHCI_SPEED_SUPER || speed == XHCI_SPEED_SUPER_PLUS) {
+        if (descriptorMps != 9u) return false;
+        *mpsOut = 512u;
+        return true;
+    }
+    if (descriptorMps != 8u && descriptorMps != 16u &&
+        descriptorMps != 32u && descriptorMps != 64u) return false;
+    if (speed == XHCI_SPEED_LOW && descriptorMps != 8u) return false;
+    if (speed == XHCI_SPEED_HIGH && descriptorMps != 64u) return false;
+    if (speed != XHCI_SPEED_LOW && speed != XHCI_SPEED_FULL &&
+        speed != XHCI_SPEED_HIGH) return false;
+    *mpsOut = descriptorMps;
+    return true;
+}
+
 // Endpoint state (Endpoint Context DWORD 0 bits 0-2)
 enum XhciEpState : uint8_t {
     XHCI_EP_STATE_DISABLED = 0,
@@ -1209,6 +1469,12 @@ inline uint32_t ep_ctx_set_avg_trb_length(uint32_t dw4, uint32_t len) {
     return (dw4 & ~0x0000FFFFu) | (len & 0x0000FFFFu);
 }
 
+inline uint64_t ep_ctx_set_dequeue_cycle(uint64_t dequeuePointer,
+                                         uint32_t cycle)
+{
+    return (dequeuePointer & ~1ULL) | (cycle & 1u);
+}
+
 // ================================================================
 // TRB builders (pure; produce XhciTrb values for the command/transfer rings)
 // ================================================================
@@ -1236,6 +1502,16 @@ inline XhciTrb trb_address_device(uint64_t inputCtxPhys, bool blockSetAddr, uint
     return trb;
 }
 
+inline XhciTrb trb_evaluate_context(uint64_t inputCtxPhys, uint8_t slotId)
+{
+    XhciTrb trb{};
+    trb.parameter = inputCtxPhys;
+    trb.status = 0u;
+    trb.control = (static_cast<uint32_t>(TRB_TYPE_EVAL_CONTEXT) << 10) |
+                  ((static_cast<uint32_t>(slotId) & 0xFFu) << 24);
+    return trb;
+}
+
 // Setup Stage TRB for an 8-byte USB setup packet.
 inline XhciTrb trb_setup_stage(const usb::SetupPacket& setup, uint8_t trt, bool ioc)
 {
@@ -1250,6 +1526,7 @@ inline XhciTrb trb_setup_stage(const usb::SetupPacket& setup, uint8_t trt, bool 
     trb.status = (8u & 0x00FFFFFFu) | ((trt & 0x03u) << 16);
     trb.control = (static_cast<uint32_t>(TRB_TYPE_SETUP_STAGE) << 10) |
                   (1u << 6) | // IDT: setup data is in this TRB
+                  (1u << 4) | // CH: status or data stage follows
                   (ioc ? (1u << 5) : 0u);
     return trb;
 }
@@ -1259,8 +1536,9 @@ inline XhciTrb trb_data_stage(uint64_t bufferPhys, uint32_t length, bool in, boo
 {
     XhciTrb trb{};
     trb.parameter = bufferPhys;
-    trb.status = (length & 0x00FFFFFFu) | ((in ? 1u : 0u) << 16);
+    trb.status = length & 0x0001FFFFu;
     trb.control = (static_cast<uint32_t>(TRB_TYPE_DATA_STAGE) << 10) |
+                  (in ? (1u << 16) : 0u) |
                   (chain ? (1u << 1) : 0u) |
                   (ioc ? (1u << 5) : 0u);
     return trb;
@@ -1271,8 +1549,9 @@ inline XhciTrb trb_status_stage(bool in, bool ioc)
 {
     XhciTrb trb{};
     trb.parameter = 0;
-    trb.status = ((in ? 1u : 0u) << 16);
+    trb.status = 0u;
     trb.control = (static_cast<uint32_t>(TRB_TYPE_STATUS_STAGE) << 10) |
+                  (in ? (1u << 16) : 0u) |
                   (ioc ? (1u << 5) : 0u);
     return trb;
 }

@@ -25,6 +25,7 @@
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/dma_memory.h"
 #include "include/kernel/intel_vtd.h"
+#include "include/kernel/pit.h"
 
 namespace kernel {
 namespace usb {
@@ -136,9 +137,10 @@ static bool s_initialized = false;
 static bool s_initializationAttempted = false;
 static bool s_running = false;
 static XhciControllerState s_state = XhciControllerState::Idle;
-static XhciOwnershipState s_ownership = XhciOwnershipState::NoCapability;
+static XhciOwnershipState s_ownership = XhciOwnershipState::Unknown;
 static uint64_t s_mmioPhysicalBase = 0;
 static uint64_t s_mmioBase = 0; // Verified kernel virtual mapping.
+static uint64_t s_mmioMappedSpan = 0u;
 static uint32_t s_pciBar0 = 0u;
 static uint32_t s_pciBar1 = 0u;
 static uint16_t s_pciCommand = 0u;
@@ -147,7 +149,13 @@ static uint8_t s_dev = 0;
 static uint8_t s_func = 0;
 static int32_t s_diagnosticControllerIndex = -1;
 static bool s_dmaReady = false;
+static bool s_dmaAuthorized = false;
+static bool s_dmaWorkspaceQualified = false;
+static bool s_dmaProtectionQualified = false;
 static bool s_dmaWorkspaceExclusive = false;
+static bool s_bmeEnabledOnEntry = false;
+static bool s_haltObservedWithinBound = false;
+static bool s_controllerResetCompleted = false;
 static uint8_t s_selectedPort = 0u;
 static XhciCapabilities s_caps = {};
 static uint8_t s_portCount = 0;
@@ -166,8 +174,8 @@ alignas(64) static XhciErstEntry s_erst[ERST_ENTRIES];
 alignas(64) static uint64_t s_dcbaa[256];
 
 static const uint32_t MAX_CONTEXT_SIZE   = 64;
-static const uint32_t INPUT_CTX_SIZE     = 3 * MAX_CONTEXT_SIZE;
-static const uint32_t DEVICE_CTX_SIZE    = 2 * MAX_CONTEXT_SIZE;
+static const uint32_t INPUT_CTX_SIZE     = 33 * MAX_CONTEXT_SIZE;
+static const uint32_t DEVICE_CTX_SIZE    = 32 * MAX_CONTEXT_SIZE;
 static const uint32_t EP0_RING_SIZE      = 8;
 static const uint32_t CONTROL_BUF_SIZE   = 256;
 
@@ -200,6 +208,7 @@ static uint8_t s_scratchpadStorage[XHCI_DMA_SCRATCHPAD_STORAGE_SIZE] = {};
 
 static uint32_t s_commandRingIndex = 0;
 static uint32_t s_commandRingCycle = 1;
+static bool s_commandRingPoisoned = false;
 static uint32_t s_eventRingIndex = 0;
 static uint32_t s_eventRingCycle = 1;
 
@@ -259,6 +268,13 @@ static void port_write32(uint32_t portIndex, uint32_t offset, uint32_t value)
 static void dma_write_barrier()
 {
     asm volatile("sfence" ::: "memory");
+}
+
+static void mmio_write_barrier()
+{
+    // Serialize the split DWORD writes and ensure prior DMA-memory stores are
+    // visible before a register write publishes their physical addresses.
+    asm volatile("mfence" ::: "memory");
 }
 
 static void dma_read_barrier()
@@ -413,9 +429,47 @@ static const char* dma_translation_block_reason()
     return "DEVICE_DMA_MAPPING_NOT_ESTABLISHED";
 }
 
+static bool authorize_controller_dma_after_qualification()
+{
+    const bool ownershipResolved =
+        s_ownership == XhciOwnershipState::NoCapability ||
+        s_ownership == XhciOwnershipState::OsOwned;
+    const bool halted = s_haltObservedWithinBound &&
+        (op_read32(XHCI_OP_USBCMD) & XHCI_USBCMD_RUN_STOP) == 0u &&
+        (op_read32(XHCI_OP_USBSTS) & XHCI_USBSTS_HCHALTED) != 0u;
+    const bool bmeDisabled =
+        (pci_read16(s_bus, s_dev, s_func, 0x04u) & 0x0004u) == 0u;
+    s_dmaAuthorized = xhci_dma_authorization_allowed(
+        ownershipResolved, halted, s_controllerResetCompleted,
+        s_dmaWorkspaceQualified, s_dmaProtectionQualified, bmeDisabled);
+    if (!s_dmaAuthorized) {
+        diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
+                         modern_input_diagnostics::Status::Blocked,
+                         pci_read16(s_bus, s_dev, s_func, 0x04u), true,
+                         op_read32(XHCI_OP_USBSTS), true,
+                         0u, 0u, 0u, 0u, false,
+                         "DMA_AUTHORIZATION_STATE_MACHINE_PRECONDITION_FAILED");
+    }
+    return s_dmaAuthorized;
+}
+
 static bool validate_dma_prerequisites()
 {
     s_dmaReady = false;
+    s_dmaAuthorized = false;
+    s_dmaWorkspaceQualified = false;
+    s_dmaProtectionQualified = false;
+    if (s_state != XhciControllerState::Reset || !s_controllerResetCompleted ||
+        !s_haltObservedWithinBound ||
+        (pci_read16(s_bus, s_dev, s_func, 0x04u) & 0x0004u) != 0u) {
+        diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
+                         modern_input_diagnostics::Status::Blocked,
+                         pci_read16(s_bus, s_dev, s_func, 0x04u), true,
+                         op_read32(XHCI_OP_USBSTS), true,
+                         0u, 0u, 0u, 0u, false,
+                         "DMA_QUALIFICATION_REQUIRES_RESET_AND_BME_DISABLED");
+        return false;
+    }
     s_dmaAddresses = {};
     s_scratchpadPageSize = 0u;
     s_scratchpadCount = 0u;
@@ -642,6 +696,25 @@ static bool validate_dma_prerequisites()
         return false;
     }
 
+    // xHCI TRB rings and data buffers may not cross a 64 KiB boundary.
+    // Check the controller-visible physical addresses after translation; a
+    // virtual alignment guarantee alone is not sufficient for DMA.
+    if (!xhci_range_within_boundary(s_dmaAddresses.commandRing,
+                                    sizeof(s_commandRing), 0x10000u) ||
+        !xhci_range_within_boundary(s_dmaAddresses.eventRing,
+                                    sizeof(s_eventRing), 0x10000u) ||
+        !xhci_range_within_boundary(s_dmaAddresses.ep0Ring,
+                                    sizeof(s_ep0Ring), 0x10000u) ||
+        !xhci_range_within_boundary(s_dmaAddresses.controlBuf,
+                                    sizeof(s_controlBuf), 0x10000u)) {
+        diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
+                         modern_input_diagnostics::Status::Blocked,
+                         workspaceCount, true, 0u, false,
+                         0u, 0u, 0u, 0u, false,
+                         "XHCI_DMA_RING_OR_BUFFER_CROSSES_64K_BOUNDARY");
+        return false;
+    }
+
     // A prior firmware or boot stage may have left PCI bus mastering enabled.
     // Qualification requires observing it disabled before any OS-owned DMA
     // structures are handed to the controller.
@@ -701,11 +774,14 @@ static bool validate_dma_prerequisites()
             serial_puts("\n");
             return false;
         }
+        s_dmaWorkspaceQualified = true;
+        s_dmaProtectionQualified = true;
         diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
                          modern_input_diagnostics::Status::Pass, 0u, false,
                          0u, false, 0u, 0u, 0u, 0u, false,
                          "DMA_VERIFIED_DIRECT_PHYSICAL");
         s_dmaReady = true;
+        if (!authorize_controller_dma_after_qualification()) return false;
         serial_puts("[XHCI] DMA verified: Intel direct physical contract passed\n");
         return true;
     }
@@ -728,11 +804,14 @@ static bool validate_dma_prerequisites()
         return false;
     }
 
-    s_dmaReady = true;
+    s_dmaWorkspaceQualified = true;
+    s_dmaProtectionQualified = true;
     diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
                      modern_input_diagnostics::Status::Pass, 0u, false,
                      0u, false, 0u, 0u, 0u, 0u, false,
                      "DMA_VERIFIED_DIRECT_PHYSICAL_NO_REMAP_TABLE");
+    s_dmaReady = true;
+    if (!authorize_controller_dma_after_qualification()) return false;
     serial_puts("[XHCI] DMA regions and scratchpads validated; direct physical DMA selected\n");
     return true;
 }
@@ -740,13 +819,17 @@ static bool validate_dma_prerequisites()
 static void op_write64(uint32_t offset, uint64_t value)
 {
     op_write32(offset + 4u, static_cast<uint32_t>(value >> 32));
+    mmio_write_barrier();
     op_write32(offset, static_cast<uint32_t>(value & 0xFFFFFFFFu));
+    mmio_write_barrier();
 }
 
 static void rt_write64(uint32_t offset, uint64_t value)
 {
     rt_write32(offset + 4u, static_cast<uint32_t>(value >> 32));
+    mmio_write_barrier();
     rt_write32(offset, static_cast<uint32_t>(value & 0xFFFFFFFFu));
+    mmio_write_barrier();
 }
 
 // ================================================================
@@ -762,12 +845,41 @@ static void ring_doorbell(uint32_t doorbell, uint32_t value)
 }
 
 // ================================================================
-// Bounded delay
+// Calibrated PIT timing and bounded polling
 // ================================================================
+
+static uint64_t timeout_ticks(uint32_t timeoutMs)
+{
+    const uint32_t rate = kernel::pit::ticks_per_second();
+    return xhci_timeout_ticks_with_phase_guard(timeoutMs, rate);
+}
+
+static bool timeout_elapsed(uint64_t startTick, uint32_t timeoutMs)
+{
+    const uint64_t limit = timeout_ticks(timeoutMs);
+    return limit == 0u || kernel::pit::ticks() - startTick >= limit;
+}
+
+static void wait_for_timer_progress()
+{
+    // xHCI init runs after the PIT IRQ path is installed. HLT wakes on the
+    // next calibrated timer tick; before the first tick use PAUSE until the
+    // same hardware-backed counter advances.
+    if (kernel::pit::heartbeat_seen()) {
+        kernel::arch::halt();
+    } else {
+        asm volatile("pause" ::: "memory");
+    }
+}
 
 static void delay_ms(uint32_t ms)
 {
-    for (volatile uint32_t i = 0; i < ms * 10000; ++i) {}
+    const uint64_t start = kernel::pit::ticks();
+    const uint64_t limit = timeout_ticks(ms);
+    if (limit == 0u) return;
+    while (kernel::pit::ticks() - start < limit) {
+        wait_for_timer_progress();
+    }
 }
 
 // ================================================================
@@ -776,46 +888,50 @@ static void delay_ms(uint32_t ms)
 
 static bool wait_for_halted(uint32_t timeoutMs)
 {
-    for (uint32_t i = 0; i < timeoutMs; ++i) {
+    const uint64_t start = kernel::pit::ticks();
+    do {
         if (op_read32(XHCI_OP_USBSTS) & XHCI_USBSTS_HCHALTED) {
             return true;
         }
-        delay_ms(1);
-    }
-    return false;
+        if (timeout_elapsed(start, timeoutMs)) return false;
+        wait_for_timer_progress();
+    } while (true);
 }
 
 static bool wait_for_reset_complete(uint32_t timeoutMs)
 {
-    for (uint32_t i = 0; i < timeoutMs; ++i) {
+    const uint64_t start = kernel::pit::ticks();
+    do {
         if (!(op_read32(XHCI_OP_USBCMD) & XHCI_USBCMD_HCRST)) {
             return true;
         }
-        delay_ms(1);
-    }
-    return false;
+        if (timeout_elapsed(start, timeoutMs)) return false;
+        wait_for_timer_progress();
+    } while (true);
 }
 
 static bool wait_for_cnr_clear(uint32_t timeoutMs)
 {
-    for (uint32_t i = 0; i < timeoutMs; ++i) {
+    const uint64_t start = kernel::pit::ticks();
+    do {
         if (!(op_read32(XHCI_OP_USBSTS) & XHCI_USBSTS_CNR)) {
             return true;
         }
-        delay_ms(1);
-    }
-    return false;
+        if (timeout_elapsed(start, timeoutMs)) return false;
+        wait_for_timer_progress();
+    } while (true);
 }
 
 static bool wait_for_running(uint32_t timeoutMs)
 {
-    for (uint32_t i = 0; i < timeoutMs; ++i) {
+    const uint64_t start = kernel::pit::ticks();
+    do {
         if (!(op_read32(XHCI_OP_USBSTS) & XHCI_USBSTS_HCHALTED)) {
             return true;
         }
-        delay_ms(1);
-    }
-    return false;
+        if (timeout_elapsed(start, timeoutMs)) return false;
+        wait_for_timer_progress();
+    } while (true);
 }
 
 // ================================================================
@@ -946,6 +1062,7 @@ static bool validate_bar()
 
     s_mmioPhysicalBase = bar.base;
     s_mmioBase = mappedVirtual;
+    s_mmioMappedSpan = requiredSpan;
     modern_input_diagnostics::record_mmio_base(s_diagnosticControllerIndex, bar.base);
     diagnostic_stage(modern_input_diagnostics::Stage::BarMmio,
                      modern_input_diagnostics::Status::Pass);
@@ -976,20 +1093,46 @@ static bool enable_pci_memory_space(const XhciBarInfo& bar)
 
 static bool enable_pci_bus_master()
 {
-    if (!s_dmaReady || !s_dmaWorkspaceExclusive ||
+    if (!s_dmaReady || !s_dmaAuthorized || !s_dmaWorkspaceExclusive ||
         (s_ownership != XhciOwnershipState::NoCapability &&
          s_ownership != XhciOwnershipState::OsOwned) ||
         s_state != XhciControllerState::Reset) {
         return false;
     }
     uint16_t command = pci_read16(s_bus, s_dev, s_func, 0x04u);
+    if ((command & 0x0004u) != 0u) return false;
     if ((command & 0x0004u) == 0u) {
         pci_write16(s_bus, s_dev, s_func, 0x04u,
                     static_cast<uint16_t>(command | 0x0004u));
         command = pci_read16(s_bus, s_dev, s_func, 0x04u);
     }
     s_pciCommand = command;
-    return (command & 0x0004u) != 0u;
+    return xhci_controller_dma_enable_allowed(
+        s_dmaAuthorized, (command & 0x0004u) != 0u);
+}
+
+static bool disable_pci_bus_master_after_halt()
+{
+    uint16_t command = pci_read16(s_bus, s_dev, s_func, 0x04u);
+    if ((command & 0x0004u) == 0u) {
+        s_pciCommand = command;
+        return true;
+    }
+
+    const bool halted =
+        (op_read32(XHCI_OP_USBSTS) & XHCI_USBSTS_HCHALTED) != 0u;
+    const bool runStopClear =
+        (op_read32(XHCI_OP_USBCMD) & XHCI_USBCMD_RUN_STOP) == 0u;
+    if (!xhci_pci_bus_master_disable_allowed(
+            s_haltObservedWithinBound, halted, runStopClear)) {
+        return false;
+    }
+
+    pci_write16(s_bus, s_dev, s_func, 0x04u,
+                static_cast<uint16_t>(command & ~0x0004u));
+    command = pci_read16(s_bus, s_dev, s_func, 0x04u);
+    s_pciCommand = command;
+    return (command & 0x0004u) == 0u;
 }
 
 static bool map_initial_capabilities(const XhciBarInfo& bar)
@@ -1027,6 +1170,7 @@ static bool map_initial_capabilities(const XhciBarInfo& bar)
 
     s_mmioPhysicalBase = bar.base;
     s_mmioBase = mappedVirtual;
+    s_mmioMappedSpan = kInitialCapabilitySpan;
     modern_input_diagnostics::record_mmio_base(s_diagnosticControllerIndex, bar.base);
     diagnostic_stage(modern_input_diagnostics::Stage::BarMmio,
                      modern_input_diagnostics::Status::Pass);
@@ -1106,12 +1250,11 @@ static bool parse_capabilities()
 
 static bool acquire_ownership()
 {
-    if (!s_dmaReady || !s_dmaWorkspaceExclusive ||
-        s_diagnosticControllerIndex < 0) {
+    if (!s_dmaWorkspaceExclusive || s_diagnosticControllerIndex < 0) {
         diagnostic_stage(modern_input_diagnostics::Stage::BiosOwnership,
                          modern_input_diagnostics::Status::Blocked,
                          0u, false, 0u, false, 0u, 0u, 0u, 0u, false,
-                         "DMA_AND_EXCLUSIVE_WORKSPACE_REQUIRED_BEFORE_OWNERSHIP");
+                         "EXCLUSIVE_CONTROLLER_REQUIRED_BEFORE_OWNERSHIP");
         return false;
     }
     if (s_caps.xecp == 0u) {
@@ -1125,85 +1268,137 @@ static bool acquire_ownership()
         return true;
     }
 
-    volatile const uint32_t* mmio =
-        reinterpret_cast<volatile const uint32_t*>(
-            static_cast<uintptr_t>(s_mmioBase));
+    volatile const uint32_t* mmio = reinterpret_cast<volatile const uint32_t*>(
+        static_cast<uintptr_t>(s_mmioBase));
+    const XhciExtCapWalkResult walk = walk_xhci_extended_capabilities(
+        mmio, static_cast<uint32_t>(s_mmioMappedSpan / sizeof(uint32_t)),
+        s_caps.xecpBase / sizeof(uint32_t));
+    if (walk.status != XhciExtCapWalkStatus::Complete) {
+        s_ownership = XhciOwnershipState::Conflict;
+        const uint32_t rawHeader = mmio[s_caps.xecpBase / sizeof(uint32_t)];
+        serial_puts("[XHCI] malformed extended-capability chain status=");
+        serial_u32_dec(static_cast<uint32_t>(walk.status));
+        serial_puts(" first=0x");
+        serial_hex_n(rawHeader, 8u);
+        serial_puts("\n");
+        diagnostic_stage(modern_input_diagnostics::Stage::BiosOwnership,
+                         modern_input_diagnostics::Status::Blocked,
+                         rawHeader, true, static_cast<uint32_t>(walk.status), true,
+                         0u, 0u, 0u, 0u, false,
+                         "XHCI_EXTENDED_CAPABILITY_CHAIN_MALFORMED_OR_AMBIGUOUS");
+        return false;
+    }
 
-    const uint32_t legsup = mmio[s_caps.xecp];
-    const uint32_t capId = legsup & 0xFFu;
-
-    if (capId != XHCI_USBLEGSUP_CAPID) {
+    if (!walk.legacyFound) {
         s_ownership = XhciOwnershipState::NoCapability;
         modern_input_diagnostics::record_ownership_status(
             s_diagnosticControllerIndex,
             modern_input_diagnostics::OwnershipStatus::NotRequired);
-        serial_puts("[XHCI] ownership not required (no legacy support cap)\n");
+        serial_puts("[XHCI] ownership not required (capability chain has no USBLEGSUP)\n");
         diagnostic_stage(modern_input_diagnostics::Stage::BiosOwnership,
-                         modern_input_diagnostics::Status::Pass,
-                         capId, true);
+                         modern_input_diagnostics::Status::Pass);
         return true;
     }
 
+    const uint32_t legacyIndex = walk.legacyOffsetDword;
+    volatile const uint32_t* legsupPtr = &mmio[legacyIndex];
+    volatile uint32_t* ctlstsPtr = const_cast<volatile uint32_t*>(
+        &mmio[legacyIndex + 1u]);
+    const uint32_t legsup = *legsupPtr;
     const XhciOwnershipState initial = detect_ownership(legsup);
+
     if (initial == XhciOwnershipState::OsOwned) {
-        s_ownership = XhciOwnershipState::OsOwned;
-        modern_input_diagnostics::record_ownership_status(
-            s_diagnosticControllerIndex,
-            modern_input_diagnostics::OwnershipStatus::OsOwned);
-        serial_puts("[XHCI] ownership already OS-owned\n");
-        diagnostic_stage(modern_input_diagnostics::Stage::BiosOwnership,
-                         modern_input_diagnostics::Status::Pass,
-                         legsup, true, legsup, true);
-        return true;
-    }
-
-    if (initial == XhciOwnershipState::NoCapability) {
-        s_ownership = XhciOwnershipState::NoCapability;
-        modern_input_diagnostics::record_ownership_status(
-            s_diagnosticControllerIndex,
-            modern_input_diagnostics::OwnershipStatus::NotRequired);
-        serial_puts("[XHCI] ownership not required\n");
-        diagnostic_stage(modern_input_diagnostics::Stage::BiosOwnership,
-                         modern_input_diagnostics::Status::Pass,
-                         legsup, true, legsup, true);
-        return true;
-    }
-
-    // BIOS-owned: request OS ownership
-    modern_input_diagnostics::record_ownership_status(
-        s_diagnosticControllerIndex,
-        modern_input_diagnostics::OwnershipStatus::BiosOwned);
-    serial_puts("[XHCI] ownership BIOS-owned, requesting handoff\n");
-
-    volatile uint32_t* legsupPtr = const_cast<volatile uint32_t*>(&mmio[s_caps.xecp]);
-    *legsupPtr = legsup | XHCI_USBLEGSUP_OS_OWNED;
-
-    // Wait for OS ownership semaphore with bounded timeout
-    for (uint32_t i = 0u; i < 1000u; ++i) {
-        const uint32_t current = *legsupPtr;
-        if (current & XHCI_USBLEGSUP_HC_OS_OWNED_SEM) {
-            s_ownership = XhciOwnershipState::OsOwned;
-            modern_input_diagnostics::record_ownership_status(
-                s_diagnosticControllerIndex,
-                modern_input_diagnostics::OwnershipStatus::OsOwned);
-            serial_puts("[XHCI] ownership acquired\n");
-            diagnostic_stage(modern_input_diagnostics::Stage::BiosOwnership,
-                             modern_input_diagnostics::Status::Pass,
-                             current, true, current, true);
-            return true;
+        // The hardware has already established OS=1 and BIOS=0.
+    } else {
+        // BIOS-owned (or initially unowned): request ownership by modifying
+        // only byte 3, whose bit 0 is HC OS Owned (USB xHCI 7.1.1).
+        if ((legsup & XHCI_USBLEGSUP_HC_OS_OWNED_SEM) == 0u) {
+            volatile uint8_t* semByte = reinterpret_cast<volatile uint8_t*>(
+                const_cast<volatile uint32_t*>(legsupPtr)) + 3u;
+            const uint8_t semValue = *semByte;
+            *semByte = static_cast<uint8_t>(semValue | 0x01u);
+            mmio_write_barrier();
         }
-        delay_ms(1);
+
+        const uint64_t handoffStart = kernel::pit::ticks();
+        uint32_t finalLegsup = legsup;
+        do {
+            finalLegsup = *legsupPtr;
+            const XhciOwnershipHandoffResult handoff =
+                xhci_ownership_handoff_result(
+                    finalLegsup, timeout_elapsed(handoffStart, 1000u));
+            if (handoff == XhciOwnershipHandoffResult::Acquired) break;
+            if (handoff == XhciOwnershipHandoffResult::Timeout) {
+                s_ownership = XhciOwnershipState::HandoffTimeout;
+                modern_input_diagnostics::record_ownership_status(
+                    s_diagnosticControllerIndex,
+                    modern_input_diagnostics::OwnershipStatus::HandoffTimeout);
+                serial_puts("[XHCI] ownership timeout USBLEGSUP=0x");
+                serial_hex_n(finalLegsup, 8u);
+                serial_puts(" USBLEGCTLSTS=0x");
+                serial_hex_n(*ctlstsPtr, 8u);
+                serial_puts("\n");
+                diagnostic_stage(modern_input_diagnostics::Stage::BiosOwnership,
+                                 modern_input_diagnostics::Status::Timeout,
+                                 legsup, true, finalLegsup, true,
+                                 0u, 0u, 0u, 0u, false,
+                                 "BIOS_OWNERSHIP_NOT_RELEASED_WITHIN_1_SECOND");
+                return false;
+            }
+            wait_for_timer_progress();
+        } while (true);
     }
 
-    s_ownership = XhciOwnershipState::HandoffTimeout;
+    const uint32_t acquiredLegsup = *legsupPtr;
+    if (!xhci_ownership_acquired(acquiredLegsup)) {
+        s_ownership = XhciOwnershipState::Conflict;
+        diagnostic_stage(modern_input_diagnostics::Stage::BiosOwnership,
+                         modern_input_diagnostics::Status::Fail,
+                         acquiredLegsup, true, *ctlstsPtr, true,
+                         0u, 0u, 0u, 0u, false,
+                         "USBLEGSUP_SEMAPHORE_READBACK_DID_NOT_ESTABLISH_OS_OWNERSHIP");
+        return false;
+    }
+
+    // USBLEGCTLSTS includes RW SMI enables, RO status shadows, RsvdP,
+    // RsvdZ, and RW1C status. Write back only RsvdP bits, with all enables and
+    // RW1C bits zero, so we disable legacy SMIs without acknowledging status.
+    const uint32_t ctlstsBefore = *ctlstsPtr;
+    const uint32_t ctlstsWrite =
+        xhci_usb_legacy_smi_disable_value(ctlstsBefore);
+    *ctlstsPtr = ctlstsWrite;
+    mmio_write_barrier();
+    const uint32_t ctlstsAfter = *ctlstsPtr;
+    if ((ctlstsAfter & XHCI_USBLEGCTLSTS_SMI_ENABLE_MASK) != 0u) {
+        s_ownership = XhciOwnershipState::SmiDisableFailure;
+        serial_puts("[XHCI] USBLEGCTLSTS SMI disable failed USBLEGSUP=0x");
+        serial_hex_n(acquiredLegsup, 8u);
+        serial_puts(" before=0x");
+        serial_hex_n(ctlstsBefore, 8u);
+        serial_puts(" after=0x");
+        serial_hex_n(ctlstsAfter, 8u);
+        serial_puts("\n");
+        diagnostic_stage(modern_input_diagnostics::Stage::BiosOwnership,
+                         modern_input_diagnostics::Status::Fail,
+                         ctlstsBefore, true, ctlstsAfter, true,
+                         0u, 0u, 0u, 0u, false,
+                         "USBLEGCTLSTS_SMI_ENABLE_BITS_REMAIN_SET");
+        return false;
+    }
+
+    s_ownership = XhciOwnershipState::OsOwned;
     modern_input_diagnostics::record_ownership_status(
         s_diagnosticControllerIndex,
-        modern_input_diagnostics::OwnershipStatus::HandoffTimeout);
-    serial_puts("[XHCI] ownership handoff timed out\n");
+        modern_input_diagnostics::OwnershipStatus::OsOwned);
+    serial_puts("[XHCI] ownership acquired USBLEGSUP=0x");
+    serial_hex_n(acquiredLegsup, 8u);
+    serial_puts(" USBLEGCTLSTS=0x");
+    serial_hex_n(ctlstsAfter, 8u);
+    serial_puts("\n");
     diagnostic_stage(modern_input_diagnostics::Stage::BiosOwnership,
-                     modern_input_diagnostics::Status::Timeout,
-                     legsup, true, *legsupPtr, true);
-    return false;
+                     modern_input_diagnostics::Status::Pass,
+                     acquiredLegsup, true, ctlstsAfter, true);
+    return true;
 }
 
 // ================================================================
@@ -1216,7 +1411,7 @@ static bool controller_mutation_preconditions()
         s_ownership == XhciOwnershipState::NoCapability ||
         s_ownership == XhciOwnershipState::OsOwned;
     return xhci_controller_state_change_allowed(
-        s_dmaReady, ownershipResolved, s_dmaWorkspaceExclusive,
+        false, ownershipResolved, s_dmaWorkspaceExclusive,
         s_diagnosticControllerIndex >= 0);
 }
 
@@ -1231,7 +1426,17 @@ static bool halt_controller()
     }
     uint32_t usbcmd = op_read32(XHCI_OP_USBCMD);
     if (!(usbcmd & XHCI_USBCMD_RUN_STOP)) {
-        // Already halted
+        s_haltObservedWithinBound = wait_for_halted(XHCI_HALT_TIMEOUT_MS);
+        if (!s_haltObservedWithinBound) {
+            s_state = XhciControllerState::Error;
+            diagnostic_stage(modern_input_diagnostics::Stage::ControllerHalt,
+                             modern_input_diagnostics::Status::Timeout,
+                             op_read32(XHCI_OP_USBCMD), true,
+                             op_read32(XHCI_OP_USBSTS), true,
+                             0u, 0u, 0u, 0u, false,
+                             "RUN_STOP_CLEAR_WITHOUT_HCHALTED_READBACK");
+            return false;
+        }
         s_state = XhciControllerState::Halted;
         serial_puts("[XHCI] controller already halted\n");
         diagnostic_stage(modern_input_diagnostics::Stage::ControllerHalt,
@@ -1243,7 +1448,8 @@ static bool halt_controller()
     // Clear Run/Stop
     op_write32(XHCI_OP_USBCMD, usbcmd & ~XHCI_USBCMD_RUN_STOP);
 
-    if (!wait_for_halted(1000u)) {
+    s_haltObservedWithinBound = wait_for_halted(XHCI_HALT_TIMEOUT_MS);
+    if (!s_haltObservedWithinBound) {
         s_state = XhciControllerState::Error;
         serial_puts("[XHCI] halt timeout\n");
         diagnostic_stage(modern_input_diagnostics::Stage::ControllerHalt,
@@ -1275,15 +1481,31 @@ static bool reset_controller()
                          "DMA_OWNERSHIP_OR_WORKSPACE_PRECONDITION_FAILED");
         return false;
     }
-    // Ensure halted first
+    // Reset only after Run/Stop is clear and HCHalted is positively observed.
     if (s_state != XhciControllerState::Halted) {
         if (!halt_controller()) {
             return false;
         }
     }
+    if (!xhci_controller_reset_allowed(
+            s_haltObservedWithinBound,
+            (op_read32(XHCI_OP_USBCMD) & XHCI_USBCMD_RUN_STOP) == 0u,
+            (op_read32(XHCI_OP_USBSTS) & XHCI_USBSTS_HCHALTED) != 0u,
+            (pci_read16(s_bus, s_dev, s_func, 0x04u) & 0x0004u) == 0u)) {
+        diagnostic_stage(modern_input_diagnostics::Stage::ControllerReset,
+                         modern_input_diagnostics::Status::Blocked,
+                         pci_read16(s_bus, s_dev, s_func, 0x04u), true,
+                         op_read32(XHCI_OP_USBSTS), true,
+                         0u, 0u, 0u, 0u, false,
+                         "RESET_REQUIRES_HALTED_CONTROLLER_WITH_BME_DISABLED");
+        return false;
+    }
 
     // Set HCRST
     op_write32(XHCI_OP_USBCMD, op_read32(XHCI_OP_USBCMD) | XHCI_USBCMD_HCRST);
+    // Intel xHCI Requirements Specification 1.2 cites a 1 ms post-HCRST
+    // delay for affected implementations; one calibrated PIT tick is >=1 ms.
+    delay_ms(1u);
 
     if (!wait_for_reset_complete(1000u)) {
         s_state = XhciControllerState::Error;
@@ -1316,6 +1538,7 @@ static bool reset_controller()
                      op_read32(XHCI_OP_USBSTS), true);
 
     s_state = XhciControllerState::Reset;
+    s_controllerResetCompleted = true;
     serial_puts("[XHCI] controller reset complete\n");
     return true;
 }
@@ -1341,6 +1564,7 @@ static void init_command_ring()
 
     s_commandRingIndex = 0;
     s_commandRingCycle = 1;
+    s_commandRingPoisoned = false;
 
     // Program CRCR
     const uint64_t crcr = ringBase | XHCI_CRCR_RCS;
@@ -1364,17 +1588,28 @@ static void init_event_ring()
     s_erst[0].ringSegmentSize = EVENT_RING_SIZE;
     s_erst[0].reserved = 0;
 
-    // Program ERSTSZ
-    rt_write32(XHCI_RT_ERSTSZ, ERST_ENTRIES);
-
-    // Program ERSTBA
-    const uint64_t erstba = s_dmaAddresses.erst;
-    dma_write_barrier();
-    rt_write64(XHCI_RT_ERSTBA, erstba);
-
-    // Program ERDP
     const uint64_t erdp = eventRingBase;
-    rt_write64(XHCI_RT_ERDP, erdp);
+    const uint64_t erstba = s_dmaAddresses.erst;
+    XhciErstRegisterWrite order[3] = {};
+    const uint32_t orderCount =
+        xhci_erst_register_write_order(order, 3u);
+    for (uint32_t i = 0u; i < orderCount; ++i) {
+        switch (order[i]) {
+            case XhciErstRegisterWrite::Size:
+                rt_write32(XHCI_RT_ERSTSZ, ERST_ENTRIES);
+                break;
+            case XhciErstRegisterWrite::DequeuePointer:
+                dma_write_barrier();
+                rt_write64(XHCI_RT_ERDP, erdp);
+                break;
+            case XhciErstRegisterWrite::BaseAddress:
+                // ERSTBA is the final publication step after the table,
+                // segment, size, and dequeue pointer are initialized.
+                dma_write_barrier();
+                rt_write64(XHCI_RT_ERSTBA, erstba);
+                break;
+        }
+    }
 
     s_eventRingIndex = 0;
     s_eventRingCycle = 1;
@@ -1443,7 +1678,7 @@ static void quiesce_after_start_failure()
 {
     const uint32_t command = op_read32(XHCI_OP_USBCMD);
     op_write32(XHCI_OP_USBCMD, command & ~XHCI_USBCMD_RUN_STOP);
-    const bool haltObservedWithinBound = wait_for_halted(1000u);
+    const bool haltObservedWithinBound = wait_for_halted(XHCI_HALT_TIMEOUT_MS);
     const bool halted = (op_read32(XHCI_OP_USBSTS) & XHCI_USBSTS_HCHALTED) != 0u;
     const bool runStopClear =
         (op_read32(XHCI_OP_USBCMD) & XHCI_USBCMD_RUN_STOP) == 0u;
@@ -1471,7 +1706,8 @@ static void quiesce_after_start_failure()
 
 static bool start_controller()
 {
-    if (!controller_mutation_preconditions() ||
+    if (!controller_mutation_preconditions() || !s_dmaReady ||
+        !s_dmaAuthorized ||
         (pci_read16(s_bus, s_dev, s_func, 0x04u) & 0x0004u) == 0u) {
         diagnostic_stage(modern_input_diagnostics::Stage::ControllerRunning,
                          modern_input_diagnostics::Status::Blocked,
@@ -1605,8 +1841,7 @@ static uint32_t process_events()
 // Enumeration DMA structures (Section 12)
 // ================================================================
 
-static uint32_t s_ep0RingIndex = 0;
-static uint32_t s_ep0RingCycle = 1;
+static XhciTransferRingState s_ep0RingState = {};
 
 static uint32_t context_size()
 {
@@ -1633,6 +1868,12 @@ static bool submit_command(const XhciTrb& cmd, CommandResult* result, uint32_t t
         result->trbPtr = 0;
     }
 
+    if (s_commandRingPoisoned ||
+        s_commandRingIndex >= COMMAND_RING_SIZE - 1u) return false;
+
+    const uint32_t submittedIndex = s_commandRingIndex;
+    const uint64_t expectedTrbPtr = s_dmaAddresses.commandRing +
+        static_cast<uint64_t>(submittedIndex) * sizeof(XhciTrb);
     XhciTrb trb = cmd;
     trb.control &= ~0x01u;
     trb.control |= s_commandRingCycle;
@@ -1649,37 +1890,48 @@ static bool submit_command(const XhciTrb& cmd, CommandResult* result, uint32_t t
         return false;
     }
 
-    // The controller can follow the Link TRB immediately after it executes
-    // the last usable command entry. Publish the next producer cycle before
-    // ringing the doorbell so the controller sees the new cycle on wrap.
+    // The Link TRB carries the producer cycle at the Link itself. Its TC bit
+    // causes the controller to toggle after fetching it, so it gets the old
+    // cycle even though software's cursor has already advanced to the next.
     if (ringWrapped) {
         uint32_t linkControl = s_commandRing[COMMAND_RING_SIZE - 1u].control;
-        linkControl = (linkControl & ~0x01u) | s_commandRingCycle;
+        linkControl = (linkControl & ~0x01u) |
+            xhci_link_cycle_before_toggle(s_commandRingCycle);
         s_commandRing[COMMAND_RING_SIZE - 1u].control = linkControl;
     }
 
+    dma_write_barrier();
     ring_doorbell(0u, 0u);
 
-    uint32_t elapsed = 0u;
-    while (elapsed < timeoutMs) {
+    const uint64_t startTick = kernel::pit::ticks();
+    do {
         XhciEventTrb evt;
         while (process_one_event(&evt)) {
             if (trb_type(reinterpret_cast<const XhciTrb&>(evt)) == TRB_TYPE_COMMAND_COMP) {
+                const uint64_t completedTrbPtr = event_cmd_comp_trb_ptr(evt);
+                if (!xhci_command_completion_matches(
+                        completedTrbPtr, expectedTrbPtr)) {
+                    update_erdp();
+                    continue;
+                }
                 if (result != nullptr) {
                     result->valid = true;
                     result->completionCode = static_cast<uint8_t>(trb_completion_code(evt));
                     result->slotId = event_cmd_comp_slot_id(evt);
-                    result->trbPtr = event_cmd_comp_trb_ptr(evt);
+                    result->trbPtr = completedTrbPtr;
                 }
                 update_erdp();
                 return true;
             }
         }
-        delay_ms(1u);
-        ++elapsed;
-    }
+        if (timeout_elapsed(startTick, timeoutMs)) break;
+        wait_for_timer_progress();
+    } while (true);
 
     update_erdp();
+    // A command may still complete after timeout. Quarantine this ring so a
+    // later submission cannot overwrite a command that the xHC may still own.
+    s_commandRingPoisoned = true;
     return false;
 }
 
@@ -1740,21 +1992,55 @@ static bool enable_slot(uint8_t* slotIdOut)
 }
 
 // ================================================================
-// Port reset (Section 5)
+// Port debounce and reset (xHCI Section 4.19)
 // ================================================================
+
+static bool debounce_port_connection(uint8_t portIndex)
+{
+    const uint32_t stableTicks = timeout_ticks(100u);
+    const uint64_t overallStart = kernel::pit::ticks();
+    uint64_t connectedStart = 0u;
+    bool trackingConnected = false;
+    while (!timeout_elapsed(overallStart, 3000u)) {
+        const uint32_t portsc = port_read32(portIndex, XHCI_PORT_SC);
+        const bool connected = (portsc & XHCI_PORTSC_CCS) != 0u;
+        const uint64_t now = kernel::pit::ticks();
+        if (connected) {
+            if (!trackingConnected) {
+                connectedStart = now;
+                trackingConnected = true;
+            } else if (now - connectedStart >= stableTicks) {
+                return true;
+            }
+        } else {
+            trackingConnected = false;
+        }
+        wait_for_timer_progress();
+    }
+    return false;
+}
 
 static bool reset_port(uint8_t portIndex)
 {
     uint32_t portsc = port_read32(portIndex, XHCI_PORT_SC);
+    const uint8_t speed = portsc_get_speed(portsc);
+    const bool warmReset = speed == XHCI_SPEED_SUPER ||
+                           speed == XHCI_SPEED_SUPER_PLUS;
     // PORTSC change bits are write-one-to-clear. Preserve only Port Power
     // when requesting reset so this operation does not erase unrelated
     // connect/link change evidence collected by the diagnostic snapshot.
-    const uint32_t resetRequest = (portsc & XHCI_PORTSC_PP) | XHCI_PORTSC_PR;
+    const uint32_t resetRequest = (portsc & XHCI_PORTSC_PP) |
+        (warmReset ? XHCI_PORTSC_WPR : XHCI_PORTSC_PR);
     port_write32(portIndex, XHCI_PORT_SC, resetRequest);
 
-    for (uint32_t i = 0u; i < 500u; ++i) {
+    const uint32_t completionBit =
+        warmReset ? XHCI_PORTSC_WRC : XHCI_PORTSC_PRC;
+    const uint32_t timeoutMs = warmReset ? 1000u : 500u;
+    const uint64_t start = kernel::pit::ticks();
+    do {
         portsc = port_read32(portIndex, XHCI_PORT_SC);
-        if ((portsc & XHCI_PORTSC_PRC) != 0u) {
+        if ((portsc & completionBit) != 0u) {
+            delay_ms(10u);
             serial_puts("[XHCI] port reset complete port=");
             serial_u32_dec(portIndex);
             serial_puts("\n");
@@ -1763,8 +2049,9 @@ static bool reset_port(uint8_t portIndex)
                              0u, false, portsc, true, 0u, portIndex);
             return true;
         }
-        delay_ms(1u);
-    }
+        if (timeout_elapsed(start, timeoutMs)) break;
+        wait_for_timer_progress();
+    } while (true);
 
     serial_puts("[XHCI] port reset timeout port=");
     serial_u32_dec(portIndex);
@@ -1794,6 +2081,8 @@ static uint32_t initial_max_packet_size(uint8_t speed)
 static bool address_device(uint8_t slotId, uint8_t port, uint8_t speed)
 {
     const uint32_t ctxSize = context_size();
+    if (!xhci_transfer_ring_initialize(&s_ep0RingState,
+                                        EP0_RING_SIZE, 1u)) return false;
 
     for (uint32_t i = 0u; i < INPUT_CTX_SIZE; ++i) {
         s_inputCtx[i] = 0;
@@ -1813,8 +2102,11 @@ static bool address_device(uint8_t slotId, uint8_t port, uint8_t speed)
     ep0Ctx[0] = ep_ctx_set_max_packet_size(0u, mps);
     ep0Ctx[1] = ep_ctx_set_type(0u, XHCI_EP_TYPE_CONTROL) | ep_ctx_set_cerr(0u, 3u);
     const uint64_t ep0RingPhys = s_dmaAddresses.ep0Ring;
-    ep0Ctx[2] = static_cast<uint32_t>(ep0RingPhys & 0xFFFFFFFFu);
-    ep0Ctx[3] = static_cast<uint32_t>(ep0RingPhys >> 32);
+    const uint64_t ep0Dequeue = ep_ctx_set_dequeue_cycle(
+        ep0RingPhys, s_ep0RingState.producerCycle);
+    ep0Ctx[2] = static_cast<uint32_t>(ep0Dequeue & 0xFFFFFFFFu);
+    ep0Ctx[3] = static_cast<uint32_t>(ep0Dequeue >> 32);
+    ep0Ctx[4] = ep_ctx_set_avg_trb_length(0u, 8u);
 
     for (uint32_t i = 0u; i < EP0_RING_SIZE; ++i) {
         s_ep0Ring[i].parameter = 0;
@@ -1823,9 +2115,8 @@ static bool address_device(uint8_t slotId, uint8_t port, uint8_t speed)
     }
     s_ep0Ring[EP0_RING_SIZE - 1u].parameter = ep0RingPhys;
     s_ep0Ring[EP0_RING_SIZE - 1u].control =
-        (TRB_TYPE_LINK << 10) | (1u << 1) | s_ep0RingCycle;
-    s_ep0RingIndex = 0;
-    s_ep0RingCycle = 1;
+        (TRB_TYPE_LINK << 10) | (1u << 1) |
+        s_ep0RingState.producerCycle;
 
     const uint64_t devCtxPhys = s_dmaAddresses.deviceCtx;
     if (slotId < 256u) {
@@ -1833,6 +2124,7 @@ static bool address_device(uint8_t slotId, uint8_t port, uint8_t speed)
     }
 
     const uint64_t inputCtxPhys = s_dmaAddresses.inputCtx;
+    dma_write_barrier();
     CommandResult result;
     if (!submit_command(trb_address_device(inputCtxPhys, false, slotId), &result, 1000u)) {
         serial_puts("[XHCI] Address Device timeout slot=");
@@ -1867,6 +2159,55 @@ static bool address_device(uint8_t slotId, uint8_t port, uint8_t speed)
     return true;
 }
 
+static bool evaluate_ep0_max_packet_size(uint8_t slotId, uint8_t speed,
+                                         uint8_t descriptorMps)
+{
+    uint32_t updatedMps = 0u;
+    if (!xhci_ep0_mps_from_descriptor(speed, descriptorMps, &updatedMps)) {
+        diagnostic_stage(modern_input_diagnostics::Stage::AddressDevice,
+                         modern_input_diagnostics::Status::Fail,
+                         descriptorMps, true, 0u, false, slotId,
+                         s_selectedPort, 1u, 0u, false,
+                         "DEVICE_DESCRIPTOR_EP0_MPS_INVALID_FOR_SPEED");
+        return false;
+    }
+    if (updatedMps == initial_max_packet_size(speed)) return true;
+
+    const uint32_t ctxSize = context_size();
+    for (uint32_t i = 0u; i < INPUT_CTX_SIZE; ++i) s_inputCtx[i] = 0u;
+    uint32_t* icc = reinterpret_cast<uint32_t*>(s_inputCtx);
+    icc[1] = XHCI_ADD_CONTEXT_FLAG_EP0;
+
+    uint32_t* ep0Input = reinterpret_cast<uint32_t*>(
+        s_inputCtx + 2u * ctxSize);
+    const uint32_t* ep0Output = reinterpret_cast<const uint32_t*>(
+        s_deviceCtx + ctxSize);
+    for (uint32_t i = 0u; i < ctxSize / sizeof(uint32_t); ++i) {
+        ep0Input[i] = ep0Output[i];
+    }
+    ep0Input[0] = ep_ctx_set_max_packet_size(ep0Input[0], updatedMps);
+
+    dma_write_barrier();
+    CommandResult result;
+    if (!submit_command(trb_evaluate_context(s_dmaAddresses.inputCtx, slotId),
+                        &result, 1000u)) {
+        diagnostic_stage(modern_input_diagnostics::Stage::AddressDevice,
+                         modern_input_diagnostics::Status::Timeout,
+                         1000u, true, 0u, false, slotId,
+                         s_selectedPort, 1u);
+        return false;
+    }
+    if (result.completionCode != CC_SUCCESS) {
+        diagnostic_stage(modern_input_diagnostics::Stage::AddressDevice,
+                         modern_input_diagnostics::Status::Fail,
+                         result.completionCode, true, 0u, false, slotId,
+                         s_selectedPort, 1u, result.completionCode, true,
+                         "EVALUATE_CONTEXT_REJECTED_EP0_MPS_UPDATE");
+        return false;
+    }
+    return true;
+}
+
 // ================================================================
 // EP0 control transfer (Section 9)
 // ================================================================
@@ -1889,6 +2230,14 @@ static bool ep0_control_transfer(uint8_t slotId, const UsbControlRequest& req,
 
     const bool hasDataStage = (req.wLength > 0u);
     const bool dataInDir = req.dataIn;
+    if (req.wLength > CONTROL_BUF_SIZE) {
+        diagnostic_stage(modern_input_diagnostics::Stage::ControlTransfer,
+                         modern_input_diagnostics::Status::Blocked,
+                         req.wLength, true, 0u, false, slotId,
+                         0u, 1u, 0u, false,
+                         "CONTROL_TRANSFER_EXCEEDS_QUALIFIED_BUFFER");
+        return false;
+    }
 
     usb::SetupPacket setup;
     setup.bmRequestType = req.bmRequestType;
@@ -1899,17 +2248,20 @@ static bool ep0_control_transfer(uint8_t slotId, const UsbControlRequest& req,
 
     const uint8_t trt = hasDataStage ? (dataInDir ? 2u : 3u) : 0u;
 
-    for (uint32_t i = 0u; i < EP0_RING_SIZE; ++i) {
-        s_ep0Ring[i].parameter = 0;
-        s_ep0Ring[i].status = 0;
-        s_ep0Ring[i].control = 0;
-    }
-
-    uint32_t idx = 0u;
-    s_ep0Ring[idx++] = trb_setup_stage(setup, trt, false);
+    XhciTrb transferTrbs[3] = {};
+    uint32_t trbCount = 0u;
+    transferTrbs[trbCount++] = trb_setup_stage(setup, trt, false);
 
     if (hasDataStage) {
         const void* dataBuffer = dataInDir ? dataIn : dataOut;
+        if (dataBuffer != s_controlBuf) {
+            diagnostic_stage(modern_input_diagnostics::Stage::ControlTransfer,
+                             modern_input_diagnostics::Status::Blocked,
+                             req.wLength, true, 0u, false,
+                             slotId, 0u, 1u, 0u, false,
+                             "CONTROL_BUFFER_NOT_IN_EXCLUSIVE_DMA_WORKSPACE");
+            return false;
+        }
         uint64_t bufPhys = 0u;
         if (!dma_region_address(dataBuffer, req.wLength, 1u, &bufPhys)) {
             diagnostic_stage(modern_input_diagnostics::Stage::ControlTransfer,
@@ -1919,29 +2271,56 @@ static bool ep0_control_transfer(uint8_t slotId, const UsbControlRequest& req,
                              "CONTROL_DMA_BUFFER_OUTSIDE_VERIFIED_KERNEL_IMAGE");
             return false;
         }
-        s_ep0Ring[idx++] = trb_data_stage(bufPhys, req.wLength, dataInDir, false, true);
+        if (!xhci_range_within_boundary(bufPhys, req.wLength, 0x10000u)) {
+            diagnostic_stage(modern_input_diagnostics::Stage::ControlTransfer,
+                             modern_input_diagnostics::Status::Blocked,
+                             req.wLength, true, 0u, false,
+                             slotId, 0u, 1u, 0u, false,
+                             "CONTROL_BUFFER_CROSSES_XHCI_64K_BOUNDARY");
+            return false;
+        }
+        transferTrbs[trbCount++] =
+            trb_data_stage(bufPhys, req.wLength, dataInDir, false, true);
     }
 
     const bool statusIn = hasDataStage ? !dataInDir : true;
-    s_ep0Ring[idx] = trb_status_stage(statusIn, true);
+    transferTrbs[trbCount++] = trb_status_stage(statusIn, true);
 
-    for (uint32_t i = 0u; i <= idx; ++i) {
-        s_ep0Ring[i].control &= ~0x01u;
-        s_ep0Ring[i].control |= s_ep0RingCycle;
+    uint32_t trbIndices[3] = {};
+    uint8_t trbCycles[3] = {};
+    bool crossedLink = false;
+    uint8_t linkCycle = 0u;
+    if (!xhci_transfer_ring_reserve(
+            &s_ep0RingState, trbCount, trbIndices, trbCycles, 3u,
+            &crossedLink, &linkCycle)) {
+        diagnostic_stage(modern_input_diagnostics::Stage::ControlTransfer,
+                         modern_input_diagnostics::Status::Blocked,
+                         s_ep0RingState.outstandingTrbs, true, 0u, false,
+                         slotId, 0u, 1u, 0u, false,
+                         s_ep0RingState.poisoned
+                            ? "EP0_RING_QUARANTINED_AFTER_TIMEOUT"
+                            : "EP0_TRANSFER_RING_FULL_OR_CURSOR_INVALID");
+        return false;
     }
 
     const uint64_t ep0RingPhys = s_dmaAddresses.ep0Ring;
-    s_ep0Ring[EP0_RING_SIZE - 1u].parameter = ep0RingPhys;
-    s_ep0Ring[EP0_RING_SIZE - 1u].control =
-        (TRB_TYPE_LINK << 10) | (1u << 1) | s_ep0RingCycle;
+    for (uint32_t i = 0u; i < trbCount; ++i) {
+        transferTrbs[i].control =
+            (transferTrbs[i].control & ~0x01u) | trbCycles[i];
+        s_ep0Ring[trbIndices[i]] = transferTrbs[i];
+    }
+    if (crossedLink) {
+        s_ep0Ring[EP0_RING_SIZE - 1u].parameter = ep0RingPhys;
+        s_ep0Ring[EP0_RING_SIZE - 1u].status = 0u;
+        s_ep0Ring[EP0_RING_SIZE - 1u].control =
+            (TRB_TYPE_LINK << 10) | (1u << 1) | linkCycle;
+    }
 
-    s_ep0RingIndex = 0;
-    s_ep0RingCycle = 1;
-
+    dma_write_barrier();
     ring_doorbell(slotId, 1u);
 
-    uint32_t elapsed = 0u;
-    while (elapsed < req.timeoutMs) {
+    const uint64_t startTick = kernel::pit::ticks();
+    do {
         XhciEventTrb evt;
         while (process_one_event(&evt)) {
             if (trb_type(reinterpret_cast<const XhciTrb&>(evt)) == TRB_TYPE_TRANSFER_EVENT) {
@@ -1949,9 +2328,22 @@ static bool ep0_control_transfer(uint8_t slotId, const UsbControlRequest& req,
                 const uint8_t evtEp   = event_transfer_ep_id(evt);
                 const uint8_t cc      = static_cast<uint8_t>(trb_completion_code(evt));
                 const uint32_t residual = event_transfer_length(evt);
+                const uint64_t eventPointer = event_transfer_trb_ptr(evt);
 
-                if (evtSlot == slotId && evtEp == 1u) {
+                if (evtSlot == slotId && evtEp == 1u &&
+                    xhci_transfer_event_matches(eventPointer, ep0RingPhys,
+                                                trbIndices, trbCount)) {
                     update_erdp();
+                    if (residual > req.wLength ||
+                        !xhci_transfer_ring_complete(&s_ep0RingState, trbCount)) {
+                        xhci_transfer_ring_poison(&s_ep0RingState);
+                        diagnostic_stage(modern_input_diagnostics::Stage::ControlTransfer,
+                                         modern_input_diagnostics::Status::Fail,
+                                         residual, true, 0u, false, slotId,
+                                         0u, evtEp, cc, true,
+                                         "TRANSFER_EVENT_RESIDUAL_OR_RING_ACCOUNTING_INVALID");
+                        return false;
+                    }
                     if (result != nullptr) {
                         result->valid = (cc == CC_SUCCESS || cc == CC_SHORT_PACKET);
                         result->completionCode = cc;
@@ -1973,20 +2365,23 @@ static bool ep0_control_transfer(uint8_t slotId, const UsbControlRequest& req,
                     serial_puts("\n");
                     return false;
                 }
+                update_erdp();
             }
         }
-        delay_ms(1u);
-        ++elapsed;
-    }
+        if (timeout_elapsed(startTick, req.timeoutMs)) break;
+        wait_for_timer_progress();
+    } while (true);
 
     update_erdp();
+    xhci_transfer_ring_poison(&s_ep0RingState);
     serial_puts("[XHCI] control transfer timeout slot=");
     serial_u32_dec(slotId);
     serial_puts("\n");
     diagnostic_stage(modern_input_diagnostics::Stage::ControlTransfer,
                      modern_input_diagnostics::Status::Timeout,
                      req.timeoutMs, true, 0u, false, slotId,
-                     0u, 1u);
+                     0u, 1u, 0u, false,
+                     "EP0_RING_QUARANTINED_AFTER_TIMEOUT");
     return false;
 }
 
@@ -2106,6 +2501,16 @@ static bool enumerate_first_device(EnumeratedDevice* out)
         return false;
     }
 
+    if (!debounce_port_connection(port)) {
+        serial_puts("[XHCI] enumerate: port connection did not stabilize\n");
+        diagnostic_stage(modern_input_diagnostics::Stage::PortReset,
+                         modern_input_diagnostics::Status::Timeout,
+                         0u, false, port_read32(port, XHCI_PORT_SC), true,
+                         0u, port, 0u, 0u, false,
+                         "PORT_CONNECTION_DID_NOT_STABILIZE_WITHIN_3_SECONDS");
+        return false;
+    }
+
     serial_puts("[XHCI] enumerate: port ");
     serial_u32_dec(port);
     serial_puts(" connected speed=");
@@ -2132,6 +2537,10 @@ static bool enumerate_first_device(EnumeratedDevice* out)
     UsbDeviceDescriptorInfo info;
 
     if (!get_device_descriptor(slotId, speed, s_controlBuf, 8u, &info)) {
+        return false;
+    }
+
+    if (!evaluate_ep0_max_packet_size(slotId, speed, s_controlBuf[7])) {
         return false;
     }
 
@@ -2190,10 +2599,24 @@ bool init()
     }
     s_initializationAttempted = true;
     s_dmaWorkspaceExclusive = false;
+    s_dmaReady = false;
+    s_dmaAuthorized = false;
+    s_dmaWorkspaceQualified = false;
+    s_dmaProtectionQualified = false;
+    s_haltObservedWithinBound = false;
+    s_controllerResetCompleted = false;
 
     serial_puts("[XHCI] init begin\n");
 
 #if ARCH_HAS_PORT_IO
+    if (kernel::pit::ticks_per_second() == 0u) {
+        diagnostic_stage(modern_input_diagnostics::Stage::BiosOwnership,
+                         modern_input_diagnostics::Status::Blocked,
+                         0u, false, 0u, false, 0u, 0u, 0u, 0u, false,
+                         "CALIBRATED_PIT_CLOCK_UNAVAILABLE");
+        serial_puts("[XHCI] initialization blocked: PIT timing is unavailable\n");
+        return false;
+    }
     if (!find_xhci_controller()) {
         serial_puts("[XHCI] PCI device not found\n");
         return false;
@@ -2208,6 +2631,9 @@ bool init()
     s_pciBar0 = pci_read32(s_bus, s_dev, s_func, 0x10u);
     s_pciBar1 = pci_read32(s_bus, s_dev, s_func, 0x14u);
     s_pciCommand = pci_read16(s_bus, s_dev, s_func, 0x04u);
+    s_bmeEnabledOnEntry = (s_pciCommand & 0x0004u) != 0u;
+    serial_puts("[XHCI] PCI BME on entry=");
+    serial_puts(s_bmeEnabledOnEntry ? "enabled\n" : "disabled\n");
     const bool barIoSpace = (s_pciBar0 & 0x01u) != 0u;
     const uint8_t barType = static_cast<uint8_t>((s_pciBar0 >> 1) & 0x03u);
     const bool barIs64 = !barIoSpace && barType == 0x02u;
@@ -2215,18 +2641,6 @@ bool init()
     modern_input_diagnostics::record_mmio_configuration(
         s_diagnosticControllerIndex, s_pciBar0, s_pciBar1, s_pciCommand,
         barType, barIoSpace, barIs64, barPrefetchable);
-
-    // Do not enable MMIO decoding on a controller that arrives with bus
-    // mastering active. Firmware may still own it or have live DMA in flight.
-    if ((s_pciCommand & 0x0004u) != 0u) {
-        diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
-                         modern_input_diagnostics::Status::Blocked,
-                         s_pciCommand, true, 0u, false,
-                         0u, 0u, 0u, 0u, false,
-                         "PCI_BUS_MASTER_ALREADY_ENABLED_BEFORE_DMA_QUALIFICATION");
-        serial_puts("[XHCI] DMA blocked: PCI bus mastering was already enabled\n");
-        return false;
-    }
 
     static const uint64_t kInitialCapabilitySpan =
         static_cast<uint64_t>(XHCI_CAP_DWORD_COUNT) * sizeof(uint32_t);
@@ -2273,13 +2687,6 @@ bool init()
         return false;
     }
 
-    // Prepare and validate every controller-owned DMA region before changing
-    // controller ownership or state. Unknown device-address translation and
-    // unmanaged ACPI remapping remain fail-closed prerequisites.
-    if (!validate_dma_prerequisites()) {
-        return false;
-    }
-
     if (!acquire_ownership()) {
         return false;
     }
@@ -2288,7 +2695,34 @@ bool init()
         return false;
     }
 
+    // BME may be active on entry while firmware still owns live queues. The
+    // OS first requests ownership and observes HCHalted; only then is it safe
+    // to clear BME. This is a quiescence action, not an authorization of new
+    // controller DMA, and readback must confirm BME=0 before reset/qualifying
+    // direct-physical DMA addresses.
+    if (!disable_pci_bus_master_after_halt()) {
+        const uint16_t command = pci_read16(s_bus, s_dev, s_func, 0x04u);
+        const uint32_t status = op_read32(XHCI_OP_USBSTS);
+        serial_puts("[XHCI] unsafe to continue after halt; BME readback=0x");
+        serial_hex_n(command, 4u);
+        serial_puts(" USBSTS=0x");
+        serial_hex_n(status, 8u);
+        serial_puts("\n");
+        diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
+                         modern_input_diagnostics::Status::Blocked,
+                         command, true, status, true,
+                         0u, 0u, 0u, 0u, false,
+                         "BUS_MASTER_NOT_DISABLED_AFTER_VERIFIED_HALT");
+        return false;
+    }
+
     if (!reset_controller()) {
+        return false;
+    }
+
+    // Qualify all addresses, memory protection and VT-d/RMRR requirements
+    // only after ownership, halt, reset, and BME-off are established.
+    if (!validate_dma_prerequisites()) {
         return false;
     }
 

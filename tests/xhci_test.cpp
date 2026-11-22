@@ -170,27 +170,50 @@ void test_mmio_mapping_validation()
 
 void test_ownership_detection()
 {
-    // No capability (no semaphores set)
+    // These masks are taken from xHCI USBLEGSUP bit positions, independently
+    // of the implementation constants: BIOS semaphore bit 16, OS bit 24.
+    expect(XHCI_USBLEGSUP_HC_BIOS_OWNED_SEM == (1u << 16),
+           "USBLEGSUP BIOS semaphore uses spec bit 16");
+    expect(XHCI_USBLEGSUP_HC_OS_OWNED_SEM == (1u << 24),
+           "USBLEGSUP OS semaphore uses spec bit 24");
+    // With the capability present, neither semaphore set means unowned.
     {
         const XhciOwnershipState os = detect_ownership(0x00000000u);
-        expect(os == XhciOwnershipState::NoCapability, "ownership no capability");
+        expect(os == XhciOwnershipState::Unowned, "ownership neither semaphore is unowned");
     }
     // BIOS-owned
     {
-        const XhciOwnershipState os = detect_ownership(XHCI_USBLEGSUP_HC_BIOS_OWNED_SEM);
+        const XhciOwnershipState os = detect_ownership(1u << 16);
         expect(os == XhciOwnershipState::BiosOwned, "ownership BIOS-owned");
     }
     // OS-owned
     {
-        const XhciOwnershipState os = detect_ownership(XHCI_USBLEGSUP_HC_OS_OWNED_SEM);
+        const XhciOwnershipState os = detect_ownership(1u << 24);
         expect(os == XhciOwnershipState::OsOwned, "ownership OS-owned");
     }
-    // Both set (should not happen, but OS-owned takes precedence in detection)
+    // Both set is a conflicting state; callers must not infer either owner.
     {
         const XhciOwnershipState os = detect_ownership(
-            XHCI_USBLEGSUP_HC_BIOS_OWNED_SEM | XHCI_USBLEGSUP_HC_OS_OWNED_SEM);
-        expect(os == XhciOwnershipState::BiosOwned, "ownership both set");
+            (1u << 16) | (1u << 24));
+        expect(os == XhciOwnershipState::Conflict, "ownership both set conflicts");
     }
+    expect(xhci_ownership_acquired(0x01000000u),
+           "ownership succeeds only with OS bit 24 and BIOS bit 16 clear");
+    expect(!xhci_ownership_acquired(0x00010000u) &&
+           !xhci_ownership_acquired(0x01010000u) &&
+           !xhci_ownership_acquired(0u),
+           "BIOS-owned, conflicting, and unowned states do not acquire ownership");
+    expect(xhci_ownership_handoff_result(0x00010000u, false) ==
+               XhciOwnershipHandoffResult::Wait &&
+           xhci_ownership_handoff_result(0x01000000u, false) ==
+               XhciOwnershipHandoffResult::Acquired &&
+           xhci_ownership_handoff_result(0x00010000u, true) ==
+               XhciOwnershipHandoffResult::Timeout,
+           "ownership handoff distinguishes wait, success, and bounded timeout");
+    expect((XHCI_USBLEGCTLSTS_SMI_ENABLE_MASK & 0x0000E011u) == 0x0000E011u,
+           "USBLEGCTLSTS SMI enable positions match bits 0, 4, 13, 14, and 15");
+    expect(xhci_usb_legacy_smi_disable_value(0xFFFFFFFFu) == 0x000E1FEEu,
+           "USBLEGCTLSTS write preserves RsvdP and writes SMI and RW1C bits as zero");
 }
 
 // ================================================================
@@ -248,6 +271,60 @@ void test_ring_helpers()
            "event consumer wraps and toggles cycle state");
     expect(!xhci_event_ring_advance(64u, nullptr, &eventCycle),
            "event ring rejects a missing cursor");
+
+    XhciTransferRingState transfer = {};
+    expect(xhci_transfer_ring_initialize(&transfer, 8u, 1u) &&
+           transfer.producerIndex == 0u && transfer.producerCycle == 1u,
+           "EP0 transfer ring begins at index zero with cycle state one");
+    uint32_t indices[3] = {};
+    uint8_t cycles[3] = {};
+    bool crossed = false;
+    uint8_t linkCycle = 0u;
+    expect(xhci_transfer_ring_reserve(&transfer, 3u, indices, cycles, 3u,
+                                      &crossed, &linkCycle) &&
+           indices[0] == 0u && indices[2] == 2u &&
+           cycles[0] == 1u && cycles[2] == 1u && !crossed,
+           "first control TD reserves three persistent producer entries");
+    expect(xhci_transfer_ring_complete(&transfer, 3u) &&
+           xhci_transfer_ring_reserve(&transfer, 3u, indices, cycles, 3u,
+                                      &crossed, &linkCycle) &&
+           indices[0] == 3u && indices[2] == 5u &&
+           cycles[0] == 1u && !crossed,
+           "second control TD continues producer state without ring reset");
+    expect(xhci_transfer_ring_complete(&transfer, 3u) &&
+           xhci_transfer_ring_reserve(&transfer, 2u, indices, cycles, 3u,
+                                      &crossed, &linkCycle) &&
+           indices[0] == 6u && indices[1] == 0u &&
+           cycles[0] == 1u && cycles[1] == 0u && crossed && linkCycle == 1u,
+           "third control TD wraps through Link and toggles producer cycle");
+    expect(xhci_transfer_ring_complete(&transfer, 2u) &&
+           xhci_transfer_ring_reserve(&transfer, 2u, indices, cycles, 3u,
+                                      &crossed, &linkCycle) &&
+           indices[0] == 1u && cycles[0] == 0u && !crossed,
+           "fourth control TD retains cycle zero after wrap");
+
+    XhciTransferRingState full = {};
+    expect(xhci_transfer_ring_initialize(&full, 8u, 1u) &&
+           xhci_transfer_ring_reserve(&full, 7u, indices, cycles, 7u,
+                                      &crossed, &linkCycle) &&
+           full.outstandingTrbs == 7u &&
+           !xhci_transfer_ring_reserve(&full, 1u, indices, cycles, 7u,
+                                       &crossed, &linkCycle),
+           "ring-full state refuses reuse before completion");
+    xhci_transfer_ring_poison(&transfer);
+    expect(!xhci_transfer_ring_reserve(&transfer, 1u, indices, cycles, 3u,
+                                       &crossed, &linkCycle),
+           "timed-out transfer ring remains quarantined");
+    const uint32_t unmatchedIndex[1] = {0u};
+    expect(!xhci_transfer_event_matches(0x10F0u, 0x1000u,
+                                       unmatchedIndex, 1u),
+           "transfer completion pointer must match the outstanding TD");
+    const uint32_t expectedIndex[2] = {6u, 0u};
+    expect(xhci_transfer_event_matches(0x1060u, 0x1000u,
+                                       expectedIndex, 2u) &&
+           !xhci_transfer_event_matches(0x1010u, 0x1000u,
+                                        expectedIndex, 2u),
+           "transfer completion correlation accepts only its TD TRB pointers");
 }
 
 // ================================================================
@@ -276,6 +353,14 @@ void test_erst_helpers()
            "ERDP rejects an unaligned event address");
     expect(!xhci_encode_erdp(0x1000u, nullptr),
            "ERDP rejects a missing output");
+    XhciErstRegisterWrite order[3] = {};
+    expect(xhci_erst_register_write_order(order, 3u) == 3u &&
+           static_cast<uint8_t>(order[0]) == 0u &&
+           static_cast<uint8_t>(order[1]) == 1u &&
+           static_cast<uint8_t>(order[2]) == 2u,
+           "ERST initialization writes size, dequeue pointer, then base address");
+    expect(xhci_erst_register_write_order(order, 2u) == 0u,
+           "ERST order helper rejects insufficient output capacity");
 }
 
 // ================================================================
@@ -505,6 +590,30 @@ void test_pls_speed_extraction()
 
 void test_context_helpers()
 {
+    expect(xhci_input_context_bytes(false) == 33u * 32u &&
+           xhci_device_context_bytes(false) == 32u * 32u,
+           "32-byte CSZ input and output contexts size every context entry");
+    expect(xhci_input_context_bytes(true) == 33u * 64u &&
+           xhci_device_context_bytes(true) == 32u * 64u,
+           "64-byte CSZ input and output contexts size every context entry");
+    expect(ep_ctx_set_dequeue_cycle(0x12345000u, 1u) == 0x12345001u &&
+           ep_ctx_set_dequeue_cycle(0x12345001u, 0u) == 0x12345000u,
+           "EP0 dequeue pointer carries the initial Dequeue Cycle State");
+    uint32_t mps = 0u;
+    expect(xhci_ep0_mps_from_descriptor(XHCI_SPEED_FULL, 8u, &mps) && mps == 8u,
+           "full-speed EP0 packet size comes from bMaxPacketSize0");
+    expect(xhci_ep0_mps_from_descriptor(XHCI_SPEED_HIGH, 64u, &mps) && mps == 64u,
+           "high-speed EP0 packet size is validated from its descriptor");
+    expect(xhci_ep0_mps_from_descriptor(XHCI_SPEED_SUPER, 9u, &mps) && mps == 512u,
+           "SuperSpeed EP0 descriptor exponent maps to 512 bytes");
+    expect(!xhci_ep0_mps_from_descriptor(XHCI_SPEED_LOW, 64u, &mps) &&
+           !xhci_ep0_mps_from_descriptor(XHCI_SPEED_SUPER, 0xFFu, &mps),
+           "invalid EP0 packet sizes are rejected for their bus speeds");
+
+    expect(xhci_range_within_boundary(0x1FF00u, 0x100u, 0x10000u) &&
+           !xhci_range_within_boundary(0x1FFF0u, 0x20u, 0x10000u) &&
+           !xhci_range_within_boundary(0x1000u, 0x10001u, 0x10000u),
+           "DMA object boundary helper catches 64 KiB crossing and oversize");
     // Slot context: speed
     {
         const uint32_t dw0 = slot_ctx_set_speed(0u, XHCI_SPEED_HIGH);
@@ -598,6 +707,7 @@ void test_trb_builders()
         expect((trb.status & 0x0000FFFFu) == 8u, "setup stage length 8");
         expect(((trb.status >> 16) & 0x03u) == 2u, "setup stage TRT IN");
         expect(((trb.control >> 6) & 0x01u) == 1u, "setup stage IDT");
+        expect(((trb.control >> 4) & 0x01u) == 1u, "setup stage chains the data or status stage");
         expect((trb.control & 0x01u) == 0u, "setup stage cycle clear");
     }
     // Data Stage TRB IN
@@ -605,20 +715,20 @@ void test_trb_builders()
         const XhciTrb trb = trb_data_stage(0x3000u, 18u, true, false, true);
         expect(trb_type(trb) == TRB_TYPE_DATA_STAGE, "data stage type");
         expect((trb.status & 0x0000FFFFu) == 18u, "data stage length");
-        expect(((trb.status >> 16) & 0x01u) == 1u, "data stage IN");
+        expect(((trb.control >> 16) & 0x01u) == 1u, "data stage IN direction bit");
         expect((trb.control & 0x02u) == 0x02u, "data stage chain");
     }
     // Data Stage TRB OUT
     {
         const XhciTrb trb = trb_data_stage(0x4000u, 64u, false, false, false);
-        expect(((trb.status >> 16) & 0x01u) == 0u, "data stage OUT");
+        expect(((trb.control >> 16) & 0x01u) == 0u, "data stage OUT direction bit");
         expect((trb.control & 0x02u) == 0u, "data stage no chain");
     }
     // Status Stage TRB
     {
         const XhciTrb trb = trb_status_stage(true, true);
         expect(trb_type(trb) == TRB_TYPE_STATUS_STAGE, "status stage type");
-        expect(((trb.status >> 16) & 0x01u) == 1u, "status stage IN");
+        expect(((trb.control >> 16) & 0x01u) == 1u, "status stage IN direction bit");
         expect(((trb.control >> 5) & 0x01u) == 1u, "status stage IOC");
     }
 }
@@ -977,9 +1087,9 @@ void test_control_request()
 
 void test_controller_state_change_preconditions()
 {
-    expect(!xhci_controller_state_change_allowed(
+    expect(xhci_controller_state_change_allowed(
                false, true, true, true),
-           "controller stays untouched when DMA is not verified");
+           "BME-on-entry takeover can halt before DMA authorization");
     expect(!xhci_controller_state_change_allowed(
                true, false, true, true),
            "firmware ownership must resolve before controller mutation");
@@ -1000,6 +1110,43 @@ void test_controller_state_change_preconditions()
            "bus mastering remains enabled while Run/Stop is still set");
     expect(xhci_pci_bus_master_disable_allowed(true, true, true),
            "bus mastering can be cleared after bounded halt is verified");
+
+    expect(!xhci_dma_authorization_allowed(true, true, true, true, true, false),
+           "DMA authorization refuses BME that is still enabled");
+    expect(!xhci_dma_authorization_allowed(false, true, true, true, true, true),
+           "DMA authorization refuses unresolved firmware ownership");
+    expect(!xhci_dma_authorization_allowed(true, false, true, true, true, true),
+           "DMA authorization refuses an unhalted controller");
+    expect(!xhci_dma_authorization_allowed(true, true, false, true, true, true),
+           "DMA authorization refuses an incomplete controller reset");
+    expect(!xhci_dma_authorization_allowed(true, true, true, false, true, true),
+           "DMA authorization refuses an unqualified workspace");
+    expect(!xhci_dma_authorization_allowed(true, true, true, true, false, true),
+           "DMA authorization refuses unqualified memory protection state");
+    expect(xhci_dma_authorization_allowed(true, true, true, true, true, true) &&
+           xhci_controller_dma_enable_allowed(true, true) &&
+           !xhci_controller_dma_enable_allowed(false, true),
+           "DMA enable follows complete authorization and verified readback");
+    expect(xhci_timeout_ticks(1000u, 100u) == 100u &&
+           xhci_timeout_ticks(1u, 100u) == 1u &&
+           xhci_timeout_ticks(XHCI_HALT_TIMEOUT_MS, 100u) == 2u &&
+           xhci_timeout_ticks(100u, 0u) == 0u &&
+           xhci_timeout_ticks_with_phase_guard(1u, 100u) == 2u &&
+           xhci_timeout_ticks_with_phase_guard(XHCI_HALT_TIMEOUT_MS, 100u) == 3u &&
+           xhci_timeout_ticks_with_phase_guard(100u, 0u) == 0u,
+           "PIT deadlines round up and include one tick to account for counter phase");
+    expect(xhci_link_cycle_before_toggle(0u) == 1u &&
+           xhci_link_cycle_before_toggle(1u) == 0u,
+           "Link TRB gets the pre-toggle cycle state");
+    expect(xhci_command_completion_matches(0x1230u, 0x1230u) &&
+           !xhci_command_completion_matches(0x1240u, 0x1230u),
+           "command completion is correlated to the submitted TRB pointer");
+    expect(!xhci_controller_reset_allowed(true, true, true, false) &&
+           !xhci_controller_reset_allowed(true, true, false, true) &&
+           !xhci_controller_reset_allowed(true, false, true, true) &&
+           !xhci_controller_reset_allowed(false, true, true, true) &&
+           xhci_controller_reset_allowed(true, true, true, true),
+           "reset requires observed halt, cleared Run/Stop, and BME off");
 }
 
 } // namespace

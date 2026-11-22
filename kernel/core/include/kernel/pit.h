@@ -27,6 +27,9 @@ void irq_handler();
 // Number of ticks since boot
 uint64_t ticks();
 
+// Configured periodic tick rate. Returns zero before init or when unavailable.
+uint32_t ticks_per_second();
+
 // Diagnostic-only indication that the independent timer interrupt path is
 // alive. This is intentionally not driven by the desktop event loop.
 bool heartbeat_seen();

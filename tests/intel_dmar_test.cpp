@@ -491,6 +491,52 @@ void test_register_classification_and_dma_gate()
            classify_root_table(true, 0x1800u) == RootTableState::Invalid,
            "RTADDR reserved bits and unsupported translation table mode are checked");
 
+    RegisterSnapshot protectedState{};
+    expect(classify_protected_memory(0u, 0u, 0u, 0u, 0u, 0u,
+                                     &protectedState) ==
+               ProtectedMemoryState::Disabled,
+           "unsupported and disabled PMR reports are classified without writes");
+    expect(classify_protected_memory(1ULL << 5u, (1u << 31u) | 1u,
+                                     0x10000000u, 0x20000000u, 0u, 0u,
+                                     &protectedState) ==
+               ProtectedMemoryState::Enabled &&
+           protectedState.protectedLowActive &&
+           protectedState.protectedLowBase == 0x10000000u &&
+           protectedState.protectedLowLimit == 0xFFFFFFFFu,
+           "active PLMR is conservatively bounded through the low 4 GiB");
+    const kernel::dma_memory::PhysicalRange belowLowPmr = {0x08000000u, 4096u};
+    const kernel::dma_memory::PhysicalRange insideLowPmr = {0x10000000u, 4096u};
+    expect(!protected_memory_overlaps_workspace(
+               protectedState, &belowLowPmr, 1u) &&
+           protected_memory_overlaps_workspace(
+               protectedState, &insideLowPmr, 1u),
+           "PLMR overlap check blocks possible protected workspace addresses");
+    expect(classify_protected_memory(1ULL << 6u, (1u << 31u) | 1u,
+                                     0u, 0u, 0x0000000100000000ULL,
+                                     0x0000000200000000ULL,
+                                     &protectedState) ==
+               ProtectedMemoryState::Enabled &&
+           protectedState.protectedHighActive &&
+           protectedState.protectedHighLimit == 0x000FFFFFFFFFFFFFULL,
+           "active PHMR is conservatively bounded through the 52-bit limit");
+    const kernel::dma_memory::PhysicalRange belowHighPmr = {0x1000u, 4096u};
+    const kernel::dma_memory::PhysicalRange insideHighPmr = {0x100000000ULL, 4096u};
+    expect(!protected_memory_overlaps_workspace(
+               protectedState, &belowHighPmr, 1u) &&
+           protected_memory_overlaps_workspace(
+               protectedState, &insideHighPmr, 1u),
+           "PHMR overlap check blocks workspace at or above its base");
+    expect(classify_protected_memory(1ULL << 5u, 1u << 31u,
+                                     0u, 0u, 0u, 0u,
+                                     &protectedState) ==
+               ProtectedMemoryState::Unknown,
+           "PMEN transition without PRS readback blocks direct DMA");
+    expect(classify_protected_memory(1ULL << 5u, (1u << 31u) | 1u,
+                                     0x10000001u, 0x20000000u, 0u, 0u,
+                                     &protectedState) ==
+               ProtectedMemoryState::Invalid,
+           "malformed PLMR reserved bits block direct DMA");
+
     expect(!dma_eligibility_allowed(RouteStatus::Resolved, RegisterStatus::Readable,
                TranslationState::EnabledObserved, RootTableState::Configured,
                true, false, true),
@@ -668,8 +714,23 @@ void test_direct_physical_dma_contract()
     evidence.rmrrMemory = RmrrMemoryStatus::Valid;
     evidence.busMasterDisabled = true;
     evidence.workspaceExclusive = true;
+    evidence.protectedMemory = ProtectedMemoryState::Disabled;
     expect(evaluate_direct_physical_dma(evidence) == DirectDmaDecision::Verified,
            "direct physical DMA passes only with all independent proofs");
+
+    evidence.protectedMemory = ProtectedMemoryState::Unknown;
+    expect(evaluate_direct_physical_dma(evidence) ==
+               DirectDmaDecision::BlockedProtectedMemoryUnknown,
+           "unknown PMEN or protected-region state blocks direct physical DMA");
+    evidence.protectedMemory = ProtectedMemoryState::Enabled;
+    evidence.protectedMemoryOverlap = true;
+    expect(evaluate_direct_physical_dma(evidence) ==
+               DirectDmaDecision::BlockedProtectedMemoryOverlap,
+           "DMA workspace overlap with active PMR blocks direct physical DMA");
+    evidence.protectedMemoryOverlap = false;
+    expect(evaluate_direct_physical_dma(evidence) == DirectDmaDecision::Verified,
+           "active PMR permits DMA only when workspace is proven disjoint");
+    evidence.protectedMemory = ProtectedMemoryState::Disabled;
 
     evidence.translation = TranslationState::EnabledObserved;
     expect(evaluate_direct_physical_dma(evidence) ==

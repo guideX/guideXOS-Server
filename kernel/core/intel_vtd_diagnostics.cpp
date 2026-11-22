@@ -10,7 +10,7 @@ namespace kernel {
 namespace intel_vtd {
 namespace {
 
-static const uint32_t VTD_REQUIRED_REGISTER_BYTES = 0x38u;
+static const uint32_t VTD_REQUIRED_REGISTER_BYTES = 0x80u;
 static const uint32_t PCI_HEADER_TYPE_OFFSET = 0x0Eu;
 static const uint32_t PCI_CLASS_REVISION_OFFSET = 0x08u;
 static const uint32_t PCI_PRIMARY_SECONDARY_SUBORDINATE_OFFSET = 0x18u;
@@ -213,9 +213,23 @@ static intel_dmar::RegisterSnapshot inspect_unit(const intel_dmar::DrhdUnit& uni
         *reinterpret_cast<const volatile uint64_t*>(bytes + 0x20u);
     const uint32_t faultStatus =
         *reinterpret_cast<const volatile uint32_t*>(bytes + 0x34u);
-    return intel_dmar::classify_registers(
+    result = intel_dmar::classify_registers(
         true, version, capability, extendedCapability,
         globalStatus, rootTableAddress, faultStatus);
+    const uint32_t pmen =
+        *reinterpret_cast<const volatile uint32_t*>(bytes + 0x64u);
+    const uint32_t protectedLowBase =
+        *reinterpret_cast<const volatile uint32_t*>(bytes + 0x68u);
+    const uint32_t protectedLowLimit =
+        *reinterpret_cast<const volatile uint32_t*>(bytes + 0x6Cu);
+    const uint64_t protectedHighBase =
+        *reinterpret_cast<const volatile uint64_t*>(bytes + 0x70u);
+    const uint64_t protectedHighLimit =
+        *reinterpret_cast<const volatile uint64_t*>(bytes + 0x78u);
+    intel_dmar::classify_protected_memory(
+        capability, pmen, protectedLowBase, protectedLowLimit,
+        protectedHighBase, protectedHighLimit, &result);
+    return result;
 #else
     result.status = intel_dmar::RegisterStatus::MappingUnavailable;
     return result;
@@ -412,6 +426,27 @@ void qualify_xhci_controllers()
                 serial::put_hex64(registers.rootTableAddress);
                 serial::puts(" FSTS=");
                 serial::put_hex32(registers.faultStatus);
+                serial::puts(" PMEN-state=");
+                serial::puts(registers.protectedMemoryState ==
+                                     intel_dmar::ProtectedMemoryState::Disabled
+                                 ? "disabled"
+                                 : (registers.protectedMemoryState ==
+                                            intel_dmar::ProtectedMemoryState::Enabled
+                                        ? "enabled"
+                                        : (registers.protectedMemoryState ==
+                                                   intel_dmar::ProtectedMemoryState::Invalid
+                                               ? "invalid"
+                                               : "unknown")));
+                serial::puts(" PMEN=0x");
+                serial::put_hex32(registers.pmen);
+                serial::puts(" PLMB=0x");
+                serial::put_hex32(registers.protectedLowBaseRaw);
+                serial::puts(" PLML=0x");
+                serial::put_hex32(registers.protectedLowLimitRaw);
+                serial::puts(" PHMB=0x");
+                serial::put_hex64(registers.protectedHighBaseRaw);
+                serial::puts(" PHML=0x");
+                serial::put_hex64(registers.protectedHighLimitRaw);
                 serial::puts("\n");
             }
         }
@@ -511,11 +546,45 @@ intel_dmar::DirectDmaDecision qualify_direct_physical_dma(
     if (route.unitIndex >= 0 &&
         static_cast<uint32_t>(route.unitIndex) < s_table.drhdCount) {
         const uint32_t unitIndex = static_cast<uint32_t>(route.unitIndex);
-        if (s_unitInspected[unitIndex]) {
-            evidence.registers = s_registersByUnit[unitIndex].status;
-            evidence.translation = s_registersByUnit[unitIndex].translation;
-            evidence.rootTable = s_registersByUnit[unitIndex].rootTable;
-        }
+        // Re-read all relevant VT-d state after controller halt and BME-off,
+        // immediately before direct-physical DMA admission. The earlier scan
+        // is diagnostic context only and may be stale by this point.
+        s_registersByUnit[unitIndex] = inspect_unit(s_table.drhd[unitIndex]);
+        s_unitInspected[unitIndex] = true;
+        const intel_dmar::RegisterSnapshot& registers =
+            s_registersByUnit[unitIndex];
+        evidence.registers = registers.status;
+        evidence.translation = registers.translation;
+        evidence.rootTable = registers.rootTable;
+        evidence.protectedMemory = registers.protectedMemoryState;
+        evidence.protectedMemoryOverlap =
+            intel_dmar::protected_memory_overlaps_workspace(
+                registers, dmaRanges, dmaRangeCount);
+        modern_input_diagnostics::record_vtd_registers(
+            controllerIndex, registers);
+        serial::puts("[VTD] DMA admission recheck PMEN=0x");
+        serial::put_hex32(registers.pmen);
+        serial::puts(" PLMB=0x");
+        serial::put_hex32(registers.protectedLowBaseRaw);
+        serial::puts(" PLML=0x");
+        serial::put_hex32(registers.protectedLowLimitRaw);
+        serial::puts(" PHMB=0x");
+        serial::put_hex64(registers.protectedHighBaseRaw);
+        serial::puts(" PHML=0x");
+        serial::put_hex64(registers.protectedHighLimitRaw);
+        serial::puts(" state=");
+        serial::puts(registers.protectedMemoryState ==
+                              intel_dmar::ProtectedMemoryState::Disabled
+                          ? "disabled"
+                          : (registers.protectedMemoryState ==
+                                     intel_dmar::ProtectedMemoryState::Enabled
+                                 ? "enabled"
+                                 : (registers.protectedMemoryState ==
+                                            intel_dmar::ProtectedMemoryState::Invalid
+                                        ? "invalid"
+                                        : "unknown")));
+        serial::puts(" overlap=");
+        serial::puts(evidence.protectedMemoryOverlap ? "yes\n" : "no\n");
     }
 
     evidence.physicalBackingValidated = dmaRanges != nullptr &&

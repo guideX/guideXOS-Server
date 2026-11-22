@@ -165,6 +165,13 @@ struct Route {
     bool rmrrRequired;
 };
 
+enum class ProtectedMemoryState : uint8_t {
+    Unknown = 0,
+    Disabled,
+    Enabled,
+    Invalid
+};
+
 struct RegisterSnapshot {
     RegisterStatus status;
     TranslationState translation;
@@ -182,6 +189,20 @@ struct RegisterSnapshot {
     bool translationStatusValid;
     bool rootTableValid;
     bool faultStatusValid;
+    ProtectedMemoryState protectedMemoryState;
+    bool protectedLowSupported;
+    bool protectedHighSupported;
+    bool protectedLowActive;
+    bool protectedHighActive;
+    uint32_t pmen;
+    uint32_t protectedLowBaseRaw;
+    uint32_t protectedLowLimitRaw;
+    uint64_t protectedHighBaseRaw;
+    uint64_t protectedHighLimitRaw;
+    uint64_t protectedLowBase;
+    uint64_t protectedLowLimit;
+    uint64_t protectedHighBase;
+    uint64_t protectedHighLimit;
 };
 
 enum class RmrrMemoryStatus : uint8_t {
@@ -215,7 +236,9 @@ enum class DirectDmaDecision : uint8_t {
     BlockedAddressability,
     BlockedRmrr,
     BlockedBusMaster,
-    BlockedWorkspaceOwnership
+    BlockedWorkspaceOwnership,
+    BlockedProtectedMemoryUnknown,
+    BlockedProtectedMemoryOverlap
 };
 
 struct DirectDmaEvidence {
@@ -229,6 +252,8 @@ struct DirectDmaEvidence {
     RmrrMemoryStatus rmrrMemory;
     bool busMasterDisabled;
     bool workspaceExclusive;
+    ProtectedMemoryState protectedMemory;
+    bool protectedMemoryOverlap;
 };
 
 inline uint16_t read_u16(const uint8_t* p)
@@ -857,6 +882,117 @@ inline RegisterSnapshot classify_registers(
     return result;
 }
 
+// PMEN and the protected-region registers are observed only. Direct physical
+// DMA may proceed with PMRs enabled only when every DMA range is disjoint
+// from every active protected region. EPM/PRS disagreement and malformed
+// region encodings fail closed.
+inline ProtectedMemoryState classify_protected_memory(
+    uint64_t capability, uint32_t pmen, uint32_t protectedLowBase,
+    uint32_t protectedLowLimit, uint64_t protectedHighBase,
+    uint64_t protectedHighLimit, RegisterSnapshot* snapshot)
+{
+    if (snapshot == nullptr) return ProtectedMemoryState::Unknown;
+    snapshot->protectedLowSupported = (capability & (1ULL << 5u)) != 0u;
+    snapshot->protectedHighSupported = (capability & (1ULL << 6u)) != 0u;
+    snapshot->protectedLowBase = 0u;
+    snapshot->protectedLowLimit = 0u;
+    snapshot->protectedHighBase = 0u;
+    snapshot->protectedHighLimit = 0u;
+    snapshot->protectedLowActive = false;
+    snapshot->protectedHighActive = false;
+    snapshot->pmen = pmen;
+    snapshot->protectedLowBaseRaw = protectedLowBase;
+    snapshot->protectedLowLimitRaw = protectedLowLimit;
+    snapshot->protectedHighBaseRaw = protectedHighBase;
+    snapshot->protectedHighLimitRaw = protectedHighLimit;
+    if (pmen == UINT32_MAX) {
+        snapshot->protectedMemoryState = ProtectedMemoryState::Unknown;
+        return snapshot->protectedMemoryState;
+    }
+
+    const bool enableRequested = (pmen & (1u << 31u)) != 0u;
+    const bool enableStatus = (pmen & 1u) != 0u;
+    if (enableRequested != enableStatus) {
+        snapshot->protectedMemoryState = ProtectedMemoryState::Unknown;
+        return snapshot->protectedMemoryState;
+    }
+    if (!enableRequested) {
+        snapshot->protectedMemoryState = ProtectedMemoryState::Disabled;
+        return snapshot->protectedMemoryState;
+    }
+    if (!snapshot->protectedLowSupported && !snapshot->protectedHighSupported) {
+        snapshot->protectedMemoryState = ProtectedMemoryState::Invalid;
+        return snapshot->protectedMemoryState;
+    }
+
+    const uint64_t addressMask = 0x000FFFFFFFF00000ULL;
+    if (snapshot->protectedLowSupported) {
+        if ((protectedLowBase & 0x000FFFFFu) != 0u ||
+            (protectedLowLimit & 0x000FFFFFu) != 0u) {
+            snapshot->protectedMemoryState = ProtectedMemoryState::Invalid;
+            return snapshot->protectedMemoryState;
+        }
+        const uint32_t lowBase = protectedLowBase & 0xFFF00000u;
+        const uint32_t lowLimit = protectedLowLimit & 0xFFF00000u;
+        if (lowLimit >= lowBase) {
+            // PLMR alignment N is implementation-specific. Read-only software
+            // cannot probe N while PMEN is active, so use a superset through
+            // 4 GiB to avoid missing any potentially protected byte.
+            snapshot->protectedLowBase = lowBase;
+            snapshot->protectedLowLimit = 0xFFFFFFFFu;
+            snapshot->protectedLowActive = true;
+        }
+    }
+    if (snapshot->protectedHighSupported) {
+        const uint64_t reservedMask = ~addressMask;
+        const uint64_t highBase = protectedHighBase & addressMask;
+        const uint64_t highLimit = protectedHighLimit & addressMask;
+        if ((protectedHighBase & reservedMask) != 0u ||
+            (protectedHighLimit & reservedMask) != 0u) {
+            snapshot->protectedMemoryState = ProtectedMemoryState::Invalid;
+            return snapshot->protectedMemoryState;
+        }
+        // Intel defines PHML < PHMB as a disabled protected high region.
+        if (highLimit >= highBase) {
+            snapshot->protectedHighBase = highBase;
+            // PHMR alignment N is also implementation-specific; the
+            // conservative upper bound is the highest 52-bit host address.
+            snapshot->protectedHighLimit = 0x000FFFFFFFFFFFFFULL;
+            snapshot->protectedHighActive = true;
+        }
+    }
+    snapshot->protectedMemoryState = ProtectedMemoryState::Enabled;
+    return snapshot->protectedMemoryState;
+}
+
+inline bool protected_memory_overlaps_workspace(
+    const RegisterSnapshot& registers,
+    const dma_memory::PhysicalRange* dmaRanges, uint32_t dmaRangeCount)
+{
+    if (registers.protectedMemoryState == ProtectedMemoryState::Disabled) {
+        return false;
+    }
+    if (registers.protectedMemoryState != ProtectedMemoryState::Enabled ||
+        (dmaRangeCount != 0u && dmaRanges == nullptr)) return true;
+    for (uint32_t i = 0u; i < dmaRangeCount; ++i) {
+        const dma_memory::PhysicalRange range = dmaRanges[i];
+        if (range.length == 0u || range_overflows(range.base, range.length)) return true;
+        if (registers.protectedLowActive) {
+            const dma_memory::PhysicalRange protectedRange = {
+                registers.protectedLowBase,
+                registers.protectedLowLimit - registers.protectedLowBase + 1u};
+            if (dma_memory::ranges_overlap(range, protectedRange)) return true;
+        }
+        if (registers.protectedHighActive) {
+            const dma_memory::PhysicalRange protectedRange = {
+                registers.protectedHighBase,
+                registers.protectedHighLimit - registers.protectedHighBase + 1u};
+            if (dma_memory::ranges_overlap(range, protectedRange)) return true;
+        }
+    }
+    return false;
+}
+
 inline bool dma_eligibility_allowed(RouteStatus route, RegisterStatus registers,
                                    TranslationState translation,
                                    RootTableState rootTable,
@@ -903,6 +1039,13 @@ inline DirectDmaDecision evaluate_direct_physical_dma(
     if (evidence.translation != TranslationState::DisabledObserved) {
         return DirectDmaDecision::BlockedTranslationEnabled;
     }
+    if (evidence.protectedMemory == ProtectedMemoryState::Unknown ||
+        evidence.protectedMemory == ProtectedMemoryState::Invalid) {
+        return DirectDmaDecision::BlockedProtectedMemoryUnknown;
+    }
+    if (evidence.protectedMemoryOverlap) {
+        return DirectDmaDecision::BlockedProtectedMemoryOverlap;
+    }
     if (!evidence.physicalBackingValidated) {
         return DirectDmaDecision::BlockedPhysicalBacking;
     }
@@ -938,6 +1081,8 @@ inline const char* direct_dma_decision_name(DirectDmaDecision decision)
         case DirectDmaDecision::BlockedRmrr: return "DMA_BLOCKED_RESERVED_MEMORY";
         case DirectDmaDecision::BlockedBusMaster: return "DMA_BLOCKED_BUS_MASTER_STATE";
         case DirectDmaDecision::BlockedWorkspaceOwnership: return "DMA_BLOCKED_OWNERSHIP";
+        case DirectDmaDecision::BlockedProtectedMemoryUnknown: return "DMA_BLOCKED_PROTECTED_MEMORY_UNKNOWN";
+        case DirectDmaDecision::BlockedProtectedMemoryOverlap: return "DMA_BLOCKED_PROTECTED_MEMORY_OVERLAP";
         default: return "DMA_BLOCKED_UNKNOWN";
     }
 }

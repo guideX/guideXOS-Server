@@ -741,3 +741,99 @@ disable VT-d. A blocked result is valid evidence; a Running result does not
 prove keyboard/mouse HID delivery without observed HID events. No physical
 boot was performed during source qualification, so SARAH_DT controller Running
 remains unverified.
+
+## INPUT3D-R9: xHCI transport correctness recovery
+
+R9 reviewed the requested ownership, initialization, timing, DMA, register,
+ring, and EP0 findings against the repository and the Intel specifications.
+The investigated baseline was commit `26f54d40` on branch `MODERN_INPUT`; the
+working tree was clean before this phase. Hosted baseline results were xHCI
+269 assertions, USB controller pass, Modern Input diagnostics 140 assertions,
+and Intel DMAR 74 assertions. The independent literal USBLEGSUP regression
+checks produced five expected failures when replayed against the baseline
+implementation, then passed after correction.
+
+### Finding-by-finding assessment
+
+| Area | Assessment and correction |
+|---|---|
+| USBLEGSUP semaphore positions | Confirmed defect. BIOS-owned is bit 16 and OS-owned is bit 24. Constants and ownership-state detection now use those positions; both asserted is a conflict, neither is unowned, and an absent capability is distinct from an unresolved/unknown state. |
+| Extended capabilities | Confirmed incomplete bounds handling. Traversal now uses the DWORD-relative `Next` offset, a mapped-span limit, a 64-DWORD visit bound, payload checks, and duplicate USBLEGSUP detection. Malformed chains fail closed. |
+| SMI and USBLEGCTLSTS semantics | Confirmed write-mask risk. Handoff clears only the SMI enables, writes read-back RsvdP values as required, and writes zero to RW1C and reserved-zero positions. It verifies that the SMI enables cleared and records before/after values on failure. |
+| Ownership acquisition and timeout | Confirmed. Success is recorded only after OS semaphore readback with BIOS ownership released. A bounded timeout logs raw semaphore/control values and does not force firmware takeover. |
+| BME-on-entry admission | Confirmed deadlock in the former gate. BME already enabled is recorded but does not block ownership or halt. After ownership is established, the driver requests Run/Stop clear and observes HCHalted; only then does it clear and verify BME. If halt or BME readback fails, initialization stops without reset or new DMA authorization. |
+| DMA admission | Tightened state-machine checks. Reset completion, recorded workspace qualification, recorded protection qualification, ownership resolution, observed halt, and BME-off readback are all required before authorization. BME is re-enabled only after ring setup and authorization, with readback required before Run/Stop. |
+| VT-d protected memory | Missing direct-DMA check. The selected VT-d unit is reread immediately before authorization. PMEN, PLMR, and PHMR are classified read-only; unknown or invalid PMEN/register state and any conservative PMR overlap block direct physical DMA. VT-d translation, protected memory, and firmware settings are never disabled or changed. |
+| Timing | Confirmed CPU-speed-dependent polling. Firmware handoff, halt, reset, CNR, port debounce/recovery, control-transfer waits, and required delays now use the configured PIT tick source and bounded deadlines. The 16 ms xHCI halt limit is conservatively guarded by three 100 Hz PIT ticks (20–30 ms depending on the phase of the periodic counter), avoiding a false early timeout. Other waits also include at most one tick of phase margin. Initialization blocks if the PIT rate is unavailable. No calibrated TSC facility was present in the kernel source. |
+| MMIO and DMA publication | Confirmed ordering gaps. Split 64-bit register writes use upper DWORD then lower DWORD with fences; DMA structures are initialized and published with the appropriate barriers. ERSTSZ and ERDP precede ERSTBA, which is written last to enable the event ring. Controller-visible command/event/EP0 rings and the control buffer are checked against 64 KiB crossings. Existing AC64 and address-range checks were present and remain enforced. |
+| EP0 and rings | Confirmed cycle/correlation/accounting defects. The EP0 producer and cycle persist across requests; dequeue pointers carry DCS; Link TRBs carry the pre-toggle cycle; outstanding capacity and completion pointers are checked; timed-out rings are poisoned against reuse. Setup/Data/Status TRB lengths, direction, and chain bits are corrected. Input/output contexts now contain 33/32 entries and use the advertised 32-byte or 64-byte context size. EP0 MPS is validated and changed through Evaluate Context when enumeration requires it. |
+| Preserved foundations | PCI discovery, BAR validation/mapping, scratchpad decoding, DMAR/IVRS parsing, RMRR checks, direct-physical range/address checks, and existing diagnostics were retained. The full diagnostics overlay was not expanded for presentation features. |
+
+The semaphore, transfer-ring, context-layout, and event-correlation checks are
+independently derived hosted regressions. They do not share the production
+constants for the literal semaphore positions. The tests exercise synthetic
+registers, memory maps, and transfer events; those results are not hardware
+acceptance.
+
+### Ownership, DMA, and protection safety
+
+The takeover order is: resolve firmware ownership; request and verify halt;
+clear and verify PCI BME; reset the halted controller and wait for reset/CNR;
+qualify the DMA workspace, physical ranges, VT-d state, RMRRs, and protection;
+initialize and publish rings; enable and verify BME; then request Run/Stop.
+Clearing BME after positively observing HCHalted prevents new PCI bus-master
+transactions after the controller has stopped its pending work. It is a
+quiescence step, not permission to submit new DMA. If HCHalted is not observed
+within the bounded wait, BME is left as found and initialization fails closed.
+
+For active PMRs, Intel's alignment `N` is implementation-specific and cannot
+be discovered by writes in this read-only phase. R9 therefore treats an active
+low PMR as the superset from PLMB through 4 GiB minus one, and an active high
+PMR as the superset from PHMB through the maximum 52-bit host address. This can
+block a safe workspace that is actually outside the exact protected range, but
+will not authorize a workspace that may overlap it. Determining the exact range
+would require platform-specific evidence or changing protection state, neither
+of which is in scope.
+
+R9 supersedes the R8 BME contract paragraph that required BME to be disabled
+before firmware ownership and halt. R9 intentionally permits BME-on-entry for
+those quiescence steps, then requires it disabled before reset and DMA
+qualification.
+
+### Verification and limits
+
+| Check | Result |
+|---|---|
+| `scripts/run-xhci-test.ps1` | Pass, 307 assertions |
+| `scripts/run-usb-controller-test.ps1` | Pass |
+| `scripts/run-modern-input-diagnostics-test.ps1` | Pass, 140 assertions |
+| `scripts/run-intel-dmar-test.ps1` | Pass, 84 assertions |
+| `C:\\mingw64\\bin\\mingw32-make.exe -C kernel ARCH=amd64 -j4` | Pass; freestanding AMD64 kernel linked and converted to ELF |
+| `git diff --check` | Pass; Git reports line-ending normalization notices for edited files |
+
+The kernel build still prints existing warnings, including bounded comparisons
+on 8-bit xHCI fields, a strict-aliasing warning, and unused helpers. No QEMU,
+physical hardware, or QAC process was run or changed. No default guest launch
+configuration was changed.
+
+Known limits remain: no guest or physical acceptance has been performed; a
+timed-out EP0 ring is quarantined rather than recovered for more requests; hub,
+HID, and multi-device support remain out of scope; active PMR bounds are
+conservative. R9 therefore does not claim Modern Input is operational. The
+offline source, hosted-regression, and freestanding-build gates are accepted
+for the next dedicated guest validation phase.
+
+### INPUT3D-R10 recommendations
+
+Prepare a separate QAC-managed guest configuration with QEMU's xHCI controller
+and a USB keyboard and USB mouse on separate emulated root ports. Keep the
+existing default PS/2 guest configuration unchanged. Capture evidence for
+controller initialization and Running state, several consecutive successful
+EP0 requests, authentic device/configuration/interface/endpoint descriptor
+bytes, and survival of bounded failures without unsafe DMA or a corrupt ring.
+Do not fold R10 guest validation into default launch behavior.
+
+### Specification references
+
+- Intel, [xHCI Specification](https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/extensible-host-controler-interface-usb-xhci.pdf): USBLEGSUP semaphore bits and USBLEGCTLSTS access semantics; the 16 ms halt bound; event-ring initialization ordering; TRB cycle and Link TRB behavior; and ring/buffer constraints.
+- Intel, [VT-d Architecture Specification, Revision 5.0](https://cdrdv2-public.intel.com/831418/vt-directed-io-spec.pdf): PMEN EPM/PRS state, PLMR/PHMR capability and register definitions, disabled-region encoding, and implementation-specific region alignment.
