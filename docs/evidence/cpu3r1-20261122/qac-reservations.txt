@@ -1,0 +1,104 @@
+=== baseline ===
+Workspace: E:\CodexArtifacts\CPU3R1-18902cf5\qac\cpu3r1-baseline-36c0bfa0bcff49239073814486be7310
+Reservation: 493f4011feb74426aa9c304be286bdba
+QEMU child: 6692; exit=0; exact exit verified=true
+QAC final reservation: Released; verified release=true
+QAC runner assessment: FAIL; UEFI loader could not map kernel virtual range; firmware returned Out of Resources
+QEMU arguments (array): ["-machine","pc,accel=whpx","-smp","2","-m","2048M","-vga","std","-display","none","-drive","if=pflash,format=raw,readonly=on,file=C:\\Program Files\\qemu\\share\\edk2-x86_64-code.fd","-drive","if=none,id=releasecdrom,file=E:\\CodexArtifacts\\CPU3R1-18902cf5\\source\\out\\release-profile\\4e1939f8-7dc7-49e3-9247-8d064b4ff39e\\artifacts\\guideXOS-Server-v0.3.0-amd64-pacman-only-candidate.iso,media=cdrom,readonly=on,format=raw","-device","ide-cd,drive=releasecdrom,bootindex=1","-boot","order=d","-net","none","-serial","file:E:\\CodexArtifacts\\CPU3R1-18902cf5\\qac\\cpu3r1-baseline-36c0bfa0bcff49239073814486be7310\\output\\serial.log","-D","E:\\CodexArtifacts\\CPU3R1-18902cf5\\qac\\cpu3r1-baseline-36c0bfa0bcff49239073814486be7310\\output\\qemu-debug.log","-d","guest_errors,cpu_reset","-rtc","base=utc,clock=host","-no-reboot","-no-shutdown","-monitor","none","-qmp","tcp:127.0.0.1:65180,server=on,wait=off","-name","guideXOS-cpu3r1-baseline-36c0bfa0bcff49239073814486be7310","-S"]
+2026-11-22T18:25:25.2372525+00:00 qmp-identity-verified {"instanceName":"guideXOS-cpu3r1-baseline-36c0bfa0bcff49239073814486be7310","protocolReadiness":"greeting-capabilities-instance-name-and-paused-status-verified","reservationId":"493f4011feb74426aa9c304be286bdba","greeting":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]},"endpoint":"127.0.0.1:65180","childProcessId":6692,"status":"prelaunch"}
+2026-11-22T18:25:25.7942946+00:00 qmp-continuation-authorized {"endpoint":"127.0.0.1:65180","childProcessId":6692,"reservationId":"493f4011feb74426aa9c304be286bdba"}
+2026-11-22T18:26:29.2474283+00:00 qmp-quit-acknowledged {"response":{}}
+2026-11-22T18:26:29.7867645+00:00 qac-release-verified {"childExitVerified":true,"reservationId":"493f4011feb74426aa9c304be286bdba","state":"Released"}
+26961df95fe71f73f66e4fdb564f15a67f05f24c7d6cf7711e049993cdf6d96d  execution.json
+f5fcc6b8f8bb99976d2ab3ca09d2aea39a1110215db80681e2ed8ea18ab51443  qac-run.log
+7949457e4ab329a20edaf29900f50b2de1b6f651fef4b2ae14d738b8c9991ddd  qmp-transcript.jsonl
+6e394ba39fee409484c93ab0c0ccebe6d5a63764a65297a0c240f3dbef0e0425  qemu-debug.log
+bb1355274f393aee4eafd32b11a0919caeb58848779056502d0a2cf2fb740835  serial.log
+
+=== inventory ===
+Workspace: E:\CodexArtifacts\CPU3R1-18902cf5\qac\cpu3r1-inventory-ad6b2e11eb624d0b8ecb68a9d2533caa
+Reservation: a5d9e0be42284c3caca4059227e5f764
+QEMU child: 15812; exit=0; exact exit verified=true
+QAC final reservation: Released; verified release=true
+QAC runner assessment: FAIL; UEFI loader could not map kernel virtual range; firmware returned Out of Resources
+QEMU arguments (array): ["-machine","pc,accel=whpx","-smp","2","-m","2048M","-vga","std","-display","none","-drive","if=pflash,format=raw,readonly=on,file=C:\\Program Files\\qemu\\share\\edk2-x86_64-code.fd","-drive","if=none,id=releasecdrom,file=E:\\CodexArtifacts\\CPU3R1-18902cf5\\source-inventory\\out\\release-profile\\9787ad27-1a92-4edc-9ddf-37466e925d7e\\artifacts\\guideXOS-Server-v0.3.0-amd64-pacman-only-candidate.iso,media=cdrom,readonly=on,format=raw","-device","ide-cd,drive=releasecdrom,bootindex=1","-boot","order=d","-net","none","-serial","file:E:\\CodexArtifacts\\CPU3R1-18902cf5\\qac\\cpu3r1-inventory-ad6b2e11eb624d0b8ecb68a9d2533caa\\output\\serial.log","-D","E:\\CodexArtifacts\\CPU3R1-18902cf5\\qac\\cpu3r1-inventory-ad6b2e11eb624d0b8ecb68a9d2533caa\\output\\qemu-debug.log","-d","guest_errors,cpu_reset","-rtc","base=utc,clock=host","-no-reboot","-no-shutdown","-monitor","none","-qmp","tcp:127.0.0.1:65226,server=on,wait=off","-name","guideXOS-cpu3r1-inventory-ad6b2e11eb624d0b8ecb68a9d2533caa","-S"]
+2026-11-22T18:27:10.9554675+00:00 qmp-identity-verified {"protocolReadiness":"greeting-capabilities-instance-name-and-paused-status-verified","instanceName":"guideXOS-cpu3r1-inventory-ad6b2e11eb624d0b8ecb68a9d2533caa","reservationId":"a5d9e0be42284c3caca4059227e5f764","endpoint":"127.0.0.1:65226","childProcessId":15812,"greeting":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]},"status":"prelaunch"}
+2026-11-22T18:27:11.4425549+00:00 qmp-continuation-authorized {"endpoint":"127.0.0.1:65226","childProcessId":15812,"reservationId":"a5d9e0be42284c3caca4059227e5f764"}
+2026-11-22T18:28:07.2216199+00:00 qmp-quit-acknowledged {"response":{}}
+2026-11-22T18:28:07.7679949+00:00 qac-release-verified {"childExitVerified":true,"state":"Released","reservationId":"a5d9e0be42284c3caca4059227e5f764"}
+1904989bd72a872df6999f2d38ee9c9251704f101cc333f54385e5c57a77f89b  execution.json
+a2ec4b1d3fe4262430a1f3f03f16cfa11dc438891b09e40634a038ea94c38edd  qac-run.log
+cd36371e7165413090de701d6bc5cab9c8890d5b68d6695bde32e7ff1129006b  qmp-transcript.jsonl
+6e394ba39fee409484c93ab0c0ccebe6d5a63764a65297a0c240f3dbef0e0425  qemu-debug.log
+49f6992e8dc01df6767d686b0efd7bafb7634af899328f92e640e522eb8f8b54  serial.log
+
+=== capacity-baseline ===
+Workspace: E:\CodexArtifacts\CPU3R1-18902cf5\qac\cpu3r1-capacity-baseline-6d5f8b93da2b436498deed63e129a3cf
+Reservation: 8aee2c4882e84a338066c7c0dcb7b984
+QEMU child: 26540; exit=0; exact exit verified=true
+QAC final reservation: Released; verified release=true
+QAC runner assessment: INCOMPLETE; No existing PacMan gameplay PASS/FAIL marker was observed.
+QEMU arguments (array): ["-machine","pc,accel=whpx","-smp","2","-m","2048M","-vga","std","-display","none","-drive","if=pflash,format=raw,readonly=on,file=C:\\Program Files\\qemu\\share\\edk2-x86_64-code.fd","-drive","if=none,id=releasecdrom,file=E:\\CodexArtifacts\\CPU3R1-18902cf5\\capacity-baseline\\guideXOS-CPU3R1-capacity-baseline.iso,media=cdrom,readonly=on,format=raw","-device","ide-cd,drive=releasecdrom,bootindex=1","-boot","order=d","-net","none","-serial","file:E:\\CodexArtifacts\\CPU3R1-18902cf5\\qac\\cpu3r1-capacity-baseline-6d5f8b93da2b436498deed63e129a3cf\\output\\serial.log","-D","E:\\CodexArtifacts\\CPU3R1-18902cf5\\qac\\cpu3r1-capacity-baseline-6d5f8b93da2b436498deed63e129a3cf\\output\\qemu-debug.log","-d","guest_errors,cpu_reset","-rtc","base=utc,clock=host","-no-reboot","-no-shutdown","-monitor","none","-qmp","tcp:127.0.0.1:56113,server=on,wait=off","-name","guideXOS-cpu3r1-capacity-baseline-6d5f8b93da2b436498deed63e129a3cf","-S"]
+2026-11-22T18:33:04.9654566+00:00 qmp-identity-verified {"greeting":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]},"status":"prelaunch","childProcessId":26540,"instanceName":"guideXOS-cpu3r1-capacity-baseline-6d5f8b93da2b436498deed63e129a3cf","protocolReadiness":"greeting-capabilities-instance-name-and-paused-status-verified","endpoint":"127.0.0.1:56113","reservationId":"8aee2c4882e84a338066c7c0dcb7b984"}
+2026-11-22T18:33:05.4248449+00:00 qmp-continuation-authorized {"childProcessId":26540,"endpoint":"127.0.0.1:56113","reservationId":"8aee2c4882e84a338066c7c0dcb7b984"}
+2026-11-22T18:34:36.8896739+00:00 guest-shutdown-observed-during-button-release {"button":"left","qmpReleaseFailure":"QMP command failed: {\"class\":\"GenericError\",\"desc\":\"VM not running\"}","evidence":"QMP SHUTDOWN guest=true reason=guest-shutdown and exact normal desktop shutdown serial marker"}
+2026-11-22T18:34:37.6251974+00:00 qmp-quit-after-guest-shutdown-acknowledged {"childProcessId":26540,"endpoint":"127.0.0.1:56113","response":{},"reservationId":"8aee2c4882e84a338066c7c0dcb7b984"}
+2026-11-22T18:34:38.2970610+00:00 qac-release-verified {"childExitVerified":true,"reservationId":"8aee2c4882e84a338066c7c0dcb7b984","state":"Released"}
+d9508220e2dea6e102ba0a4c8d48935f5b1e2443a2b4beb1cce628b5e3888cf2  execution.json
+81574f55a450f86a65afdb030746ae1e0a1dc04ffddce1178684c1bbac11e691  qac-run.log
+3a87ba3fb932edbff69dc59787e075ded52cbc64332089453c36b4bce85e4823  qmp-transcript.jsonl
+6e394ba39fee409484c93ab0c0ccebe6d5a63764a65297a0c240f3dbef0e0425  qemu-debug.log
+cef929e8c76c45aa1a20186fdc3c05f3c8adafa79825999223e2d24fef509c98  serial.log
+
+=== capacity-inventory ===
+Workspace: E:\CodexArtifacts\CPU3R1-18902cf5\qac\cpu3r1-capacity-inventory-577b6da2775a45a988226cfce09691ab
+Reservation: af0d510a366e4b9fa41c2bcb7d958759
+QEMU child: 12308; exit=0; exact exit verified=true
+QAC final reservation: Released; verified release=true
+QAC runner assessment: INCOMPLETE; No existing PacMan gameplay PASS/FAIL marker was observed.
+QEMU arguments (array): ["-machine","pc,accel=whpx","-smp","2","-m","2048M","-vga","std","-display","none","-drive","if=pflash,format=raw,readonly=on,file=C:\\Program Files\\qemu\\share\\edk2-x86_64-code.fd","-drive","if=none,id=releasecdrom,file=E:\\CodexArtifacts\\CPU3R1-18902cf5\\capacity-inventory\\guideXOS-CPU3R1-capacity-inventory.iso,media=cdrom,readonly=on,format=raw","-device","ide-cd,drive=releasecdrom,bootindex=1","-boot","order=d","-net","none","-serial","file:E:\\CodexArtifacts\\CPU3R1-18902cf5\\qac\\cpu3r1-capacity-inventory-577b6da2775a45a988226cfce09691ab\\output\\serial.log","-D","E:\\CodexArtifacts\\CPU3R1-18902cf5\\qac\\cpu3r1-capacity-inventory-577b6da2775a45a988226cfce09691ab\\output\\qemu-debug.log","-d","guest_errors,cpu_reset","-rtc","base=utc,clock=host","-no-reboot","-no-shutdown","-monitor","none","-qmp","tcp:127.0.0.1:65260,server=on,wait=off","-name","guideXOS-cpu3r1-capacity-inventory-577b6da2775a45a988226cfce09691ab","-S"]
+2026-11-22T18:28:22.5370854+00:00 qmp-identity-verified {"instanceName":"guideXOS-cpu3r1-capacity-inventory-577b6da2775a45a988226cfce09691ab","status":"prelaunch","endpoint":"127.0.0.1:65260","reservationId":"af0d510a366e4b9fa41c2bcb7d958759","protocolReadiness":"greeting-capabilities-instance-name-and-paused-status-verified","childProcessId":12308,"greeting":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-11-22T18:28:23.0325356+00:00 qmp-continuation-authorized {"endpoint":"127.0.0.1:65260","reservationId":"af0d510a366e4b9fa41c2bcb7d958759","childProcessId":12308}
+2026-11-22T18:30:54.9914871+00:00 guest-shutdown-observed-during-button-release {"evidence":"QMP SHUTDOWN guest=true reason=guest-shutdown and exact normal desktop shutdown serial marker","qmpReleaseFailure":"QMP command failed: {\"class\":\"GenericError\",\"desc\":\"VM not running\"}","button":"left"}
+2026-11-22T18:30:55.6813822+00:00 qmp-quit-after-guest-shutdown-acknowledged {"endpoint":"127.0.0.1:65260","reservationId":"af0d510a366e4b9fa41c2bcb7d958759","response":{},"childProcessId":12308}
+2026-11-22T18:30:56.3730142+00:00 qac-release-verified {"reservationId":"af0d510a366e4b9fa41c2bcb7d958759","state":"Released","childExitVerified":true}
+6f4cc40cd324a1e76c9cbf1f3406444f993caf73a97e3adcb855fa0d0d14231d  execution.json
+77e23bd56c4c1180f4ba3fdbcaaaf49f54c59be1caa772b88d504d53c4cfed1f  qac-run.log
+22dae2af2c79331a06b63a17e528d64639b502047c27f3fcf6c0e0fde73d4a7d  qmp-transcript.jsonl
+6e394ba39fee409484c93ab0c0ccebe6d5a63764a65297a0c240f3dbef0e0425  qemu-debug.log
+118213eb2659a32b416f833679d708728ae238f8852c37dc1613417719a070cf  serial.log
+
+=== capacity-fallback ===
+Workspace: E:\CodexArtifacts\CPU3R1-18902cf5\qac\cpu3r1-capacity-fallback-2c74b1735c354d249017b40b6528b1d1
+Reservation: dd1a99154ecd4d74b92637ea16d07c3c
+QEMU child: 28596; exit=0; exact exit verified=true
+QAC final reservation: Released; verified release=true
+QAC runner assessment: INCOMPLETE; No existing PacMan gameplay PASS/FAIL marker was observed.
+QEMU arguments (array): ["-machine","pc,accel=whpx","-smp","2","-m","2048M","-vga","std","-display","none","-drive","if=pflash,format=raw,readonly=on,file=C:\\Program Files\\qemu\\share\\edk2-x86_64-code.fd","-drive","if=none,id=releasecdrom,file=E:\\CodexArtifacts\\CPU3R1-18902cf5\\capacity-fallback\\guideXOS-CPU3R1-capacity-fallback.iso,media=cdrom,readonly=on,format=raw","-device","ide-cd,drive=releasecdrom,bootindex=1","-boot","order=d","-net","none","-serial","file:E:\\CodexArtifacts\\CPU3R1-18902cf5\\qac\\cpu3r1-capacity-fallback-2c74b1735c354d249017b40b6528b1d1\\output\\serial.log","-D","E:\\CodexArtifacts\\CPU3R1-18902cf5\\qac\\cpu3r1-capacity-fallback-2c74b1735c354d249017b40b6528b1d1\\output\\qemu-debug.log","-d","guest_errors,cpu_reset","-rtc","base=utc,clock=host","-no-reboot","-no-shutdown","-monitor","none","-qmp","tcp:127.0.0.1:56066,server=on,wait=off","-name","guideXOS-cpu3r1-capacity-fallback-2c74b1735c354d249017b40b6528b1d1","-S"]
+2026-11-22T18:31:08.5659935+00:00 qmp-identity-verified {"reservationId":"dd1a99154ecd4d74b92637ea16d07c3c","status":"prelaunch","childProcessId":28596,"endpoint":"127.0.0.1:56066","instanceName":"guideXOS-cpu3r1-capacity-fallback-2c74b1735c354d249017b40b6528b1d1","greeting":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]},"protocolReadiness":"greeting-capabilities-instance-name-and-paused-status-verified"}
+2026-11-22T18:31:09.1230587+00:00 qmp-continuation-authorized {"reservationId":"dd1a99154ecd4d74b92637ea16d07c3c","endpoint":"127.0.0.1:56066","childProcessId":28596}
+2026-11-22T18:32:42.4089162+00:00 guest-shutdown-observed-during-button-release {"button":"left","qmpReleaseFailure":"QMP command failed: {\"class\":\"GenericError\",\"desc\":\"VM not running\"}","evidence":"QMP SHUTDOWN guest=true reason=guest-shutdown and exact normal desktop shutdown serial marker"}
+2026-11-22T18:32:43.1891509+00:00 qmp-quit-after-guest-shutdown-acknowledged {"response":{},"endpoint":"127.0.0.1:56066","reservationId":"dd1a99154ecd4d74b92637ea16d07c3c","childProcessId":28596}
+2026-11-22T18:32:43.7708657+00:00 qac-release-verified {"state":"Released","childExitVerified":true,"reservationId":"dd1a99154ecd4d74b92637ea16d07c3c"}
+02ea053f0ed0252a41c95b86b35de705d119aa37cf22a997e0d66f484fbf2810  execution.json
+2f0f7b11d630e3f31d91dd80cbc015a133c8d894839bb47647b5da686e9194cf  qac-run.log
+8c85c442712abdd8b8a378119571148cab22eb903b8ffee8c1621954dfac7521  qmp-transcript.jsonl
+6e394ba39fee409484c93ab0c0ccebe6d5a63764a65297a0c240f3dbef0e0425  qemu-debug.log
+fe7c139c29e1a614306ae01633ca91126736780fa82d3c81976c831c0ba4e2ce  serial.log
+
+=== Final coordinator census ===
+2026-11-22T10:35:02.0702939-08:00
+Coordinator: Online
+Name: guideXOS QAC
+Version: 2.0.0
+PID: 1532
+Started (UTC): 2026-11-20T18:55:16.4997427+00:00
+Uptime: 171585s
+QEMU processes: 0 (0 foreign)
+Managed development limit: 2
+Managed sessions: 0; queued: 0; blocked: 0
+Coordinator: Online (guideXOS QAC 2.0.0)
+Reservations: 0
+Managed sessions: 0
+Queued reservations: 0
+All five private QMP listeners verified closed.

@@ -1,0 +1,133 @@
+=== baseline ===
+Source: E:\CodexArtifacts\CPU3R1-18902cf5\qac\cpu3r1-baseline-36c0bfa0bcff49239073814486be7310\output\serial.log
+Raw serial SHA-256: bb1355274f393aee4eafd32b11a0919caeb58848779056502d0a2cf2fb740835
+Task frame arena reserved at 0x000000007D1B7000 (4096 pages)
+ELF: vaddr range 0x100000 - 0x22b8ea60 (size 0x22a8ea60)
+ELF: Allocated 141967 pages at 0x594ce000
+Kernel loaded at: 0x00000000594CE000 - 0x000000007BF5CA60
+Ramdisk loaded at 0x00000000554CE000
+Building identity page tables with 12 ranges...
+Failed to map kernel virtual range
+BdsDxe: failed to start Boot0001 "UEFI QEMU DVD-ROM QM00003 " from PciRoot(0x0)/Pci(0x1,0x1)/Ata(Secondary,Master,0x0): Out of Resources
+
+=== inventory ===
+Source: E:\CodexArtifacts\CPU3R1-18902cf5\qac\cpu3r1-inventory-ad6b2e11eb624d0b8ecb68a9d2533caa\output\serial.log
+Raw serial SHA-256: 49f6992e8dc01df6767d686b0efd7bafb7634af899328f92e640e522eb8f8b54
+Task frame arena reserved at 0x000000007D1B7000 (4096 pages)
+ELF: vaddr range 0x100000 - 0x22b90a60 (size 0x22a90a60)
+ELF: Allocated 141969 pages at 0x594cc000
+Kernel loaded at: 0x00000000594CC000 - 0x000000007BF5CA60
+Ramdisk loaded at 0x00000000554CC000
+Building identity page tables with 12 ranges...
+Failed to map kernel virtual range
+BdsDxe: failed to start Boot0001 "UEFI QEMU DVD-ROM QM00003 " from PciRoot(0x0)/Pci(0x1,0x1)/Ata(Secondary,Master,0x0): Out of Resources
+
+=== capacity-baseline ===
+Source: E:\CodexArtifacts\CPU3R1-18902cf5\qac\cpu3r1-capacity-baseline-6d5f8b93da2b436498deed63e129a3cf\output\serial.log
+Raw serial SHA-256: cef929e8c76c45aa1a20186fdc3c05f3c8adafa79825999223e2d24fef509c98
+Task frame arena reserved at 0x000000007D1B6000 (4096 pages)
+ELF: vaddr range 0x100000 - 0x22b8ea60 (size 0x22a8ea60)
+ELF: Allocated 141967 pages at 0x594ce000
+Kernel loaded at: 0x00000000594CE000 - 0x000000007BF5CA60
+Ramdisk loaded at 0x00000000554CE000
+Building identity page tables with 12 ranges...
+Page tables built at PML4: 0x000000007E1D8000
+=== GuideXOS Boot (Post-ExitBootServices) ===
+[BOOT] BootInfo at: 0x000000007E1DA000
+[KERNEL] Boot method: UEFI BootInfo
+[MEMORY-OWNERSHIP] status=overlapping-reservation user-mode=disabled
+[KERNEL] IDT + PIC initialized, interrupts enabled
+[KERNEL] PIT timer initialized, IRQ0 registered
+[KERNEL] PS/2 mouse init complete
+[OK]   PS/2 Keyboard
+[OK]   PS/2 Mouse
+[N/A]  Local APIC
+[N/A]  I/O APIC
+[KERNEL] Entering main loop (waiting for input)...
+[desktop] Super key pressed, toggling Start Menu
+[desktop] Super key pressed, toggling Start Menu
+[NATIVE-ELF] desktop shortcut launch=Nexgen PacMan
+[NATIVE-ELF] runtime=0000000000000001 exit result=0x00000000 requested=1 fault=none currentAbi=None lastAbi=RequestExit abiCalls=0x0000000000000203 frames=0x0000000000000007 inputEvents=0x0000000000000009
+[NATIVE-ELF] runtime=0000000000000001 app=Nexgen PacMan lifecycle PASS window/resource cleanup complete
+[NATIVE-ELF] desktop shortcut result=PASS
+[desktop] Super key pressed, toggling Start Menu
+[SHUTDOWN] final reason=system-shutdown exitCode=0 caller=desktop expected=1 runtime=none app=none
+PIT heartbeat samples (35 serial lines):
+[KERNEL-HEARTBEAT] ticks=0000000000000064 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000000DAC source=PIT_IRQ0
+
+=== capacity-inventory ===
+Source: E:\CodexArtifacts\CPU3R1-18902cf5\qac\cpu3r1-capacity-inventory-577b6da2775a45a988226cfce09691ab\output\serial.log
+Raw serial SHA-256: 118213eb2659a32b416f833679d708728ae238f8852c37dc1613417719a070cf
+Task frame arena reserved at 0x000000007D1B6000 (4096 pages)
+ELF: vaddr range 0x100000 - 0x22b90a60 (size 0x22a90a60)
+ELF: Allocated 141969 pages at 0x594cc000
+Kernel loaded at: 0x00000000594CC000 - 0x000000007BF5CA60
+Ramdisk loaded at 0x00000000554CC000
+Building identity page tables with 12 ranges...
+Page tables built at PML4: 0x000000007E1D8000
+=== GuideXOS Boot (Post-ExitBootServices) ===
+[BOOT] BootInfo at: 0x000000007E1DA000
+[KERNEL] Boot method: UEFI BootInfo
+[CPU2] inventory=complete boot-id-source=cpuid-01 boot-apic-id=0x00000000 boot-match=matched-firmware-enabled guidexos-running-processors=1
+[CPU2] firmware-root=xsdt rsdp=0x000000007FB7E014 root=0x000000007FB7D0E8 madt=0x000000007FB78000 rsdp-revision=0x00000002 madt-revision=0x00000003 madt-bytes=0x00000080
+[CPU2] firmware-advertised-records=0x00000002 firmware-enabled-records=0x00000002 firmware-online-capable-records=0x00000000 stored=0x00000002 capacity=0x00000080
+[CPU2] processor madt-type=0x00000000 offset=0x0000002C apic-id=0x00000000 acpi-uid=0x00000000 firmware-flags=0x00000001 enabled=1 online-capable=0 executing-boot-processor=1
+[CPU2] processor madt-type=0x00000000 offset=0x00000034 apic-id=0x00000001 acpi-uid=0x00000001 firmware-flags=0x00000001 enabled=1 online-capable=0
+[CPU3] roster=mapped descriptors=0x00000002 online=0x00000001 offline=0x00000001
+[MEMORY-OWNERSHIP] status=overlapping-reservation user-mode=disabled
+[KERNEL] IDT + PIC initialized, interrupts enabled
+[KERNEL] PIT timer initialized, IRQ0 registered
+[KERNEL] PS/2 mouse init complete
+[OK]   PS/2 Keyboard
+[OK]   PS/2 Mouse
+[N/A]  Local APIC
+[N/A]  I/O APIC
+[KERNEL] Entering main loop (waiting for input)...
+[desktop] Super key pressed, toggling Start Menu
+[desktop] Super key pressed, toggling Start Menu
+[NATIVE-ELF] desktop shortcut launch=Nexgen PacMan
+[NATIVE-ELF] runtime=0000000000000001 exit result=0x00000000 requested=1 fault=none currentAbi=None lastAbi=RequestExit abiCalls=0x00000000000002E4 frames=0x000000000000000E inputEvents=0x000000000000000B
+[NATIVE-ELF] runtime=0000000000000001 app=Nexgen PacMan lifecycle PASS window/resource cleanup complete
+[NATIVE-ELF] desktop shortcut result=PASS
+[desktop] Super key pressed, toggling Start Menu
+[SHUTDOWN] final reason=system-shutdown exitCode=0 caller=desktop expected=1 runtime=none app=none
+PIT heartbeat samples (75 serial lines):
+[KERNEL-HEARTBEAT] ticks=0000000000000064 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000001D4C source=PIT_IRQ0
+
+=== capacity-fallback ===
+Source: E:\CodexArtifacts\CPU3R1-18902cf5\qac\cpu3r1-capacity-fallback-2c74b1735c354d249017b40b6528b1d1\output\serial.log
+Raw serial SHA-256: fe7c139c29e1a614306ae01633ca91126736780fa82d3c81976c831c0ba4e2ce
+Task frame arena reserved at 0x000000007D1B8000 (4096 pages)
+ELF: vaddr range 0x100000 - 0x22b90a60 (size 0x22a90a60)
+ELF: Allocated 141969 pages at 0x594cc000
+Kernel loaded at: 0x00000000594CC000 - 0x000000007BF5CA60
+Ramdisk loaded at 0x00000000554CC000
+Building identity page tables with 13 ranges...
+Page tables built at PML4: 0x000000007E1D8000
+=== GuideXOS Boot (Post-ExitBootServices) ===
+[BOOT] BootInfo at: 0x000000007E1DA000
+[KERNEL] Boot method: UEFI BootInfo
+[CPU2] inventory=handoff-unavailable boot-id-source=cpuid-01 boot-apic-id=0x00000000 boot-match=inventory-unavailable guidexos-running-processors=1
+[CPU3] roster=unavailable descriptors=0x00000001 online=0x00000001 offline=0x00000000
+[MEMORY-OWNERSHIP] status=overlapping-reservation user-mode=disabled
+[KERNEL] IDT + PIC initialized, interrupts enabled
+[KERNEL] PIT timer initialized, IRQ0 registered
+[KERNEL] PS/2 mouse init complete
+[OK]   PS/2 Keyboard
+[OK]   PS/2 Mouse
+[N/A]  Local APIC
+[N/A]  I/O APIC
+[KERNEL] Entering main loop (waiting for input)...
+[desktop] Super key pressed, toggling Start Menu
+[desktop] Super key pressed, toggling Start Menu
+[NATIVE-ELF] desktop shortcut launch=Nexgen PacMan
+[NATIVE-ELF] runtime=0000000000000001 exit result=0x00000000 requested=1 fault=none currentAbi=None lastAbi=RequestExit abiCalls=0x0000000000000203 frames=0x0000000000000009 inputEvents=0x0000000000000009
+[NATIVE-ELF] runtime=0000000000000001 app=Nexgen PacMan lifecycle PASS window/resource cleanup complete
+[NATIVE-ELF] desktop shortcut result=PASS
+[desktop] Super key pressed, toggling Start Menu
+[SHUTDOWN] final reason=system-shutdown exitCode=0 caller=desktop expected=1 runtime=none app=none
+PIT heartbeat samples (43 serial lines):
+[KERNEL-HEARTBEAT] ticks=0000000000000064 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=00000000000010CC source=PIT_IRQ0
