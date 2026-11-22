@@ -40,6 +40,7 @@ struct Discovery {
     PhysicalView view;
     void* context;
     ProcessorInventory& out;
+    InterruptTopology* interrupts;
 
     const uint8_t* fail(InventoryStatus status)
     {
@@ -153,6 +154,88 @@ void mark_identity_issues(ProcessorRecord* records, uint32_t count)
     }
 }
 
+// IOREGSEL and the last byte of the 32-bit IOWIN register.
+constexpr uint32_t kIoApicWindowLastByte = 0x13;
+
+void mark_pair(uint8_t& first, uint8_t& second, InterruptRecordIssue issue)
+{
+    first |= issue;
+    second |= issue;
+}
+
+void capture_interrupt_record(InterruptTopology& topology, const uint8_t* record, uint32_t offset)
+{
+    // The enclosing walk already checked the generic two-byte header and
+    // ensured that the complete indicated record is in the checksummed MADT.
+    const uint8_t type = record[0];
+    const uint8_t minimum = type == 1 || type == 5 ? 12 : type == 2 ? 10 : 0;
+    if (minimum == 0) {
+        ++topology.ignored_count;
+        if (type == 3 || type == 4 || type == 10) ++topology.ignored_nmi_count;
+        return;
+    }
+    if (record[1] < minimum) {
+        if (topology.malformed_count++ == 0) topology.first_malformed_offset = offset;
+        return;
+    }
+
+    if (type == 1) {
+        const uint16_t index = topology.io_apic_count++;
+        if (index >= kIoApicCapacity) return;
+        auto& io = topology.io_apics[index];
+        io = {read32(record + 4), read32(record + 8), offset, record[2], 0};
+        if (record[3] != 0 || io.address == 0 || (io.address & 3u) != 0 ||
+            io.address > UINT32_MAX - kIoApicWindowLastByte) io.issues |= InvalidRecordFields;
+        for (uint16_t i = 0; i < index; ++i) {
+            auto& prior = topology.io_apics[i];
+            const bool same_id = io.id == prior.id;
+            const bool same_address = io.address == prior.address;
+            const bool same_base = io.gsi_base == prior.gsi_base;
+            const bool overlap = io.address <= uint64_t(prior.address) + kIoApicWindowLastByte &&
+                                 prior.address <= uint64_t(io.address) + kIoApicWindowLastByte;
+            if (same_id || overlap || same_base) {
+                mark_pair(io.issues, prior.issues, same_id && same_address && same_base
+                             ? DuplicateRecord : ConflictingRecord);
+            }
+        }
+    } else if (type == 2) {
+        const uint16_t index = topology.source_override_count++;
+        if (index >= kSourceOverrideCapacity) return;
+        auto& route = topology.source_overrides[index];
+        const auto flags = static_cast<uint16_t>(uint16_t(record[8]) | (uint16_t(record[9]) << 8));
+        route = {read32(record + 4), offset, flags, record[2], record[3], 0};
+        if (route.bus != 0 || route.source >= 16 || (route.flags & 0xFFF0u) != 0 ||
+            route.polarity() == InterruptPolarity::Reserved || route.trigger() == InterruptTrigger::Reserved) {
+            route.issues |= InvalidRecordFields;
+        }
+        for (uint16_t i = 0; i < index; ++i) {
+            auto& prior = topology.source_overrides[i];
+            if (route.bus == prior.bus && route.source == prior.source) {
+                const bool valid = ((route.issues | prior.issues) & InvalidRecordFields) == 0;
+                const bool same_mode = route.flags == prior.flags ||
+                    (valid && route.polarity() == prior.polarity() && route.trigger() == prior.trigger());
+                mark_pair(route.issues, prior.issues, route.gsi == prior.gsi && same_mode
+                             ? DuplicateRecord : ConflictingRecord);
+            } else if (route.gsi == prior.gsi) {
+                mark_pair(route.issues, prior.issues, SharedOverrideGsi);
+            }
+        }
+    } else {
+        const uint16_t index = topology.address_override_count++;
+        if (index >= kAddressOverrideCapacity) return;
+        auto& local = topology.address_overrides[index];
+        local = {read64(record + 4), offset, 0};
+        if (record[2] != 0 || record[3] != 0 || local.address == 0 || (local.address & 0xFFFu) != 0) {
+            local.issues |= InvalidRecordFields;
+        }
+        for (uint16_t i = 0; i < index; ++i) {
+            auto& prior = topology.address_overrides[i];
+            mark_pair(local.issues, prior.issues, local.address == prior.address
+                         ? DuplicateRecord : ConflictingRecord);
+        }
+    }
+}
+
 void Discovery::read_madt()
 {
     out.failure_table = TableKind::Madt;
@@ -189,8 +272,21 @@ void Discovery::read_madt()
             if (processor.enabled()) ++enabled;
             if (out.online_capable(processor)) ++online_capable;
             if (stored < kProcessorCapacity) out.records[stored++] = processor;
+        } else if (interrupts) {
+            capture_interrupt_record(*interrupts, record, offset);
         }
         offset += record[1];
+    }
+    if (interrupts) {
+        interrupts->local_apic_address = read32(madt + 36);
+        interrupts->madt_flags = read32(madt + 40);
+        const uint64_t local = interrupts->effective_local_apic_address();
+        for (uint16_t i = 0; local != 0 && i < interrupts->stored_io_apics(); ++i) {
+            auto& io = interrupts->io_apics[i];
+            if (io.address <= (local | 0xFFFu) && local <= uint64_t(io.address) + kIoApicWindowLastByte) {
+                io.issues |= ConflictingRecord;
+            }
+        }
     }
     mark_identity_issues(out.records, stored);
     out.advertised_count = advertised;
@@ -241,28 +337,32 @@ const uint8_t* uefi_acpi_view(void* context, uint64_t address, size_t bytes)
 
 } // namespace
 
-void discover_processors(uint64_t rsdp, PhysicalView view, void* context, ProcessorInventory& out)
+void discover_processors(uint64_t rsdp, PhysicalView view, void* context, ProcessorInventory& out,
+                         InterruptTopology* interrupts)
 {
     out = {};
+    if (interrupts) *interrupts = {};
     out.rsdp_address = rsdp;
     if (rsdp == 0) {
         out.status = InventoryStatus::NoRsdp;
     } else if (!view) {
         out.status = InventoryStatus::MemoryMapUnavailable;
     } else {
-        Discovery discovery{view, context, out};
+        Discovery discovery{view, context, out, interrupts};
         if (discovery.read_rsdp() && discovery.find_madt()) discovery.read_madt();
+        if (interrupts && out.status == InventoryStatus::InvalidRecord) *interrupts = {};
     }
 }
 
 void capture_uefi_processors(uint64_t rsdp, const void* memory_map, size_t map_bytes,
-                             size_t descriptor_size, ProcessorInventory& out)
+                             size_t descriptor_size, ProcessorInventory& out,
+                             InterruptTopology* interrupts)
 {
     const bool valid_map = memory_map && map_bytes != 0 && map_bytes <= 256u * 1024u &&
                            descriptor_size >= 40 && descriptor_size <= 256 &&
                            descriptor_size % 8 == 0 && map_bytes % descriptor_size == 0;
     UefiMap map{static_cast<const uint8_t*>(memory_map), map_bytes, descriptor_size};
-    discover_processors(rsdp, valid_map ? uefi_acpi_view : nullptr, &map, out);
+    discover_processors(rsdp, valid_map ? uefi_acpi_view : nullptr, &map, out, interrupts);
 }
 
 } // namespace acpi

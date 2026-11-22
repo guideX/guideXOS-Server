@@ -636,8 +636,9 @@ EFI_STATUS ExitBootServicesWithMemoryMapInBuffer(
         if ((boot.base.Flags & guideXOS::GUIDEXOS_BOOTINFO_FLAG_ACPI_INVENTORY_VALID) == 0) {
             guideXOS::acpi::capture_uefi_processors(boot.base.AcpiRsdp,
                 descriptorVersion == 1 ? tempMap : nullptr, curMapSize, descriptorSize,
-                boot.acpi.inventory);
+                boot.acpi.inventory, &boot.interrupts.topology);
             guideXOS::seal_bootinfo_acpi(boot);
+            guideXOS::seal_bootinfo_interrupt_topology(boot);
         }
 
         CopyMem(finalMap, tempMap, curMapSize);

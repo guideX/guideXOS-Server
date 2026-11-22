@@ -3,7 +3,10 @@
 #include "cpu_capabilities.h"
 
 namespace guideXOS {
-namespace acpi { struct ProcessorInventory; }
+namespace acpi {
+struct ProcessorInventory;
+struct InterruptTopology;
+}
 }
 
 namespace kernel {
@@ -27,6 +30,8 @@ BootCpuMatch match_boot_processor(const CpuTopologyHint& cpu,
 void report_boot_processor_inventory(const CpuCapabilities& cpu,
                                      const guideXOS::acpi::ProcessorInventory* inventory,
                                      uint32_t running_processors);
+void report_boot_interrupt_topology(const CpuCapabilities& cpu,
+                                    const guideXOS::acpi::InterruptTopology* topology);
 #endif
 
 } // namespace amd64

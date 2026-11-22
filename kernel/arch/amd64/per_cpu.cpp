@@ -163,6 +163,7 @@ void initialize_boot_per_cpu(const guideXOS::BootInfo* boot)
     serial::puts(" offline=0x");
     serial::put_hex32(s_boot_per_cpu.offline_count());
     serial::puts("\n");
+    report_boot_interrupt_topology(cpu, guideXOS::bootinfo_acpi_interrupt_topology(boot));
 #endif
 }
 

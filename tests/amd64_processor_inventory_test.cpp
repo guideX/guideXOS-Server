@@ -96,9 +96,35 @@ Bytes x2apic(uint32_t uid, uint32_t id, uint32_t flags)
     return data;
 }
 
-Bytes madt(std::initializer_list<Bytes> records, uint8_t revision = 5)
+Bytes io_apic(uint8_t id, uint32_t address, uint32_t gsi)
 {
-    Bytes payload(8); // Local APIC address and MADT flags.
+    Bytes record{1, 12, id, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    write_le(record, 4, address);
+    write_le(record, 8, gsi);
+    return record;
+}
+
+Bytes source_override(uint8_t bus, uint8_t source, uint32_t gsi, uint16_t flags)
+{
+    Bytes record{2, 10, bus, source, 0, 0, 0, 0, 0, 0};
+    write_le(record, 4, gsi);
+    write_le(record, 8, flags, 2);
+    return record;
+}
+
+Bytes address_override(uint64_t address)
+{
+    Bytes record{5, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    write_le(record, 4, address, 8);
+    return record;
+}
+
+Bytes madt(std::initializer_list<Bytes> records, uint8_t revision = 5,
+           uint32_t local = 0, uint32_t flags = 0)
+{
+    Bytes payload(8);
+    write_le(payload, 0, local);
+    write_le(payload, 4, flags);
     for (const auto& record : records) payload.insert(payload.end(), record.begin(), record.end());
     return sdt("APIC", payload, revision);
 }
@@ -108,16 +134,19 @@ struct Tables {
         {kRsdp, rsdp(true)}, {kRoot, root(true, {kOther, kMadt})},
         {kOther, {'F', 'A', 'C', 'S'}}, {kMadt, madt({lapic(2, 3, 1)})}
     };
+    std::vector<uint64_t> views;
 
-    ProcessorInventory read()
+    ProcessorInventory read(InterruptTopology* interrupts = nullptr)
     {
+        views.clear();
         ProcessorInventory result{};
         discover_processors(kRsdp, [](void* context, uint64_t address, size_t size) -> const uint8_t* {
-            const auto& tables = static_cast<Tables*>(context)->bytes;
-            const auto found = tables.find(address);
-            if (found == tables.end() || size > found->second.size()) return nullptr;
+            auto& tables = *static_cast<Tables*>(context);
+            tables.views.push_back(address);
+            const auto found = tables.bytes.find(address);
+            if (found == tables.bytes.end() || size > found->second.size()) return nullptr;
             return found->second.data();
-        }, this, result);
+        }, this, result, interrupts);
         return result;
     }
 };
@@ -279,6 +308,163 @@ void boot_identity()
     CHECK(match_boot_processor(hint, &result).status == BootCpuMatchStatus::Ambiguous);
 }
 
+void interrupt_inventory()
+{
+    Tables tables;
+    InterruptTopology interrupts{};
+    const uint32_t header = 0xFEE00000;
+    const uint64_t local = 0x1FEE00000ull;
+    tables.bytes[kMadt] = madt({lapic(1, 3, 1), io_apic(7, 0xFEC00000, 0),
+        io_apic(8, 0xFEC00100, 32), source_override(0, 0, 2, 0),
+        source_override(0, 12, 44, 5), source_override(0, 9, 41, 15),
+        x2apic(2, 0x104, 2), address_override(local), Bytes{4, 6, 0xFF, 0, 0, 1}, Bytes{254, 2}},
+        5, header, kMadtPcatCompat);
+    const auto processors = tables.read(&interrupts);
+    CHECK(processors.status == InventoryStatus::Complete && processors.stored_count == 2);
+    CHECK(processors.records[1].apic_id == 0x104 && processors.online_capable_count == 1);
+    CHECK((tables.views == std::vector<uint64_t>{kRsdp, kRsdp, kRsdp, kRoot, kRoot,
+                                               kOther, kMadt, kMadt, kMadt}));
+    CHECK(interrupts.local_apic_address == header && interrupts.madt_flags == kMadtPcatCompat);
+    CHECK(interrupts.address_override_count == 1 && interrupts.effective_local_apic_address() == local);
+    CHECK(interrupts.address_overrides[0].madt_offset == 122 && interrupts.address_overrides[0].issues == 0);
+    CHECK(interrupts.io_apic_count == 2 && interrupts.io_apics[0].madt_offset == 52);
+    CHECK(interrupts.io_apics[1].id == 8 && interrupts.io_apics[1].address == 0xFEC00100 &&
+          interrupts.io_apics[1].gsi_base == 32 && interrupts.io_apics[1].issues == 0);
+    CHECK(interrupts.source_override_count == 3 && interrupts.ignored_count == 2 &&
+          interrupts.ignored_nmi_count == 1 && interrupts.malformed_count == 0 && !interrupts.truncated());
+    const auto& pit = interrupts.source_overrides[0];
+    CHECK(pit.bus == 0 && pit.source == 0 && pit.gsi == 2 && pit.flags == 0 && pit.issues == 0);
+    CHECK(pit.polarity() == InterruptPolarity::ActiveHigh && pit.trigger() == InterruptTrigger::Edge);
+    CHECK(interrupts.source_overrides[1].polarity() == InterruptPolarity::ActiveHigh &&
+          interrupts.source_overrides[1].trigger() == InterruptTrigger::Edge);
+    CHECK(interrupts.source_overrides[2].polarity() == InterruptPolarity::ActiveLow &&
+          interrupts.source_overrides[2].trigger() == InterruptTrigger::Level);
+
+    tables.bytes[kMadt] = madt({}, 3, header, 0);
+    CHECK(tables.read(&interrupts).status == InventoryStatus::Complete);
+    CHECK(interrupts.effective_local_apic_address() == header && interrupts.madt_flags == 0);
+    CHECK(interrupts.address_override_count == 0 && interrupts.ignored_count == 0);
+}
+
+void invalid_interrupt_fields_and_lengths()
+{
+    Tables tables;
+    InterruptTopology interrupts{};
+    auto reserved_io = io_apic(2, 0xFEC00000, UINT32_MAX);
+    reserved_io[3] = 1;
+    auto reserved_address = address_override(0x1FEE00000ull);
+    reserved_address[3] = 1;
+    tables.bytes[kMadt] = madt({io_apic(1, 0, 0), reserved_io, io_apic(3, 0xFEC01001, 16),
+        io_apic(4, 0xFFFFFFF0u, 32),
+        source_override(1, 0, 2, 0), source_override(0, 16, 4, 0),
+        source_override(0, 5, 5, 2), source_override(0, 6, 6, 8),
+        source_override(0, 7, 7, 0x8000), source_override(0, 8, UINT32_MAX, 0),
+        reserved_address}, 5, 0xFEE00000);
+    CHECK(tables.read(&interrupts).status == InventoryStatus::Complete);
+    for (uint16_t i = 0; i < interrupts.io_apic_count; ++i) {
+        CHECK(interrupts.io_apics[i].issues == InvalidRecordFields);
+    }
+    CHECK(interrupts.io_apics[1].gsi_base == UINT32_MAX);
+    for (uint16_t i = 0; i < 5; ++i) {
+        CHECK(interrupts.source_overrides[i].issues == InvalidRecordFields);
+    }
+    CHECK(interrupts.source_overrides[0].polarity() == InterruptPolarity::Unresolved &&
+          interrupts.source_overrides[0].trigger() == InterruptTrigger::Unresolved);
+    CHECK(interrupts.source_overrides[2].polarity() == InterruptPolarity::Reserved &&
+          interrupts.source_overrides[3].trigger() == InterruptTrigger::Reserved);
+    CHECK(interrupts.source_overrides[5].gsi == UINT32_MAX && interrupts.source_overrides[5].issues == 0);
+    CHECK(interrupts.address_overrides[0].issues == InvalidRecordFields &&
+          interrupts.effective_local_apic_address() == 0);
+    for (const auto address : {0ull, 0xFEE00001ull}) {
+        tables.bytes[kMadt] = madt({address_override(address)}, 5, 0xFEE00000);
+        CHECK(tables.read(&interrupts).status == InventoryStatus::Complete);
+        CHECK(interrupts.address_overrides[0].issues == InvalidRecordFields &&
+              interrupts.effective_local_apic_address() == 0);
+    }
+    tables.bytes[kMadt] = madt({}, 5, 0xFEE00001u);
+    CHECK(tables.read(&interrupts).status == InventoryStatus::Complete &&
+          interrupts.effective_local_apic_address() == 0);
+
+    auto extended = io_apic(4, 0xFEC01000, 0);
+    extended.push_back(0xAA);
+    ++extended[1];
+    tables.bytes[kMadt] = madt({Bytes{1, 2}, Bytes{2, 2}, Bytes{5, 2}, extended, lapic(1, 3, 1)}, 5, 0xFEE00000);
+    CHECK(tables.read(&interrupts).stored_count == 1);
+    CHECK(interrupts.malformed_count == 3 && interrupts.first_malformed_offset == 44 &&
+          interrupts.io_apic_count == 1 && interrupts.io_apics[0].madt_offset == 50 &&
+          interrupts.effective_local_apic_address() == 0);
+    for (const auto& bad : {Bytes{1}, Bytes{2, 0}, Bytes{5, 12}, Bytes{9, 2}, Bytes{254, 3}}) {
+        tables.bytes[kMadt] = madt({io_apic(1, 0xFEC00000, 0), bad});
+        CHECK(tables.read(&interrupts).status == InventoryStatus::InvalidRecord);
+        CHECK(interrupts.io_apic_count == 0 && interrupts.malformed_count == 0);
+    }
+    ++tables.bytes[kMadt][9];
+    CHECK(tables.read(&interrupts).status == InventoryStatus::InvalidChecksum && interrupts.io_apic_count == 0);
+}
+
+void contradictory_interrupt_records()
+{
+    Tables tables;
+    InterruptTopology interrupts{};
+    const auto io = io_apic(2, 0xFEC00000, 0);
+    const auto route = source_override(0, 0, 2, 0);
+    const auto local = address_override(0xFEE00000);
+    tables.bytes[kMadt] = madt({io, io, io_apic(2, 0xFEC01000, 16),
+        io_apic(3, 0xFEC00000, 32), io_apic(4, 0xFEC03000, 0),
+        route, source_override(0, 0, 2, 5), source_override(0, 0, 2, 15),
+        source_override(0, 0, 9, 0), source_override(0, 9, 2, 0),
+        local, local, address_override(0xFEE01000)});
+    CHECK(tables.read(&interrupts).status == InventoryStatus::Complete);
+    CHECK(interrupts.io_apics[0].issues == (DuplicateRecord | ConflictingRecord));
+    CHECK(interrupts.io_apics[1].issues == interrupts.io_apics[0].issues);
+    for (unsigned i = 2; i < 5; ++i) CHECK(interrupts.io_apics[i].issues == ConflictingRecord);
+    CHECK(interrupts.source_overrides[0].issues == (DuplicateRecord | ConflictingRecord | SharedOverrideGsi));
+    CHECK(interrupts.source_overrides[1].issues == interrupts.source_overrides[0].issues);
+    CHECK(interrupts.source_overrides[2].issues == (ConflictingRecord | SharedOverrideGsi));
+    CHECK(interrupts.source_overrides[3].issues == ConflictingRecord);
+    CHECK(interrupts.source_overrides[4].issues == SharedOverrideGsi);
+    CHECK(interrupts.address_overrides[0].issues == (DuplicateRecord | ConflictingRecord));
+    CHECK(interrupts.address_overrides[1].issues == interrupts.address_overrides[0].issues);
+    CHECK(interrupts.address_overrides[2].issues == ConflictingRecord);
+    CHECK(interrupts.effective_local_apic_address() == 0);
+
+    tables.bytes[kMadt] = madt({local, local});
+    CHECK(tables.read(&interrupts).status == InventoryStatus::Complete);
+    CHECK(interrupts.address_overrides[0].issues == DuplicateRecord && interrupts.effective_local_apic_address() == 0);
+    tables.bytes[kMadt] = madt({io_apic(1, 0xFEC00100, 0), io_apic(2, 0xFEC00110, 32)});
+    CHECK(tables.read(&interrupts).status == InventoryStatus::Complete);
+    CHECK(interrupts.io_apics[0].issues == ConflictingRecord && interrupts.io_apics[1].issues == ConflictingRecord);
+    tables.bytes[kMadt] = madt({local, io_apic(1, 0xFEE00100, 0)});
+    CHECK(tables.read(&interrupts).status == InventoryStatus::Complete);
+    CHECK(interrupts.io_apics[0].issues == ConflictingRecord);
+}
+
+void interrupt_capacity()
+{
+    Tables tables;
+    InterruptTopology interrupts{};
+    Bytes payload(8);
+    const auto append = [&](const Bytes& record, uint16_t count) {
+        for (uint16_t i = 0; i < count; ++i) payload.insert(payload.end(), record.begin(), record.end());
+    };
+    append(io_apic(2, 0xFEC00000, 0), kIoApicCapacity + 1);
+    append(source_override(0, 0, 2, 0), kSourceOverrideCapacity + 1);
+    append(address_override(0xFEE00000), kAddressOverrideCapacity + 1);
+    append(lapic(1, 3, 1), 1);
+    tables.bytes[kMadt] = sdt("APIC", payload);
+    const auto processors = tables.read(&interrupts);
+    CHECK(processors.status == InventoryStatus::Complete && processors.stored_count == 1);
+    CHECK(interrupts.io_apic_count == kIoApicCapacity + 1 && interrupts.stored_io_apics() == kIoApicCapacity);
+    CHECK(interrupts.source_override_count == kSourceOverrideCapacity + 1 &&
+          interrupts.stored_source_overrides() == kSourceOverrideCapacity);
+    CHECK(interrupts.address_override_count == kAddressOverrideCapacity + 1 &&
+          interrupts.stored_address_overrides() == kAddressOverrideCapacity);
+    CHECK(interrupts.truncated() && interrupts.effective_local_apic_address() == 0);
+    payload.push_back(2);
+    tables.bytes[kMadt] = sdt("APIC", payload);
+    CHECK(tables.read(&interrupts).status == InventoryStatus::InvalidRecord && !interrupts.truncated());
+}
+
 void vendor_topology()
 {
     struct Leaves {
@@ -349,7 +535,7 @@ void uefi_mapping_and_handoff()
     const auto base = reinterpret_cast<uintptr_t>(firmware);
     const Bytes rsdp_bytes = rsdp(true, base + 128);
     const Bytes root_bytes = root(true, {base + 4093});
-    const Bytes madt_bytes = madt({lapic(1, 3, 1)});
+    const Bytes madt_bytes = madt({lapic(1, 3, 1), io_apic(2, 0xFEC00000, 0)}, 3, 0xFEE00000);
     std::memcpy(firmware, rsdp_bytes.data(), rsdp_bytes.size());
     std::memcpy(firmware + 128, root_bytes.data(), root_bytes.size());
     std::memcpy(firmware + 4093, madt_bytes.data(), madt_bytes.size());
@@ -409,6 +595,41 @@ void uefi_mapping_and_handoff()
     ++inventory.rsdp_address;
     seal_bootinfo_acpi(handoff);
     CHECK(bootinfo_acpi_inventory(&boot) == nullptr);
+
+    // Old loaders clear the optional tail. Its absence or corruption is
+    // independent from the processor handoff used by CPU3.
+    --inventory.rsdp_address;
+    seal_bootinfo_acpi(handoff);
+    CHECK(bootinfo_acpi_inventory(&boot) == &inventory);
+    CHECK(bootinfo_acpi_interrupt_topology(&boot) == nullptr);
+    auto& topology = handoff.interrupts.topology;
+    capture_uefi_processors(base, map.data(), map.size(), 48, inventory, &topology);
+    seal_bootinfo_acpi(handoff);
+    seal_bootinfo_interrupt_topology(handoff);
+    CHECK(bootinfo_acpi_interrupt_topology(&boot) == &topology);
+    CHECK(topology.io_apic_count == 1 && topology.effective_local_apic_address() == 0xFEE00000);
+    ++topology.io_apics[0].id;
+    CHECK(bootinfo_acpi_interrupt_topology(&boot) == nullptr && bootinfo_acpi_inventory(&boot) == &inventory);
+    seal_bootinfo_interrupt_topology(handoff);
+    ++handoff.interrupts.version;
+    CHECK(bootinfo_acpi_interrupt_topology(&boot) == nullptr);
+    seal_bootinfo_interrupt_topology(handoff);
+    --handoff.interrupts.size;
+    CHECK(bootinfo_acpi_interrupt_topology(&boot) == nullptr);
+    seal_bootinfo_interrupt_topology(handoff);
+    handoff.interrupts.signature = 0;
+    CHECK(bootinfo_acpi_interrupt_topology(&boot) == nullptr);
+    seal_bootinfo_interrupt_topology(handoff);
+    inventory.status = InventoryStatus::Truncated;
+    seal_bootinfo_acpi(handoff);
+    CHECK(bootinfo_acpi_interrupt_topology(&boot) == &topology);
+    inventory.status = InventoryStatus::NoRsdp;
+    seal_bootinfo_acpi(handoff);
+    CHECK(bootinfo_acpi_interrupt_topology(&boot) == nullptr);
+    seal_bootinfo_interrupt_topology(handoff);
+    CHECK(handoff.interrupts.signature == 0);
+    ++boot.HeaderChecksum;
+    CHECK(bootinfo_acpi_inventory(&boot) == nullptr && bootinfo_acpi_interrupt_topology(&boot) == nullptr);
 }
 
 } // namespace
@@ -419,7 +640,11 @@ int main()
     missing_and_invalid_tables();
     records_and_capacity();
     boot_identity();
+    interrupt_inventory();
+    invalid_interrupt_fields_and_lengths();
+    contradictory_interrupt_records();
+    interrupt_capacity();
     vendor_topology();
     uefi_mapping_and_handoff();
-    std::puts("PASS AMD64 processor inventory (6 fixture groups)");
+    std::puts("PASS AMD64 processor and interrupt inventory (10 fixture groups)");
 }

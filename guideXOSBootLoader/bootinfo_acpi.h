@@ -17,9 +17,23 @@ struct BootInfoAcpiExtension {
     acpi::ProcessorInventory inventory;
 };
 
+constexpr uint32_t kBootInfoInterruptSignature = 0x52544E49u; // "INTR"
+constexpr uint32_t kBootInfoInterruptVersion = 1;
+
+// The same mapped page has room for an independent tail. A CPU2–CPU4
+// loader zeroes this space, and its processor extension still uses v1.
+struct BootInfoInterruptExtension {
+    uint32_t signature;
+    uint32_t version;
+    uint32_t size;
+    uint8_t checksum;
+    acpi::InterruptTopology topology;
+};
+
 struct BootInfoWithAcpi {
     BootInfo base;
     BootInfoAcpiExtension acpi;
+    BootInfoInterruptExtension interrupts;
 };
 
 static_assert(sizeof(BootInfoWithAcpi) <= kBootInfoPageBytes, "ACPI extension must fit in BootInfo page");
@@ -29,12 +43,19 @@ static_assert(offsetof(BootInfoWithAcpi, acpi) == 576 &&
               offsetof(acpi::ProcessorInventory, records) == 64 &&
               sizeof(acpi::ProcessorRecord) == 20,
               "ACPI extension v1 must use the same layout in the loader and kernel");
+static_assert(offsetof(BootInfoWithAcpi, interrupts) == 3216 &&
+              offsetof(BootInfoInterruptExtension, topology) == 16 &&
+              sizeof(BootInfoInterruptExtension) == 744 &&
+              sizeof(acpi::IoApicRecord) == 16 &&
+              sizeof(acpi::SourceOverrideRecord) == 16 &&
+              sizeof(acpi::AddressOverrideRecord) == 16,
+              "Interrupt extension v1 must use the same layout in the loader and kernel");
 
-inline uint8_t bootinfo_acpi_sum(const BootInfoAcpiExtension& extension)
+inline uint8_t bootinfo_extension_sum(const void* extension, size_t size)
 {
-    const auto* bytes = reinterpret_cast<const uint8_t*>(&extension);
+    const auto* bytes = static_cast<const uint8_t*>(extension);
     uint8_t sum = 0;
-    for (size_t i = 0; i < sizeof(extension); ++i) sum = static_cast<uint8_t>(sum + bytes[i]);
+    for (size_t i = 0; i < size; ++i) sum = static_cast<uint8_t>(sum + bytes[i]);
     return sum;
 }
 
@@ -44,7 +65,7 @@ inline void seal_bootinfo_acpi(BootInfoWithAcpi& handoff)
     extension.version = kBootInfoAcpiVersion;
     extension.size = sizeof(extension);
     extension.checksum = 0;
-    extension.checksum = static_cast<uint8_t>(0 - bootinfo_acpi_sum(extension));
+    extension.checksum = static_cast<uint8_t>(0 - bootinfo_extension_sum(&extension, sizeof(extension)));
     handoff.base.Flags |= GUIDEXOS_BOOTINFO_FLAG_ACPI_INVENTORY_VALID;
 }
 
@@ -60,11 +81,42 @@ inline const acpi::ProcessorInventory* bootinfo_acpi_inventory(const BootInfo* b
 
     const auto& extension = reinterpret_cast<const BootInfoWithAcpi*>(boot)->acpi;
     if (extension.version != kBootInfoAcpiVersion || extension.size != sizeof(extension) ||
-        bootinfo_acpi_sum(extension) != 0) return nullptr;
+        bootinfo_extension_sum(&extension, sizeof(extension)) != 0) return nullptr;
     const auto& inventory = extension.inventory;
     if (inventory.rsdp_address != boot->AcpiRsdp ||
         inventory.stored_count > acpi::kProcessorCapacity) return nullptr;
     return &inventory;
+}
+
+inline void seal_bootinfo_interrupt_topology(BootInfoWithAcpi& handoff)
+{
+    const auto status = handoff.acpi.inventory.status;
+    auto& extension = handoff.interrupts;
+    if (status != acpi::InventoryStatus::Complete && status != acpi::InventoryStatus::Truncated) {
+        extension.signature = 0;
+        return;
+    }
+    extension.signature = kBootInfoInterruptSignature;
+    extension.version = kBootInfoInterruptVersion;
+    extension.size = sizeof(extension);
+    extension.checksum = 0;
+    extension.checksum = static_cast<uint8_t>(0 - bootinfo_extension_sum(&extension, sizeof(extension)));
+}
+
+inline const acpi::InterruptTopology* bootinfo_acpi_interrupt_topology(const BootInfo* boot)
+{
+    const auto* inventory = bootinfo_acpi_inventory(boot);
+    if (!inventory || (inventory->status != acpi::InventoryStatus::Complete &&
+                       inventory->status != acpi::InventoryStatus::Truncated)) return nullptr;
+
+    const auto& extension = reinterpret_cast<const BootInfoWithAcpi*>(boot)->interrupts;
+    if (extension.signature != kBootInfoInterruptSignature || extension.version != kBootInfoInterruptVersion ||
+        extension.size != sizeof(extension) ||
+        bootinfo_extension_sum(&extension, sizeof(extension)) != 0) return nullptr;
+
+    const auto& topology = extension.topology;
+    if (topology.ignored_nmi_count > topology.ignored_count) return nullptr;
+    return &topology;
 }
 
 } // namespace guideXOS
