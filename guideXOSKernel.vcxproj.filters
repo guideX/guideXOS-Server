@@ -234,6 +234,9 @@
     <ClInclude Include="kernel\arch\amd64\include\arch\boot_processor_inventory.h">
       <Filter>Header Files\Architecture\amd64</Filter>
     </ClInclude>
+    <ClInclude Include="kernel\arch\amd64\include\arch\per_cpu.h">
+      <Filter>Header Files\Architecture\amd64</Filter>
+    </ClInclude>
     <ClInclude Include="kernel\arch\amd64\include\arch\graphics.h">
       <Filter>Header Files\Architecture\amd64</Filter>
     </ClInclude>
@@ -492,6 +495,9 @@
       <Filter>Source Files\Architecture\amd64</Filter>
     </ClCompile>
     <ClCompile Include="kernel\arch\amd64\boot_processor_inventory.cpp">
+      <Filter>Source Files\Architecture\amd64</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\amd64\per_cpu.cpp">
       <Filter>Source Files\Architecture\amd64</Filter>
     </ClCompile>
     <ClCompile Include="kernel\arch\amd64\graphics.cpp">

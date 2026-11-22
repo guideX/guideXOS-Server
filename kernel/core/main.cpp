@@ -84,8 +84,8 @@
 // Include BootInfo structure from bootloader (x86 / amd64 UEFI only)
 #include "../../guideXOSBootLoader/guidexOSBootInfo.h"
 #endif
-#if defined(ARCH_AMD64) && defined(GXOS_ENABLE_CPU_INVENTORY_DIAGNOSTIC)
-#include <arch/boot_processor_inventory.h>
+#if defined(ARCH_AMD64)
+#include <arch/per_cpu.h>
 #endif
 
 // Existing proof builds historically selected their coordinator through the
@@ -773,8 +773,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         while(1) { }
     }
 
-#if defined(ARCH_AMD64) && defined(GXOS_ENABLE_CPU_INVENTORY_DIAGNOSTIC)
-    kernel::arch::amd64::report_boot_processor_inventory(bootinfo);
+#if defined(ARCH_AMD64)
+    kernel::arch::amd64::initialize_boot_per_cpu(bootinfo);
 #endif
 
     if (is_bootinfo) {

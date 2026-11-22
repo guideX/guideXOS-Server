@@ -2,7 +2,6 @@
 #include "../../../guideXOSBootLoader/acpi_processor_inventory.h"
 
 #if defined(GXOS_ENABLE_CPU_INVENTORY_DIAGNOSTIC)
-#include "../../../guideXOSBootLoader/bootinfo_acpi.h"
 #include "../../core/include/kernel/serial_debug.h"
 #endif
 
@@ -179,10 +178,9 @@ void report_firmware(const ProcessorInventory& inventory, const BootCpuMatch& ma
 
 } // namespace
 
-void report_boot_processor_inventory(const guideXOS::BootInfo* boot)
+void report_boot_processor_inventory(const CpuCapabilities& cpu, const ProcessorInventory* inventory,
+                                     uint32_t running_processors)
 {
-    const auto* inventory = guideXOS::bootinfo_acpi_inventory(boot);
-    const auto cpu = read_cpu_capabilities();
     const auto match = match_boot_processor(cpu.topology, inventory);
 
     serial::puts("[CPU2] inventory=");
@@ -194,7 +192,9 @@ void report_boot_processor_inventory(const guideXOS::BootInfo* boot)
     }
     serial::puts(" boot-match=");
     serial::puts(name(match.status));
-    serial::puts(" guidexos-running-processors=1\n");
+    // CPU3 admits only the BSP. Keep the existing CPU2 serial field format.
+    serial::puts(running_processors == 1 ? " guidexos-running-processors=1\n"
+                                         : " guidexos-running-processors=0\n");
 
     if (inventory) report_firmware(*inventory, match);
 }

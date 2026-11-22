@@ -3,7 +3,6 @@
 #include "cpu_capabilities.h"
 
 namespace guideXOS {
-struct BootInfo;
 namespace acpi { struct ProcessorInventory; }
 }
 
@@ -25,7 +24,9 @@ BootCpuMatch match_boot_processor(const CpuTopologyHint& cpu,
                                 const guideXOS::acpi::ProcessorInventory* inventory);
 
 #if defined(GXOS_ENABLE_CPU_INVENTORY_DIAGNOSTIC)
-void report_boot_processor_inventory(const guideXOS::BootInfo* boot);
+void report_boot_processor_inventory(const CpuCapabilities& cpu,
+                                     const guideXOS::acpi::ProcessorInventory* inventory,
+                                     uint32_t running_processors);
 #endif
 
 } // namespace amd64
