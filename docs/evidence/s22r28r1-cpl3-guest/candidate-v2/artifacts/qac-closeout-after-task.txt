@@ -1,0 +1,19 @@
+Snapshot captured at 2026-11-22T00:22:50Z
+This is a later read-only QAC snapshot; the active reservation is not the CPL3 run.
+Coordinator: Online
+Name: guideXOS QAC
+Version: 2.0.0
+PID: 1532
+Started (UTC): 2026-11-20T18:55:16.4997427+00:00
+Uptime: 106096s
+QEMU processes: 1 (0 foreign)
+Managed development limit: 2
+Managed sessions: 1; queued: 0; blocked: 0
+Coordinator: Online (guideXOS QAC 2.0.0)
+QEMU PID 30872 | C:\Program Files\qemu\qemu-system-x86_64.exe | 2026-11-22T00:19:21.1326948+00:00 | managed
+  Note: Reservation 9602b018c23b4ce08f7b2c77c4aba931 · guideXOSServer · acceptance
+Reservations: 1
+  9602b018c23b4ce08f7b2c77c4aba931 | guideXOSServer | acceptance | Running | queue 0 | LEON2_RDT\guideX (PID 29120) | owner Verified | child PID 30872
+Managed sessions: 1
+Managed session: 9602b018c23b4ce08f7b2c77c4aba931 | Running | guideXOSServer · LEON2_RDT\guideX (PID 29120)
+Queued reservations: 0
