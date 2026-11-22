@@ -315,6 +315,62 @@ $action = Step $session @{ ReservationState = 'Released'; ChildStatus = 'OwnedAc
 Assert-Case (!$session.qualifying -and $action -eq 'RetainQacOwnership') 'QAC release cannot qualify while the owned QEMU process is still active'
 
 $runnerSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'run-aarch64-runsafe2-qac.ps1'))
+$repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$candidateDirectory = Join-Path $repoRoot 'out/aarch64-runsafe4b-native-20261114-03'
+$candidateManifestPath = Join-Path $candidateDirectory 'candidate-manifest.json'
+$candidateManifestSha256 = 'b93f3ae8b39025503701f226942ed0c62c7e87452fe18986c93d183cd45e41ca'
+$candidateManifest = Get-Content -Raw $candidateManifestPath | ConvertFrom-Json
+Assert-Case ((Test-QacCandidateFileSha256 -Path $candidateManifestPath -ExpectedSha256 $candidateManifestSha256) -and
+    $candidateManifest.server.head -eq '88bedfe19976225445fa6866a786000d0d8a3eae') 'Preserved RUNSAFE4-B manifest and original source revision match their pinned identity'
+
+foreach ($artifact in @(
+    @{ Path = (Join-Path $candidateDirectory 'kernel.elf'); Hash = $candidateManifest.artifacts.kernelElfSha256 },
+    @{ Path = (Join-Path $candidateDirectory 'BOOTAA64.EFI'); Hash = $candidateManifest.artifacts.bootEfiSha256 },
+    @{ Path = (Join-Path $candidateDirectory 'esp/ramdisk.img'); Hash = $candidateManifest.artifacts.ramdiskSha256 },
+    @{ Path = (Join-Path $candidateDirectory 'ramdisk-root/Apps/DeveloperStudio/bin/arm64/developerstudio.elf'); Hash = $candidateManifest.artifacts.studioElf.sha256 },
+    @{ Path = (Join-Path $candidateDirectory 'ramdisk-root/Apps/DeveloperStudio/app.json'); Hash = $candidateManifest.artifacts.packageManifestSha256 })) {
+    Assert-Case (Test-QacCandidateFileSha256 -Path $artifact.Path -ExpectedSha256 ([string]$artifact.Hash)) "Preserved candidate artifact hash matches manifest: $([IO.Path]::GetFileName($artifact.Path))"
+}
+
+$return42Fixture = Join-Path $repoRoot 'out/aarch64-runsafe4b-native-20261114-03-runsafe4a-host/build-identity/compiled-arm64.elf'
+$return43Fixture = Join-Path $repoRoot 'out/aarch64-runsafe4b-native-20261114-03-runsafe4a-host/build-service-return43/compiled-arm64.elf'
+Assert-Case ((Test-QacCandidateFileSha256 -Path $return42Fixture -ExpectedSha256 ([string]$candidateManifest.artifacts.compiledStudioElfQualification.historicalCompilerElfSha256)) -and
+    (Test-QacCandidateFileSha256 -Path $return43Fixture -ExpectedSha256 ([string]$candidateManifest.artifacts.compiledStudioElfQualification.return43.historicalCompilerElfSha256))) 'Resident-compiler return-42 and return-43 ELF fixtures match preserved manifest provenance'
+
+Assert-Case (Test-QacCandidateSourcePathsSupported -Paths @(
+    'docs/aarch64/AARCH64_RUNSAFE4B_NATIVE_ELF_EXECUTION.md',
+    'scripts/run-aarch64-runsafe2-qac.ps1',
+    'scripts/aarch64-runsafe2-qac-supervisor.psm1',
+    'scripts/test-aarch64-runsafe2-qac-supervisor.ps1')) 'Documentation and reviewed host-side supervision changes preserve guest candidate provenance'
+$currentHead = (& git -C $repoRoot rev-parse HEAD).Trim()
+& git -C $repoRoot merge-base --is-ancestor $candidateManifest.server.head $currentHead 2>$null
+Assert-Case ($LASTEXITCODE -eq 0) 'Preserved candidate source revision remains an ancestor of the current checkout'
+$committedSourcePaths = @(& git -C $repoRoot diff --no-renames --name-only ($candidateManifest.server.head + '..' + $currentHead))
+$workingSourcePaths = @(& git -C $repoRoot diff --no-renames --name-only HEAD)
+$untrackedSourcePaths = @(& git -C $repoRoot ls-files --others --exclude-standard)
+$actualSourcePaths = @($committedSourcePaths + $workingSourcePaths + $untrackedSourcePaths | Select-Object -Unique)
+Assert-Case (Test-QacCandidateSourcePathsSupported -Paths $actualSourcePaths) 'Current checkout differences retain the original candidate source provenance'
+Assert-Case (!(Test-QacCandidateSourcePathsSupported -Paths @('kernel/arch/arm64/phase4_main.cpp'))) 'Changed guest execution inputs invalidate preserved candidate provenance'
+Assert-Case (!(Test-QacCandidateSourcePathsSupported -Paths @('scripts/build-aarch64-phase12.ps1'))) 'Unreviewed build harness differences invalidate preserved candidate provenance'
+
+$tempHashPath = Join-Path ([IO.Path]::GetTempPath()) ('qac-hash-regression-' + [Guid]::NewGuid().ToString('N'))
+try {
+    [IO.File]::WriteAllText($tempHashPath, 'candidate artifact regression')
+    $tempHash = (Get-FileHash -LiteralPath $tempHashPath -Algorithm SHA256).Hash
+    Assert-Case (Test-QacCandidateFileSha256 -Path $tempHashPath -ExpectedSha256 $tempHash) 'Candidate artifact hash verifier accepts exact bytes'
+    [IO.File]::AppendAllText($tempHashPath, ' changed')
+    Assert-Case (!(Test-QacCandidateFileSha256 -Path $tempHashPath -ExpectedSha256 $tempHash)) 'Candidate artifact hash verifier rejects changed bytes'
+    Assert-Case (!(Test-QacCandidateFileSha256 -Path $tempHashPath -ExpectedSha256 ('0' * 64))) 'Mismatched manifest or artifact SHA-256 is rejected'
+    Copy-Item -LiteralPath $candidateManifestPath -Destination $tempHashPath
+    [IO.File]::AppendAllText($tempHashPath, ' ')
+    Assert-Case (!(Test-QacCandidateFileSha256 -Path $tempHashPath -ExpectedSha256 $candidateManifestSha256)) 'Changed candidate manifest bytes are rejected against the preserved manifest digest'
+} finally {
+    Remove-Item -LiteralPath $tempHashPath -Force -ErrorAction SilentlyContinue
+}
+
+Assert-Case ($runnerSource.Contains('Test-QacCandidateFileSha256 -Path $manifestPath') -and
+    $runnerSource.Contains('Test-QacCandidateSourcePathsSupported -Paths $sourcePathDiffs') -and
+    $runnerSource.Contains('supervisor_script_sha256')) 'Runner enforces pinned manifest identity, scoped source differences, and records supervisor version'
 Assert-Case ($runnerSource.Contains("`$sessionPath + '.partial.json'") -and $runnerSource.Contains('partial_log_finalization_error')) 'A failed session save has a partial evidence preservation path'
 Assert-Case ($runnerSource.Contains('$script:qmpQuitSent = $true') -and
     $runnerSource.Contains('$script:qmpQuitAcknowledged = $true') -and

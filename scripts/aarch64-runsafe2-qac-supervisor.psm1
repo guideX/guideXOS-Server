@@ -5,6 +5,47 @@ $script:QacReservationStates = @(
     'Released', 'Cancelled', 'Expired', 'Failed', 'Recovery Required'
 )
 
+# These files affect only host-side supervision and are covered by hosted tests.
+$script:QacCandidateHostOnlyPaths = @(
+    'scripts/run-aarch64-runsafe2-qac.ps1',
+    'scripts/run-aarch64-runsafe4b-qac.ps1',
+    'scripts/aarch64-runsafe2-qac-supervisor.psm1',
+    'scripts/test-aarch64-runsafe2-qac-supervisor.ps1'
+)
+
+function Test-QacCandidateSourcePathsSupported {
+    [CmdletBinding()]
+    param([AllowEmptyCollection()] [string[]] $Paths = @())
+
+    foreach ($path in $Paths) {
+        $normalizedPath = ([string]$path).Replace([string][char]92, '/')
+        while ($normalizedPath.StartsWith('./', [StringComparison]::Ordinal)) {
+            $normalizedPath = $normalizedPath.Substring(2)
+        }
+        if ($normalizedPath.StartsWith('docs/', [StringComparison]::OrdinalIgnoreCase)) { continue }
+        if ($script:QacCandidateHostOnlyPaths -contains $normalizedPath) { continue }
+        return $false
+    }
+    return $true
+}
+
+function Test-QacCandidateFileSha256 {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [string] $Path,
+        [Parameter(Mandatory = $true)] [string] $ExpectedSha256
+    )
+
+    if ($ExpectedSha256 -notmatch '^[0-9a-fA-F]{64}$' -or
+        !(Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    try {
+        $actualSha256 = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+        return [StringComparer]::OrdinalIgnoreCase.Equals($actualSha256, $ExpectedSha256)
+    } catch {
+        return $false
+    }
+}
+
 function New-QacSupervisorState {
     return [ordered]@{
         phase = 'AdmissionPending'
@@ -447,4 +488,4 @@ function Get-QacManagedChildLifetimeSeconds {
     return [Math]::Round(($exit.ToUniversalTime() - $start.ToUniversalTime()).TotalSeconds, 3)
 }
 
-Export-ModuleMember -Function New-QacSupervisorState, Add-QacTransition, Get-QacQmpEndpointVerification, Step-QacSupervisor, Test-QacSupervisorPartial, Get-QacManagedChildLifetimeSeconds
+Export-ModuleMember -Function New-QacSupervisorState, Add-QacTransition, Get-QacQmpEndpointVerification, Step-QacSupervisor, Test-QacSupervisorPartial, Get-QacManagedChildLifetimeSeconds, Test-QacCandidateSourcePathsSupported, Test-QacCandidateFileSha256

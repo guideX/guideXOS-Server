@@ -1086,6 +1086,10 @@ $record = [ordered]@{
     state_machine_action = $sessionState.last_action
     partial_log_finalization_error = ''
     candidate_manifest_sha256 = ''
+    supervisor_source_head = ''
+    supervisor_script_sha256 = ''
+    supervisor_module_sha256 = ''
+    qualification_wrapper_sha256 = ''
     candidate_kernel_sha256 = ''
     candidate_efi_sha256 = ''
     candidate_ramdisk_sha256 = ''
@@ -1116,6 +1120,11 @@ try {
         if (!(Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required candidate/tool file is missing: $path" }
     }
     $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+    # This qualification resumes only the preserved --03 candidate.
+    if ($Runsafe4BQualification -and
+        !(Test-QacCandidateFileSha256 -Path $manifestPath -ExpectedSha256 'b93f3ae8b39025503701f226942ed0c62c7e87452fe18986c93d183cd45e41ca')) {
+        throw 'RUNSAFE4-B candidate manifest differs from the preserved --03 manifest identity.'
+    }
     if ($ScheduledEl0Qualification) {
         $payloads = $manifest.artifacts.scheduledEl0Payloads
         $expectedProfile = if ($Runsafe4BQualification) { 'runsafe4b-compiled-el0' } else { 'runsafe3b-scheduled-el0' }
@@ -1166,29 +1175,54 @@ try {
         @{ Path = (Join-Path $CandidateDirectory 'kernel.elf'); Hash = $manifest.artifacts.kernelElfSha256 },
         @{ Path = (Join-Path $CandidateDirectory 'BOOTAA64.EFI'); Hash = $manifest.artifacts.bootEfiSha256 },
         @{ Path = (Join-Path $CandidateDirectory 'esp\ramdisk.img'); Hash = $manifest.artifacts.ramdiskSha256 })) {
-        if ((Get-Sha256Hex $artifact.Path) -ne $artifact.Hash) { throw "Candidate artifact hash mismatch: $($artifact.Path)" }
+        if (!(Test-QacCandidateFileSha256 -Path $artifact.Path -ExpectedSha256 ([string]$artifact.Hash))) {
+            throw "Candidate artifact hash mismatch: $($artifact.Path)"
+        }
     }
     if ($Runsafe4BQualification) {
         $studioElfPath = Join-Path $CandidateDirectory 'ramdisk-root\Apps\DeveloperStudio\bin\arm64\developerstudio.elf'
         $studioManifestPath = Join-Path $CandidateDirectory 'ramdisk-root\Apps\DeveloperStudio\app.json'
         if (!(Test-Path -LiteralPath $studioElfPath -PathType Leaf) -or
             !(Test-Path -LiteralPath $studioManifestPath -PathType Leaf) -or
-            (Get-Sha256Hex $studioElfPath) -ne $manifest.artifacts.studioElf.sha256 -or
-            (Get-Sha256Hex $studioManifestPath) -ne $manifest.artifacts.packageManifestSha256) {
+            !(Test-QacCandidateFileSha256 -Path $studioElfPath -ExpectedSha256 ([string]$manifest.artifacts.studioElf.sha256)) -or
+            !(Test-QacCandidateFileSha256 -Path $studioManifestPath -ExpectedSha256 ([string]$manifest.artifacts.packageManifestSha256))) {
             throw 'Candidate Studio ELF or package manifest hash differs from its recorded identity.'
         }
     }
     $currentHead = (& git -C $repoRoot rev-parse HEAD).Trim()
     $currentBranch = (& git -C $repoRoot branch --show-current).Trim()
     if ($currentBranch -ne $manifest.server.branch) { throw 'Current branch differs from the candidate branch.' }
-    if ($ScheduledEl0Qualification -and $currentHead -ne $script:scheduledSourceRevision) {
-        throw 'RUNSAFE3-B candidate must execute at the exact committed revision embedded in its guest marker.'
+    if ($ScheduledEl0Qualification) {
+        & git -C $repoRoot merge-base --is-ancestor $script:scheduledSourceRevision $currentHead 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Scheduled EL0 candidate source revision is not an ancestor of the current checkout.'
+        }
+        $committedPathDiff = @(& git -C $repoRoot diff --no-renames --name-only ($script:scheduledSourceRevision + '..' + $currentHead))
+        if ($LASTEXITCODE -ne 0) { throw 'Could not inspect committed candidate source differences.' }
+        $workingTreePathDiff = @(& git -C $repoRoot diff --no-renames --name-only HEAD)
+        if ($LASTEXITCODE -ne 0) { throw 'Could not inspect staged and unstaged candidate source differences.' }
+        $untrackedPathDiff = @(& git -C $repoRoot ls-files --others --exclude-standard)
+        if ($LASTEXITCODE -ne 0) { throw 'Could not inspect untracked candidate source differences.' }
+        $sourcePathDiffs = @($committedPathDiff + $workingTreePathDiff + $untrackedPathDiff | Select-Object -Unique)
+        if (!(Test-QacCandidateSourcePathsSupported -Paths $sourcePathDiffs)) {
+            $unsupportedPaths = @($sourcePathDiffs | Where-Object {
+                !(Test-QacCandidateSourcePathsSupported -Paths @([string]$_))
+            }) -join ', '
+            throw "Scheduled EL0 candidate has unsupported guest-source or harness differences: $unsupportedPaths"
+        }
     }
     foreach ($source in $manifest.server.worktree.files) {
         $sourcePath = Join-Path $repoRoot ([string]$source.path)
-        if (!(Test-Path -LiteralPath $sourcePath -PathType Leaf) -or
-            (Get-Sha256Hex $sourcePath) -ne $source.sha256) {
+        if (!(Test-QacCandidateFileSha256 -Path $sourcePath -ExpectedSha256 ([string]$source.sha256))) {
             throw "Candidate source file hash differs from its manifest: $($source.path)"
+        }
+    }
+    if ($ScheduledEl0Qualification) {
+        $record.supervisor_source_head = $currentHead
+        $record.supervisor_script_sha256 = Get-Sha256Hex (Join-Path $PSScriptRoot 'run-aarch64-runsafe2-qac.ps1')
+        $record.supervisor_module_sha256 = Get-Sha256Hex (Join-Path $PSScriptRoot 'aarch64-runsafe2-qac-supervisor.psm1')
+        if ($Runsafe4BQualification) {
+            $record.qualification_wrapper_sha256 = Get-Sha256Hex (Join-Path $PSScriptRoot 'run-aarch64-runsafe4b-qac.ps1')
         }
     }
     $record.candidate_source_head = [string]$manifest.server.head
