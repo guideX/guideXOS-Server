@@ -1,5 +1,6 @@
 #include <Uefi.h>
 #include "elf.h"
+#include "amd64_boot_paging.h"
 #include "uefi_shim.h"
 
 EFI_STATUS LoadElf(
@@ -43,8 +44,8 @@ EFI_STATUS LoadElf(
         return EFI_LOAD_ERROR;
     }
 
-    if (ehdr.e_phoff == 0 || ehdr.e_phnum == 0) {
-        Print((CONST CHAR16*)L"ELF: No program headers\n");
+    if (ehdr.e_phoff == 0 || ehdr.e_phnum == 0 || ehdr.e_phentsize != sizeof(Elf64_Phdr)) {
+        Print((CONST CHAR16*)L"ELF: Invalid program header table\n");
         return EFI_LOAD_ERROR;
     }
 
@@ -75,11 +76,20 @@ EFI_STATUS LoadElf(
     UINT64 minLoadVaddr = (UINT64)-1;
     UINT64 maxLoadVaddr = 0;
 
+    using namespace guideXOS::amd64_boot_paging;
     for (UINT16 i = 0; i < ehdr.e_phnum; ++i) {
         Elf64_Phdr* ph = (Elf64_Phdr*)((UINT8*)phdrs + i * ehdr.e_phentsize);
 
         if (ph->p_type != PT_LOAD || ph->p_memsz == 0) {
             continue;
+        }
+
+        if (ph->p_vaddr >= kIdentityLimit ||
+            ph->p_memsz > kIdentityLimit - ph->p_vaddr ||
+            ph->p_filesz > ph->p_memsz) {
+            Print((CONST CHAR16*)L"ELF: Invalid PT_LOAD range\n");
+            LocalFreePool(SystemTable, phdrs, phTableSize);
+            return EFI_LOAD_ERROR;
         }
 
         if (ph->p_vaddr < minLoadVaddr) {
@@ -92,7 +102,7 @@ EFI_STATUS LoadElf(
         }
     }
 
-    if (minLoadVaddr == (UINT64)-1 || maxLoadVaddr == 0) {
+    if (minLoadVaddr == (UINT64)-1 || (minLoadVaddr & kPageMask) != 0) {
         Print((CONST CHAR16*)L"ELF: No usable PT_LOAD segments\n");
         LocalFreePool(SystemTable, phdrs, phTableSize);
         return EFI_LOAD_ERROR;
@@ -105,10 +115,10 @@ EFI_STATUS LoadElf(
 
     // --- 4. Allocate contiguous physical memory ---
     UINTN numPages = (UINTN)((totalSize + EFI_PAGE_SIZE - 1) / EFI_PAGE_SIZE);
-    EFI_PHYSICAL_ADDRESS physBase = 0;
+    EFI_PHYSICAL_ADDRESS physBase = kIdentityLimit - 1;
 
     status = SystemTable->BootServices->AllocatePages(
-        AllocateAnyPages,
+        AllocateMaxAddress,
         EfiLoaderData,
         numPages,
         &physBase
@@ -117,6 +127,12 @@ EFI_STATUS LoadElf(
         Print((CONST CHAR16*)L"ELF: AllocatePages failed: %r\n", status);
         LocalFreePool(SystemTable, phdrs, phTableSize);
         return status;
+    }
+    if (physBase == 0 || (physBase & kPageMask) != 0 ||
+        physBase >= kIdentityLimit || totalSize > kIdentityLimit - physBase) {
+        SystemTable->BootServices->FreePages(physBase, numPages);
+        LocalFreePool(SystemTable, phdrs, phTableSize);
+        return EFI_NO_MAPPING;
     }
 
     UINT8* basePtr = (UINT8*)(UINTN)physBase;

@@ -1,60 +1,53 @@
 #pragma once
 
 #include "Uefi.h"
-#include <stdint.h>
-
-// Minimal x86_64 paging builder for UEFI->kernel handoff.
-// Builds identity-mapped 4KiB pages for a small set of physical ranges.
-// Intended for QEMU/OVMF, long mode already enabled by firmware.
+#include "amd64_boot_paging.h"
 
 namespace guideXOS {
-namespace paging
+namespace paging {
+
+struct IdentityRange
 {
-    // Page table entry flags
-    static constexpr UINT64 PTE_P  = 1ull << 0;   // Present
-    static constexpr UINT64 PTE_W  = 1ull << 1;   // Writable
-    static constexpr UINT64 PTE_U  = 1ull << 2;   // User (keep 0 for kernel)
-    static constexpr UINT64 PTE_PWT= 1ull << 3;
-    static constexpr UINT64 PTE_PCD= 1ull << 4;
-    static constexpr UINT64 PTE_A  = 1ull << 5;
-    static constexpr UINT64 PTE_D  = 1ull << 6;
-    static constexpr UINT64 PTE_PS = 1ull << 7;   // Large page (PD/PTD)
-    static constexpr UINT64 PTE_G  = 1ull << 8;
-    static constexpr UINT64 PTE_NX = 1ull << 63;  // No-execute (if supported/enabled)
+    EFI_PHYSICAL_ADDRESS Base;
+    UINTN SizeBytes;
+    bool AllowKernelAlias = false;
+};
 
-    struct PageTables
-    {
-        EFI_PHYSICAL_ADDRESS Pml4Phys;
-    };
+// Owns a single boot tree while UEFI Boot Services are available. Keep this
+// workspace in loader storage so its tracking array does not use UEFI stack.
+class PageTables
+{
+public:
+    constexpr PageTables() = default;
+    PageTables(const PageTables&) = delete;
+    PageTables& operator=(const PageTables&) = delete;
 
-    // Build a minimal identity-mapped page table set for the ranges provided.
-    // All pages are mapped RW, executable (NX not set) to keep it minimal.
-    EFI_STATUS BuildIdentityPageTables(
-        EFI_SYSTEM_TABLE* SystemTable,
-        const EFI_PHYSICAL_ADDRESS* rangesBegin,
-        const EFI_PHYSICAL_ADDRESS* rangesEnd,
-        /*in*/ const UINTN* sizesBegin,
-        PageTables* out);
+    // Installs 4 KiB writable, executable, supervisor-only mappings.
+    // A successful build also identity maps every table page.
+    EFI_STATUS Build(EFI_BOOT_SERVICES* services, const IdentityRange* ranges,
+                     UINTN rangeCount, UINT64 kernelVirtualBase,
+                     EFI_PHYSICAL_ADDRESS kernelPhysicalBase, UINTN kernelBytes);
 
-    // Helper to add a mapping for [physBase, physBase+size) as identity map
-    EFI_STATUS MapIdentityRange(
-        EFI_SYSTEM_TABLE* SystemTable,
-        EFI_PHYSICAL_ADDRESS pml4Phys,
-        EFI_PHYSICAL_ADDRESS physBase,
-        UINTN sizeBytes);
+    // Release on failure before handoff. After ExitBootServices succeeds the
+    // active tree belongs to the kernel and must remain reserved.
+    EFI_STATUS Release(EFI_BOOT_SERVICES* services);
 
-    // Helper to add a mapping for [virtBase, virtBase+size) -> physBase
-    EFI_STATUS MapRange(
-        EFI_SYSTEM_TABLE* SystemTable,
-        EFI_PHYSICAL_ADDRESS pml4Phys,
-        UINT64 virtBase,
-        EFI_PHYSICAL_ADDRESS physBase,
-        UINTN sizeBytes);
+    EFI_PHYSICAL_ADDRESS Root() const { return root_; }
+    UINTN Count() const { return count_; }
 
-    // Identity-map all page table pages allocated so far.
-    // MUST be called after MapRange() to ensure newly allocated PT pages are accessible.
-    EFI_STATUS IdentityMapPageTablePages(
-        EFI_SYSTEM_TABLE* SystemTable,
-        EFI_PHYSICAL_ADDRESS pml4Phys);
+private:
+    EFI_STATUS Allocate(EFI_BOOT_SERVICES* services, EFI_PHYSICAL_ADDRESS* physical);
+    EFI_STATUS Map(EFI_BOOT_SERVICES* services, UINT64 virtualBase,
+                   EFI_PHYSICAL_ADDRESS physicalBase, UINTN sizeBytes,
+                   bool allowKernelAlias = false);
+    EFI_STATUS BuildTree(EFI_BOOT_SERVICES* services, const IdentityRange* ranges,
+                         UINTN rangeCount, UINT64 kernelVirtualBase,
+                         EFI_PHYSICAL_ADDRESS kernelPhysicalBase, UINTN kernelBytes);
+
+    EFI_PHYSICAL_ADDRESS root_ = 0;
+    UINTN count_ = 0;
+    EFI_PHYSICAL_ADDRESS pages_[amd64_boot_paging::kMaxTablePages]{};
+};
+
 }
 }

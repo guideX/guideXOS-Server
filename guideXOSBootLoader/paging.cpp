@@ -2,214 +2,147 @@
 #include "uefi_shim.h"
 
 namespace guideXOS {
-namespace paging
+namespace paging {
+
+using namespace amd64_boot_paging;
+static_assert(EFI_PAGE_SIZE == kPageBytes, "UEFI and AMD64 boot page sizes must match");
+
+static constexpr UINT64 kPresent = 1ull << 0;
+static constexpr UINT64 kWritable = 1ull << 1;
+static constexpr UINT64 kLarge = 1ull << 7;
+
+static UINT64* TableAt(EFI_PHYSICAL_ADDRESS physical)
 {
-    static inline EFI_PHYSICAL_ADDRESS AlignDown4K(EFI_PHYSICAL_ADDRESS v) { return v & ~(EFI_PHYSICAL_ADDRESS)0xFFF; }
-    static inline EFI_PHYSICAL_ADDRESS AlignUp4K(EFI_PHYSICAL_ADDRESS v) { return (v + 0xFFF) & ~(EFI_PHYSICAL_ADDRESS)0xFFF; }
+    return reinterpret_cast<UINT64*>(static_cast<UINTN>(physical));
+}
 
-    static inline UINT64* PhysToPtr(EFI_PHYSICAL_ADDRESS p) { return (UINT64*)(UINTN)p; }
+EFI_STATUS PageTables::Allocate(EFI_BOOT_SERVICES* services,
+                                EFI_PHYSICAL_ADDRESS* physical)
+{
+    if (count_ == kMaxTablePages) return EFI_OUT_OF_RESOURCES;
 
-    // Track allocated page table pages so we can identity-map them
-    static constexpr UINTN MAX_PT_PAGES = 512;
-    static EFI_PHYSICAL_ADDRESS g_ptPages[MAX_PT_PAGES];
-    static UINTN g_ptPageCount = 0;
+    *physical = kIdentityLimit - 1u;
+    const EFI_STATUS status = services->AllocatePages(
+        AllocateMaxAddress, EfiLoaderData, 1, physical);
+    if (EFI_ERROR(status)) return status;
 
-    static EFI_STATUS AllocTable(EFI_SYSTEM_TABLE* SystemTable, EFI_PHYSICAL_ADDRESS* outPhys)
-    {
-        if (g_ptPageCount >= MAX_PT_PAGES) return EFI_OUT_OF_RESOURCES;
-        *outPhys = 0;
-        EFI_STATUS st = SystemTable->BootServices->AllocatePages(
-            AllocateAnyPages,
-            EfiLoaderData,
-            1,
-            outPhys);
-        if (EFI_ERROR(st)) return st;
-        SetMem((void*)(UINTN)(*outPhys), EFI_PAGE_SIZE, 0);
-        
-        // Track this page for later self-mapping
-        if (g_ptPageCount < MAX_PT_PAGES) {
-            g_ptPages[g_ptPageCount++] = *outPhys;
-        }
-        
-        return EFI_SUCCESS;
+    // Record successful firmware allocations before any further validation.
+    pages_[count_++] = *physical;
+    if (*physical == 0 || (*physical & kPageMask) != 0 ||
+        *physical >= kIdentityLimit) return EFI_NO_MAPPING;
+
+    SetMem(TableAt(*physical), EFI_PAGE_SIZE, 0);
+    return EFI_SUCCESS;
+}
+
+EFI_STATUS PageTables::Release(EFI_BOOT_SERVICES* services)
+{
+    root_ = 0;
+    while (count_ != 0) {
+        const EFI_STATUS status = services->FreePages(pages_[count_ - 1], 1);
+        if (EFI_ERROR(status)) return status;
+        --count_;
     }
+    return EFI_SUCCESS;
+}
 
-    // Walk/allocate PML4->PDPT->PD->PT for a given virtual address (identity => vaddr==paddr)
-    static EFI_STATUS EnsurePtForVaddr(EFI_SYSTEM_TABLE* SystemTable, EFI_PHYSICAL_ADDRESS pml4Phys, UINT64 vaddr, EFI_PHYSICAL_ADDRESS* outPtPhys)
-    {
-        const UINTN pml4i = (UINTN)((vaddr >> 39) & 0x1FFull);
-        const UINTN pdpti = (UINTN)((vaddr >> 30) & 0x1FFull);
-        const UINTN pdi   = (UINTN)((vaddr >> 21) & 0x1FFull);
+EFI_STATUS PageTables::Map(EFI_BOOT_SERVICES* services, UINT64 virtualBase,
+                           EFI_PHYSICAL_ADDRESS physicalBase, UINTN sizeBytes,
+                           bool allowKernelAlias)
+{
+    if (sizeBytes == 0) return EFI_SUCCESS;
+    if (physicalBase >= kIdentityLimit ||
+        sizeBytes > kIdentityLimit - physicalBase ||
+        sizeBytes - 1 > UINT64_MAX - virtualBase ||
+        ((virtualBase ^ physicalBase) & kPageMask) != 0) return EFI_INVALID_PARAMETER;
 
-        UINT64* pml4 = PhysToPtr(pml4Phys);
+    const UINT64 lastByte = virtualBase + (sizeBytes - 1);
+    const UINT64 half = virtualBase >> 47;
+    if ((half != 0 && half != (UINT64_MAX >> 47)) ||
+        (lastByte >> 47) != half) return EFI_INVALID_PARAMETER;
 
-        // PDPT
-        EFI_PHYSICAL_ADDRESS pdptPhys = 0;
-        if ((pml4[pml4i] & PTE_P) == 0) {
-            EFI_STATUS st = AllocTable(SystemTable, &pdptPhys);
-            if (EFI_ERROR(st)) return st;
-            pml4[pml4i] = (UINT64)pdptPhys | PTE_P | PTE_W;
-        } else {
-            pdptPhys = (EFI_PHYSICAL_ADDRESS)(pml4[pml4i] & ~0xFFFull);
-        }
-
-        UINT64* pdpt = PhysToPtr(pdptPhys);
-
-        // PD
-        EFI_PHYSICAL_ADDRESS pdPhys = 0;
-        if ((pdpt[pdpti] & PTE_P) == 0) {
-            EFI_STATUS st = AllocTable(SystemTable, &pdPhys);
-            if (EFI_ERROR(st)) return st;
-            pdpt[pdpti] = (UINT64)pdPhys | PTE_P | PTE_W;
-        } else {
-            pdPhys = (EFI_PHYSICAL_ADDRESS)(pdpt[pdpti] & ~0xFFFull);
-        }
-
-        UINT64* pd = PhysToPtr(pdPhys);
-
-        // PT (no large pages here, keep it simple)
-        EFI_PHYSICAL_ADDRESS ptPhys = 0;
-        if ((pd[pdi] & PTE_P) == 0) {
-            EFI_STATUS st = AllocTable(SystemTable, &ptPhys);
-            if (EFI_ERROR(st)) return st;
-            pd[pdi] = (UINT64)ptPhys | PTE_P | PTE_W;
-        } else {
-            if (pd[pdi] & PTE_PS) {
-                // Unexpected: already a 2MiB mapping. For minimal loader, treat as error.
-                return EFI_UNSUPPORTED;
+    // Use a page count so no exclusive end or rounded end can overflow,
+    // including for the final page of the upper canonical half.
+    UINT64 virtualPage = virtualBase & ~kPageMask;
+    UINT64 physicalPage = physicalBase & ~kPageMask;
+    UINT64 pagesLeft = (lastByte >> 12) - (virtualPage >> 12) + 1;
+    while (pagesLeft != 0) {
+        EFI_PHYSICAL_ADDRESS tablePhysical = root_;
+        for (UINTN shift = 39; shift > 12; shift -= 9) {
+            UINT64& entry = TableAt(tablePhysical)[(virtualPage >> shift) & 0x1FF];
+            if ((entry & kPresent) == 0) {
+                EFI_STATUS status = Allocate(services, &tablePhysical);
+                if (EFI_ERROR(status)) return status;
+                entry = tablePhysical | kPresent | kWritable;
+            } else {
+                if ((entry & kLarge) != 0) return EFI_UNSUPPORTED;
+                tablePhysical = entry & kAddressMask;
             }
-            ptPhys = (EFI_PHYSICAL_ADDRESS)(pd[pdi] & ~0xFFFull);
         }
 
-        *outPtPhys = ptPhys;
-        return EFI_SUCCESS;
-    }
-
-    EFI_STATUS MapIdentityRange(EFI_SYSTEM_TABLE* SystemTable, EFI_PHYSICAL_ADDRESS pml4Phys, EFI_PHYSICAL_ADDRESS physBase, UINTN sizeBytes)
-    {
-        if (!SystemTable || pml4Phys == 0) return EFI_INVALID_PARAMETER;
-        if (sizeBytes == 0) return EFI_SUCCESS;
-
-        const EFI_PHYSICAL_ADDRESS identityLimit = 1ull << 47;
-        if ((EFI_PHYSICAL_ADDRESS)sizeBytes > identityLimit ||
-            physBase >= identityLimit ||
-            (EFI_PHYSICAL_ADDRESS)sizeBytes > identityLimit - physBase) {
-            return EFI_INVALID_PARAMETER;
-        }
-
-        EFI_PHYSICAL_ADDRESS start = AlignDown4K(physBase);
-        const EFI_PHYSICAL_ADDRESS rawEnd = physBase + (EFI_PHYSICAL_ADDRESS)sizeBytes;
-        if (rawEnd > identityLimit - 0xFFFu) return EFI_INVALID_PARAMETER;
-        EFI_PHYSICAL_ADDRESS end = AlignUp4K(rawEnd);
-
-        for (EFI_PHYSICAL_ADDRESS p = start; p < end; p += 0x1000) {
-            EFI_PHYSICAL_ADDRESS ptPhys = 0;
-            EFI_STATUS st = EnsurePtForVaddr(SystemTable, pml4Phys, (UINT64)p, &ptPhys);
-            if (EFI_ERROR(st)) return st;
-
-            const UINTN pti = (UINTN)(((UINT64)p >> 12) & 0x1FFull);
-            UINT64* pt = PhysToPtr(ptPhys);
-            
-            // CRITICAL FIX: Check if mapping already exists to avoid conflicts
-            if ((pt[pti] & PTE_P) != 0) {
-                EFI_PHYSICAL_ADDRESS existingPhys = pt[pti] & ~0xFFFull;
-                if (existingPhys != p) {
-                    // Conflict! Overwrite with identity mapping.
-                }
+        UINT64* leaf = TableAt(tablePhysical) + ((virtualPage >> 12) & 0x1FF);
+        const UINTN entries = 512 - ((virtualPage >> 12) & 0x1FF);
+        const UINTN batch = pagesLeft < entries ? pagesLeft : entries;
+        for (UINTN i = 0; i < batch; ++i, physicalPage += kPageBytes) {
+            const UINT64 desired = physicalPage | kPresent | kWritable;
+            if ((leaf[i] & kPresent) == 0) {
+                leaf[i] = desired;
+            } else if (leaf[i] != desired && !allowKernelAlias) {
+                return EFI_NO_MAPPING;
             }
-            
-            // Map as RW executable (Present, Writable)
-            // NOTE: Removed PTE_G (Global) flag as it requires CR4.PGE to be set
-            pt[pti] = (UINT64)p | PTE_P | PTE_W;
         }
+        pagesLeft -= batch;
+        if (pagesLeft != 0) virtualPage += batch * kPageBytes;
+    }
+    return EFI_SUCCESS;
+}
 
-        return EFI_SUCCESS;
+EFI_STATUS PageTables::BuildTree(EFI_BOOT_SERVICES* services, const IdentityRange* ranges,
+                                 UINTN rangeCount, UINT64 kernelVirtualBase,
+                                 EFI_PHYSICAL_ADDRESS kernelPhysicalBase, UINTN kernelBytes)
+{
+    EFI_STATUS status = Allocate(services, &root_);
+    if (EFI_ERROR(status)) return status;
+
+    status = Map(services, kernelVirtualBase, kernelPhysicalBase, kernelBytes);
+    if (EFI_ERROR(status)) return status;
+
+    for (UINTN i = 0; i < rangeCount; ++i) {
+        const IdentityRange& range = ranges[i];
+        status = Map(services, range.Base, range.Base, range.SizeBytes, range.AllowKernelAlias);
+        if (EFI_ERROR(status)) return status;
     }
 
-    EFI_STATUS MapRange(
-        EFI_SYSTEM_TABLE* SystemTable,
-        EFI_PHYSICAL_ADDRESS pml4Phys,
-        UINT64 virtBase,
-        EFI_PHYSICAL_ADDRESS physBase,
-        UINTN sizeBytes)
-    {
-        if (sizeBytes == 0) return EFI_SUCCESS;
-
-        UINT64 vStart = virtBase & ~0xFFFULL;
-        UINT64 vEnd   = (virtBase + (UINT64)sizeBytes + 0xFFFULL) & ~0xFFFULL;
-        UINT64 phys   = physBase & ~0xFFFULL;
-
-        for (UINT64 v = vStart; v < vEnd; v += 0x1000, phys += 0x1000) {
-            EFI_PHYSICAL_ADDRESS ptPhys = 0;
-            EFI_STATUS st = EnsurePtForVaddr(SystemTable, pml4Phys, v, &ptPhys);
-            if (EFI_ERROR(st)) return st;
-
-            const UINTN pti = (UINTN)((v >> 12) & 0x1FFull);
-            UINT64* pt = PhysToPtr(ptPhys);
-
-            // Overwrite mapping to desired physical address (Present, Writable)
-            pt[pti] = (UINT64)phys | PTE_P | PTE_W;
-        }
-
-        return EFI_SUCCESS;
+    // Mapping a table can allocate more tables. Walk the growing list to
+    // closure, bounded by Allocate's capacity check before each addition.
+    for (UINTN i = 0; i < count_; ++i) {
+        status = Map(services, pages_[i], pages_[i], EFI_PAGE_SIZE);
+        if (EFI_ERROR(status)) return status;
     }
+    return EFI_SUCCESS;
+}
 
-    EFI_STATUS BuildIdentityPageTables(
-        EFI_SYSTEM_TABLE* SystemTable,
-        const EFI_PHYSICAL_ADDRESS* rangesBegin,
-        const EFI_PHYSICAL_ADDRESS* rangesEnd,
-        const UINTN* sizesBegin,
-        PageTables* out)
-    {
-        if (!SystemTable || !rangesBegin || !rangesEnd || !sizesBegin || !out) return EFI_INVALID_PARAMETER;
+EFI_STATUS PageTables::Build(EFI_BOOT_SERVICES* services, const IdentityRange* ranges,
+                              UINTN rangeCount, UINT64 kernelVirtualBase,
+                              EFI_PHYSICAL_ADDRESS kernelPhysicalBase, UINTN kernelBytes)
+{
+    if (!services || !services->AllocatePages || !services->FreePages ||
+        (!ranges && rangeCount != 0) || kernelBytes == 0) return EFI_INVALID_PARAMETER;
+    if (count_ != 0) return EFI_ALREADY_STARTED;
 
-        // Reset page table tracking
-        g_ptPageCount = 0;
+    const EFI_STATUS status = BuildTree(services, ranges, rangeCount,
+                                        kernelVirtualBase, kernelPhysicalBase, kernelBytes);
+    if (!EFI_ERROR(status)) return status;
 
-        EFI_PHYSICAL_ADDRESS pml4Phys = 0;
-        EFI_STATUS st = AllocTable(SystemTable, &pml4Phys);
-        if (EFI_ERROR(st)) return st;
-
-        // Map each requested range (identity)
-        UINTN idx = 0;
-        for (auto p = rangesBegin; p != rangesEnd; ++p, ++idx) {
-            st = MapIdentityRange(SystemTable, pml4Phys, *p, sizesBegin[idx]);
-            if (EFI_ERROR(st)) return st;
-        }
-
-        // CRITICAL: Identity-map all page table pages themselves.
-        UINTN mappedCount = 0;
-        while (mappedCount < g_ptPageCount) {
-            UINTN currentCount = g_ptPageCount;
-            for (UINTN i = mappedCount; i < currentCount; ++i) {
-                st = MapIdentityRange(SystemTable, pml4Phys, g_ptPages[i], EFI_PAGE_SIZE);
-                if (EFI_ERROR(st)) return st;
-            }
-            mappedCount = currentCount;
-        }
-
-        out->Pml4Phys = pml4Phys;
-        return EFI_SUCCESS;
+    Print((CONST CHAR16*)L"Boot page-table build failed: %r (%u/%u pages allocated)\n",
+          status, static_cast<UINT32>(count_), kMaxTablePages);
+    const EFI_STATUS releaseStatus = Release(services);
+    if (EFI_ERROR(releaseStatus)) {
+        Print((CONST CHAR16*)L"Boot page-table cleanup failed: %r\n", releaseStatus);
+        return releaseStatus;
     }
+    return status;
+}
 
-    EFI_STATUS IdentityMapPageTablePages(
-        EFI_SYSTEM_TABLE* SystemTable,
-        EFI_PHYSICAL_ADDRESS pml4Phys)
-    {
-        // Identity-map all page table pages that have been allocated.
-        // This must be called after any MapRange() calls to ensure the
-        // newly allocated page table pages are themselves accessible
-        // after the CR3 switch.
-        UINTN mappedCount = 0;
-        while (mappedCount < g_ptPageCount) {
-            UINTN currentCount = g_ptPageCount;
-            for (UINTN i = mappedCount; i < currentCount; ++i) {
-                EFI_STATUS st = MapIdentityRange(SystemTable, pml4Phys, g_ptPages[i], EFI_PAGE_SIZE);
-                if (EFI_ERROR(st)) return st;
-            }
-            mappedCount = currentCount;
-        }
-        return EFI_SUCCESS;
-    }
 }
 }

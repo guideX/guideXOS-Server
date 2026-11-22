@@ -1,4 +1,5 @@
 #include "include/kernel/amd64_memory_foundation.h"
+#include "include/kernel/amd64_boot_page_tables.h"
 #include "include/kernel/physical_frame_owner.h"
 #include "include/kernel/task_address_space.h"
 #include "include/kernel/serial_debug.h"
@@ -18,21 +19,18 @@ namespace memory {
 #if defined(__x86_64__) || defined(_M_X64)
 namespace {
 
-static const uint64_t kIdentityMappedPhysicalLimit = 1ull << 47;
-static const uint64_t kPageBytes = 4096u;
-static const uint64_t kPageMask = kPageBytes - 1u;
+using namespace guideXOS::amd64_boot_paging;
+
 static const uint64_t kPtePresent = 1ull << 0;
 static const uint64_t kPteWritable = 1ull << 1;
 static const uint64_t kPteUser = 1ull << 2;
 static const uint64_t kPteLarge = 1ull << 7;
-static const uint64_t kPteAddressMask = 0x000FFFFFFFFFF000ull;
-static const uint32_t kMaximumBootPageTablePages = 512u;
 static const uint32_t kIa32Efer = 0xC0000080u;
 static const uint64_t kEferNxEnable = 1ull << 11;
 
 static void* identity_map_physical(void*, uint64_t physicalAddress)
 {
-    if (physicalAddress >= kIdentityMappedPhysicalLimit) return nullptr;
+    if (physicalAddress >= kIdentityLimit) return nullptr;
     return reinterpret_cast<void*>(static_cast<uintptr_t>(physicalAddress));
 }
 
@@ -40,7 +38,7 @@ static bool identity_translation_is_kernel_writable(uint64_t rootPhysical,
                                                     uint64_t virtualAddress)
 {
     if (rootPhysical == 0u || (rootPhysical & kPageMask) != 0u ||
-        virtualAddress >= kIdentityMappedPhysicalLimit) return false;
+        virtualAddress >= kIdentityLimit) return false;
     uint64_t* table = static_cast<uint64_t*>(identity_map_physical(nullptr, rootPhysical));
     if (!table) return false;
     const uint64_t indices[4] = {(virtualAddress >> 39) & 0x1FFu,
@@ -52,17 +50,17 @@ static bool identity_translation_is_kernel_writable(uint64_t rootPhysical,
         if ((entry & kPtePresent) == 0u || (entry & kPteUser) != 0u ||
             (entry & kPteWritable) == 0u) return false;
         if (level == 3u) {
-            return (entry & kPteAddressMask) == (virtualAddress & ~kPageMask);
+            return (entry & kAddressMask) == (virtualAddress & ~kPageMask);
         }
         if ((entry & kPteLarge) != 0u) {
             if (level == 0u) return false;
             const uint32_t shift = level == 1u ? 30u : 21u;
             const uint64_t largePageMask = (1ull << shift) - 1u;
             const uint64_t physicalBase =
-                (entry & kPteAddressMask) & ~largePageMask;
+                (entry & kAddressMask) & ~largePageMask;
             return (physicalBase | (virtualAddress & largePageMask)) == virtualAddress;
         }
-        const uint64_t childPhysical = entry & kPteAddressMask;
+        const uint64_t childPhysical = entry & kAddressMask;
         table = static_cast<uint64_t*>(identity_map_physical(nullptr, childPhysical));
         if (!table) return false;
     }
@@ -73,14 +71,13 @@ static bool identity_range_is_kernel_writable(uint64_t rootPhysical,
                                               uint64_t physicalBase,
                                               uint64_t byteCount)
 {
-    if (byteCount == 0u || physicalBase >= kIdentityMappedPhysicalLimit ||
-        byteCount > kIdentityMappedPhysicalLimit - physicalBase) return false;
-    const uint64_t rawEnd = physicalBase + byteCount;
-    if (rawEnd > kIdentityMappedPhysicalLimit - kPageMask) return false;
+    if (byteCount == 0u || physicalBase >= kIdentityLimit ||
+        byteCount > kIdentityLimit - physicalBase) return false;
+    const uint64_t lastByte = physicalBase + byteCount - 1;
     const uint64_t start = physicalBase & ~kPageMask;
-    const uint64_t end = (rawEnd + kPageMask) & ~kPageMask;
+    const uint64_t lastPage = lastByte & ~kPageMask;
     // Descriptor count and task-arena capacity cap this walk to 4,128 pages.
-    for (uint64_t page = start; page < end; page += kPageBytes) {
+    for (uint64_t page = start; page <= lastPage; page += kPageBytes) {
         if (!identity_translation_is_kernel_writable(rootPhysical, page)) return false;
     }
     return true;
@@ -94,31 +91,6 @@ static bool ranges_overlap(uint64_t firstBase, uint64_t firstSize,
         secondBase > UINT64_MAX - secondSize) return true;
     return firstBase < secondBase + secondSize &&
            secondBase < firstBase + firstSize;
-}
-
-static bool page_table_tree_avoids_arena(uint64_t tablePhysical,
-                                         uint32_t level,
-                                         uint64_t arenaBase,
-                                         uint64_t arenaEnd,
-                                         uint32_t* tableCount)
-{
-    if (!tableCount || level > 3u || (tablePhysical & kPageMask) != 0u ||
-        tablePhysical >= kIdentityMappedPhysicalLimit ||
-        (tablePhysical >= arenaBase && tablePhysical < arenaEnd) ||
-        ++*tableCount > kMaximumBootPageTablePages) return false;
-    uint64_t* table = static_cast<uint64_t*>(identity_map_physical(nullptr, tablePhysical));
-    if (!table) return false;
-    if (level == 3u) return true;
-
-    for (uint32_t i = 0; i < 512u; ++i) {
-        const uint64_t entry = table[i];
-        if ((entry & kPtePresent) == 0u) continue;
-        if (level == 0u && (entry & kPteLarge) != 0u) return false;
-        if (level > 0u && (entry & kPteLarge) != 0u) continue;
-        if (!page_table_tree_avoids_arena(entry & kPteAddressMask, level + 1u,
-                                          arenaBase, arenaEnd, tableCount)) return false;
-    }
-    return true;
 }
 
 static uint64_t current_cr3(void*)
@@ -233,7 +205,7 @@ bool initialize_amd64_task_memory(const guideXOS::BootInfo* bootInfo)
     }
     const uint64_t memoryMapBytes =
         bootInfo->MemoryMapEntryCount * bootInfo->MemoryMapDescriptorSize;
-    const uint64_t kernelRoot = kernel::arch::read_cr3() & kPteAddressMask;
+    const uint64_t kernelRoot = kernel::arch::read_cr3() & kAddressMask;
     const uint64_t arenaBase = bootInfo->TaskFrameArenaBase;
     const uint64_t arenaSize = bootInfo->TaskFrameArenaSize;
     const uint64_t bootInfoPhysical = reinterpret_cast<uintptr_t>(bootInfo);
@@ -261,11 +233,20 @@ bool initialize_amd64_task_memory(const guideXOS::BootInfo* bootInfo)
                                framebuffer.Size);
         }
     }
-    uint32_t pageTablePages = 0u;
-    if (overlapsReservedRange ||
-        !page_table_tree_avoids_arena(kernelRoot, 0u, arenaBase,
-                                      arenaBase + arenaSize, &pageTablePages)) {
+    if (overlapsReservedRange) {
         kernel::serial::puts("[MEMORY-OWNERSHIP] status=overlapping-reservation user-mode=disabled\n");
+        return false;
+    }
+    uint32_t pageTablePages = 0u;
+    const auto tableStatus = check_boot_page_tables(kernelRoot, arenaBase,
+        arenaBase + arenaSize, &identity_map_physical, nullptr, pageTablePages);
+    if (tableStatus != BootPageTableStatus::Ok) {
+        const char* status = "page-table-tree-invalid";
+        if (tableStatus == BootPageTableStatus::CapacityExceeded) status = "page-table-capacity-exceeded";
+        if (tableStatus == BootPageTableStatus::ArenaOverlap) status = "page-table-arena-overlap";
+        kernel::serial::puts("[MEMORY-OWNERSHIP] status=");
+        kernel::serial::puts(status);
+        kernel::serial::puts(" user-mode=disabled\n");
         return false;
     }
     if (!identity_range_is_kernel_writable(kernelRoot, bootInfo->MemoryMap,
@@ -301,6 +282,8 @@ bool initialize_amd64_task_memory(const guideXOS::BootInfo* bootInfo)
     kernel::serial::put_hex32(accounting.capacityFrames);
     kernel::serial::puts(" free-pages=0x");
     kernel::serial::put_hex32(accounting.freeFrames);
+    kernel::serial::puts(" boot-table-pages=0x");
+    kernel::serial::put_hex32(pageTablePages);
     kernel::serial::puts(" metadata=kernel-bss user-mode=disabled\n");
     return true;
 #else
