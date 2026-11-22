@@ -21,6 +21,7 @@ Candidate 2 uses the current BootInfo v3 loader and is the exact ISO run that co
 - artifacts/qemu-child-identity-v3c.json records the direct QEMU child and exact command line.
 - artifacts/qac-run-v3c-console.log, artifacts/qac-final-v3c-inspect.json, and the final status/list/queue files record QAC ownership and release.
 - artifacts/qmp-pre-cont-v3c.json and artifacts/qmp-session-v3c.log record the paused state, continuation, and running state; artifacts/qmp-gate-d-stop-v3c.log records host-requested shutdown.
+- artifacts/qac-closeout-after-task.txt records a later read-only QAC snapshot. It identifies a separate managed session that appeared after the CPL3 reservation was already Released; that session was left untouched.
 - artifacts/guest-com1-v3c.serial.log is the complete guest transcript. Its SHA-256 is recorded in run-summary.json.
 - The v3a and v3b QAC logs preserve two firmware configuration attempts that exited before guest execution.
 - run-summary.json records session IDs, child identity, ISO hash, timing, observed milestones, and limitations.
