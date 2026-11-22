@@ -223,6 +223,7 @@ namespace guideXOS
     static const uint32_t GUIDEXOS_BOOTINFO_FLAG_FRAMEBUFFER_VALID = (1u << 1);
     static const uint32_t GUIDEXOS_BOOTINFO_FLAG_RAMDISK_VALID = (1u << 2);
     static const uint32_t GUIDEXOS_BOOTINFO_FLAG_TASK_FRAME_ARENA_VALID = (1u << 3);
+    static const uint32_t GUIDEXOS_BOOTINFO_FLAG_ACPI_INVENTORY_VALID = (1u << 4);
 
     // Early panic: implemented in a .cpp file, infinite loop and/or framebuffer error.
     [[noreturn]] void guidexos_early_panic(const BootInfo* bi);

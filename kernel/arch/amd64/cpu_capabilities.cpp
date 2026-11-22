@@ -15,6 +15,8 @@ constexpr uint32_t kBrandStart = 0x80000002u;
 constexpr uint32_t kBrandEnd = 0x80000004u;
 constexpr uint32_t kExtendedPower = 0x80000007u;
 constexpr uint32_t kAddressWidths = 0x80000008u;
+constexpr uint32_t kAmdExtendedApicId = 0x8000001Eu;
+constexpr uint32_t kAmdExtendedTopology = 0x80000026u;
 constexpr unsigned kNxBit = 20;
 
 bool native_cpuid(void*, uint32_t leaf, uint32_t subleaf, CpuidRegisters& regs)
@@ -89,17 +91,40 @@ bool read_topology_hint(CpuidReader read, void* context, uint32_t leaf,
     return true;
 }
 
-CpuTopologyHint topology_hint(CpuidReader read, void* context, uint32_t max_basic,
-                              const CpuidRegisters& leaf1, CpuidBit apic)
+bool vendor_is(const char* actual, const char* expected)
+{
+    for (unsigned i = 0; i < 12; ++i) {
+        if (actual[i] != expected[i]) return false;
+    }
+    return true;
+}
+
+CpuTopologyHint topology_hint(CpuidReader read, void* context, const CpuCapabilities& cpu,
+                              const CpuidRegisters& leaf1, bool amd_topology_extensions)
 {
     CpuTopologyHint hint{};
-    if (max_basic >= 0x1Fu && read_topology_hint(read, context, 0x1Fu, CpuTopologySource::Leaf1F, hint)) {
+    const bool amd = vendor_is(cpu.vendor, "AuthenticAMD");
+    const bool amd_family = amd || vendor_is(cpu.vendor, "HygonGenuine");
+    if (amd && cpu.max_extended_leaf >= kAmdExtendedTopology &&
+        read_topology_hint(read, context, kAmdExtendedTopology, CpuTopologySource::AmdLeaf80000026, hint)) {
         return hint;
     }
-    if (max_basic >= 0x0Bu && read_topology_hint(read, context, 0x0Bu, CpuTopologySource::Leaf0B, hint)) {
+    if (!amd_family && cpu.max_basic_leaf >= 0x1Fu &&
+        read_topology_hint(read, context, 0x1Fu, CpuTopologySource::Leaf1F, hint)) {
         return hint;
     }
-    if (apic == CpuidBit::Set) {
+    if (cpu.max_basic_leaf >= 0x0Bu &&
+        read_topology_hint(read, context, 0x0Bu, CpuTopologySource::Leaf0B, hint)) {
+        return hint;
+    }
+    CpuidRegisters regs{};
+    if (amd_family && amd_topology_extensions && cpu.max_extended_leaf >= kAmdExtendedApicId &&
+        read(context, kAmdExtendedApicId, 0, regs)) {
+        hint.source = CpuTopologySource::AmdLeaf8000001E;
+        hint.initial_apic_id = regs.eax;
+        return hint;
+    }
+    if (cpu.features.apic == CpuidBit::Set) {
         hint.source = CpuTopologySource::LegacyLeaf1;
         hint.initial_apic_id = leaf1.ebx >> 24;
         if (bit(leaf1.edx, 28) == CpuidBit::Set) {
@@ -147,7 +172,9 @@ CpuCapabilities decode_cpu_capabilities(CpuidReader read, void* context)
         features.smep = bit(regs.ebx, 7);
         features.smap = bit(regs.ebx, 20);
     }
+    bool amd_topology_extensions = false;
     if (result.max_extended_leaf >= kExtendedFeatures && read(context, kExtendedFeatures, 0, regs)) {
+        amd_topology_extensions = bit(regs.ecx, 22) == CpuidBit::Set;
         features.nx = bit(regs.edx, kNxBit);
         features.page_1g = bit(regs.edx, 26);
         features.rdtscp = bit(regs.edx, 27);
@@ -162,7 +189,7 @@ CpuCapabilities decode_cpu_capabilities(CpuidReader read, void* context)
         result.linear_address_bits = static_cast<uint8_t>((regs.eax >> 8) & 0xFFu);
     }
 
-    result.topology = topology_hint(read, context, result.max_basic_leaf, leaf1, features.apic);
+    result.topology = topology_hint(read, context, result, leaf1, amd_topology_extensions);
     return result;
 }
 

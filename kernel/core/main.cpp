@@ -84,6 +84,9 @@
 // Include BootInfo structure from bootloader (x86 / amd64 UEFI only)
 #include "../../guideXOSBootLoader/guidexOSBootInfo.h"
 #endif
+#if defined(ARCH_AMD64) && defined(GXOS_ENABLE_CPU_INVENTORY_DIAGNOSTIC)
+#include <arch/boot_processor_inventory.h>
+#endif
 
 // Existing proof builds historically selected their coordinator through the
 // control/persistence flags.  Preserve that behavior while making proof
@@ -769,6 +772,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[KERNEL] ERROR: No valid boot method detected, halting\n");
         while(1) { }
     }
+
+#if defined(ARCH_AMD64) && defined(GXOS_ENABLE_CPU_INVENTORY_DIAGNOSTIC)
+    kernel::arch::amd64::report_boot_processor_inventory(bootinfo);
+#endif
 
     if (is_bootinfo) {
         // Initialize only the bounded task-frame owner. The address-space

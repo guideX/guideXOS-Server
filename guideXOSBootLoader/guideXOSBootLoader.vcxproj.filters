@@ -18,6 +18,9 @@
     <ClCompile Include="main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="acpi_processor_inventory.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="elf.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -51,6 +54,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="acpi.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="acpi_processor_inventory.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="bootinfo_acpi.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="guidexOSBootInfo.h">

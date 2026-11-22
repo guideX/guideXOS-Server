@@ -147,7 +147,6 @@ void test_unusable_structured_topology_falls_back_to_legacy()
         {0x80000000u, {}},
         {1, {0, (0xABu << 24) | (16u << 16), 0, (1u << 9) | (1u << 28)}},
         {7, {}},
-        {0x1F, {1, 2, 0x100, 1}, false},
         {0x0B, {1, 2, 0, 1}},
     });
     CHECK(std::strcmp(result.vendor, "AuthenticAMD") == 0);

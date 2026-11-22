@@ -83,6 +83,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="acpi_processor_inventory.cpp" />
     <ClCompile Include="elf.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="fb_console.cpp" />
@@ -102,6 +103,8 @@
     <ClInclude Include="debug_helpers.h" />
     <ClInclude Include="elf.h" />
     <ClInclude Include="acpi.h" />
+    <ClInclude Include="acpi_processor_inventory.h" />
+    <ClInclude Include="bootinfo_acpi.h" />
     <ClInclude Include="guidexOSBootInfo.h" />
     <ClInclude Include="fb_console.h" />
     <ClInclude Include="Guid\Acpi.h" />

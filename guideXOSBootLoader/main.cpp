@@ -34,6 +34,7 @@ Forbidden:
 #include "bootinfo.h"          // legacy, gradually being phased out
 #include "elf.h"
 #include "guidexOSBootInfo.h"   // canonical BootInfo v3
+#include "bootinfo_acpi.h"
 #include "uefi_shim.h"         // UEFI shims for freestanding environment
 #include "debug_helpers.h"     // Post-ExitBootServices debugging
 #include "paging.h"            // minimal identity page tables
@@ -572,7 +573,8 @@ EFI_STATUS ExitBootServicesWithMemoryMapInBuffer(
     EFI_MEMORY_DESCRIPTOR* finalMap,
     UINTN                finalMapCapacityBytes,
     UINTN*               outEntryCount,
-    UINTN*               outDescriptorSize
+    UINTN*               outDescriptorSize,
+    guideXOS::BootInfoWithAcpi& boot
 )
 {
     if (!SystemTable || !finalMap || finalMapCapacityBytes == 0 || !outEntryCount || !outDescriptorSize) {
@@ -629,6 +631,15 @@ EFI_STATUS ExitBootServicesWithMemoryMapInBuffer(
             return EFI_BUFFER_TOO_SMALL;
         }
 
+        // Capture once under UEFI's mappings before the first exit attempt.
+        // This uses the fetched map and makes no firmware calls of its own.
+        if ((boot.base.Flags & guideXOS::GUIDEXOS_BOOTINFO_FLAG_ACPI_INVENTORY_VALID) == 0) {
+            guideXOS::acpi::capture_uefi_processors(boot.base.AcpiRsdp,
+                descriptorVersion == 1 ? tempMap : nullptr, curMapSize, descriptorSize,
+                boot.acpi.inventory);
+            guideXOS::seal_bootinfo_acpi(boot);
+        }
+
         CopyMem(finalMap, tempMap, curMapSize);
 
         status = SystemTable->BootServices->ExitBootServices(ImageHandle, mapKey);
@@ -649,36 +660,18 @@ EFI_STATUS ExitBootServicesWithMemoryMapInBuffer(
 }
 
 
-#pragma pack(push, 1)
-typedef struct {
-    char  Signature[8];     // "RSD PTR "
-    UINT8 Checksum;
-    char  OEMID[6];
-    UINT8 Revision;
-    UINT32 RsdtAddress;     // 32-bit RSDT (for ACPI 1.0)
-    // ACPI 2.0+ extensions follow; include if needed:
-    UINT32 Length;
-    UINT64 XsdtAddress;     // 64-bit XSDT
-    UINT8  ExtendedChecksum;
-    UINT8  Reserved[3];
-} RSDPDescriptor20;
-#pragma pack(pop)
-
-RSDPDescriptor20* FindRSDP(EFI_SYSTEM_TABLE* SystemTable) {
+static void* FindRSDP(EFI_SYSTEM_TABLE* SystemTable) {
     EFI_CONFIGURATION_TABLE* configTable = SystemTable->ConfigurationTable;
     UINTN tableCount = SystemTable->NumberOfTableEntries;
-
+    void* legacy = nullptr;
     for (UINTN i = 0; i < tableCount; ++i) {
         EFI_GUID* guid = &configTable[i].VendorGuid;
-
-        if (CompareGuid(guid, &gEfiAcpi20TableGuid) ||
-            CompareGuid(guid, &gEfiAcpi10TableGuid)) {
-
-            return (RSDPDescriptor20*)configTable[i].VendorTable;
-        }
+        void* table = configTable[i].VendorTable;
+        if (!table) continue;
+        if (CompareGuid(guid, &gEfiAcpi20TableGuid)) return table;
+        if (!legacy && CompareGuid(guid, &gEfiAcpi10TableGuid)) legacy = table;
     }
-
-    return nullptr;
+    return legacy;
 }
 
 // Simple memset for BootInfo
@@ -705,7 +698,8 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         return status;
     }
     SetMem((void*)(UINTN)bootInfoPhys, EFI_PAGE_SIZE, 0);
-    guideXOS::BootInfo* v1BootInfo = (guideXOS::BootInfo*)(UINTN)bootInfoPhys;
+    auto* bootHandoff = reinterpret_cast<guideXOS::BootInfoWithAcpi*>(static_cast<UINTN>(bootInfoPhys));
+    guideXOS::BootInfo* v1BootInfo = &bootHandoff->base;
 
     // Keep task-owned frames in a dedicated, explicitly reserved arena. The
     // kernel treats every physical page outside this arena as unavailable.
@@ -740,11 +734,11 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     }
 
     // --- ACPI RSDP (optional) ---
-    RSDPDescriptor20* rsdp = FindRSDP(SystemTable);
+    void* rsdp = FindRSDP(SystemTable);
     if (!rsdp) {
         Print((CONST CHAR16*)L"ACPI RSDP not found\n");
     } else {
-        Print((CONST CHAR16*)L"ACPI RSDP found at %p, rev %u\n", (VOID*)rsdp, (UINT32)rsdp->Revision);
+        Print((CONST CHAR16*)L"ACPI RSDP reported at %p\n", rsdp);
     }
 
     // --- Locate GOP ---
@@ -855,7 +849,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     v1BootInfo->BootMode = guideXOS::BootMode::Uefi;
     // Preserve any flags already set (e.g., ramdisk valid)
 
-    // ACPI RSDP pointer (64-bit physical)
+    // Physical RSDP address for inventory capture and handoff provenance.
     v1BootInfo->AcpiRsdp = rsdp ? (uint64_t)(UINTN)rsdp : 0ull;
 
     // Framebuffer from GOP (diagnostic array + legacy primary fields)
@@ -1097,7 +1091,6 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     // 5. Memory map buffer
     // 6. Framebuffer - CRITICAL for display output
     // 7. Ramdisk - if loaded
-    // 8. ACPI tables - for ACPI parsing
 
     const EFI_PHYSICAL_ADDRESS kernelPhysBase = (EFI_PHYSICAL_ADDRESS)kernelBase;
     const UINTN kernelSpanBytes = (kernelTotalSize != 0) ? (UINTN)kernelTotalSize : (64u * 1024u * 1024u);
@@ -1158,14 +1151,6 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         sizes[rangeCount] = (UINTN)ramdiskSize;
         rangeCount++;
         Print(L"Mapping ramdisk: %p size %Lu\n", (VOID*)(UINTN)ramdiskPhys, ramdiskSize);
-    }
-
-    // 8. ACPI RSDP region (map at least one page for RSDP, kernel will map more as needed)
-    if (rsdp != nullptr) {
-        ranges[rangeCount] = (EFI_PHYSICAL_ADDRESS)(UINTN)rsdp & ~0xFFFull; // Page-align down
-        sizes[rangeCount] = EFI_PAGE_SIZE * 4; // Map a few pages for RSDP + nearby tables
-        rangeCount++;
-        Print(L"Mapping ACPI RSDP region: %p\n", (VOID*)(UINTN)rsdp);
     }
 
     // 9. CRITICAL: Map the bootloader/trampoline code region
@@ -1324,7 +1309,8 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         memoryMap,
         preMemMapBytes,
         &memoryMapCount,
-        &memoryMapDescSize
+        &memoryMapDescSize,
+        *bootHandoff
     );
     if (EFI_ERROR(statusExit)) {
         Print(L"ExitBootServices failed: %r\n", statusExit);

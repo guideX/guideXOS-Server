@@ -41,13 +41,15 @@ struct CpuFeatures {
     CpuidBit invariant_tsc;
 };
 
-enum class CpuTopologySource : uint8_t { Unavailable, Leaf1F, Leaf0B, LegacyLeaf1 };
+enum class CpuTopologySource : uint8_t {
+    Unavailable, Leaf1F, Leaf0B, LegacyLeaf1, AmdLeaf80000026, AmdLeaf8000001E
+};
 
 // Hints for the sampled logical processor. No firmware or online CPU list is read.
 struct CpuTopologyHint {
     CpuTopologySource source;
     uint32_t initial_apic_id;
-    // Structured leaves describe subleaf 0 only. Legacy leaf 1 has no level or shift.
+    // Structured leaves describe subleaf 0 only. The ID-only sources leave these zero.
     uint8_t level_type;
     uint8_t apic_id_shift;
     // Structured level's EBX count, or legacy HTT-qualified addressable-ID field.

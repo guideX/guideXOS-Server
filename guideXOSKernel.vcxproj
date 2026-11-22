@@ -215,6 +215,7 @@
     <ClInclude Include="kernel\core\include\kernel\fb_console.h" />
     <ClInclude Include="kernel\arch\amd64\include\arch\amd64.h" />
     <ClInclude Include="kernel\arch\amd64\include\arch\cpu_capabilities.h" />
+    <ClInclude Include="kernel\arch\amd64\include\arch\boot_processor_inventory.h" />
     <ClInclude Include="kernel\arch\amd64\include\arch\graphics.h" />
     <ClInclude Include="kernel\arch\amd64\include\arch\pci_audio.h" />
     <ClInclude Include="kernel\arch\amd64\include\arch\usb_hci.h" />
@@ -316,6 +317,7 @@
       <ObjectFileName>$(IntDir)arch_amd64.obj</ObjectFileName>
     </ClCompile>
     <ClCompile Include="kernel\arch\amd64\cpu_capabilities.cpp" />
+    <ClCompile Include="kernel\arch\amd64\boot_processor_inventory.cpp" />
     <ClCompile Include="kernel\arch\amd64\graphics.cpp">
       <ObjectFileName>$(IntDir)graphics_amd64.obj</ObjectFileName>
     </ClCompile>
