@@ -1,9 +1,14 @@
 #include "include/arch/per_cpu.h"
 #include "include/arch/boot_processor_inventory.h"
 
-#if defined(GXOS_ENABLE_CPU_INVENTORY_DIAGNOSTIC)
+#if defined(GXOS_ENABLE_CPU_INVENTORY_DIAGNOSTIC) || defined(GXOS_ENABLE_BSP_APIC_DIAGNOSTIC)
 #include "../../../guideXOSBootLoader/bootinfo_acpi.h"
+#endif
+#if defined(GXOS_ENABLE_CPU_INVENTORY_DIAGNOSTIC)
 #include "../../core/include/kernel/serial_debug.h"
+#endif
+#if defined(GXOS_ENABLE_BSP_APIC_DIAGNOSTIC)
+#include "include/arch/bsp_apic.h"
 #endif
 
 namespace kernel {
@@ -42,14 +47,6 @@ bool valid_firmware_records(const ProcessorInventory& inventory)
         }
     }
     return true;
-}
-
-bool known_apic_id(const CpuCapabilities& cpu)
-{
-    const auto& topology = cpu.topology;
-    if (!cpu.cpuid_available || topology.source == CpuTopologySource::Unavailable) return false;
-    if (topology.source == CpuTopologySource::LegacyLeaf1) return topology.initial_apic_id < UINT8_MAX;
-    return topology.initial_apic_id < UINT32_MAX;
 }
 
 CpuDescriptor firmware_descriptor(uint32_t index, const ProcessorInventory& inventory, const ProcessorRecord& record)
@@ -143,7 +140,7 @@ uint32_t PerCpuState::online_count() const
 void initialize_boot_per_cpu(const guideXOS::BootInfo* boot)
 {
     const ProcessorInventory* inventory = nullptr;
-#if defined(GXOS_ENABLE_CPU_INVENTORY_DIAGNOSTIC)
+#if defined(GXOS_ENABLE_CPU_INVENTORY_DIAGNOSTIC) || defined(GXOS_ENABLE_BSP_APIC_DIAGNOSTIC)
     inventory = guideXOS::bootinfo_acpi_inventory(boot);
 #else
     (void)boot;
@@ -152,6 +149,9 @@ void initialize_boot_per_cpu(const guideXOS::BootInfo* boot)
     if (!s_boot_per_cpu.initialize_bootstrap(cpu, inventory)) return;
     (void)s_boot_per_cpu.mark_online(0);
 
+#if defined(GXOS_ENABLE_CPU_INVENTORY_DIAGNOSTIC) || defined(GXOS_ENABLE_BSP_APIC_DIAGNOSTIC)
+    const auto* interrupt_topology = guideXOS::bootinfo_acpi_interrupt_topology(boot);
+#endif
 #if defined(GXOS_ENABLE_CPU_INVENTORY_DIAGNOSTIC)
     report_boot_processor_inventory(cpu, inventory, s_boot_per_cpu.online_count());
     serial::puts("[CPU3] roster=");
@@ -163,7 +163,10 @@ void initialize_boot_per_cpu(const guideXOS::BootInfo* boot)
     serial::puts(" offline=0x");
     serial::put_hex32(s_boot_per_cpu.offline_count());
     serial::puts("\n");
-    report_boot_interrupt_topology(cpu, guideXOS::bootinfo_acpi_interrupt_topology(boot));
+    report_boot_interrupt_topology(cpu, interrupt_topology);
+#endif
+#if defined(GXOS_ENABLE_BSP_APIC_DIAGNOSTIC)
+    report_bootstrap_apic(cpu, s_boot_per_cpu, interrupt_topology);
 #endif
 }
 

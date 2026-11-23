@@ -69,6 +69,14 @@ struct CpuCapabilities {
     CpuTopologyHint topology;
 };
 
+inline bool known_apic_id(const CpuCapabilities& cpu)
+{
+    const auto& topology = cpu.topology;
+    if (!cpu.cpuid_available || topology.source == CpuTopologySource::Unavailable) return false;
+    if (topology.source == CpuTopologySource::LegacyLeaf1) return topology.initial_apic_id < UINT8_MAX;
+    return topology.initial_apic_id < UINT32_MAX;
+}
+
 CpuCapabilities decode_cpu_capabilities(CpuidReader read, void* context);
 
 // CPUID only. For per-CPU results the caller must keep the sample on one CPU.
