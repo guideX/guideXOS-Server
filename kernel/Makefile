@@ -107,6 +107,9 @@ endif
 ifeq ($(BSP_APIC_DIAGNOSTIC),1)
 CFLAGS += -DGXOS_ENABLE_BSP_APIC_DIAGNOSTIC
 endif
+ifeq ($(BSP_XAPIC_ADMISSION_DIAGNOSTIC),1)
+CFLAGS += -DGXOS_ENABLE_BSP_XAPIC_ADMISSION_DIAGNOSTIC
+endif
 endif
 CFLAGS += -I. -I.. -Icore/include -Iarch/$(ARCH)/include
 CFLAGS += $(EXTRA_CFLAGS)
@@ -131,8 +134,11 @@ LDFLAGS := $(LINKER_SCRIPT_FLAG)arch/$(ARCH)/linker.ld $(ARCH_LDFLAGS)
 CORE_SOURCES := $(wildcard core/*.cpp)
 SETTINGS_PRESENTATION_SOURCE := $(GUIDEXOS_REPO_ROOT)/settings_presentation_core.cpp
 ARCH_SOURCES := $(wildcard arch/$(ARCH)/*.cpp)
-ifneq ($(BSP_APIC_DIAGNOSTIC),1)
+ifeq ($(filter 1,$(BSP_APIC_DIAGNOSTIC) $(BSP_XAPIC_ADMISSION_DIAGNOSTIC)),)
 ARCH_SOURCES := $(filter-out arch/amd64/bsp_apic.cpp,$(ARCH_SOURCES))
+endif
+ifneq ($(BSP_XAPIC_ADMISSION_DIAGNOSTIC),1)
+ARCH_SOURCES := $(filter-out arch/amd64/bsp_xapic_admission.cpp,$(ARCH_SOURCES))
 endif
 ASM_SOURCES := $(wildcard arch/$(ARCH)/*.asm) $(wildcard arch/$(ARCH)/*.s)
 MBEDTLS_C_SOURCES := $(if $(filter 1,$(MBEDTLS_GUIDEXOS_LINK_ENABLED)),$(MBEDTLS_GUIDEXOS_C_SOURCES))
@@ -234,18 +240,17 @@ $(OBJ_DIR)/arch/%.o: arch/$(ARCH)/%.cpp
 	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
 ifeq ($(ARCH),amd64)
-# Recompile the boot hook and relink when switching the CPU6 flag in place.
-BSP_APIC_STAMP := $(OBJ_DIR)/arch/.bsp-apic-$(if $(filter 1,$(BSP_APIC_DIAGNOSTIC)),on,off)
-BSP_APIC_OLD_STAMP := $(OBJ_DIR)/arch/.bsp-apic-$(if $(filter 1,$(BSP_APIC_DIAGNOSTIC)),off,on)
-$(OBJ_DIR)/arch/per_cpu.o: $(BSP_APIC_STAMP)
+# Recompile the boot hook and APIC decoder when switching either APIC flag.
+BSP_APIC_STAMP := $(OBJ_DIR)/arch/.bsp-apic-config-$(if $(filter 1,$(BSP_APIC_DIAGNOSTIC)),1,0)$(if $(filter 1,$(BSP_XAPIC_ADMISSION_DIAGNOSTIC)),1,0)
+$(OBJ_DIR)/arch/per_cpu.o $(OBJ_DIR)/arch/bsp_apic.o: $(BSP_APIC_STAMP)
 $(BSP_APIC_STAMP):
 	@$(call MKDIR,$(OBJ_DIR)/arch)
 ifeq ($(OS),Windows_NT)
-	@if exist "$(subst /,\,$(BSP_APIC_OLD_STAMP))" del "$(subst /,\,$(BSP_APIC_OLD_STAMP))"
+	@if exist "$(subst /,\,$(OBJ_DIR)/arch/.bsp-apic-config-*)" del /q "$(subst /,\,$(OBJ_DIR)/arch/.bsp-apic-config-*)"
 else
-	@rm -f "$(BSP_APIC_OLD_STAMP)"
+	@rm -f "$(OBJ_DIR)/arch"/.bsp-apic-config-*
 endif
-	@echo BSP_APIC_DIAGNOSTIC=$(BSP_APIC_DIAGNOSTIC) > "$@"
+	@echo BSP_APIC_DIAGNOSTIC=$(BSP_APIC_DIAGNOSTIC) BSP_XAPIC_ADMISSION_DIAGNOSTIC=$(BSP_XAPIC_ADMISSION_DIAGNOSTIC) > "$@"
 endif
 
 $(OBJ_DIR)/arch/%.d: arch/$(ARCH)/%.cpp
