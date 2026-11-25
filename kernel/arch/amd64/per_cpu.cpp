@@ -11,7 +11,7 @@
 #if defined(GXOS_ENABLE_BSP_APIC_DIAGNOSTIC)
 #include "include/arch/bsp_apic.h"
 #endif
-#if defined(GXOS_ENABLE_BSP_XAPIC_ADMISSION_DIAGNOSTIC)
+#if defined(GXOS_ENABLE_BSP_XAPIC_ADMISSION_DIAGNOSTIC) && !defined(GXOS_ENABLE_BSP_APIC_BASE_PROBE_DIAGNOSTIC)
 #include "include/arch/bsp_xapic_admission.h"
 #endif
 
@@ -155,7 +155,7 @@ void initialize_boot_per_cpu(const guideXOS::BootInfo* boot)
     (void)s_boot_per_cpu.mark_online(0);
 
 #if defined(GXOS_ENABLE_CPU_INVENTORY_DIAGNOSTIC) || defined(GXOS_ENABLE_BSP_APIC_DIAGNOSTIC) || \
-    defined(GXOS_ENABLE_BSP_XAPIC_ADMISSION_DIAGNOSTIC)
+    (defined(GXOS_ENABLE_BSP_XAPIC_ADMISSION_DIAGNOSTIC) && !defined(GXOS_ENABLE_BSP_APIC_BASE_PROBE_DIAGNOSTIC))
     const auto* interrupt_topology = guideXOS::bootinfo_acpi_interrupt_topology(boot);
 #endif
 #if defined(GXOS_ENABLE_CPU_INVENTORY_DIAGNOSTIC)
@@ -174,7 +174,7 @@ void initialize_boot_per_cpu(const guideXOS::BootInfo* boot)
 #if defined(GXOS_ENABLE_BSP_APIC_DIAGNOSTIC)
     report_bootstrap_apic(cpu, s_boot_per_cpu, interrupt_topology);
 #endif
-#if defined(GXOS_ENABLE_BSP_XAPIC_ADMISSION_DIAGNOSTIC)
+#if defined(GXOS_ENABLE_BSP_XAPIC_ADMISSION_DIAGNOSTIC) && !defined(GXOS_ENABLE_BSP_APIC_BASE_PROBE_DIAGNOSTIC)
     report_bsp_xapic_admission(s_boot_per_cpu, interrupt_topology);
 #endif
 }

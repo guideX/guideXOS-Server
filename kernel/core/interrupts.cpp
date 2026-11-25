@@ -17,6 +17,12 @@
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/amd64_protected_task_contract.h"
 
+#if defined(GXOS_ENABLE_BSP_APIC_BASE_PROBE_DIAGNOSTIC)
+#include "arch/bsp_apic_base_probe.h"
+#include "arch/bsp_xapic_admission.h"
+#include "../../guideXOSBootLoader/bootinfo_acpi.h"
+#endif
+
 namespace kernel {
 namespace interrupts {
 
@@ -167,6 +173,22 @@ static IDTEntry s_idt[kIDTSize];
 static IDTPtr   s_idtPtr;
 static irq_handler_t s_handlers[16] = { 0 };
 
+#if defined(GXOS_ENABLE_BSP_APIC_BASE_PROBE_DIAGNOSTIC)
+using arch::amd64::ApicBaseProbeStatus;
+static_assert(sizeof(IDTEntry) == 16 && sizeof(IDTPtr) == 10, "AMD64 probe IDT layout");
+static_assert(__builtin_offsetof(TSS64, ist2) == 44 && __builtin_offsetof(TSS64, ist3) == 52,
+              "AMD64 probe emergency IST layout");
+static_assert(amd64_protected_task::kKernelCodeSelector == 0x08 &&
+              amd64_protected_task::kKernelDataSelector == 0x10, "AMD64 probe fixup selectors");
+extern "C" ApicBaseProbeStatus gxos_amd64_read_boot_apic_base(
+    uint64_t* value, const IDTPtr* probe_idt, const IDTPtr* kernel_idt);
+extern "C" void gxos_amd64_apic_base_gp();
+extern "C" void gxos_amd64_apic_base_emergency_stop();
+static IDTEntry s_apic_probe_idt[kIDTSize];
+alignas(16) static uint8_t s_apic_probe_nmi_stack[4096];
+alignas(16) static uint8_t s_apic_probe_double_fault_stack[4096];
+#endif
+
 #if defined(__x86_64__) || defined(_M_X64)
 // Exception diagnostics must not use the interrupted Native ELF stack.  The
 // app stack is intentionally isolated from this bounded kernel-owned stack.
@@ -257,6 +279,10 @@ static void gdt_init()
     s_tss = {};
     s_tss.iomapBase = sizeof(TSS64);
     s_tss.ist1 = (reinterpret_cast<uint64_t>(gxos_exception_stack) + sizeof(gxos_exception_stack)) & ~0x0Full;
+#if defined(GXOS_ENABLE_BSP_APIC_BASE_PROBE_DIAGNOSTIC)
+    s_tss.ist2 = reinterpret_cast<uint64_t>(s_apic_probe_nmi_stack + sizeof(s_apic_probe_nmi_stack));
+    s_tss.ist3 = reinterpret_cast<uint64_t>(s_apic_probe_double_fault_stack + sizeof(s_apic_probe_double_fault_stack));
+#endif
     set_tss_descriptor(5, reinterpret_cast<uint64_t>(&s_tss), sizeof(TSS64) - 1u);
     s_user_selectors_valid =
         amd64_protected_task::valid_selector_layout() &&
@@ -405,15 +431,23 @@ void eoi(uint8_t irq)
 // ----------------------------------------------------------------
 
 #if defined(__x86_64__) || defined(_M_X64)
+#if defined(GXOS_ENABLE_BSP_APIC_BASE_PROBE_DIAGNOSTIC)
+static void set_idt_entry(int index, uint64_t addr, uint8_t type_attr, uint8_t ist = 0,
+                          IDTEntry* idt = s_idt)
+#else
 static void set_idt_entry(int index, uint64_t addr, uint8_t type_attr, uint8_t ist = 0)
+#endif
 {
-    s_idt[index].offset_low  = (uint16_t)(addr & 0xFFFF);
-    s_idt[index].selector    = 0x08;
-    s_idt[index].ist         = ist & 0x07u;
-    s_idt[index].type_attr   = type_attr;
-    s_idt[index].offset_mid  = (uint16_t)((addr >> 16) & 0xFFFF);
-    s_idt[index].offset_high = (uint32_t)((addr >> 32) & 0xFFFFFFFF);
-    s_idt[index].reserved    = 0;
+#if !defined(GXOS_ENABLE_BSP_APIC_BASE_PROBE_DIAGNOSTIC)
+    auto* idt = s_idt;
+#endif
+    idt[index].offset_low  = (uint16_t)(addr & 0xFFFF);
+    idt[index].selector    = 0x08;
+    idt[index].ist         = ist & 0x07u;
+    idt[index].type_attr   = type_attr;
+    idt[index].offset_mid  = (uint16_t)((addr >> 16) & 0xFFFF);
+    idt[index].offset_high = (uint32_t)((addr >> 32) & 0xFFFFFFFF);
+    idt[index].reserved    = 0;
 }
 #else
 static void set_idt_entry(int index, uint32_t addr, uint8_t type_attr)
@@ -776,7 +810,37 @@ static void load_idt()
 // Public API  (x86 / amd64)
 // ----------------------------------------------------------------
 
+#if defined(GXOS_ENABLE_BSP_APIC_BASE_PROBE_DIAGNOSTIC)
+static ApicBaseProbeStatus read_boot_apic_base(uint64_t& value)
+{
+    // Only the cold BSP interrupt initialization can call this reader. Once
+    // consumed, even a later reinitialization cannot arm it again.
+    static bool attempted = false;
+    uint16_t task_register = 0;
+    asm volatile ("str %0" : "=rm"(task_register));
+    if (attempted || !s_user_selectors_valid || !s_tss_loaded || s_tss.rsp0 != 0 ||
+        task_register != amd64_protected_task::kTssSelector) {
+        return ApicBaseProbeStatus::InvalidContext;
+    }
+    attempted = true;
+
+    // Build a detached IDT. The live IDT is never edited and the assembly
+    // restores the original IDTR before exposing a result.
+    for (int i = 0; i < kIDTSize; ++i) s_apic_probe_idt[i] = s_idt[i];
+    const auto emergency = reinterpret_cast<uint64_t>(gxos_amd64_apic_base_emergency_stop);
+    set_idt_entry(2, emergency, 0x8E, 2, s_apic_probe_idt);
+    set_idt_entry(8, emergency, 0x8E, 3, s_apic_probe_idt);
+    set_idt_entry(13, reinterpret_cast<uint64_t>(gxos_amd64_apic_base_gp),
+                  0x8E, 0, s_apic_probe_idt);
+    const IDTPtr probe_idtr{sizeof(s_apic_probe_idt) - 1u,
+                            reinterpret_cast<uint64_t>(s_apic_probe_idt)};
+    return gxos_amd64_read_boot_apic_base(&value, &probe_idtr, &s_idtPtr);
+}
+
+static void init_pic(const guideXOS::BootInfo* probe_boot)
+#else
 void init()
+#endif
 {
     // CRITICAL: Set up our own GDT first, before any interrupt handling.
     // The UEFI-provided GDT may not be accessible after ExitBootServices
@@ -822,6 +886,21 @@ void init()
 #endif
 
     load_idt();
+#if defined(GXOS_ENABLE_BSP_APIC_BASE_PROBE_DIAGNOSTIC)
+    if (probe_boot) {
+        const auto& roster = arch::amd64::boot_per_cpu_state();
+        const auto sample = arch::amd64::sample_bootstrap_apic_base(roster, read_boot_apic_base);
+        serial::puts("[CPU7B2] apic-base-msr=");
+        serial::puts(arch::amd64::apic_base_probe_status_name(sample.status));
+        if (sample.observation()) {
+            serial::puts(" raw=0x");
+            serial::put_hex64(sample.value);
+        }
+        serial::putc('\n');
+        arch::amd64::report_bsp_xapic_admission(roster,
+            guideXOS::bootinfo_acpi_interrupt_topology(probe_boot), sample.observation());
+    }
+#endif
     arch::enable_interrupts();
 
     serial::puts("[IRQ] IDT loaded, PIC remapped, interrupts enabled\n");
@@ -831,6 +910,18 @@ void init()
     serial::put_hex8(arch::inb(kPICSlaveData));
     serial::putc('\n');
 }
+
+#if defined(GXOS_ENABLE_BSP_APIC_BASE_PROBE_DIAGNOSTIC)
+void init()
+{
+    init_pic(nullptr);
+}
+
+void init_with_bsp_apic_base_probe(const guideXOS::BootInfo* boot)
+{
+    init_pic(boot);
+}
+#endif
 
 void register_irq(uint8_t irq, irq_handler_t handler)
 {

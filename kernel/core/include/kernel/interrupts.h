@@ -12,11 +12,20 @@
 
 #include "kernel/types.h"
 
+#if defined(GXOS_ENABLE_BSP_APIC_BASE_PROBE_DIAGNOSTIC)
+namespace guideXOS { struct BootInfo; }
+#endif
+
 namespace kernel {
 namespace interrupts {
 
 // Initialize IDT, remap PIC, and enable interrupts
 void init();
+
+#if defined(GXOS_ENABLE_BSP_APIC_BASE_PROBE_DIAGNOSTIC)
+// Cold BSP boot only, before IRQ registration or protected-task entry.
+void init_with_bsp_apic_base_probe(const guideXOS::BootInfo* boot);
+#endif
 
 // Register handler callback for a given IRQ number (0–15)
 typedef void (*irq_handler_t)();

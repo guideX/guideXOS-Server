@@ -896,7 +896,11 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[KERNEL] Desktop drawn\n");
         
         // Set up IDT, remap PIC, enable interrupts
+#if defined(GXOS_ENABLE_BSP_APIC_BASE_PROBE_DIAGNOSTIC)
+        kernel::interrupts::init_with_bsp_apic_base_probe(is_bootinfo ? bootinfo : nullptr);
+#else
         kernel::interrupts::init();
+#endif
         kernel::serial::puts("[KERNEL] IDT + PIC initialized, interrupts enabled\n");
         
         // Initialize PIT timer for periodic IRQ0 (100 Hz heartbeat)

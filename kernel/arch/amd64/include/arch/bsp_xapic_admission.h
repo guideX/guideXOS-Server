@@ -62,7 +62,8 @@ const char* xapic_admission_name(XapicAdmission admission);
 
 #if defined(GXOS_ENABLE_BSP_XAPIC_ADMISSION_DIAGNOSTIC)
 void report_bsp_xapic_admission(const PerCpuState& roster,
-                               const guideXOS::acpi::InterruptTopology* firmware);
+                               const guideXOS::acpi::InterruptTopology* firmware,
+                               const uint64_t* apic_base_msr = nullptr);
 #endif
 
 } // namespace amd64
