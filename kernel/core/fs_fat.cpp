@@ -1058,6 +1058,52 @@ static void clear_lfn_name(char* name, uint32_t nameSize)
     for (uint32_t i = 0; i < nameSize; ++i) name[i] = '\0';
 }
 
+static const uint8_t kMaxLfnEntriesPerFile = 20;
+
+struct LfnEntryLocation {
+    uint32_t sector;
+    uint32_t offset;
+};
+
+struct LfnReadState {
+    char name[256];
+    uint8_t checksum;
+    bool checksumPresent;
+    bool checksumConsistent;
+    LfnEntryLocation locations[kMaxLfnEntriesPerFile];
+    uint8_t locationCount;
+    bool locationsOverflow;
+};
+
+static void reset_lfn_state(LfnReadState& state)
+{
+    clear_lfn_name(state.name, sizeof(state.name));
+    state.checksum = 0;
+    state.checksumPresent = false;
+    state.checksumConsistent = true;
+    state.locationCount = 0;
+    state.locationsOverflow = false;
+}
+
+static void record_lfn_location(LfnReadState& state, uint32_t sector, uint32_t offset)
+{
+    if (state.locationCount >= kMaxLfnEntriesPerFile) {
+        state.locationsOverflow = true;
+        return;
+    }
+    state.locations[state.locationCount++] = {sector, offset};
+}
+
+static uint8_t short_name_checksum(const char rawName[11])
+{
+    uint8_t checksum = 0;
+    for (uint32_t i = 0; i < 11; ++i) {
+        checksum = static_cast<uint8_t>(((checksum & 1u) ? 0x80u : 0u) +
+            (checksum >> 1) + static_cast<uint8_t>(rawName[i]));
+    }
+    return checksum;
+}
+
 static void lfn_put_char(char* name, uint32_t nameSize, uint32_t pos, uint16_t ch)
 {
     if (!name || nameSize == 0 || pos + 1 >= nameSize) return;
@@ -1065,15 +1111,102 @@ static void lfn_put_char(char* name, uint32_t nameSize, uint32_t pos, uint16_t c
     name[pos] = (ch < 0x80) ? static_cast<char>(ch) : '?';
 }
 
-static void collect_lfn_entry(const FAT32_LFNEntry* lfn, char* name, uint32_t nameSize)
+static void collect_lfn_entry(const FAT32_LFNEntry* lfn, LfnReadState& state)
 {
-    if (!lfn || !name || nameSize == 0) return;
+    if (!lfn) return;
+    if (!state.checksumPresent) {
+        state.checksum = lfn->checksum;
+        state.checksumPresent = true;
+    } else if (state.checksum != lfn->checksum) {
+        state.checksumConsistent = false;
+    }
+    if (lfn->type != 0 || lfn->firstClusterLo != 0) {
+        state.checksumConsistent = false;
+    }
     uint32_t sequence = lfn->order & 0x1F;
     if (sequence == 0) return;
     uint32_t base = (sequence - 1) * 13;
-    for (uint32_t i = 0; i < 5; ++i) lfn_put_char(name, nameSize, base + i, lfn->name1[i]);
-    for (uint32_t i = 0; i < 6; ++i) lfn_put_char(name, nameSize, base + 5 + i, lfn->name2[i]);
-    for (uint32_t i = 0; i < 2; ++i) lfn_put_char(name, nameSize, base + 11 + i, lfn->name3[i]);
+    for (uint32_t i = 0; i < 5; ++i) lfn_put_char(state.name, sizeof(state.name), base + i, lfn->name1[i]);
+    for (uint32_t i = 0; i < 6; ++i) lfn_put_char(state.name, sizeof(state.name), base + 5 + i, lfn->name2[i]);
+    for (uint32_t i = 0; i < 2; ++i) lfn_put_char(state.name, sizeof(state.name), base + 11 + i, lfn->name3[i]);
+}
+
+static bool lfn_matches_short_name(const LfnReadState& state, const char rawName[11])
+{
+    return state.name[0] != '\0' && state.checksumPresent &&
+        state.checksumConsistent && state.checksum == short_name_checksum(rawName);
+}
+
+static bool make_lfn_entry_for_short_name(const char* name, const char shortName[11],
+                                          FAT32_LFNEntry* out)
+{
+    if (!name || !out) return false;
+    uint32_t length = 0;
+    while (name[length] && length <= 12u) ++length;
+    if (length == 0 || length > 12u) return false;
+
+    memzero(out, sizeof(*out));
+    out->order = 0x41u;
+    out->attr = ATTR_LFN;
+    out->type = 0;
+    out->checksum = short_name_checksum(shortName);
+    out->firstClusterLo = 0;
+
+    uint16_t characters[13];
+    for (uint32_t i = 0; i < 13; ++i) characters[i] = 0xFFFFu;
+    for (uint32_t i = 0; i < length; ++i) {
+        const uint8_t ch = static_cast<uint8_t>(name[i]);
+        if (ch < 0x20u || ch >= 0x80u) return false;
+        characters[i] = ch;
+    }
+    characters[length] = 0;
+    for (uint32_t i = 0; i < 5; ++i) out->name1[i] = characters[i];
+    for (uint32_t i = 0; i < 6; ++i) out->name2[i] = characters[i + 5];
+    for (uint32_t i = 0; i < 2; ++i) out->name3[i] = characters[i + 11];
+    return true;
+}
+
+static bool read_lfn_entry_at(const FATVolume& vol, const LfnEntryLocation& location,
+                              FAT32_LFNEntry* out)
+{
+    if (!out || location.offset + sizeof(FAT32_LFNEntry) > vol.bytesPerSector ||
+        read_volume_sector(vol, location.sector, s_secBuf) != block::BLOCK_OK) {
+        return false;
+    }
+    memcopy(out, &s_secBuf[location.offset], sizeof(*out));
+    return true;
+}
+
+static bool write_lfn_entry_at(const FATVolume& vol, const LfnEntryLocation& location,
+                               const FAT32_LFNEntry* entry)
+{
+    if (!entry || location.offset + sizeof(FAT32_LFNEntry) > vol.bytesPerSector ||
+        read_volume_sector(vol, location.sector, s_secBuf) != block::BLOCK_OK) {
+        return false;
+    }
+    memcopy(&s_secBuf[location.offset], entry, sizeof(*entry));
+    return write_volume_sector(vol, location.sector, s_secBuf) == block::BLOCK_OK;
+}
+
+static bool save_lfn_entries(const FATVolume& vol, const LfnReadState& state,
+                             FAT32_LFNEntry* entries)
+{
+    if (!entries || state.locationsOverflow) return false;
+    for (uint8_t i = 0; i < state.locationCount; ++i) {
+        if (!read_lfn_entry_at(vol, state.locations[i], &entries[i])) return false;
+    }
+    return true;
+}
+
+static bool restore_lfn_entries(const FATVolume& vol, const LfnReadState& state,
+                                const FAT32_LFNEntry* entries)
+{
+    if (!entries || state.locationsOverflow) return false;
+    bool restored = true;
+    for (uint8_t i = 0; i < state.locationCount; ++i) {
+        if (!write_lfn_entry_at(vol, state.locations[i], &entries[i])) restored = false;
+    }
+    return restored;
 }
 
 static void fill_dir_entry_from_fat(const FAT32_DirEntry* de, const char* displayName, DirEntry* out)
@@ -1240,8 +1373,8 @@ bool read_dir(uint8_t volumeIndex, DirEntry* out)
 
     FATVolume& vol = s_volumes[volumeIndex];
     uint32_t entriesPerSector = vol.bytesPerSector / 32;
-    char lfnName[256];
-    clear_lfn_name(lfnName, sizeof(lfnName));
+    LfnReadState lfnState{};
+    reset_lfn_state(lfnState);
 
     while (true) {
         if (is_fat16_root_dir(vol, s_dirIter.cluster)) {
@@ -1302,24 +1435,25 @@ bool read_dir(uint8_t volumeIndex, DirEntry* out)
 
             // Deleted entry
             if (static_cast<uint8_t>(de->name[0]) == 0xE5) {
-                clear_lfn_name(lfnName, sizeof(lfnName));
+                reset_lfn_state(lfnState);
                 continue;
             }
 
             if (de->attr == ATTR_LFN) {
-                collect_lfn_entry(reinterpret_cast<const FAT32_LFNEntry*>(de), lfnName, sizeof(lfnName));
+                collect_lfn_entry(reinterpret_cast<const FAT32_LFNEntry*>(de), lfnState);
                 continue;
             }
             if (de->attr & ATTR_VOLUME_ID) {
-                clear_lfn_name(lfnName, sizeof(lfnName));
+                reset_lfn_state(lfnState);
                 continue;
             }
 
             char shortName[32];
             short_name_to_string(de->name, shortName);
-            const char* displayName = lfnName[0] ? lfnName : shortName;
+            const char* displayName = lfn_matches_short_name(lfnState, de->name) ?
+                lfnState.name : shortName;
             fill_dir_entry_from_fat(de, displayName, out);
-            clear_lfn_name(lfnName, sizeof(lfnName));
+            reset_lfn_state(lfnState);
             return true;
         }
 
@@ -1755,6 +1889,20 @@ static char to_upper(char c)
     return c;
 }
 
+static bool is_fat_short_name_character(char value)
+{
+    const char c = to_upper(value);
+    if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) return true;
+    switch (c) {
+        case '$': case '%': case '\'': case '-': case '_': case '@':
+        case '~': case '`': case '!': case '(': case ')': case '{':
+        case '}': case '^': case '#': case '&':
+            return true;
+        default:
+            return false;
+    }
+}
+
 static bool name_matches(const char* a, const char* b)
 {
     while (*a && *b) {
@@ -1766,7 +1914,8 @@ static bool name_matches(const char* a, const char* b)
 }
 
 static bool find_in_directory_at(uint8_t volumeIndex, uint32_t dirCluster, const char* name,
-                                 DirEntry* out, uint32_t* outSector, uint32_t* outOffset);
+                                 DirEntry* out, uint32_t* outSector, uint32_t* outOffset,
+                                 LfnReadState* outLfnState = nullptr);
 
 static uint32_t str_len(const char* s)
 {
@@ -1789,6 +1938,9 @@ static void copy_string(char* dst, const char* src, uint32_t maxLen)
     dst[i] = '\0';
 }
 
+// New directory-entry names are intentionally limited to the ASCII FAT 8.3
+// character set. Lookup can resolve checksum-valid existing VFAT LFNs, but
+// this create/rename path does not generate arbitrary long-name entries.
 static bool make_short_name(const char* name, char out[11])
 {
     if (!name || !*name) return false;
@@ -1798,24 +1950,25 @@ static bool make_short_name(const char* name, char out[11])
     uint32_t len = str_len(name);
     for (uint32_t i = 0; i < len; ++i) {
         if (name[i] == '.') {
+            if (dot != 0xFFFFFFFF) return false;
             dot = i;
-            break;
         }
     }
 
     uint32_t baseLen = (dot == 0xFFFFFFFF) ? len : dot;
     uint32_t extStart = (dot == 0xFFFFFFFF) ? len : dot + 1;
-    if (baseLen == 0 || baseLen > 8 || len - extStart > 3) return false;
+    if (baseLen == 0 || baseLen > 8 || len - extStart > 3 ||
+        (dot != 0xFFFFFFFF && extStart == len)) return false;
 
     for (uint32_t i = 0; i < baseLen; ++i) {
         char c = to_upper(name[i]);
-        if (c == ' ' || c == '/' || c == '\\') return false;
+        if (!is_fat_short_name_character(c)) return false;
         out[i] = c;
     }
 
     for (uint32_t i = 0; extStart + i < len; ++i) {
         char c = to_upper(name[extStart + i]);
-        if (c == ' ' || c == '.' || c == '/' || c == '\\') return false;
+        if (!is_fat_short_name_character(c)) return false;
         out[8 + i] = c;
     }
 
@@ -1966,7 +2119,8 @@ static bool write_file_clusters(FATVolume& vol, uint32_t firstCluster, const voi
 }
 
 static bool find_in_directory_at(uint8_t volumeIndex, uint32_t dirCluster, const char* name,
-                                 DirEntry* out, uint32_t* outSector, uint32_t* outOffset)
+                                 DirEntry* out, uint32_t* outSector, uint32_t* outOffset,
+                                 LfnReadState* outLfnState)
 {
     if (volumeIndex >= MAX_FAT_VOLUMES || !name || !out || !outSector || !outOffset) {
         s_lastPathLookupStatus = PATH_LOOKUP_INVALID_ARGUMENT;
@@ -1979,8 +2133,9 @@ static bool find_in_directory_at(uint8_t volumeIndex, uint32_t dirCluster, const
 
     FATVolume& vol = s_volumes[volumeIndex];
     s_lastPathLookupStatus = PATH_LOOKUP_NOT_FOUND;
-    char lfnName[256];
-    clear_lfn_name(lfnName, sizeof(lfnName));
+    LfnReadState lfnState{};
+    reset_lfn_state(lfnState);
+    if (outLfnState) reset_lfn_state(*outLfnState);
 
     uint32_t entriesPerSector = vol.bytesPerSector / 32;
 
@@ -2001,29 +2156,32 @@ static bool find_in_directory_at(uint8_t volumeIndex, uint32_t dirCluster, const
                     return false;
                 }
                 if (static_cast<uint8_t>(de->name[0]) == 0xE5) {
-                    clear_lfn_name(lfnName, sizeof(lfnName));
+                    reset_lfn_state(lfnState);
                     continue;
                 }
                 if (de->attr == ATTR_LFN) {
-                    collect_lfn_entry(reinterpret_cast<const FAT32_LFNEntry*>(de), lfnName, sizeof(lfnName));
+                    collect_lfn_entry(reinterpret_cast<const FAT32_LFNEntry*>(de), lfnState);
+                    record_lfn_location(lfnState, sector, offset);
                     continue;
                 }
                 if (de->attr & ATTR_VOLUME_ID) {
-                    clear_lfn_name(lfnName, sizeof(lfnName));
+                    reset_lfn_state(lfnState);
                     continue;
                 }
 
                 char shortName[32];
                 short_name_to_string(de->name, shortName);
-                const char* displayName = lfnName[0] ? lfnName : shortName;
+                const bool validLfnName = lfn_matches_short_name(lfnState, de->name);
+                const char* displayName = validLfnName ? lfnState.name : shortName;
                 if (!name_matches(displayName, name) && !name_matches(shortName, name)) {
-                    clear_lfn_name(lfnName, sizeof(lfnName));
+                    reset_lfn_state(lfnState);
                     continue;
                 }
 
                 fill_dir_entry_from_fat(de, displayName, out);
                 *outSector = sector;
                 *outOffset = offset;
+                if (outLfnState && validLfnName) *outLfnState = lfnState;
                 s_lastPathLookupStatus = PATH_LOOKUP_OK;
                 return true;
             }
@@ -2056,29 +2214,32 @@ static bool find_in_directory_at(uint8_t volumeIndex, uint32_t dirCluster, const
                     return false;
                 }
                 if (static_cast<uint8_t>(de->name[0]) == 0xE5) {
-                    clear_lfn_name(lfnName, sizeof(lfnName));
+                    reset_lfn_state(lfnState);
                     continue;
                 }
                 if (de->attr == ATTR_LFN) {
-                    collect_lfn_entry(reinterpret_cast<const FAT32_LFNEntry*>(de), lfnName, sizeof(lfnName));
+                    collect_lfn_entry(reinterpret_cast<const FAT32_LFNEntry*>(de), lfnState);
+                    record_lfn_location(lfnState, sector, offset);
                     continue;
                 }
                 if (de->attr & ATTR_VOLUME_ID) {
-                    clear_lfn_name(lfnName, sizeof(lfnName));
+                    reset_lfn_state(lfnState);
                     continue;
                 }
 
                 char shortName[32];
                 short_name_to_string(de->name, shortName);
-                const char* displayName = lfnName[0] ? lfnName : shortName;
+                const bool validLfnName = lfn_matches_short_name(lfnState, de->name);
+                const char* displayName = validLfnName ? lfnState.name : shortName;
                 if (!name_matches(displayName, name) && !name_matches(shortName, name)) {
-                    clear_lfn_name(lfnName, sizeof(lfnName));
+                    reset_lfn_state(lfnState);
                     continue;
                 }
 
                 fill_dir_entry_from_fat(de, displayName, out);
                 *outSector = sector;
                 *outOffset = offset;
+                if (outLfnState && validLfnName) *outLfnState = lfnState;
                 s_lastPathLookupStatus = PATH_LOOKUP_OK;
                 return true;
             }
@@ -2104,7 +2265,8 @@ static bool find_in_directory_at(uint8_t volumeIndex, uint32_t dirCluster, const
 }
 
 static bool find_path_entry_at(uint8_t volumeIndex, const char* path,
-                               DirEntry* out, uint32_t* outSector, uint32_t* outOffset)
+                               DirEntry* out, uint32_t* outSector, uint32_t* outOffset,
+                               LfnReadState* outLfnState = nullptr)
 {
     if (volumeIndex >= MAX_FAT_VOLUMES || !path || !out || !outSector || !outOffset) {
         s_lastPathLookupStatus = PATH_LOOKUP_INVALID_ARGUMENT;
@@ -2114,6 +2276,7 @@ static bool find_path_entry_at(uint8_t volumeIndex, const char* path,
         s_lastPathLookupStatus = PATH_LOOKUP_NOT_MOUNTED;
         return false;
     }
+    if (outLfnState) reset_lfn_state(*outLfnState);
 
     FATVolume& vol = s_volumes[volumeIndex];
     const char* p = path;
@@ -2134,7 +2297,9 @@ static bool find_path_entry_at(uint8_t volumeIndex, const char* path,
         while (*p == '/') ++p;
         if (component[0] == '\0') continue;
 
-        if (!find_in_directory_at(volumeIndex, currentCluster, component, &entry, &sector, &offset)) {
+        if (!find_in_directory_at(volumeIndex, currentCluster, component, &entry,
+                                  &sector, &offset,
+                                  *p == '\0' ? outLfnState : nullptr)) {
             return false;
         }
 
@@ -2344,7 +2509,12 @@ FileWriteStatus create_file_path_status(uint8_t volumeIndex, const char* path,
     serial::puts(fileName);
     serial::puts("\n");
     if (!make_short_name(fileName, shortName)) {
-        serial::puts("FAT_FILE_DIR_ENTRY_RESULT=FAT_FILE_WRITE_INVALID_NAME\n");
+        serial::puts("[FAT_FILE_CREATE_VALIDATION] stage=short-name-generation path=");
+        serial::puts(path);
+        serial::puts(" component=");
+        serial::puts(fileName);
+        serial::puts(" supported-format=8.3 result=invalid\n");
+        serial::puts("FAT_FILE_DIR_ENTRY_RESULT=FAT_FILE_WRITE_INVALID_NAME stage=short-name-generation\n");
         return FILE_WRITE_INVALID_NAME;
     }
 
@@ -2927,7 +3097,8 @@ bool delete_path(uint8_t volumeIndex, const char* path, bool directory)
     DirEntry entry;
     uint32_t sector = 0;
     uint32_t offset = 0;
-    if (!find_path_entry_at(volumeIndex, path, &entry, &sector, &offset)) {
+    LfnReadState lfnState{};
+    if (!find_path_entry_at(volumeIndex, path, &entry, &sector, &offset, &lfnState)) {
         s_lastDeleteStatus = DELETE_NOT_FOUND;
         return false;
     }
@@ -2944,7 +3115,29 @@ bool delete_path(uint8_t volumeIndex, const char* path, bool directory)
         return false;
     }
 
+    if (lfnState.locationsOverflow) {
+        s_lastDeleteStatus = DELETE_CORRUPT_DIRECTORY;
+        return false;
+    }
+    FAT32_LFNEntry originalLfnEntries[kMaxLfnEntriesPerFile]{};
+    if (lfnState.locationCount &&
+        !save_lfn_entries(vol, lfnState, originalLfnEntries)) {
+        s_lastDeleteStatus = DELETE_IO_ERROR;
+        return false;
+    }
+
+    for (uint8_t i = 0; i < lfnState.locationCount; ++i) {
+        FAT32_LFNEntry deletedEntry = originalLfnEntries[i];
+        deletedEntry.order = 0xE5u;
+        if (!write_lfn_entry_at(vol, lfnState.locations[i], &deletedEntry)) {
+            restore_lfn_entries(vol, lfnState, originalLfnEntries);
+            s_lastDeleteStatus = DELETE_IO_ERROR;
+            return false;
+        }
+    }
+
     if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
+        if (lfnState.locationCount) restore_lfn_entries(vol, lfnState, originalLfnEntries);
         s_lastDeleteStatus = DELETE_IO_ERROR;
         return false;
     }
@@ -2952,6 +3145,7 @@ bool delete_path(uint8_t volumeIndex, const char* path, bool directory)
     FAT32_DirEntry* de = reinterpret_cast<FAT32_DirEntry*>(&s_secBuf[offset]);
     de->name[0] = static_cast<char>(0xE5);
     if (write_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
+        if (lfnState.locationCount) restore_lfn_entries(vol, lfnState, originalLfnEntries);
         s_lastDeleteStatus = DELETE_IO_ERROR;
         return false;
     }
@@ -2993,6 +3187,11 @@ static bool hide_directory_entry(const FATVolume& vol, uint32_t sector, uint32_t
 
 bool rename_path(uint8_t volumeIndex, const char* oldPath, const char* newPath)
 {
+    // Expose the block result for callers that need to distinguish a transient
+    // media timeout from an unsupported or invalid rename request.
+    s_lastIoStatus = block::BLOCK_OK;
+    s_lastTraversalStatus = TRAVERSAL_OK;
+    s_lastPathLookupStatus = PATH_LOOKUP_NOT_ATTEMPTED;
     if (volumeIndex >= MAX_FAT_VOLUMES) return false;
     if (!s_volumes[volumeIndex].mounted) return false;
     if (!oldPath || !newPath) return false;
@@ -3021,12 +3220,22 @@ bool rename_path(uint8_t volumeIndex, const char* oldPath, const char* newPath)
     DirEntry entry;
     uint32_t oldSector = 0;
     uint32_t oldOffset = 0;
-    if (!find_in_directory_at(volumeIndex, oldParent, oldName, &entry, &oldSector, &oldOffset)) {
+    LfnReadState lfnState{};
+    if (!find_in_directory_at(volumeIndex, oldParent, oldName, &entry,
+                              &oldSector, &oldOffset, &lfnState)) {
         return false;
     }
     if (entry.attr & ATTR_READ_ONLY) return false;
 
     if (oldParent == newParent) {
+        if (lfnState.locationsOverflow) return false;
+        FAT32_LFNEntry originalLfnEntries[kMaxLfnEntriesPerFile]{};
+        FAT32_LFNEntry renamedLfnEntry{};
+        if (lfnState.locationCount &&
+            (!save_lfn_entries(vol, lfnState, originalLfnEntries) ||
+             !make_lfn_entry_for_short_name(newName, shortName, &renamedLfnEntry))) {
+            return false;
+        }
         if (read_volume_sector(vol, oldSector, s_secBuf) != block::BLOCK_OK) {
             return false;
         }
@@ -3034,13 +3243,53 @@ bool rename_path(uint8_t volumeIndex, const char* oldPath, const char* newPath)
         FAT32_DirEntry* de = reinterpret_cast<FAT32_DirEntry*>(&s_secBuf[oldOffset]);
         FAT32_DirEntry originalEntry;
         memcopy(&originalEntry, de, sizeof(FAT32_DirEntry));
+
+        for (uint8_t i = 0; i < lfnState.locationCount; ++i) {
+            FAT32_LFNEntry updatedEntry = originalLfnEntries[i];
+            if (i + 1u == lfnState.locationCount) {
+                updatedEntry = renamedLfnEntry;
+            } else {
+                updatedEntry.order = 0xE5u;
+            }
+            if (!write_lfn_entry_at(vol, lfnState.locations[i], &updatedEntry)) {
+                restore_lfn_entries(vol, lfnState, originalLfnEntries);
+                flush_volume_io(vol);
+                return false;
+            }
+        }
+
+        if (read_volume_sector(vol, oldSector, s_secBuf) != block::BLOCK_OK) {
+            if (lfnState.locationCount) restore_lfn_entries(vol, lfnState, originalLfnEntries);
+            flush_volume_io(vol);
+            return false;
+        }
+        de = reinterpret_cast<FAT32_DirEntry*>(&s_secBuf[oldOffset]);
         memcopy(de->name, shortName, 11);
 
-        if (write_volume_sector(vol, oldSector, s_secBuf) != block::BLOCK_OK) return false;
+        if (write_volume_sector(vol, oldSector, s_secBuf) != block::BLOCK_OK) {
+            restore_directory_entry(vol, oldSector, oldOffset, originalEntry);
+            if (lfnState.locationCount) restore_lfn_entries(vol, lfnState, originalLfnEntries);
+            flush_volume_io(vol);
+            return false;
+        }
         if (flush_volume_io(vol) == block::BLOCK_OK) return true;
+        const block::Status renameFailureStatus = s_lastIoStatus;
         serial::puts("LFPASTE_RENAME_ROLLBACK_BEGIN same-parent\n");
-        restore_directory_entry(vol, oldSector, oldOffset, originalEntry);
-        flush_volume_io(vol);
+        bool rollbackWritesOk = restore_directory_entry(vol, oldSector, oldOffset, originalEntry);
+        if (lfnState.locationCount) {
+            rollbackWritesOk = restore_lfn_entries(vol, lfnState, originalLfnEntries) && rollbackWritesOk;
+        }
+        const block::Status rollbackWriteStatus = s_lastIoStatus;
+        const block::Status rollbackFlushStatus = flush_volume_io(vol);
+        if (rollbackFlushStatus == block::BLOCK_OK && rollbackWritesOk) {
+            // A successful rollback must not erase the original failure from
+            // the VFS result. Callers use it to distinguish a retryable media
+            // timeout from an unsupported rename.
+            s_lastIoStatus = renameFailureStatus;
+        } else if (rollbackFlushStatus == block::BLOCK_OK &&
+                   rollbackWriteStatus != block::BLOCK_OK) {
+            s_lastIoStatus = rollbackWriteStatus;
+        }
         serial::puts("LFPASTE_RENAME_ROLLBACK_END same-parent\n");
         return false;
     }

@@ -23,7 +23,7 @@
 #include "include/kernel/serial_debug.h"
 
 // Forward declarations for power functions (defined in desktop.cpp, outside any namespace)
-extern void perform_shutdown();
+extern bool perform_shutdown(const char* caller);
 extern void perform_restart();
 extern void perform_sleep();
 
@@ -2957,7 +2957,9 @@ static void execute_command(const char* cmd) {
         perform_restart();
     } else if (str_eq(command, "shutdown") || str_eq(command, "poweroff") || str_eq(command, "halt")) {
         output_string("Shutting down...\n");
-        perform_shutdown();
+        if (!perform_shutdown("shell")) {
+            output_string("Shutdown aborted: filesystem synchronization failed.\n");
+        }
     } else if (str_eq(command, "sleep") || str_eq(command, "suspend")) {
         output_string("Entering sleep mode...\n");
         perform_sleep();

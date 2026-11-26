@@ -3,6 +3,7 @@
 #include "process.h"
 #include "ipc_bus.h"
 #include "start_menu_action_model.h"
+#include "taskbar_application_model.h"
 #include <string>
 #include <vector>
 
@@ -24,6 +25,9 @@ namespace gxos { namespace gui {
         static void ShowForDesktopItem(int x, int y, int desktopItemIndex);
         static void ShowForStartMenuApp(int x, int y, const std::string& appName,
                                         const std::string& canonicalAppId);
+        static void ShowForTaskbarApp(int x, int y, const TaskbarApplicationEntry& entry);
+        static void ShowForTaskbarOverflow(int x, int y,
+            const std::vector<TaskbarApplicationEntry>& entries, size_t firstOverflowEntry);
 
         /// Hide the menu
         static void Hide();
@@ -53,6 +57,31 @@ namespace gxos { namespace gui {
             bool separator;
             bool appAction;
             apps::AppActionInfo actionSnapshot;
+            enum class TaskbarCommand {
+                None,
+                ActivateWindow,
+                MinimizeWindow,
+                ToggleMaximizeWindow,
+                CloseWindow,
+                CloseAllWindows,
+                PinApp,
+                UnpinApp,
+                LaunchApp,
+                SelectOverflowEntry,
+                OverflowPreviousPage,
+                OverflowNextPage
+            } taskbarCommand{TaskbarCommand::None};
+            uint64_t taskbarWindowId{0};
+            std::string taskbarAppId;
+            int overflowPageDelta{0};
+            bool taskbarItemEnabled{true};
+        };
+
+        struct OverflowTarget {
+            std::string label;
+            std::string appId;
+            uint64_t windowId{0};
+            bool enabled{false};
         };
 
         static void buildItems();
@@ -68,6 +97,13 @@ namespace gxos { namespace gui {
         static bool s_desktopItemTargetIsDirectory;
         static std::string s_startMenuAppName;
         static std::string s_startMenuAppId;
+        static std::string s_taskbarAppId;
+        static uint64_t s_taskbarPrimaryWindow;
+        static bool s_taskbarAppMenu;
+        static bool s_taskbarOverflowMenu;
+        static std::vector<OverflowTarget> s_taskbarOverflowTargets;
+        static size_t s_taskbarOverflowPage;
+        static void buildTaskbarOverflowPage();
         static bool s_iconSubmenuVisible;
         static int s_iconSubmenuIndex;
 

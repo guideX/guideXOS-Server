@@ -48,6 +48,12 @@ std::string RightClickMenu::s_desktopItemTargetLabel;
 bool RightClickMenu::s_desktopItemTargetIsDirectory = false;
 std::string RightClickMenu::s_startMenuAppName;
 std::string RightClickMenu::s_startMenuAppId;
+std::string RightClickMenu::s_taskbarAppId;
+uint64_t RightClickMenu::s_taskbarPrimaryWindow = 0;
+bool RightClickMenu::s_taskbarAppMenu = false;
+bool RightClickMenu::s_taskbarOverflowMenu = false;
+std::vector<RightClickMenu::OverflowTarget> RightClickMenu::s_taskbarOverflowTargets;
+size_t RightClickMenu::s_taskbarOverflowPage = 0;
 bool RightClickMenu::s_iconSubmenuVisible = false;
 int RightClickMenu::s_iconSubmenuIndex = -1;
 
@@ -61,6 +67,12 @@ void RightClickMenu::Show(int x, int y) {
     s_desktopItemTargetIsDirectory = false;
     s_startMenuAppName.clear();
     s_startMenuAppId.clear();
+    s_taskbarAppId.clear();
+    s_taskbarPrimaryWindow = 0;
+    s_taskbarAppMenu = false;
+    s_taskbarOverflowMenu = false;
+    s_taskbarOverflowTargets.clear();
+    s_taskbarOverflowPage = 0;
     s_iconSubmenuVisible = false;
     buildItems();
     Logger::write(LogLevel::Info, "RightClickMenu shown");
@@ -84,6 +96,12 @@ void RightClickMenu::ShowForDesktopItem(int x, int y, int desktopItemIndex) {
     }
     s_startMenuAppName.clear();
     s_startMenuAppId.clear();
+    s_taskbarAppId.clear();
+    s_taskbarPrimaryWindow = 0;
+    s_taskbarAppMenu = false;
+    s_taskbarOverflowMenu = false;
+    s_taskbarOverflowTargets.clear();
+    s_taskbarOverflowPage = 0;
     s_iconSubmenuVisible = false;
     buildItems();
     Logger::write(LogLevel::Info, "RightClickMenu shown for desktop item");
@@ -100,6 +118,12 @@ void RightClickMenu::ShowForStartMenuApp(int x, int y, const std::string& appNam
     s_desktopItemTargetIsDirectory = false;
     s_startMenuAppName = appName;
     s_startMenuAppId = canonicalAppId;
+    s_taskbarAppId.clear();
+    s_taskbarPrimaryWindow = 0;
+    s_taskbarAppMenu = false;
+    s_taskbarOverflowMenu = false;
+    s_taskbarOverflowTargets.clear();
+    s_taskbarOverflowPage = 0;
     s_iconSubmenuVisible = false;
     buildItems();
     const ActiveDisplayConfiguration display = Compositor::activeDisplayConfiguration();
@@ -114,6 +138,77 @@ void RightClickMenu::ShowForStartMenuApp(int x, int y, const std::string& appNam
     Logger::write(LogLevel::Info, "Start Menu context menu created for app: " + appName);
 }
 
+void RightClickMenu::ShowForTaskbarApp(int x, int y, const TaskbarApplicationEntry& entry) {
+    s_x = x;
+    s_y = y;
+    s_visible = true;
+    s_desktopItemIndex = -1;
+    s_desktopItemTargetPath.clear();
+    s_desktopItemTargetLabel.clear();
+    s_desktopItemTargetIsDirectory = false;
+    s_startMenuAppName.clear();
+    s_startMenuAppId.clear();
+    s_taskbarAppId = entry.appId;
+    s_taskbarPrimaryWindow = TaskbarEntryPrimaryWindowId(entry);
+    s_taskbarAppMenu = true;
+    s_taskbarOverflowMenu = false;
+    s_taskbarOverflowTargets.clear();
+    s_taskbarOverflowPage = 0;
+    s_iconSubmenuVisible = false;
+    buildItems();
+    const ActiveDisplayConfiguration display = Compositor::activeDisplayConfiguration();
+    if (display.valid()) {
+        const int left = display.virtualDesktop.left;
+        const int top = display.virtualDesktop.top;
+        s_x = left + ClampStartMenuContextOrigin(s_x - left,
+            display.virtualDesktop.width(), kMenuW);
+        s_y = top + ClampStartMenuContextOrigin(s_y - top,
+            display.virtualDesktop.height(), menuHeight());
+    }
+    Logger::write(LogLevel::Info, "Taskbar application context menu created appId=" + entry.appId);
+}
+
+void RightClickMenu::ShowForTaskbarOverflow(int x, int y,
+    const std::vector<TaskbarApplicationEntry>& entries, size_t firstOverflowEntry) {
+    s_x = x;
+    s_y = y;
+    s_visible = true;
+    s_desktopItemIndex = -1;
+    s_desktopItemTargetPath.clear();
+    s_desktopItemTargetLabel.clear();
+    s_desktopItemTargetIsDirectory = false;
+    s_startMenuAppName.clear();
+    s_startMenuAppId.clear();
+    s_taskbarAppId.clear();
+    s_taskbarPrimaryWindow = 0;
+    s_taskbarAppMenu = false;
+    s_taskbarOverflowMenu = true;
+    s_taskbarOverflowTargets.clear();
+    s_taskbarOverflowPage = 0;
+    s_iconSubmenuVisible = false;
+    for (size_t i = firstOverflowEntry; i < entries.size(); ++i) {
+        const TaskbarApplicationEntry& entry = entries[i];
+        OverflowTarget target;
+        target.label = entry.label.empty() ? "Application" : entry.label;
+        target.appId = entry.appId;
+        target.windowId = TaskbarEntryWindowForClick(entry);
+        target.enabled = target.windowId != 0 || entry.relaunchable;
+        s_taskbarOverflowTargets.push_back(std::move(target));
+    }
+    buildTaskbarOverflowPage();
+    const ActiveDisplayConfiguration display = Compositor::activeDisplayConfiguration();
+    if (display.valid()) {
+        const int left = display.virtualDesktop.left;
+        const int top = display.virtualDesktop.top;
+        s_x = left + ClampStartMenuContextOrigin(s_x - left,
+            display.virtualDesktop.width(), kMenuW);
+        s_y = top + ClampStartMenuContextOrigin(s_y - top,
+            display.virtualDesktop.height(), menuHeight());
+    }
+    Logger::write(LogLevel::Info, "Taskbar overflow menu shown entries=" +
+        std::to_string(s_taskbarOverflowTargets.size()));
+}
+
 void RightClickMenu::Hide() {
     s_visible = false;
     s_desktopItemIndex = -1;
@@ -122,6 +217,12 @@ void RightClickMenu::Hide() {
     s_desktopItemTargetIsDirectory = false;
     s_startMenuAppName.clear();
     s_startMenuAppId.clear();
+    s_taskbarAppId.clear();
+    s_taskbarPrimaryWindow = 0;
+    s_taskbarAppMenu = false;
+    s_taskbarOverflowMenu = false;
+    s_taskbarOverflowTargets.clear();
+    s_taskbarOverflowPage = 0;
     s_iconSubmenuVisible = false;
     s_items.clear();
 }
@@ -136,6 +237,37 @@ bool RightClickMenu::IsStartMenuAppMenuVisible() {
 
 int RightClickMenu::menuHeight() {
     return (int)s_items.size() * kItemH;
+}
+
+void RightClickMenu::buildTaskbarOverflowPage() {
+    s_items.clear();
+    const size_t pageSize = 8;
+    const size_t pageCount = std::max<size_t>(1,
+        (s_taskbarOverflowTargets.size() + pageSize - 1) / pageSize);
+    if (s_taskbarOverflowPage >= pageCount) s_taskbarOverflowPage = pageCount - 1;
+    if (s_taskbarOverflowPage > 0) {
+        MenuItem item{"Previous applications", false, false, false};
+        item.taskbarCommand = MenuItem::TaskbarCommand::OverflowPreviousPage;
+        item.overflowPageDelta = -1;
+        s_items.push_back(std::move(item));
+    }
+    const size_t start = s_taskbarOverflowPage * pageSize;
+    const size_t end = std::min(s_taskbarOverflowTargets.size(), start + pageSize);
+    for (size_t i = start; i < end; ++i) {
+        const OverflowTarget& target = s_taskbarOverflowTargets[i];
+        MenuItem item{target.label, false, false, false};
+        item.taskbarCommand = MenuItem::TaskbarCommand::SelectOverflowEntry;
+        item.taskbarWindowId = target.windowId;
+        item.taskbarAppId = target.appId;
+        item.taskbarItemEnabled = target.enabled;
+        s_items.push_back(std::move(item));
+    }
+    if (s_taskbarOverflowPage + 1 < pageCount) {
+        MenuItem item{"More applications", false, false, false};
+        item.taskbarCommand = MenuItem::TaskbarCommand::OverflowNextPage;
+        item.overflowPageDelta = 1;
+        s_items.push_back(std::move(item));
+    }
 }
 
 bool RightClickMenu::ContainsPoint(int mx, int my) {
@@ -153,6 +285,77 @@ bool RightClickMenu::ContainsPoint(int mx, int my) {
 
 void RightClickMenu::buildItems() {
     s_items.clear();
+    if (s_taskbarOverflowMenu) {
+        buildTaskbarOverflowPage();
+        return;
+    }
+    if (s_taskbarAppMenu) {
+        const std::vector<TaskbarApplicationEntry> entries = Compositor::taskbarApplications();
+        const TaskbarApplicationEntry* current = nullptr;
+        for (const TaskbarApplicationEntry& entry : entries) {
+            if ((!s_taskbarAppId.empty() && entry.appId == s_taskbarAppId) ||
+                (s_taskbarAppId.empty() && TaskbarEntryPrimaryWindowId(entry) == s_taskbarPrimaryWindow)) {
+                current = &entry;
+                break;
+            }
+        }
+        if (!current) return;
+        using Command = MenuItem::TaskbarCommand;
+        const std::vector<TaskbarContextAction> actions = BuildTaskbarContextActions(*current);
+        for (const TaskbarContextAction& action : actions) {
+            std::string label;
+            Command command = Command::None;
+            switch (action.kind) {
+            case TaskbarContextActionKind::ActivateWindow: {
+                const auto window = std::find_if(current->windows.begin(), current->windows.end(), [&action](const TaskbarWindowSnapshot& item) {
+                    return item.id == action.windowId;
+                });
+                if (window == current->windows.end()) continue;
+                label = (window->minimized || window->tombstoned ? "Restore: " : "Activate: ") +
+                    (window->title.empty() ? current->label : window->title);
+                command = Command::ActivateWindow;
+                break;
+            }
+            case TaskbarContextActionKind::MinimizeWindow:
+                label = "Minimize";
+                command = Command::MinimizeWindow;
+                break;
+            case TaskbarContextActionKind::ToggleMaximizeWindow: {
+                const auto window = std::find_if(current->windows.begin(), current->windows.end(), [&action](const TaskbarWindowSnapshot& item) {
+                    return item.id == action.windowId;
+                });
+                label = window != current->windows.end() && window->maximized ? "Restore Down" : "Maximize";
+                command = Command::ToggleMaximizeWindow;
+                break;
+            }
+            case TaskbarContextActionKind::CloseWindow:
+                label = "Close Window";
+                command = Command::CloseWindow;
+                break;
+            case TaskbarContextActionKind::CloseAllWindows:
+                label = "Close All Windows";
+                command = Command::CloseAllWindows;
+                break;
+            case TaskbarContextActionKind::PinApp:
+                label = "Pin to Taskbar";
+                command = Command::PinApp;
+                break;
+            case TaskbarContextActionKind::UnpinApp:
+                label = "Unpin from Taskbar";
+                command = Command::UnpinApp;
+                break;
+            case TaskbarContextActionKind::LaunchApp:
+                label = "Launch";
+                command = Command::LaunchApp;
+                break;
+            }
+            MenuItem item{label, false, false, false};
+            item.taskbarCommand = command;
+            item.taskbarWindowId = action.windowId;
+            s_items.push_back(std::move(item));
+        }
+        return;
+    }
     if (!s_startMenuAppName.empty()) {
         const apps::AppActionList snapshot = s_startMenuAppId.empty()
             ? apps::AppActionList{}
@@ -259,6 +462,71 @@ bool RightClickMenu::HandleClick(int mx, int my) {
     if (mx >= s_x && mx <= s_x + kMenuW && my >= s_y && my <= s_y + menuH) {
         int idx = (my - s_y) / kItemH;
         if (idx >= 0 && idx < (int)s_items.size()) {
+            const MenuItem selectedItem = s_items[idx];
+            using Command = MenuItem::TaskbarCommand;
+            if (selectedItem.taskbarCommand != Command::None) {
+                switch (selectedItem.taskbarCommand) {
+                case Command::ActivateWindow:
+                    Compositor::dispatchTaskbarWindowAction(TaskbarWindowAction::Activate, selectedItem.taskbarWindowId);
+                    break;
+                case Command::MinimizeWindow:
+                    Compositor::dispatchTaskbarWindowAction(TaskbarWindowAction::Minimize, selectedItem.taskbarWindowId);
+                    break;
+                case Command::ToggleMaximizeWindow:
+                    Compositor::dispatchTaskbarWindowAction(TaskbarWindowAction::ToggleMaximize, selectedItem.taskbarWindowId);
+                    break;
+                case Command::CloseWindow:
+                    Compositor::dispatchTaskbarWindowAction(TaskbarWindowAction::Close, selectedItem.taskbarWindowId);
+                    break;
+                case Command::CloseAllWindows:
+                    Compositor::dispatchTaskbarCloseAll(s_taskbarAppId);
+                    break;
+                case Command::PinApp:
+                    Compositor::pinTaskbarApp(s_taskbarAppId);
+                    break;
+                case Command::UnpinApp:
+                    Compositor::unpinTaskbarApp(s_taskbarAppId);
+                    break;
+                case Command::LaunchApp: {
+                    std::string error;
+                    Compositor::launchTaskbarApp(s_taskbarAppId, error);
+                    break;
+                }
+                case Command::SelectOverflowEntry:
+                    if (selectedItem.taskbarItemEnabled) {
+                        if (selectedItem.taskbarWindowId != 0) {
+                            Compositor::dispatchTaskbarWindowAction(
+                                TaskbarWindowAction::Activate, selectedItem.taskbarWindowId);
+                        } else if (!selectedItem.taskbarAppId.empty()) {
+                            std::string error;
+                            Compositor::launchTaskbarApp(selectedItem.taskbarAppId, error);
+                        }
+                    }
+                    Hide();
+                    return true;
+                case Command::OverflowPreviousPage:
+                case Command::OverflowNextPage: {
+                    const int delta = selectedItem.overflowPageDelta;
+                    if (delta < 0 && s_taskbarOverflowPage > 0) --s_taskbarOverflowPage;
+                    else if (delta > 0) ++s_taskbarOverflowPage;
+                    buildTaskbarOverflowPage();
+                    const ActiveDisplayConfiguration display = Compositor::activeDisplayConfiguration();
+                    if (display.valid()) {
+                        const int left = display.virtualDesktop.left;
+                        const int top = display.virtualDesktop.top;
+                        s_x = left + ClampStartMenuContextOrigin(s_x - left,
+                            display.virtualDesktop.width(), kMenuW);
+                        s_y = top + ClampStartMenuContextOrigin(s_y - top,
+                            display.virtualDesktop.height(), menuHeight());
+                    }
+                    return true;
+                }
+                case Command::None:
+                    break;
+                }
+                Hide();
+                return true;
+            }
             if (s_items[idx].appAction) {
                 const apps::AppActionInfo selectedAction = s_items[idx].actionSnapshot;
                 const apps::AppActionInvocationResult result =

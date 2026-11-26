@@ -5919,12 +5919,18 @@ void FileExplorerApp::pasteClipboardTo(const char* destinationDirectory) {
     serial::puts("[fileexplorer-bm] FILE_CLIPBOARD_CONTEXT_COMMAND=PASTE destination=");
     serial::puts(destinationDirectory ? destinationDirectory : "(null)");
     serial::puts("\n");
+    const uint32_t operationOwnerWindowId = m_window ? m_window->id : 0;
+    const bool tracksTaskbarActivity = operationOwnerWindowId != 0 &&
+        compositor::TaskbarManager::beginFileOperationActivity(operationOwnerWindowId);
     file_clipboard::PasteResult result = file_clipboard::paste_to_directory(destinationDirectory);
     setStatus(file_clipboard::paste_result_message(result));
     if (result == file_clipboard::PasteResult::Success) {
         file_clipboard::begin_paste_refresh();
         refresh();
         file_clipboard::note_paste_refresh(true);
+    }
+    if (tracksTaskbarActivity) {
+        compositor::TaskbarManager::endFileOperationActivity(operationOwnerWindowId);
     }
     invalidate();
 }

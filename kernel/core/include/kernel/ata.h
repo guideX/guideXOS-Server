@@ -134,6 +134,8 @@ struct ATADevice {
     uint8_t  ahciPort;            // AHCI port number (if AHCI)
     uint64_t abar;                // AHCI Base Address (MMIO)
     bool     lba48;               // supports 48-bit LBA
+    bool     flushCache;          // IDENTIFY word 83 bit 12
+    bool     flushCacheExt;       // IDENTIFY word 83 bit 13
     uint64_t totalSectors;
     uint32_t sectorSize;          // almost always 512
     char     model[41];           // null-terminated model string
