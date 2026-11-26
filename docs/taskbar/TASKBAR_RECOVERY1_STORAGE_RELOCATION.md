@@ -95,7 +95,7 @@ The ISO was not rebuilt in this recovery. The missing commit objects prevent ind
 
 The archived QAC-managed QEMU run reports successful UEFI boot, kernel startup, read-only `wallimg` root, `/system` mount, wallpaper, Start Menu, File Explorer, minimize/restore preview, and auto-hide/reveal. It also reports that the Start Menu shutdown confirmation did not appear and graceful ACPI powerdown did not stop the guest; QAC’s owner stopped its managed child. Context-menu behavior is not recorded as verified. That run was QEMU-only; VirtualBox qualification remains pending.
 
-At the current inspection, QAC has an active acceptance reservation (`dc3bd0ce6d984ebe9245f066da65fa63`) owned by process 12128 with live QEMU child 21956. No new QAC request or guest was started. The previous archived QAC result is not a new qualification run for this recovery.
+The first QAC state-file snapshot showed an active acceptance reservation (`dc3bd0ce6d984ebe9245f066da65fa63`) owned by process 12128 with live QEMU child 21956. No QAC request or guest was started by this recovery. At the final recheck, the reservation list was empty and no `qemu-system` process was running. This is a point-in-time availability snapshot; the previous archived QAC result is not a new qualification run for this recovery.
 
 The previous report’s VirtualBox starting settings were: **Other/Unknown (64-bit)**, 2 CPUs, 2 GiB RAM, EFI enabled, optical ISO only with no hard disk, VBoxVGA, 128 MiB video memory, 3D acceleration off, and PS/2 keyboard and mouse. Avoid USB Tablet input. These are setup suggestions, not evidence of VirtualBox compatibility. The ISO-only `wallimg` boot is read-only, so taskbar settings and user files do not persist between boots.
 
@@ -107,7 +107,7 @@ The review ISO itself already exists and its byte-level checksum and UEFI boot c
 
 ## 8. Changes and final worktree state
 
-This report is the only intended change in this recovery. It will be committed locally on the existing `TASKBAR_IMPROVEMENTS` branch. No source files, other worktrees, mainline checkout, frozen release artifacts, or NATIVE_DB_STORAGE changes were modified. Nothing was pushed or merged.
+This report is the only change in this recovery. It is committed locally on the existing `TASKBAR_IMPROVEMENTS` branch. No source files, other worktrees, mainline checkout, frozen release artifacts, or NATIVE_DB_STORAGE changes were modified. Nothing was pushed or merged.
 
 ## 9. Exact next steps toward INTEGRATION3
 
