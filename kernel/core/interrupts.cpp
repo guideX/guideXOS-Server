@@ -195,8 +195,12 @@ struct ApicBaseGpEvidence {
     uint64_t ss;
     uint64_t continuation_rip;
     uint64_t continuation_reached;
+    // Bit 0: RSP at the continuation equals the armed RSP. Bit 1: R11D still
+    // holds the armed index. Bit 2: ECX still holds the armed index.
+    uint64_t continuation_integrity;
 };
-static_assert(sizeof(ApicBaseGpEvidence) == 72, "AMD64 GP evidence layout");
+static_assert(sizeof(ApicBaseGpEvidence) == 80, "AMD64 GP evidence layout");
+constexpr uint64_t kApicBaseContinuationIntegrityAll = 0x7;
 extern "C" volatile ApicBaseGpEvidence gxos_amd64_apic_base_gp_evidence;
 extern "C" volatile uint64_t apic_base_probe_rsp;
 extern "C" volatile uint32_t apic_base_probe_msr;
@@ -830,6 +834,95 @@ static void load_idt()
 // ----------------------------------------------------------------
 
 #if defined(GXOS_ENABLE_BSP_APIC_BASE_PROBE_DIAGNOSTIC)
+#if defined(GXOS_ENABLE_BSP_APIC_BASE_GP_QUALIFICATION_DIAGNOSTIC)
+static bool apic_base_probe_cleanup_verified()
+{
+    IDTPtr current{};
+    asm volatile("sidt %0" : "=m"(current));
+    return current.limit == s_idtPtr.limit && current.base == s_idtPtr.base &&
+           apic_base_probe_rsp == 0 && apic_base_probe_msr == 0;
+}
+
+[[noreturn]] static void apic_base_probe_fail_closed()
+{
+    serial::puts("[CPU7B2R1] probe-cleanup=FAILED fail-stop=1\n");
+    gxos_amd64_apic_base_emergency_stop();
+    for (;;) arch::halt();
+}
+
+// One opt-in exact-site #GP(0) qualification read. The destination is a
+// sentinel and the assembly publishes only an index 0x1B result, even if a
+// hypervisor or emulator returns from RDMSR instead of delivering #GP(0).
+static void qualify_exact_site_gp(const IDTPtr& probe_idtr, uint32_t msr_index, const char* label)
+{
+    constexpr uint64_t kSuppressedResult = 0xD15EA5EDBAD0C0DEull;
+    uint64_t suppressed_result = kSuppressedResult;
+    const auto fault_status = gxos_amd64_read_boot_apic_base(
+        &suppressed_result, &probe_idtr, &s_idtPtr, msr_index);
+    if (!apic_base_probe_cleanup_verified() || suppressed_result != kSuppressedResult) {
+        apic_base_probe_fail_closed();
+    }
+
+    ApicBaseGpEvidence evidence{};
+    evidence.vector = gxos_amd64_apic_base_gp_evidence.vector;
+    evidence.error_code = gxos_amd64_apic_base_gp_evidence.error_code;
+    evidence.instruction_rip = gxos_amd64_apic_base_gp_evidence.instruction_rip;
+    evidence.cs = gxos_amd64_apic_base_gp_evidence.cs;
+    evidence.rflags = gxos_amd64_apic_base_gp_evidence.rflags;
+    evidence.rsp = gxos_amd64_apic_base_gp_evidence.rsp;
+    evidence.ss = gxos_amd64_apic_base_gp_evidence.ss;
+    evidence.continuation_rip = gxos_amd64_apic_base_gp_evidence.continuation_rip;
+    evidence.continuation_reached = gxos_amd64_apic_base_gp_evidence.continuation_reached;
+    evidence.continuation_integrity = gxos_amd64_apic_base_gp_evidence.continuation_integrity;
+    const uint64_t rejected_flags = (1ull << 8) | (1ull << 9) | (1ull << 10) |
+                                    (1ull << 14) | (1ull << 17);
+    const bool delivered = fault_status == ApicBaseProbeStatus::GeneralProtection &&
+        evidence.vector == 13 && evidence.error_code == 0 &&
+        evidence.instruction_rip == reinterpret_cast<uint64_t>(gxos_amd64_apic_base_rdmsr) &&
+        evidence.cs == amd64_protected_task::kKernelCodeSelector &&
+        evidence.ss == amd64_protected_task::kKernelDataSelector && evidence.rsp != 0 &&
+        (evidence.rflags & rejected_flags) == 0 &&
+        evidence.continuation_rip == reinterpret_cast<uint64_t>(gxos_amd64_apic_base_fault) &&
+        evidence.continuation_reached == 1 &&
+        evidence.continuation_integrity == kApicBaseContinuationIntegrityAll;
+
+    serial::puts(label);
+    if (delivered) {
+        serial::puts("delivered vector=13 error=0 rip=0x");
+        serial::put_hex64(evidence.instruction_rip);
+        serial::puts(" cs=0x");
+        serial::put_hex64(evidence.cs);
+        serial::puts(" rsp=0x");
+        serial::put_hex64(evidence.rsp);
+        serial::puts(" rflags=0x");
+        serial::put_hex64(evidence.rflags);
+        serial::puts(" ss=0x");
+        serial::put_hex64(evidence.ss);
+        serial::puts(" continuation=0x");
+        serial::put_hex64(evidence.continuation_rip);
+        serial::puts(" reached=1 integrity=0x");
+        serial::put_hex64(evidence.continuation_integrity);
+        serial::puts(" result=suppressed cleanup=clean\n");
+    } else if (fault_status == ApicBaseProbeStatus::Observed) {
+        serial::puts("not-delivered returned-value=suppressed cleanup=clean\n");
+    } else {
+        serial::puts("rejected status=");
+        serial::put_hex64(static_cast<uint64_t>(fault_status));
+        serial::puts(" vector=0x");
+        serial::put_hex64(evidence.vector);
+        serial::puts(" error=0x");
+        serial::put_hex64(evidence.error_code);
+        serial::puts(" rip=0x");
+        serial::put_hex64(evidence.instruction_rip);
+        serial::puts(" reached=0x");
+        serial::put_hex64(evidence.continuation_reached);
+        serial::puts(" integrity=0x");
+        serial::put_hex64(evidence.continuation_integrity);
+        serial::puts(" result=suppressed cleanup=clean\n");
+    }
+}
+#endif
+
 static ApicBaseProbeStatus read_boot_apic_base(uint64_t& value)
 {
     // Only the cold BSP interrupt initialization can call this reader. Once
@@ -854,75 +947,22 @@ static ApicBaseProbeStatus read_boot_apic_base(uint64_t& value)
     const IDTPtr probe_idtr{sizeof(s_apic_probe_idt) - 1u,
                             reinterpret_cast<uint64_t>(s_apic_probe_idt)};
 #if defined(GXOS_ENABLE_BSP_APIC_BASE_GP_QUALIFICATION_DIAGNOSTIC)
-    const auto cleanup_verified = []() {
-        IDTPtr current{};
-        asm volatile("sidt %0" : "=m"(current));
-        return current.limit == s_idtPtr.limit && current.base == s_idtPtr.base &&
-               apic_base_probe_rsp == 0 && apic_base_probe_msr == 0;
-    };
-    const auto fail_closed = []() {
-        serial::puts("[CPU7B2R1] probe-cleanup=FAILED fail-stop=1\n");
-        gxos_amd64_apic_base_emergency_stop();
-        for (;;) arch::halt();
-    };
-
-    // This reserved MSR read exists only in the explicitly enabled R1 guest
-    // lane. Its destination is a sentinel and the assembly never publishes
-    // a value for this index, even if a hypervisor incorrectly returns one.
+    // CPU7B2R1 historical index. QEMU 11.0.0 returns zero without #GP for an
+    // unknown index under both WHPX (MSR exit: "return 0 on read") and TCG
+    // (helper_rdmsr default case), so this read is retained only as evidence.
     constexpr uint32_t kQualificationInvalidMsr = 0xFFFFFFFFu;
-    constexpr uint64_t kSuppressedResult = 0xD15EA5EDBAD0C0DEull;
-    uint64_t suppressed_result = kSuppressedResult;
-    const auto fault_status = gxos_amd64_read_boot_apic_base(
-        &suppressed_result, &probe_idtr, &s_idtPtr, kQualificationInvalidMsr);
-    if (!cleanup_verified() || suppressed_result != kSuppressedResult) fail_closed();
-
-    ApicBaseGpEvidence evidence{};
-    evidence.vector = gxos_amd64_apic_base_gp_evidence.vector;
-    evidence.error_code = gxos_amd64_apic_base_gp_evidence.error_code;
-    evidence.instruction_rip = gxos_amd64_apic_base_gp_evidence.instruction_rip;
-    evidence.cs = gxos_amd64_apic_base_gp_evidence.cs;
-    evidence.rflags = gxos_amd64_apic_base_gp_evidence.rflags;
-    evidence.rsp = gxos_amd64_apic_base_gp_evidence.rsp;
-    evidence.ss = gxos_amd64_apic_base_gp_evidence.ss;
-    evidence.continuation_rip = gxos_amd64_apic_base_gp_evidence.continuation_rip;
-    evidence.continuation_reached = gxos_amd64_apic_base_gp_evidence.continuation_reached;
-    const uint64_t rejected_flags = (1ull << 8) | (1ull << 9) | (1ull << 10) |
-                                    (1ull << 14) | (1ull << 17);
-    const bool delivered = fault_status == ApicBaseProbeStatus::GeneralProtection &&
-        evidence.vector == 13 && evidence.error_code == 0 &&
-        evidence.instruction_rip == reinterpret_cast<uint64_t>(gxos_amd64_apic_base_rdmsr) &&
-        evidence.cs == amd64_protected_task::kKernelCodeSelector &&
-        evidence.ss == amd64_protected_task::kKernelDataSelector && evidence.rsp != 0 &&
-        (evidence.rflags & rejected_flags) == 0 &&
-        evidence.continuation_rip == reinterpret_cast<uint64_t>(gxos_amd64_apic_base_fault) &&
-        evidence.continuation_reached == 1;
-
-    serial::puts("[CPU7B2R1] invalid-msr-gp=");
-    if (delivered) {
-        serial::puts("delivered vector=13 error=0 rip=0x");
-        serial::put_hex64(evidence.instruction_rip);
-        serial::puts(" cs=0x");
-        serial::put_hex64(evidence.cs);
-        serial::puts(" rsp=0x");
-        serial::put_hex64(evidence.rsp);
-        serial::puts(" rflags=0x");
-        serial::put_hex64(evidence.rflags);
-        serial::puts(" ss=0x");
-        serial::put_hex64(evidence.ss);
-        serial::puts(" continuation=0x");
-        serial::put_hex64(evidence.continuation_rip);
-        serial::puts(" reached=1 result=suppressed cleanup=clean\n");
-    } else if (fault_status == ApicBaseProbeStatus::Observed) {
-        serial::puts("not-delivered returned-value=suppressed cleanup=clean\n");
-    } else {
-        serial::puts("rejected status=");
-        serial::put_hex64(static_cast<uint64_t>(fault_status));
-        serial::puts(" result=suppressed cleanup=clean\n");
-    }
+    // CPU7B3 index. 0x800 is reserved in the architectural x2APIC MSR range.
+    // RDMSR raises #GP(0) there in xAPIC mode for every index, and in x2APIC
+    // mode for a reserved index. It reads no APIC register in either mode and
+    // needs no LAPIC MMIO mapping.
+    constexpr uint32_t kQualificationX2ApicReservedMsr = 0x800u;
+    qualify_exact_site_gp(probe_idtr, kQualificationInvalidMsr, "[CPU7B2R1] invalid-msr-gp=");
+    qualify_exact_site_gp(probe_idtr, kQualificationX2ApicReservedMsr,
+                          "[CPU7B3] x2apic-reserved-msr-gp=");
 
     const auto followup = gxos_amd64_read_boot_apic_base(
         &value, &probe_idtr, &s_idtPtr, 0x1Bu);
-    if (!cleanup_verified()) fail_closed();
+    if (!apic_base_probe_cleanup_verified()) apic_base_probe_fail_closed();
     serial::puts("[CPU7B2R1] followup-apic-base=");
     serial::puts(followup == ApicBaseProbeStatus::Observed ? "observed" : "failed");
     serial::puts(" cleanup=clean\n");

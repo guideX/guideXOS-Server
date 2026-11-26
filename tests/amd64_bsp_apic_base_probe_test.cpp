@@ -22,6 +22,7 @@ extern "C" int gxos_test_apic_base_gp_matches(const GpFrame*, uint64_t, uint32_t
 extern "C" int gxos_test_apic_base_probe_state_clean();
 extern "C" int gxos_test_apic_base_probe_context_idle();
 extern "C" void gxos_test_apic_base_probe_set_context(uint64_t, uint32_t);
+extern "C" int gxos_test_apic_base_publishes_index(uint32_t);
 
 namespace {
 
@@ -189,6 +190,32 @@ void test_stale_probe_context_rejection()
     assert(gxos_test_apic_base_probe_state_clean());
 }
 
+void test_qualification_indices()
+{
+    // CPU7B3: the qualification lane arms the same exact-site matcher with
+    // non-0x1B indices. The matcher compares ECX with the armed index, so a
+    // #GP for one index can never claim the fixup armed for another.
+    // The hosted matcher arms 0x1B, so only ECX=0x1B may match.
+    const GpFrame expected{0, gxos_test_apic_base_fault_rip(), 8, 0x10002, 0x123408, 0x10};
+    for (uint32_t ecx : {0x1Bu, 0x0u, 0x800u, 0x801u, 0x8000001Bu, 0xFFFFFFFFu}) {
+        assert(gxos_test_apic_base_gp_matches(&expected, expected.rsp, ecx, 13) == (ecx == 0x1Bu));
+        assert(gxos_test_apic_base_probe_state_clean());
+    }
+    for (uint32_t armed : {0x800u, 0xFFFFFFFFu}) {
+        gxos_test_apic_base_probe_set_context(0, armed);
+        assert(!gxos_test_apic_base_probe_context_idle());
+        gxos_test_apic_base_probe_set_context(0, 0);
+        assert(gxos_test_apic_base_probe_context_idle());
+    }
+
+    // Only IA32_APIC_BASE may publish a returned value. Reserved and
+    // x2APIC-range qualification indices stay fail-closed if RDMSR returns.
+    assert(gxos_test_apic_base_publishes_index(0x1B));
+    for (uint32_t index : {0x0u, 0x1Au, 0x1Cu, 0x800u, 0x802u, 0x8FFu, 0x8000001Bu, 0xFFFFFFFFu}) {
+        assert(!gxos_test_apic_base_publishes_index(index));
+    }
+}
+
 } // namespace
 
 int main()
@@ -198,5 +225,7 @@ int main()
     test_failures_reentry_and_cleanup();
     test_assembly_frame_matcher();
     test_stale_probe_context_rejection();
-    std::puts("CPU7B2 hosted: 5 groups passed (simulated read results and raw #GP frame matching)");
+    test_qualification_indices();
+    std::puts("CPU7B2/CPU7B3 hosted: 6 groups passed (simulated read results, raw #GP frame matching, "
+              "qualification index publication)");
 }

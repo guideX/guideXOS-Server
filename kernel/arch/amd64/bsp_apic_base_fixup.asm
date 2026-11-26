@@ -12,7 +12,13 @@ extern exception_stub_13
 %define KERNEL_SS 0x10
 %define UNSUPPORTED_FLAGS ((1 << 8) | (1 << 10) | (1 << 14) | (1 << 17)) ; TF, DF, NT, VM
 %define INTERRUPT_FLAG (1 << 9)
-%define QUALIFICATION_INVALID_MSR 0xffffffff
+; Only the architectural IA32_APIC_BASE index may publish a value. Every
+; qualification index (reserved or x2APIC-reserved) is fail-closed even when a
+; hypervisor or emulator returns from RDMSR instead of delivering #GP(0).
+%macro require_publishable_index 2 ; MSR index register (32-bit), reject
+    cmp %1, APIC_BASE_MSR
+    jne %2
+%endmacro
 
 %macro require_probe_context_idle 1
     cmp qword [rel apic_base_probe_rsp], 0
@@ -44,7 +50,7 @@ extern exception_stub_13
 
 ; RCX=output, RDX=temporary IDTR, R8=expected kernel IDTR, R9D=MSR index.
 ; The caller holds exclusive ownership. Status in EAX: 0 observed,
-; 1 context rejected, 2 #GP. The reserved-index result is never published.
+; 1 context rejected, 2 #GP. Only an index 0x1B result is ever published.
 gxos_amd64_read_boot_apic_base:
     require_probe_context_idle .reject_unarmed
     pushfq
@@ -80,6 +86,7 @@ gxos_amd64_read_boot_apic_base:
     mov qword [rel gxos_amd64_apic_base_gp_evidence + 48], 0
     mov qword [rel gxos_amd64_apic_base_gp_evidence + 56], 0
     mov qword [rel gxos_amd64_apic_base_gp_evidence + 64], 0
+    mov qword [rel gxos_amd64_apic_base_gp_evidence + 72], 0
     mov r11d, r9d
     mov r8, rcx
     lidt [rdx]
@@ -99,6 +106,22 @@ apic_base_rdmsr:
 global gxos_amd64_apic_base_fault
 gxos_amd64_apic_base_fault:
 apic_base_fault:
+    ; Record that IRETQ restored the armed stack and the handler preserved the
+    ; index registers. Uses only volatile R10 before the common cleanup.
+    xor r10d, r10d
+    cmp rsp, [rel apic_base_probe_rsp]
+    jne .rsp_checked
+    or r10d, 1
+.rsp_checked:
+    cmp r11d, dword [rel apic_base_probe_msr]
+    jne .r11_checked
+    or r10d, 2
+.r11_checked:
+    cmp ecx, dword [rel apic_base_probe_msr]
+    jne .ecx_checked
+    or r10d, 4
+.ecx_checked:
+    mov [rel gxos_amd64_apic_base_gp_evidence + 72], r10
     mov qword [rel gxos_amd64_apic_base_gp_evidence + 64], 1
     mov eax, 2
 apic_base_finish:
@@ -109,8 +132,7 @@ apic_base_finish:
     jnz apic_base_return
     cmp dword [rel gxos_amd64_apic_base_gp_evidence + 0], 0
     jne apic_base_return
-    cmp r11d, QUALIFICATION_INVALID_MSR
-    je apic_base_return
+    require_publishable_index r11d, apic_base_return
     mov [r8], r9
 apic_base_return:
     add rsp, 16
@@ -179,6 +201,7 @@ global gxos_test_apic_base_fault_rip
 global gxos_test_apic_base_probe_state_clean
 global gxos_test_apic_base_probe_context_idle
 global gxos_test_apic_base_probe_set_context
+global gxos_test_apic_base_publishes_index
 gxos_test_apic_base_gp_matches:
     xor eax, eax
     cmp r9d, 13
@@ -215,6 +238,15 @@ gxos_test_apic_base_probe_set_context:
     mov [rel apic_base_probe_rsp], rcx
     mov [rel apic_base_probe_msr], edx
     ret
+
+; RCX=MSR index. Returns 1 only if the reader would publish a value for it.
+gxos_test_apic_base_publishes_index:
+    xor eax, eax
+    mov r11d, ecx
+    require_publishable_index r11d, .publish_done
+    mov eax, 1
+.publish_done:
+    ret
 %endif
 
 section .bss align=8
@@ -224,4 +256,4 @@ global apic_base_probe_msr
 apic_base_probe_msr: resd 1
 alignb 8
 global gxos_amd64_apic_base_gp_evidence
-gxos_amd64_apic_base_gp_evidence: resq 9
+gxos_amd64_apic_base_gp_evidence: resq 10

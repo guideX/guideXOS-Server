@@ -33,6 +33,17 @@ foreach ($pattern in @('pushf', 'push\s+%rax', 'push\s+%r10', 'pop\s+%r10', 'pop
 if ($gpAssembly -match '\bcall\b|%(rbx|rbp|rsi|rdi|r12|r13|r14|r15)\b') {
     throw 'Emitted #GP handler calls code or uses a Microsoft x64 nonvolatile register.'
 }
+$readStart = $disassembly.IndexOf('<gxos_amd64_read_boot_apic_base>:')
+if ($readStart -lt 0 -or $gpStart -le $readStart) { throw 'The emitted object is missing the bounded reader symbol.' }
+$readAssembly = $disassembly.Substring($readStart, $gpStart - $readStart)
+# CPU7B3: only index 0x1B may publish, and the continuation records its
+# stack/index integrity before the common cleanup restores the IDTR.
+if (([regex]::Matches($readAssembly, 'cmp\s+\$0x1b,%r11d')).Count -lt 1 -or $readAssembly -match 'cmp\s+\$0xffffffff,%r11d') {
+    throw 'Emitted reader must gate value publication on index 0x1B only.'
+}
+foreach ($pattern in @('cmp\s+0x[0-9a-f]+\(%rip\),%rsp', 'mov\s+%r10,0x[0-9a-f]+\(%rip\)')) {
+    if ($readAssembly -notmatch $pattern) { throw "Emitted continuation is missing its integrity record: $pattern" }
+}
 if (([regex]::Matches($disassembly, '\brdmsr\b')).Count -ne 1) {
     throw 'Emitted APIC_BASE fixup object must contain exactly one authorized RDMSR site.'
 }
