@@ -181,9 +181,28 @@ static_assert(__builtin_offsetof(TSS64, ist2) == 44 && __builtin_offsetof(TSS64,
 static_assert(amd64_protected_task::kKernelCodeSelector == 0x08 &&
               amd64_protected_task::kKernelDataSelector == 0x10, "AMD64 probe fixup selectors");
 extern "C" ApicBaseProbeStatus gxos_amd64_read_boot_apic_base(
-    uint64_t* value, const IDTPtr* probe_idt, const IDTPtr* kernel_idt);
+    uint64_t* value, const IDTPtr* probe_idt, const IDTPtr* kernel_idt, uint32_t msr_index);
 extern "C" void gxos_amd64_apic_base_gp();
 extern "C" void gxos_amd64_apic_base_emergency_stop();
+#if defined(GXOS_ENABLE_BSP_APIC_BASE_GP_QUALIFICATION_DIAGNOSTIC)
+struct ApicBaseGpEvidence {
+    uint64_t vector;
+    uint64_t error_code;
+    uint64_t instruction_rip;
+    uint64_t cs;
+    uint64_t rflags;
+    uint64_t rsp;
+    uint64_t ss;
+    uint64_t continuation_rip;
+    uint64_t continuation_reached;
+};
+static_assert(sizeof(ApicBaseGpEvidence) == 72, "AMD64 GP evidence layout");
+extern "C" volatile ApicBaseGpEvidence gxos_amd64_apic_base_gp_evidence;
+extern "C" volatile uint64_t apic_base_probe_rsp;
+extern "C" volatile uint32_t apic_base_probe_msr;
+extern "C" void gxos_amd64_apic_base_rdmsr();
+extern "C" void gxos_amd64_apic_base_fault();
+#endif
 static IDTEntry s_apic_probe_idt[kIDTSize];
 alignas(16) static uint8_t s_apic_probe_nmi_stack[4096];
 alignas(16) static uint8_t s_apic_probe_double_fault_stack[4096];
@@ -834,7 +853,83 @@ static ApicBaseProbeStatus read_boot_apic_base(uint64_t& value)
                   0x8E, 0, s_apic_probe_idt);
     const IDTPtr probe_idtr{sizeof(s_apic_probe_idt) - 1u,
                             reinterpret_cast<uint64_t>(s_apic_probe_idt)};
-    return gxos_amd64_read_boot_apic_base(&value, &probe_idtr, &s_idtPtr);
+#if defined(GXOS_ENABLE_BSP_APIC_BASE_GP_QUALIFICATION_DIAGNOSTIC)
+    const auto cleanup_verified = []() {
+        IDTPtr current{};
+        asm volatile("sidt %0" : "=m"(current));
+        return current.limit == s_idtPtr.limit && current.base == s_idtPtr.base &&
+               apic_base_probe_rsp == 0 && apic_base_probe_msr == 0;
+    };
+    const auto fail_closed = []() {
+        serial::puts("[CPU7B2R1] probe-cleanup=FAILED fail-stop=1\n");
+        gxos_amd64_apic_base_emergency_stop();
+        for (;;) arch::halt();
+    };
+
+    // This reserved MSR read exists only in the explicitly enabled R1 guest
+    // lane. Its destination is a sentinel and the assembly never publishes
+    // a value for this index, even if a hypervisor incorrectly returns one.
+    constexpr uint32_t kQualificationInvalidMsr = 0xFFFFFFFFu;
+    constexpr uint64_t kSuppressedResult = 0xD15EA5EDBAD0C0DEull;
+    uint64_t suppressed_result = kSuppressedResult;
+    const auto fault_status = gxos_amd64_read_boot_apic_base(
+        &suppressed_result, &probe_idtr, &s_idtPtr, kQualificationInvalidMsr);
+    if (!cleanup_verified() || suppressed_result != kSuppressedResult) fail_closed();
+
+    ApicBaseGpEvidence evidence{};
+    evidence.vector = gxos_amd64_apic_base_gp_evidence.vector;
+    evidence.error_code = gxos_amd64_apic_base_gp_evidence.error_code;
+    evidence.instruction_rip = gxos_amd64_apic_base_gp_evidence.instruction_rip;
+    evidence.cs = gxos_amd64_apic_base_gp_evidence.cs;
+    evidence.rflags = gxos_amd64_apic_base_gp_evidence.rflags;
+    evidence.rsp = gxos_amd64_apic_base_gp_evidence.rsp;
+    evidence.ss = gxos_amd64_apic_base_gp_evidence.ss;
+    evidence.continuation_rip = gxos_amd64_apic_base_gp_evidence.continuation_rip;
+    evidence.continuation_reached = gxos_amd64_apic_base_gp_evidence.continuation_reached;
+    const uint64_t rejected_flags = (1ull << 8) | (1ull << 9) | (1ull << 10) |
+                                    (1ull << 14) | (1ull << 17);
+    const bool delivered = fault_status == ApicBaseProbeStatus::GeneralProtection &&
+        evidence.vector == 13 && evidence.error_code == 0 &&
+        evidence.instruction_rip == reinterpret_cast<uint64_t>(gxos_amd64_apic_base_rdmsr) &&
+        evidence.cs == amd64_protected_task::kKernelCodeSelector &&
+        evidence.ss == amd64_protected_task::kKernelDataSelector && evidence.rsp != 0 &&
+        (evidence.rflags & rejected_flags) == 0 &&
+        evidence.continuation_rip == reinterpret_cast<uint64_t>(gxos_amd64_apic_base_fault) &&
+        evidence.continuation_reached == 1;
+
+    serial::puts("[CPU7B2R1] invalid-msr-gp=");
+    if (delivered) {
+        serial::puts("delivered vector=13 error=0 rip=0x");
+        serial::put_hex64(evidence.instruction_rip);
+        serial::puts(" cs=0x");
+        serial::put_hex64(evidence.cs);
+        serial::puts(" rsp=0x");
+        serial::put_hex64(evidence.rsp);
+        serial::puts(" rflags=0x");
+        serial::put_hex64(evidence.rflags);
+        serial::puts(" ss=0x");
+        serial::put_hex64(evidence.ss);
+        serial::puts(" continuation=0x");
+        serial::put_hex64(evidence.continuation_rip);
+        serial::puts(" reached=1 result=suppressed cleanup=clean\n");
+    } else if (fault_status == ApicBaseProbeStatus::Observed) {
+        serial::puts("not-delivered returned-value=suppressed cleanup=clean\n");
+    } else {
+        serial::puts("rejected status=");
+        serial::put_hex64(static_cast<uint64_t>(fault_status));
+        serial::puts(" result=suppressed cleanup=clean\n");
+    }
+
+    const auto followup = gxos_amd64_read_boot_apic_base(
+        &value, &probe_idtr, &s_idtPtr, 0x1Bu);
+    if (!cleanup_verified()) fail_closed();
+    serial::puts("[CPU7B2R1] followup-apic-base=");
+    serial::puts(followup == ApicBaseProbeStatus::Observed ? "observed" : "failed");
+    serial::puts(" cleanup=clean\n");
+    return followup;
+#else
+    return gxos_amd64_read_boot_apic_base(&value, &probe_idtr, &s_idtPtr, 0x1Bu);
+#endif
 }
 
 static void init_pic(const guideXOS::BootInfo* probe_boot)

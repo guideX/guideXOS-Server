@@ -19,6 +19,9 @@ struct GpFrame {
 };
 extern "C" uint64_t gxos_test_apic_base_fault_rip();
 extern "C" int gxos_test_apic_base_gp_matches(const GpFrame*, uint64_t, uint32_t, uint32_t);
+extern "C" int gxos_test_apic_base_probe_state_clean();
+extern "C" int gxos_test_apic_base_probe_context_idle();
+extern "C" void gxos_test_apic_base_probe_set_context(uint64_t, uint32_t);
 
 namespace {
 
@@ -145,9 +148,13 @@ void test_assembly_frame_matcher()
 {
     const GpFrame expected{0, gxos_test_apic_base_fault_rip(), 8, 0x10002, 0x123408, 0x10};
     assert(gxos_test_apic_base_gp_matches(&expected, expected.rsp, 0x1B, 13));
+    assert(gxos_test_apic_base_probe_state_clean());
     assert(!gxos_test_apic_base_gp_matches(&expected, 0, 0x1B, 13));
+    assert(gxos_test_apic_base_probe_state_clean());
     assert(!gxos_test_apic_base_gp_matches(&expected, expected.rsp + 16, 0x1B, 13));
+    assert(gxos_test_apic_base_probe_state_clean());
     assert(!gxos_test_apic_base_gp_matches(&expected, expected.rsp, 0x1A, 13));
+    assert(gxos_test_apic_base_probe_state_clean());
     for (uint32_t vector = 0; vector < 256; ++vector) {
         if (vector != 13) assert(!gxos_test_apic_base_gp_matches(&expected, expected.rsp, 0x1B, vector));
     }
@@ -162,11 +169,24 @@ void test_assembly_frame_matcher()
     assert(!gxos_test_apic_base_gp_matches(&frame, expected.rsp, 0x1B, 13));
     frame.cs = 0x18; // CPL0 with a different selector still cannot claim the fixup.
     assert(!gxos_test_apic_base_gp_matches(&frame, expected.rsp, 0x1B, 13));
-    for (int bit : {8, 9, 14, 17}) {
+    for (int bit : {8, 9, 10, 14, 17}) {
         frame = expected;
         frame.rflags |= 1ull << bit;
         assert(!gxos_test_apic_base_gp_matches(&frame, expected.rsp, 0x1B, 13));
+        assert(gxos_test_apic_base_probe_state_clean());
     }
+}
+
+void test_stale_probe_context_rejection()
+{
+    assert(gxos_test_apic_base_probe_context_idle());
+    gxos_test_apic_base_probe_set_context(0x12345000, 0x1B);
+    assert(!gxos_test_apic_base_probe_context_idle());
+    gxos_test_apic_base_probe_set_context(0, 0x1B);
+    assert(!gxos_test_apic_base_probe_context_idle());
+    gxos_test_apic_base_probe_set_context(0, 0);
+    assert(gxos_test_apic_base_probe_context_idle());
+    assert(gxos_test_apic_base_probe_state_clean());
 }
 
 } // namespace
@@ -177,5 +197,6 @@ int main()
     test_context_and_capabilities();
     test_failures_reentry_and_cleanup();
     test_assembly_frame_matcher();
-    std::puts("CPU7B2 hosted: 4 groups passed (simulated read results and raw #GP frame matching)");
+    test_stale_probe_context_rejection();
+    std::puts("CPU7B2 hosted: 5 groups passed (simulated read results and raw #GP frame matching)");
 }
