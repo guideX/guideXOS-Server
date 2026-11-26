@@ -27,6 +27,8 @@ The recreated E: checkout is structurally healthy and begins at the independentl
 
 The full audit outputs and the starting tracked-file SHA-256 inventory are preserved in `E:\dev\SECURITY_SETTINGS_RECOVERY1_EVIDENCE`. No reset, clean, prune, force-push, or destructive checkout was used.
 
+The named backup location `E:\bkup` exists. Its top-level inventory and workstream-named entries directly under `dev`, `devgithub`, `devgitlab`, and `artifacts` contained no guideXOS Security Settings, SECURITY3G, or recovery candidates. The known `E:\dev\TASKBAR_RECOVERY1_BACKUP_20261126` bundle was inspected separately and does not contain the missing R2/R3 objects. A recursive listing under `E:\bkup` encountered an access-denied WindowsImageBackup log directory and was stopped; that disk image was not traversed or treated as evidence.
+
 ## Git history recovery matrix
 
 | Milestone | Historical commit | Commit recovered? | Source present? | Evidence present? | Action/status |
@@ -102,6 +104,6 @@ Kernel checks ran in detached verification worktrees under the evidence director
 
 ## Lineage, final state, and next action
 
-Recovery implementation is committed locally; this report is recorded in a separate local commit immediately after it. After that report commit, branch `SECURITY_SETTINGS` points at the report commit and the primary working tree is clean. The live remote baseline remains `cc8d9d0d418036041231cfc752bc07b555fda666`; no push or merge was performed. The existing `SECURITY-VNC1 — Authenticated VNC & Configurable Remote Login` roadmap remains future work and no VNC code was changed.
+Recovery implementation is committed locally; this report is recorded in a separate local commit immediately after it. A follow-up audit note records the bounded `E:\bkup` search above. After the follow-up note commit, branch `SECURITY_SETTINGS` points at that commit and the primary working tree is clean. The live remote baseline remains `cc8d9d0d418036041231cfc752bc07b555fda666`; no push or merge was performed. The roadmap item `SECURITY-VNC1 — Authenticated VNC & Configurable Remote Login` remains future work and no VNC code was changed.
 
 **Recommended next prompt:** “Continue SECURITY3G-R4 guest qualification from the reconstructed SECURITY_RECOVERY1 state. Prepare and hash fresh positive/negative candidates, locate a valid writable x64 OVMF VARS image, wait for QAC admission without modifying the coordinator, and record actual guest evidence before any acceptance claim.”
