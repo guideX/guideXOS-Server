@@ -256,7 +256,7 @@ Missing, because it was lost:
 - **Commit:** this report only. No source or script changes.
 - **Not committed (git-ignored on purpose):** the `third_party/` overlay. It is about 50 MB, and the licensing and identity decision belongs to RECOVERY2b.
 - **Build outputs:** kept under `E:\CodexArtifacts\…\dotnet-recovery2\`.
-- **Push status:** SSH `ssh -T git@github.com` gives `Permission denied (publickey)` with the configured `~/.ssh/github_leon2` key. The SSH push of `dotnet-recovery2` is therefore not possible from this machine as configured. HTTPS reads work. The closeout records whether a non-interactive HTTPS push succeeded.
+- **Push status:** SSH `ssh -T git@github.com` gives `Permission denied (publickey)` with the configured `~/.ssh/github_leon2` key. The SSH push of `dotnet-recovery2` is therefore not possible from this machine as configured. HTTPS reads work, but a non-interactive HTTPS push failed with `could not read Username for 'https://github.com'` because no credential is stored. **The branch is committed locally only and is not pushed.**
 - **Remaining uncommitted work:** none tracked.
 
 ## I. Next Luna prompt
