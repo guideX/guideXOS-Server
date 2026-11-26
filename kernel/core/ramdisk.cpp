@@ -24,6 +24,30 @@ static RamDisk s_disks[MAX_RAMDISKS];
 static uint8_t s_diskCount = 0;
 static bool    s_initialized = false;
 
+#if defined(GXOS_RAMDISK_STAGE_FINGERPRINTS) && (defined(__GNUC__) || defined(__clang__))
+static bool s_wallimgAttachFingerprintEmitted = false;
+
+static bool ramdisk_name_is_wallimg(const char* name)
+{
+    static const char expected[] = "wallimg";
+    if (!name) return false;
+    for (size_t i = 0; i < sizeof(expected); ++i) {
+        if (name[i] != expected[i]) return false;
+    }
+    return true;
+}
+
+static uint64_t ramdisk_sector0_fnv1a64(const void* data)
+{
+    const uint8_t* bytes = static_cast<const uint8_t*>(data);
+    uint64_t hash = 14695981039346656037ull;
+    for (size_t i = 0; i < RAMDISK_SECTOR_SIZE; ++i) {
+        hash = (hash ^ bytes[i]) * 1099511628211ull;
+    }
+    return hash;
+}
+#endif
+
 // Static memory pool for RAM disk allocation
 // Aligned to 4KB for potential DMA compatibility
 alignas(4096) static uint8_t s_memoryPool[RAMDISK_POOL_SIZE];
@@ -371,6 +395,18 @@ static uint8_t create_readonly_at_internal(const void* memory, size_t sizeBytes,
     if (!memory || sizeBytes < RAMDISK_SECTOR_SIZE) {
         return 0xFF;
     }
+
+#if defined(GXOS_RAMDISK_STAGE_FINGERPRINTS) && (defined(__GNUC__) || defined(__clang__))
+    if (!s_wallimgAttachFingerprintEmitted && ramdisk_name_is_wallimg(name)) {
+        const uint64_t fingerprint = ramdisk_sector0_fnv1a64(memory);
+        serial::puts("S22R28R3_STAGE_FP stage=ramdisk-attach base=0x");
+        serial::put_hex64(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(memory)));
+        serial::puts(" bytes=0x00000200 fnv1a64=0x");
+        serial::put_hex64(fingerprint);
+        serial::putc('\n');
+        s_wallimgAttachFingerprintEmitted = true;
+    }
+#endif
 
     uint8_t index = 0xFF;
     for (uint8_t i = 0; i < MAX_RAMDISKS; ++i) {

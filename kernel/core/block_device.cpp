@@ -9,6 +9,10 @@
 
 #include "include/kernel/block_device.h"
 
+#if defined(GXOS_RAMDISK_STAGE_FINGERPRINTS) && (defined(__GNUC__) || defined(__clang__))
+#include "include/kernel/serial_debug.h"
+#endif
+
 namespace kernel {
 namespace block {
 
@@ -19,6 +23,30 @@ namespace block {
 static BlockDevice s_devices[MAX_BLOCK_DEVICES];
 static uint8_t     s_deviceCount = 0;
 static uint64_t    s_deviceGenerations[MAX_BLOCK_DEVICES] = {};
+
+#if defined(GXOS_RAMDISK_STAGE_FINGERPRINTS) && (defined(__GNUC__) || defined(__clang__))
+static bool s_wallimgSector0ReadFingerprintEmitted = false;
+
+static bool block_name_is_wallimg(const char* name)
+{
+    static const char expected[] = "wallimg";
+    if (!name) return false;
+    for (size_t i = 0; i < sizeof(expected); ++i) {
+        if (name[i] != expected[i]) return false;
+    }
+    return true;
+}
+
+static uint64_t block_sector0_fnv1a64(const void* data)
+{
+    const uint8_t* bytes = static_cast<const uint8_t*>(data);
+    uint64_t hash = 14695981039346656037ull;
+    for (uint32_t i = 0; i < 512; ++i) {
+        hash = (hash ^ bytes[i]) * 1099511628211ull;
+    }
+    return hash;
+}
+#endif
 
 static void advanceGeneration(uint8_t index)
 {
@@ -49,6 +77,9 @@ static void memcopy(void* dst, const void* src, uint32_t len)
 
 void init()
 {
+#if defined(GXOS_RAMDISK_STAGE_FINGERPRINTS) && (defined(__GNUC__) || defined(__clang__))
+    s_wallimgSector0ReadFingerprintEmitted = false;
+#endif
     for (uint8_t i = 0; i < MAX_BLOCK_DEVICES; ++i) {
         if (s_devices[i].active) advanceGeneration(i);
     }
@@ -111,8 +142,25 @@ Status read_sectors(uint8_t devIndex,
         return BLOCK_ERR_INVALID;
     }
 
-    return s_devices[devIndex].readFn(
-        s_devices[devIndex].driverIndex, lba, count, buffer);
+    const BlockDevice& device = s_devices[devIndex];
+    const Status status = device.readFn(device.driverIndex, lba, count, buffer);
+#if defined(GXOS_RAMDISK_STAGE_FINGERPRINTS) && (defined(__GNUC__) || defined(__clang__))
+    if (!s_wallimgSector0ReadFingerprintEmitted &&
+        device.type == BDEV_RAMDISK && block_name_is_wallimg(device.name) &&
+        lba == 0 && count != 0) {
+        serial::puts("S22R28R3_STAGE_FP stage=block-read device=wallimg lba=0 bytes=0x00000200 status=0x");
+        serial::put_hex8(static_cast<uint8_t>(status));
+        if (status == BLOCK_OK && device.sectorSize >= 512 && count >= 1) {
+            serial::puts(" fnv1a64=0x");
+            serial::put_hex64(block_sector0_fnv1a64(buffer));
+        } else {
+            serial::puts(" fnv1a64=unavailable");
+        }
+        serial::putc('\n');
+        s_wallimgSector0ReadFingerprintEmitted = true;
+    }
+#endif
+    return status;
 }
 
 Status write_sectors(uint8_t devIndex,

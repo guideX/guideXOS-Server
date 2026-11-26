@@ -1492,6 +1492,24 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     guideXOS::debug::SerialPrint("\n[BOOT] Validating trampoline mapping:\n");
     guideXOS::debug::ValidatePageMapping(pt.Pml4Phys, trampolinePhys);
 
+#if defined(GXOS_RAMDISK_STAGE_FINGERPRINTS)
+    if (v1BootInfo->RamdiskBase != 0 && v1BootInfo->RamdiskSize >= 512) {
+        const UINT8* sector0 = reinterpret_cast<const UINT8*>(
+            static_cast<UINTN>(v1BootInfo->RamdiskBase));
+        UINT64 fingerprint = 14695981039346656037ull;
+        for (UINTN i = 0; i < 512; ++i) {
+            fingerprint = (fingerprint ^ sector0[i]) * 1099511628211ull;
+        }
+        guideXOS::debug::SerialPrint("S22R28R3_STAGE_FP stage=loader-handoff base=");
+        guideXOS::debug::SerialPrintHex64(v1BootInfo->RamdiskBase);
+        guideXOS::debug::SerialPrint(" bytes=0x00000200 fnv1a64=");
+        guideXOS::debug::SerialPrintHex64(fingerprint);
+        guideXOS::debug::SerialPrint("\n");
+    } else {
+        guideXOS::debug::SerialPrint("S22R28R3_STAGE_FP stage=loader-handoff unavailable=ramdisk-range\n");
+    }
+#endif
+
     guideXOS::debug::SerialPrint("\n[BOOT] === CALLING TRAMPOLINE NOW ===\n");
 
     // Use PHYSICAL entry point for the trampoline jump.

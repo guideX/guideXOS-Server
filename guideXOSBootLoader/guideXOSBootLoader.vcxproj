@@ -82,6 +82,11 @@
       <EnableUAC>false</EnableUAC>
     </Link>
   </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64' and '$(GUIDEXOS_RAMDISK_STAGE_FINGERPRINTS)'=='1'">
+    <ClCompile>
+      <PreprocessorDefinitions>GXOS_RAMDISK_STAGE_FINGERPRINTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="elf.cpp" />
     <ClCompile Include="main.cpp" />
