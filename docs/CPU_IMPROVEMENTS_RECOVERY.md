@@ -1,6 +1,6 @@
 # CPU Improvements storage recovery
 
-Recovery started November 24, 2026 (Pacific). The E: checkout now contains the original CPU7B2 implementation tree and the restored historical qualification report. The implementation has a new local commit ID because the original Git commit object was unavailable. Fresh guest qualification remains open.
+Recovery started November 24, 2026 (Pacific) and continued November 26. The E: checkout contains the original CPU7B2 implementation tree and restored historical report. The implementation has a new local commit ID because the original Git commit object was unavailable. On November 26 the stock, diagnostic and CPL3 candidates completed fresh managed ISO-only guest runs; the CPU7B2R1 hardware fault-path qualification remains open.
 
 ## Starting repository state
 
@@ -105,8 +105,30 @@ An independent byte comparison of the two preserved stock kernels reproduced the
 
 ## QAC status and CPU7B2R1
 
-The QAC development launcher contract passed 80 checks, ISO-only profile 7, persistent-data profile 8 and UEFI artifact isolation 36. The S22R10 launcher suite stopped after assertion 71 at the hard-coded `D:\dev\guideXOS_QAC\src\GuideXOS.QAC.Cli\Program.cs` read. The archived suite also identifies a multiline source regex that assumes LF at assertion 134. Point the source assertion at the restored QAC checkout and make the regex independent of Windows line endings. The managed runner can already resolve a relocated apphost via `-QacCliPath` or `GUIDEXOS_QAC_CLI`.
+### November 24 checkpoint
 
-No usable CLI or coordinator was located for a verified current reservation. The surviving QAC state and log files under `%LOCALAPPDATA%\guideXOS\QAC` provide historical records. No guest was started during recovery. Fresh PIC/PIT, desktop, keyboard and pointer, PacMan gameplay and cleanup, and three-cycle CPL3 acceptance remain pending in a managed guest.
+At the initial recovery checkpoint, the QAC development launcher contract passed 80 checks, ISO-only profile 7, persistent-data profile 8 and UEFI artifact isolation 36. The S22R10 launcher test stopped at assertion 71 because it read `D:\dev\guideXOS_QAC\src\GuideXOS.QAC.Cli\Program.cs`. Assertion 134 also depended on LF-only line endings. No usable CLI or coordinator was then available, so no guest was started during that checkpoint.
 
-The next action is to restore the QAC CLI, coordinator and source checkout, then verify current coordinator status, reservation list, queue and child ownership. Requalify the hash-verified stock, CPU7B2 diagnostic and CPL3 control candidates in the ISO-only lane. For CPU7B2R1, use a separate disposable, deadline-bounded lane for controlled hardware delivery of the exact-site `#GP(0)`. Capture continuation and confirm recovery state is disarmed, the original IDTR and expected machine state are restored, and an unrelated exception follows the ordinary path. Keep LAPIC MMIO mapping and interrupt-controller activation gated on fault-entry, ownership, alias, cache-type, permissions, paging-budget and controller prerequisites.
+### November 26 QAC restoration and guest requalification
+
+The QAC source and interactive coordinator are now available at `E:\dev\QAC`. The CLI apphost used for qualification was `E:\dev\QAC\src\GuideXOS.QAC.Cli\bin\Debug\net10.0-windows\GuideXOS.QAC.Cli.exe`, version 2.0.0. QAC status, reservation list and queue were checked before each run: the coordinator was online, with zero QEMU processes, foreign QEMU processes, reservations, queued requests or blocked requests. Each lane obtained a verified exclusive acceptance reservation for its QEMU direct child. The final census was empty, with all reservations released. QEMU 11.0.0 and the preserved OVMF hash were used.
+
+The S22R10 launcher test now resolves the QAC CLI source through the E: sibling checkout, and its continuation assertion accepts CRLF or LF. It passes 166/166 checks. Its transcript is `E:\CodexArtifacts\CPU7B2-recovery-20261124\qac-contracts\qac_s22r10_uefi_launcher_test_e-retest2.log`. These runs passed `-QacCliPath` explicitly because the runner's default sibling fallback still expects a folder named `guideXOS_QAC`; set `-QacCliPath` or `GUIDEXOS_QAC_CLI` when using the current `E:\dev\QAC` checkout.
+
+Fresh runs used the hash-verified, previously built ISOs in the `PublicPreviewIsoOnly` profile: read-only ISO, no network and no writable data volume. No AMD64 build was repeated in this follow-up; all previously recorded kernel, release-build and package evidence remains in the sections above. The run harnesses, logs, independent audit JSON and screenshots are under `E:\CodexArtifacts\CPU7B2-recovery-20261126`.
+
+| Lane | Managed guest evidence | Result |
+| --- | --- | --- |
+| Stock | `cpu7b2-stock-recovery-20261126-repeat-r2-1728abf72f48462f94a6a7d6633d63e5`; 42 advancing PIT heartbeats, 605 boot page-table pages, desktop/input and PacMan lifecycle markers, visible PacMan frame change after keyboard input, normal desktop shutdown, QEMU exit 0 and QAC release verified. | Scripted guest checks passed; no CPU7B2 marker present. |
+| CPU7B2 diagnostic | `cpu7b2-diagnostic-recovery-20261126-repeat-r1-74fdcd83ac8e41d59f1201241cca57fb`; 44 advancing PIT heartbeats, 605 boot page-table pages, expected APIC sample and admission report, visible PacMan frame change, normal shutdown, QEMU exit 0 and QAC release verified. | Observed `IA32_APIC_BASE=0x00000000FEE00900`; BSP xAPIC base `0xFEE00000` matches MADT. Admission remained `ownership-unverified`, one CPU online, mapping not installed, controller access not attempted. |
+| CPU7B2 + CPL3 control | `cpu7b2-cpl3-recovery-20261126-repeat-r1-4a7581efa40b4a0799eb33ddecfe3530`; 42 advancing PIT heartbeats, 605 boot page-table pages, expected APIC/admission reports, three CPL3 trap/reap cycles returning `0x2A`, visible PacMan frame change, normal shutdown, QEMU exit 0 and QAC release verified. | CPL3 reported `passed cycles=3 nonfaulting=1 preemption=0`; serial and task cleanup assertions passed. |
+
+All three executions still have QAC's generic `guestResult=INCOMPLETE`: the product emits no dedicated PacMan gameplay PASS/FAIL marker. The separate harness validated the existing serial markers, keyboard events, screenshots, PacMan lifecycle cleanup, PIT progression, shutdown and QAC/QMP teardown. The initial stock capture used shorter input timing and showed no frame difference; its preserved follow-up used the stabilized cadence recorded in the repeat harness and did show a visible frame change. This observation does not qualify the `#GP(0)` path.
+
+After these runs, a fresh hash check matched the 34 preserved-file baseline, all five accepted-media/persistence entries and all 12 candidate artifacts. The check is recorded in `E:\CodexArtifacts\CPU7B2-recovery-20261126\preservation-post-guest.json`. E: remains healthy with about 5.66 TB free. The qualification reused the existing reconstructed CPU7B2 source and did not modify accepted media or persistent-data images.
+
+### Remaining work and next action
+
+The original `8bcd23c8` and `12845378` commit objects and old D: Git metadata remain unavailable. The reconstructed source tree matches the recorded original CPU7B2 tree, but the new build IDs, full EFI images and ISO hashes are not asserted to match the missing historical binaries. The one-byte stock-kernel `cmp` encoding difference at `0x77C7B` also remains to be investigated.
+
+CPU7B2R1 should use a separate disposable, deadline-bounded qualification lane for hardware delivery of the exact-site `#GP(0)`. Capture fault entry, expected continuation, recovery-state disarm, IDTR and machine-state restoration, and an unrelated exception taking the ordinary path. The observed successful MSR read is not evidence that the fault handler ran. Preserve PIC/PIT, desktop, PacMan and CPL3 behavior. Keep live LAPIC MMIO mapping and interrupt-controller activation gated on qualified fault-entry, ownership, alias, cache-type, permissions, paging-budget and controller prerequisites.
