@@ -10,6 +10,7 @@
 #include "include/kernel/image_adapter.h"
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/vfs.h"
+#include "include/kernel/native_elf_baremetal.h"
 #include "../../taskbar_application_model_core.h"
 
 namespace kernel {
@@ -1214,14 +1215,13 @@ static void copyTaskbarText(char* out, int outSize, const char* value) {
 }
 
 static bool validTaskbarAppId(const char* value) {
-    if (!gxos::gui::HasCanonicalTaskbarAppIdentity(value)) return false;
-    int length = 0;
-    while (value[length]) {
-        const unsigned char c = static_cast<unsigned char>(value[length]);
-        if (length >= kernel::app::MAX_APP_ID - 1 || c < 32u || c == 127u || c == '=') return false;
-        ++length;
-    }
-    return true;
+    return gxos::gui::IsSafeTaskbarAppIdentity(value, kernel::app::MAX_APP_ID);
+}
+
+static bool launchTaskbarAppById(const char* appId) {
+    const app::AppInfo* info = app::AppManager::getAppInfoById(appId);
+    if (info) return info->available && info->factory && app::AppManager::launchAppById(appId);
+    return native_elf::launch_by_id(appId);
 }
 
 static bool taskbarStringsEqual(const char* left, const char* right) {
@@ -1365,11 +1365,15 @@ void TaskbarManager::updateButtons() {
         copyTaskbarText(button.appId, app::MAX_APP_ID, s_pinnedAppIds[i]);
         button.pinned = true;
         const app::AppInfo* info = app::AppManager::getAppInfoById(button.appId);
-        button.relaunchable = info && info->available && info->factory;
+        const native_elf::PackageInfo* package = info ? nullptr :
+            native_elf::lookup_package_by_id(button.appId);
+        button.relaunchable = info ? (info->available && info->factory) : package != nullptr;
         button.missingApplication = !button.relaunchable;
         if (info) {
             copyTaskbarText(button.title, app::MAX_TITLE_LEN, info->name);
             button.iconColor = info->iconColor;
+        } else if (package) {
+            copyTaskbarText(button.title, app::MAX_TITLE_LEN, package->displayName);
         } else {
             copyTaskbarText(button.title, app::MAX_TITLE_LEN, "Missing app");
         }
@@ -1399,10 +1403,15 @@ void TaskbarManager::updateButtons() {
             if (gxos::gui::HasCanonicalTaskbarAppIdentity(appId)) {
                 copyTaskbarText(button.appId, app::MAX_APP_ID, appId);
                 const app::AppInfo* info = app::AppManager::getAppInfoById(appId);
+                const native_elf::PackageInfo* package = info ? nullptr :
+                    native_elf::registered_package_by_id(appId);
                 if (info) {
                     copyTaskbarText(button.title, app::MAX_TITLE_LEN, info->name);
                     button.iconColor = info->iconColor;
                     button.relaunchable = info->available && info->factory;
+                } else if (package) {
+                    copyTaskbarText(button.title, app::MAX_TITLE_LEN, package->displayName);
+                    button.relaunchable = true;
                 } else {
                     copyTaskbarText(button.title, app::MAX_TITLE_LEN,
                                     window->title[0] ? window->title : appId);
@@ -1698,7 +1707,7 @@ bool TaskbarManager::handleClick(int32_t mx, int32_t my) {
         openMenuForButton(index, mx, my);
         return true;
     case gxos::gui::TaskbarCoreClickAction::Launch:
-        app::AppManager::launchAppById(button.appId);
+        launchTaskbarAppById(button.appId);
         return true;
     case gxos::gui::TaskbarCoreClickAction::Minimize:
         KernelCompositor::minimizeWindow(button.windowId);
@@ -2167,11 +2176,11 @@ void TaskbarManager::dispatchMenuItem(int index) {
         unpinApplication(s_menuAppId);
         break;
     case MenuCommand::LaunchApp:
-        app::AppManager::launchAppById(s_menuAppId);
+        launchTaskbarAppById(s_menuAppId);
         break;
     case MenuCommand::SelectOverflowEntry:
         if (item.windowId != 0) activateWindow(item.windowId);
-        else if (item.appId[0] != '\0') app::AppManager::launchAppById(item.appId);
+        else if (item.appId[0] != '\0') launchTaskbarAppById(item.appId);
         break;
     case MenuCommand::None:
     default:
@@ -2338,7 +2347,11 @@ bool TaskbarManager::pinApplication(const char* appId) {
     ensurePinnedApplicationsLoaded();
     if (!validTaskbarAppId(appId)) return false;
     const app::AppInfo* info = app::AppManager::getAppInfoById(appId);
-    if (!info || !info->available || !info->factory) return false;
+    if (info) {
+        if (!info->available || !info->factory) return false;
+    } else if (!native_elf::lookup_package_by_id(appId)) {
+        return false;
+    }
     for (int i = 0; i < s_pinCount; ++i) if (taskbarStringsEqual(s_pinnedAppIds[i], appId)) return false;
     if (s_pinCount >= MAX_TASKBAR_PINS) return false;
     copyTaskbarText(s_pinnedAppIds[s_pinCount++], app::MAX_APP_ID, appId);

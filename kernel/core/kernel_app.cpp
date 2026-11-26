@@ -9,6 +9,7 @@
 #include "include/kernel/desktop.h"
 #include "include/kernel/kernel_ipc.h"
 #include "include/kernel/serial_debug.h"
+#include "../../taskbar_application_model_core.h"
 
 extern "C" void desktop_request_redraw();
 
@@ -59,6 +60,16 @@ static bool streq(const char* a, const char* b) {
 KernelApp::KernelApp() : m_state(AppState::NotLoaded), m_window(nullptr) {
     m_name[0] = '\0';
     m_runtimeAppId[0] = '\0';
+}
+
+bool KernelApp::bindRuntimeAppIdFromTrustedLaunch(const char* appId) {
+    if (!gxos::gui::IsSafeTaskbarAppIdentity(appId, MAX_APP_ID)) return false;
+    if (m_runtimeAppId[0] &&
+        !gxos::gui::SameCanonicalTaskbarAppIdentity(m_runtimeAppId, appId)) {
+        return false;
+    }
+    strcopy(m_runtimeAppId, appId, MAX_APP_ID);
+    return gxos::gui::SameCanonicalTaskbarAppIdentity(m_runtimeAppId, appId);
 }
 
 KernelApp::~KernelApp() {

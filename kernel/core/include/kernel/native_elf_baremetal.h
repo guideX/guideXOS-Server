@@ -60,6 +60,10 @@ void discover();
 // short PacMan compatibility label.  Returns only after the app exits.
 bool launch(const char* appName);
 
+// App Model and taskbar dispatch require an exact canonical ID. Display names
+// and package-directory aliases remain available through launch().
+bool launch_by_id(const char* appId);
+
 // Whether a supported external NativeElf package was discovered.
 bool is_available(const char* appName);
 
@@ -70,6 +74,10 @@ const PackageInfo* lookup_package(const char* appName);
 
 // Inspect the current package table without triggering a discovery pass.
 const PackageInfo* registered_package(const char* appName);
+
+// Exact-ID lookup for taskbar grouping and pin validation.
+const PackageInfo* lookup_package_by_id(const char* appId);
+const PackageInfo* registered_package_by_id(const char* appId);
 
 // Enumerate the same validated package table used by lookup_package().
 uint32_t package_count();

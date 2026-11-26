@@ -5,6 +5,7 @@
 #include "kernel/vfs.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -17,6 +18,8 @@ constexpr uint32_t kSectorSize = 512;
 std::fstream g_image;
 uint64_t g_sectorCount = 0;
 uint64_t g_writesUntilFailure = UINT64_MAX;
+uint64_t g_failWriteLba = UINT64_MAX;
+uint32_t g_failWriteLbaMatchesRemaining = UINT32_MAX;
 uint32_t g_flushFailuresRemaining = 0;
 kernel::block::Status g_flushFailureStatus = kernel::block::BLOCK_ERR_IO;
 uint32_t g_fatStart = 0;
@@ -93,6 +96,14 @@ kernel::block::Status image_write(uint8_t, uint64_t lba, uint32_t count, const v
 {
     if (!input || !count || lba > g_sectorCount || count > g_sectorCount - lba) {
         return kernel::block::BLOCK_ERR_INVALID;
+    }
+    if (lba == g_failWriteLba && g_failWriteLbaMatchesRemaining != UINT32_MAX) {
+        if (g_failWriteLbaMatchesRemaining == 0u) {
+            g_failWriteLba = UINT64_MAX;
+            g_failWriteLbaMatchesRemaining = UINT32_MAX;
+            return kernel::block::BLOCK_ERR_IO;
+        }
+        --g_failWriteLbaMatchesRemaining;
     }
     if (g_writesUntilFailure == 0) return kernel::block::BLOCK_ERR_IO;
     if (g_writesUntilFailure != UINT64_MAX) --g_writesUntilFailure;
@@ -196,6 +207,66 @@ bool read_equals(const char* path, const std::vector<uint8_t>& expected)
         std::equal(expected.begin(), expected.end(), actual.begin());
 }
 
+bool read_fat32_entry(const kernel::fs_fat::FATVolume& volume, uint32_t cluster,
+                      uint32_t copy, uint32_t* value)
+{
+    if (!value || volume.type != kernel::fs_fat::FAT_TYPE_FAT32 ||
+        volume.bytesPerSector != kSectorSize || copy >= volume.numFATs) return false;
+    const uint32_t byteOffset = cluster * 4u;
+    const uint32_t sectorOffset = byteOffset / volume.bytesPerSector;
+    const uint32_t entryOffset = byteOffset % volume.bytesPerSector;
+    if (sectorOffset >= volume.fatSizeSectors) return false;
+    const uint64_t relativeLba = volume.reservedSectors +
+        static_cast<uint64_t>(copy) * volume.fatSizeSectors + sectorOffset;
+    uint8_t sector[kSectorSize];
+    if (kernel::block::read_sectors(volume.blockDevIndex,
+            volume.partitionOffset + relativeLba, 1, sector) != kernel::block::BLOCK_OK) {
+        return false;
+    }
+    *value = read_le32(sector + entryOffset) & 0x0FFFFFFFu;
+    return true;
+}
+
+bool find_free_fat32_cluster(const kernel::fs_fat::FATVolume& volume,
+                             uint32_t start, uint32_t* cluster)
+{
+    if (!cluster || volume.type != kernel::fs_fat::FAT_TYPE_FAT32 ||
+        volume.totalDataClusters == 0) return false;
+    const uint32_t first = start >= 2u && start - 2u < volume.totalDataClusters ? start : 2u;
+    for (uint32_t scan = 0; scan < volume.totalDataClusters; ++scan) {
+        const uint32_t candidate = static_cast<uint32_t>(
+            (static_cast<uint64_t>(first - 2u) + scan) % volume.totalDataClusters + 2u);
+        uint32_t value = 0;
+        if (!read_fat32_entry(volume, candidate, 0, &value)) return false;
+        if (value == 0) {
+            *cluster = candidate;
+            return true;
+        }
+    }
+    return false;
+}
+
+uint64_t fat32_entry_sector_lba(const kernel::fs_fat::FATVolume& volume,
+                                uint32_t cluster, uint32_t copy)
+{
+    const uint32_t sectorOffset = (cluster * 4u) / volume.bytesPerSector;
+    return volume.partitionOffset + volume.reservedSectors +
+        static_cast<uint64_t>(copy) * volume.fatSizeSectors + sectorOffset;
+}
+
+bool fill_directory_cluster(const char* path, uint32_t slots, const char* label)
+{
+    if (kernel::vfs::mkdir(path) != kernel::vfs::VFS_OK) return false;
+    for (uint32_t index = 0; index < slots; ++index) {
+        char childPath[96];
+        char fileName[16];
+        std::snprintf(fileName, sizeof(fileName), "F%07u.TXT", index);
+        std::snprintf(childPath, sizeof(childPath), "%s/%s", path, fileName);
+        if (kernel::vfs::create_file(childPath, label, 1u) != 1) return false;
+    }
+    return true;
+}
+
 uint8_t fat_lfn_checksum(const char shortName[11])
 {
     uint8_t checksum = 0;
@@ -221,40 +292,48 @@ bool insert_lfn_at_root_end(const char* longName, const char shortName[11])
 
     const size_t nameLength = std::strlen(longName);
     if (nameLength == 0 || nameLength > 12u) return false;
-    const uint64_t rootSector = volume->partitionOffset + volume->firstDataSector +
-        static_cast<uint64_t>(volume->rootCluster - 2u) * volume->sectorsPerCluster;
     uint8_t sector[kSectorSize];
-    for (uint32_t sectorInCluster = 0;
-         sectorInCluster < volume->sectorsPerCluster; ++sectorInCluster) {
-        const uint64_t lba = rootSector + sectorInCluster;
-        if (kernel::block::read_sectors(volume->blockDevIndex, lba, 1, sector) !=
-            kernel::block::BLOCK_OK) {
+    uint32_t cluster = volume->rootCluster;
+    for (uint32_t step = 0; step < volume->totalDataClusters; ++step) {
+        const uint64_t clusterSector = volume->partitionOffset + volume->firstDataSector +
+            static_cast<uint64_t>(cluster - 2u) * volume->sectorsPerCluster;
+        for (uint32_t sectorInCluster = 0;
+             sectorInCluster < volume->sectorsPerCluster; ++sectorInCluster) {
+            const uint64_t lba = clusterSector + sectorInCluster;
+            if (kernel::block::read_sectors(volume->blockDevIndex, lba, 1, sector) !=
+                kernel::block::BLOCK_OK) {
+                return false;
+            }
+            for (uint32_t offset = 0; offset + sizeof(kernel::fs_fat::FAT32_LFNEntry) <=
+                 sizeof(sector); offset += sizeof(kernel::fs_fat::FAT32_DirEntry)) {
+                if (sector[offset] != 0x00u) continue;
+
+                kernel::fs_fat::FAT32_LFNEntry entry{};
+                entry.order = 0x41u;
+                entry.attr = kernel::fs_fat::ATTR_LFN;
+                entry.type = 0;
+                entry.checksum = fat_lfn_checksum(shortName);
+                entry.firstClusterLo = 0;
+                uint16_t characters[13];
+                for (uint32_t index = 0; index < 13; ++index) characters[index] = 0xFFFFu;
+                for (size_t index = 0; index < nameLength; ++index) {
+                    characters[index] = static_cast<uint8_t>(longName[index]);
+                }
+                if (nameLength < 13u) characters[nameLength] = 0;
+                for (uint32_t index = 0; index < 5; ++index) entry.name1[index] = characters[index];
+                for (uint32_t index = 0; index < 6; ++index) entry.name2[index] = characters[index + 5];
+                for (uint32_t index = 0; index < 2; ++index) entry.name3[index] = characters[index + 11];
+                std::memcpy(sector + offset, &entry, sizeof(entry));
+                return kernel::block::write_sectors(volume->blockDevIndex, lba, 1, sector) ==
+                        kernel::block::BLOCK_OK &&
+                    kernel::block::flush(volume->blockDevIndex) == kernel::block::BLOCK_OK;
+            }
+        }
+        uint32_t next = 0;
+        if (!read_fat32_entry(*volume, cluster, 0, &next) || next >= 0x0FFFFFF8u || next < 2u) {
             return false;
         }
-        for (uint32_t offset = 0; offset + sizeof(kernel::fs_fat::FAT32_LFNEntry) <=
-             sizeof(sector); offset += sizeof(kernel::fs_fat::FAT32_DirEntry)) {
-            if (sector[offset] != 0x00u) continue;
-
-            kernel::fs_fat::FAT32_LFNEntry entry{};
-            entry.order = 0x41u;
-            entry.attr = kernel::fs_fat::ATTR_LFN;
-            entry.type = 0;
-            entry.checksum = fat_lfn_checksum(shortName);
-            entry.firstClusterLo = 0;
-            uint16_t characters[13];
-            for (uint32_t index = 0; index < 13; ++index) characters[index] = 0xFFFFu;
-            for (size_t index = 0; index < nameLength; ++index) {
-                characters[index] = static_cast<uint8_t>(longName[index]);
-            }
-            if (nameLength < 13u) characters[nameLength] = 0;
-            for (uint32_t index = 0; index < 5; ++index) entry.name1[index] = characters[index];
-            for (uint32_t index = 0; index < 6; ++index) entry.name2[index] = characters[index + 5];
-            for (uint32_t index = 0; index < 2; ++index) entry.name3[index] = characters[index + 11];
-            std::memcpy(sector + offset, &entry, sizeof(entry));
-            return kernel::block::write_sectors(volume->blockDevIndex, lba, 1, sector) ==
-                    kernel::block::BLOCK_OK &&
-                kernel::block::flush(volume->blockDevIndex) == kernel::block::BLOCK_OK;
-        }
+        cluster = next;
     }
     return false;
 }
@@ -798,6 +877,108 @@ int main(int argc, char** argv)
               static_cast<uint32_t>(payload.size())) == 26 &&
               std::memcmp(payload.data(), "Short EDITacement appended", 26) == 0,
           "filesystem teardown and remount recover saved bytes from the image");
+
+    const kernel::vfs::MountPoint* documentsMount = kernel::vfs::get_mount("/Documents");
+    const kernel::fs_fat::FATVolume* documentsVolume = documentsMount
+        ? kernel::fs_fat::get_volume(documentsMount->fsVolumeIndex) : nullptr;
+    const uint32_t directorySlots = documentsVolume && documentsVolume->bytesPerSector == kSectorSize
+        ? documentsVolume->bytesPerSector * documentsVolume->sectorsPerCluster / 32u : 0u;
+    const bool growthFixtureReady = documentsVolume && documentsVolume->type ==
+        kernel::fs_fat::FAT_TYPE_FAT32 && directorySlots > 2u && g_fatCopies >= 2u;
+    check(growthFixtureReady,
+          "FAT32 directory-growth fixture has a cluster and mirrored FAT copies");
+    if (growthFixtureReady) {
+        const uint32_t entriesToFill = directorySlots - 2u;
+        const bool filled = fill_directory_cluster("/Documents/GROW", entriesToFill, "G") &&
+            fill_directory_cluster("/Documents/FAILGR", entriesToFill, "F");
+        check(filled,
+              "fill two FAT32 directory clusters through their final directory slots");
+
+        kernel::vfs::FileInfo growInfo{};
+        kernel::fs_fat::DirEntry growEntry{};
+        uint32_t growTailPrimary = 0;
+        uint32_t growTailMirror = 0;
+        const bool growTailRead = kernel::vfs::stat("/Documents/GROW", &growInfo) ==
+                kernel::vfs::VFS_OK &&
+            kernel::fs_fat::lookup_path(documentsMount->fsVolumeIndex, "GROW", &growEntry) &&
+            read_fat32_entry(*documentsVolume, growEntry.firstCluster, 0, &growTailPrimary) &&
+            read_fat32_entry(*documentsVolume, growEntry.firstCluster, 1, &growTailMirror);
+        check(growTailRead && growTailPrimary >= 0x0FFFFFF8u &&
+                  growTailMirror >= 0x0FFFFFF8u,
+              "full directory reaches a valid mirrored FAT end marker before extension");
+
+        const int32_t growthCreate = kernel::vfs::create_file(
+            "/Documents/GROW/LAST.TXT", "G", 1u);
+        uint32_t grownTail = 0;
+        uint32_t grownTailMirror = 0;
+        uint32_t grownClusterEnd = 0;
+        uint32_t grownClusterEndMirror = 0;
+        const bool growthLinked = growTailRead &&
+            read_fat32_entry(*documentsVolume, growEntry.firstCluster, 0, &grownTail) &&
+            read_fat32_entry(*documentsVolume, growEntry.firstCluster, 1, &grownTailMirror) &&
+            grownTail >= 2u && grownTail < 0x0FFFFFF8u &&
+            read_fat32_entry(*documentsVolume, grownTail, 0, &grownClusterEnd) &&
+            read_fat32_entry(*documentsVolume, grownTail, 1, &grownClusterEndMirror);
+        kernel::vfs::FileInfo lastInfo{};
+        check(growthCreate == 1 && growthLinked && grownTail == grownTailMirror &&
+                  grownClusterEnd >= 0x0FFFFFF8u &&
+                  grownClusterEndMirror >= 0x0FFFFFF8u &&
+                  kernel::vfs::stat("/Documents/GROW/LAST.TXT", &lastInfo) ==
+                      kernel::vfs::VFS_OK && lastInfo.size == 1u,
+              "FAT32 full directory grows, links both FAT copies, and publishes the new file");
+
+        kernel::vfs::FileInfo failInfo{};
+        kernel::fs_fat::DirEntry failEntry{};
+        uint32_t failedFileCluster = 0;
+        uint32_t failedGrowthCluster = 0;
+        const bool failureTargetsReady = kernel::vfs::stat("/Documents/FAILGR", &failInfo) ==
+                kernel::vfs::VFS_OK &&
+            kernel::fs_fat::lookup_path(documentsMount->fsVolumeIndex, "FAILGR", &failEntry) &&
+            find_free_fat32_cluster(*documentsVolume, documentsVolume->nextFreeCluster,
+                                    &failedFileCluster) &&
+            find_free_fat32_cluster(*documentsVolume, failedFileCluster + 1u,
+                                    &failedGrowthCluster);
+        const uint64_t tailMirrorLba = failureTargetsReady
+            ? fat32_entry_sector_lba(*documentsVolume, failEntry.firstCluster, 1u) : UINT64_MAX;
+        uint32_t matchingAllocations = 0;
+        if (failureTargetsReady && fat32_entry_sector_lba(
+                *documentsVolume, failedFileCluster, 1u) == tailMirrorLba) {
+            ++matchingAllocations;
+        }
+        if (failureTargetsReady && fat32_entry_sector_lba(
+                *documentsVolume, failedGrowthCluster, 1u) == tailMirrorLba) {
+            ++matchingAllocations;
+        }
+        g_failWriteLba = tailMirrorLba;
+        g_failWriteLbaMatchesRemaining = failureTargetsReady
+            ? matchingAllocations : UINT32_MAX;
+        const int32_t failedGrowthCreate = failureTargetsReady
+            ? kernel::vfs::create_file("/Documents/FAILGR/FAIL.TXT", "X", 1u)
+            : kernel::vfs::VFS_ERR_INVALID;
+        g_failWriteLba = UINT64_MAX;
+        g_failWriteLbaMatchesRemaining = UINT32_MAX;
+        uint32_t failedTailPrimary = 0;
+        uint32_t failedTailMirror = 0;
+        uint32_t failedFileFat = UINT32_MAX;
+        uint32_t failedFileFatMirror = UINT32_MAX;
+        uint32_t failedGrowthFat = UINT32_MAX;
+        uint32_t failedGrowthFatMirror = UINT32_MAX;
+        const bool rollbackVerified = failureTargetsReady &&
+            read_fat32_entry(*documentsVolume, failEntry.firstCluster, 0, &failedTailPrimary) &&
+            read_fat32_entry(*documentsVolume, failEntry.firstCluster, 1, &failedTailMirror) &&
+            read_fat32_entry(*documentsVolume, failedFileCluster, 0, &failedFileFat) &&
+            read_fat32_entry(*documentsVolume, failedFileCluster, 1, &failedFileFatMirror) &&
+            read_fat32_entry(*documentsVolume, failedGrowthCluster, 0, &failedGrowthFat) &&
+            read_fat32_entry(*documentsVolume, failedGrowthCluster, 1, &failedGrowthFatMirror);
+        check(failureTargetsReady && failedGrowthCreate == kernel::vfs::VFS_ERR_IO &&
+                  rollbackVerified && failedTailPrimary >= 0x0FFFFFF8u &&
+                  failedTailMirror >= 0x0FFFFFF8u && failedFileFat == 0u &&
+                  failedFileFatMirror == 0u && failedGrowthFat == 0u &&
+                  failedGrowthFatMirror == 0u &&
+                  kernel::vfs::stat("/Documents/FAILGR/FAIL.TXT", &lastInfo) ==
+                      kernel::vfs::VFS_ERR_NOT_FOUND,
+              "failed FAT mirror link rolls back the directory tail and both allocated clusters");
+    }
 
     const uint8_t syncHandle = kernel::vfs::open("/Documents/NOTES/REPORT.BIN",
                                                  kernel::vfs::OPEN_RDWR);

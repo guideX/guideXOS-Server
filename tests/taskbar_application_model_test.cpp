@@ -183,6 +183,20 @@ int main() {
     check(!gxos::gui::HasCanonicalTaskbarAppIdentity(""), "shared canonical identity rejects empty IDs");
     check(gxos::gui::SameCanonicalTaskbarAppIdentity("org.guide.test", "org.guide.test"), "shared identity comparison groups exact IDs");
     check(!gxos::gui::SameCanonicalTaskbarAppIdentity("", ""), "shared identity comparison never groups anonymous windows");
+    check(gxos::gui::IsSafeTaskbarAppIdentity("org.guide.native", 48),
+          "taskbar identity accepts a bounded canonical native AppID");
+    check(!gxos::gui::IsSafeTaskbarAppIdentity("org.guide.native=other", 48),
+          "taskbar identity rejects delimiter injection");
+    check(!gxos::gui::IsSafeTaskbarAppIdentity("org.guide.native", 12),
+          "taskbar identity rejects truncation beyond the runtime buffer");
+    check(gxos::gui::MatchesTrustedTaskbarAppIdentity(
+              "org.guide.native", "org.guide.native", 48),
+          "native launch identity binds only to its exact registered AppID");
+    check(!gxos::gui::MatchesTrustedTaskbarAppIdentity(
+              "org.guide.native", "org.guide.other", 48) &&
+              !gxos::gui::MatchesTrustedTaskbarAppIdentity(
+                  "org.guide.native", "ORG.GUIDE.NATIVE", 48),
+          "native launch identity rejects unknown and case-mismatched IDs");
     check(gxos::gui::DecideTaskbarCoreClick(2, false, false, true) ==
           gxos::gui::TaskbarCoreClickAction::ShowWindowChooser, "shared click policy selects grouped windows");
     check(gxos::gui::DecideTaskbarCoreClick(1, true, false, true) ==

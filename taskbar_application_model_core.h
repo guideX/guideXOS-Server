@@ -81,6 +81,30 @@ inline bool SameCanonicalTaskbarAppIdentity(const char* left, const char* right)
     return *left == *right;
 }
 
+// App IDs cross the taskbar persistence and native-window boundaries. Keep
+// their bounded validation shared so a trusted launch cannot be truncated or
+// smuggle control characters into the pin store.
+inline bool IsSafeTaskbarAppIdentity(const char* appId, unsigned int capacity) {
+    if (!HasCanonicalTaskbarAppIdentity(appId) || capacity < 2u) return false;
+    unsigned int length = 0;
+    while (appId[length]) {
+        const unsigned char value = static_cast<unsigned char>(appId[length]);
+        if (length + 1u >= capacity || value < 0x20u || value == 0x7Fu || value == '=') {
+            return false;
+        }
+        ++length;
+    }
+    return true;
+}
+
+inline bool MatchesTrustedTaskbarAppIdentity(const char* requestedId,
+                                             const char* registeredId,
+                                             unsigned int capacity) {
+    return IsSafeTaskbarAppIdentity(requestedId, capacity) &&
+        IsSafeTaskbarAppIdentity(registeredId, capacity) &&
+        SameCanonicalTaskbarAppIdentity(requestedId, registeredId);
+}
+
 inline TaskbarCoreClickAction DecideTaskbarCoreClick(
     unsigned int windowCount,
     bool focused,

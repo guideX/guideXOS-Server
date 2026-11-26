@@ -9549,7 +9549,7 @@ static bool try_launch_kernel_app(const char* appName)
     // only reach this branch after the shared resolver validated the package.
     if (target.type == gxos::apps::LaunchTargetType::NativeElfApp && target.bareMetalAvailable) {
         s_shellActive = false;
-        return native_elf::launch(selectedDispatch);
+        return native_elf::launch_by_id(target.appId);
     }
     
     // Check if app is available in kernel mode

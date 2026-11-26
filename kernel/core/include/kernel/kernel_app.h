@@ -14,6 +14,9 @@
 #include "kernel/types.h"
 
 namespace kernel {
+namespace native_elf {
+class NativeWindowOwner;
+}
 namespace app {
 
 // ============================================================
@@ -268,7 +271,9 @@ protected:
 
 private:
     char m_runtimeAppId[MAX_APP_ID];
+    bool bindRuntimeAppIdFromTrustedLaunch(const char* appId);
     friend class AppManager;
+    friend class kernel::native_elf::NativeWindowOwner;
 };
 
 // ============================================================
