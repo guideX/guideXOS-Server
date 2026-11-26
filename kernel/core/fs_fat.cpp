@@ -60,6 +60,207 @@ static void memzero(void* dst, uint32_t len)
     for (uint32_t i = 0; i < len; ++i) p[i] = 0;
 }
 
+#if defined(GXOS_FAT_MOUNT_DIAGNOSTICS)
+static MountDiagnostic s_mountDiagnostic{};
+static uint32_t s_mountAttemptCounter = 0;
+
+static void mount_diag_set_final(MountDiagnosticStage stage)
+{
+    s_mountDiagnostic.finalStage = stage;
+}
+
+static const char* mount_diag_stage_name(MountDiagnosticStage stage)
+{
+    switch (stage) {
+    case FAT_MOUNT_DIAG_STAGE_ATTEMPT: return "ATTEMPT";
+    case FAT_MOUNT_DIAG_STAGE_INITIAL_SECTOR_READ_FAILED: return "INITIAL_SECTOR_READ_FAILED";
+    case FAT_MOUNT_DIAG_STAGE_FAT32_BYTES_PER_SECTOR_REJECT: return "FAT32_BYTES_PER_SECTOR_REJECT";
+    case FAT_MOUNT_DIAG_STAGE_FAT32_SECTORS_PER_CLUSTER_REJECT: return "FAT32_SECTORS_PER_CLUSTER_REJECT";
+    case FAT_MOUNT_DIAG_STAGE_FAT32_FAT_COUNT_REJECT: return "FAT32_FAT_COUNT_REJECT";
+    case FAT_MOUNT_DIAG_STAGE_FAT32_FAT_SIZE_REJECT: return "FAT32_FAT_SIZE_REJECT";
+    case FAT_MOUNT_DIAG_STAGE_FAT32_FILESYSTEM_TYPE_REJECT: return "FAT32_FILESYSTEM_TYPE_REJECT";
+    case FAT_MOUNT_DIAG_STAGE_FAT32_TOTAL_SECTORS_REJECT: return "FAT32_TOTAL_SECTORS_REJECT";
+    case FAT_MOUNT_DIAG_STAGE_FAT32_DATA_REGION_REJECT: return "FAT32_DATA_REGION_REJECT";
+    case FAT_MOUNT_DIAG_STAGE_FAT32_CLUSTER_COUNT_REJECT: return "FAT32_CLUSTER_COUNT_REJECT";
+    case FAT_MOUNT_DIAG_STAGE_FAT32_CLUSTER_SIZE_REJECT: return "FAT32_CLUSTER_SIZE_REJECT";
+    case FAT_MOUNT_DIAG_STAGE_FAT16_BYTES_PER_SECTOR_REJECT: return "FAT16_BYTES_PER_SECTOR_REJECT";
+    case FAT_MOUNT_DIAG_STAGE_FAT16_SECTORS_PER_CLUSTER_REJECT: return "FAT16_SECTORS_PER_CLUSTER_REJECT";
+    case FAT_MOUNT_DIAG_STAGE_FAT16_FAT_COUNT_REJECT: return "FAT16_FAT_COUNT_REJECT";
+    case FAT_MOUNT_DIAG_STAGE_FAT16_ROOT_ENTRY_COUNT_REJECT: return "FAT16_ROOT_ENTRY_COUNT_REJECT";
+    case FAT_MOUNT_DIAG_STAGE_FAT16_FAT_SIZE_REJECT: return "FAT16_FAT_SIZE_REJECT";
+    case FAT_MOUNT_DIAG_STAGE_FAT16_TOTAL_SECTORS_REJECT: return "FAT16_TOTAL_SECTORS_REJECT";
+    case FAT_MOUNT_DIAG_STAGE_FAT16_DATA_REGION_REJECT: return "FAT16_DATA_REGION_REJECT";
+    case FAT_MOUNT_DIAG_STAGE_FAT16_CLUSTER_COUNT_REJECT: return "FAT16_CLUSTER_COUNT_REJECT";
+    case FAT_MOUNT_DIAG_STAGE_FAT16_CLUSTER_SIZE_REJECT: return "FAT16_CLUSTER_SIZE_REJECT";
+    case FAT_MOUNT_DIAG_STAGE_PARTITION_SECTOR_READ_FAILED: return "PARTITION_SECTOR_READ_FAILED";
+    case FAT_MOUNT_DIAG_STAGE_FAT_CANDIDATES_REJECTED: return "FAT_CANDIDATES_REJECTED";
+    case FAT_MOUNT_DIAG_STAGE_EXFAT_SECTOR_READ_FAILED: return "EXFAT_SECTOR_READ_FAILED";
+    case FAT_MOUNT_DIAG_STAGE_EXFAT_FILESYSTEM_TYPE_REJECT: return "EXFAT_FILESYSTEM_TYPE_REJECT";
+    case FAT_MOUNT_DIAG_STAGE_EXFAT_BOOT_SIGNATURE_REJECT: return "EXFAT_BOOT_SIGNATURE_REJECT";
+    case FAT_MOUNT_DIAG_STAGE_EXFAT_VALIDATION_REJECT: return "EXFAT_VALIDATION_REJECT";
+    case FAT_MOUNT_DIAG_STAGE_EXFAT_MOUNTED: return "EXFAT_MOUNTED";
+    case FAT_MOUNT_DIAG_STAGE_MOUNT_CAPACITY_REJECT: return "MOUNT_CAPACITY_REJECT";
+    case FAT_MOUNT_DIAG_STAGE_MOUNTED: return "MOUNTED";
+    case FAT_MOUNT_DIAG_STAGE_MOUNT_REJECTED: return "MOUNT_REJECTED";
+    case FAT_MOUNT_DIAG_STAGE_NONE:
+    default: return "NONE";
+    }
+}
+
+static void mount_diag_begin(uint8_t blockDevIdx)
+{
+    memzero(&s_mountDiagnostic, sizeof(s_mountDiagnostic));
+    ++s_mountAttemptCounter;
+    if (s_mountAttemptCounter == 0) ++s_mountAttemptCounter;
+    s_mountDiagnostic.attemptId = s_mountAttemptCounter;
+    s_mountDiagnostic.blockDeviceIndex = blockDevIdx;
+    s_mountDiagnostic.initialRequestedSector = 0;
+    s_mountDiagnostic.firstReadStatus = block::BLOCK_ERR_INVALID;
+    s_mountDiagnostic.lastReadStatus = block::BLOCK_ERR_INVALID;
+    s_mountDiagnostic.finalStage = FAT_MOUNT_DIAG_STAGE_ATTEMPT;
+
+    const block::BlockDevice* device = block::get_device(blockDevIdx);
+    if (device) {
+        s_mountDiagnostic.blockDeviceType = static_cast<uint8_t>(device->type);
+        s_mountDiagnostic.blockDeviceSectorSize = device->sectorSize;
+    }
+}
+
+static void mount_diag_record_read(uint64_t sector, block::Status status)
+{
+    if (s_mountDiagnostic.readCount == 0) {
+        s_mountDiagnostic.initialRequestedSector = sector;
+        s_mountDiagnostic.firstReadStatus = status;
+    }
+    if (s_mountDiagnostic.readCount != 0xFF) ++s_mountDiagnostic.readCount;
+    s_mountDiagnostic.lastReadStatus = status;
+    if (sector == 0 && status == block::BLOCK_OK) {
+        s_mountDiagnostic.sectorZeroObtained = true;
+    }
+}
+
+static void mount_diag_capture_boot_sector(uint8_t blockDevIdx,
+                                           uint64_t sector,
+                                           const uint8_t* bootSector)
+{
+    s_mountDiagnostic.candidateBootSector = sector;
+    s_mountDiagnostic.firstBpbRejectStage = FAT_MOUNT_DIAG_STAGE_NONE;
+    s_mountDiagnostic.lastBpbRejectStage = FAT_MOUNT_DIAG_STAGE_NONE;
+    s_mountDiagnostic.bootSignatureReadable = false;
+    s_mountDiagnostic.bootSignatureValid = false;
+    s_mountDiagnostic.bpbFieldsReadable = false;
+    s_mountDiagnostic.bootSignature = 0;
+    s_mountDiagnostic.bytesPerSector = 0;
+    s_mountDiagnostic.sectorsPerCluster = 0;
+    s_mountDiagnostic.reservedSectorCount = 0;
+    s_mountDiagnostic.fatCount = 0;
+    s_mountDiagnostic.fatSize16 = 0;
+    s_mountDiagnostic.fatSize32 = 0;
+    s_mountDiagnostic.totalSectors16 = 0;
+    s_mountDiagnostic.totalSectors32 = 0;
+    if (!bootSector) return;
+
+    const block::BlockDevice* device = block::get_device(blockDevIdx);
+    const uint32_t sectorSize = device ? device->sectorSize : 0;
+    if (sectorSize >= 512) {
+        s_mountDiagnostic.bootSignatureReadable = true;
+        s_mountDiagnostic.bootSignature =
+            static_cast<uint16_t>(bootSector[510]) |
+            (static_cast<uint16_t>(bootSector[511]) << 8);
+        s_mountDiagnostic.bootSignatureValid =
+            s_mountDiagnostic.bootSignature == 0xAA55;
+    }
+    if (sectorSize < sizeof(FAT32_BPB)) return;
+
+    const FAT32_BPB* bpb = reinterpret_cast<const FAT32_BPB*>(bootSector);
+    s_mountDiagnostic.bytesPerSector = bpb->bytesPerSector;
+    s_mountDiagnostic.sectorsPerCluster = bpb->sectorsPerCluster;
+    s_mountDiagnostic.reservedSectorCount = bpb->reservedSectors;
+    s_mountDiagnostic.fatCount = bpb->numFATs;
+    s_mountDiagnostic.fatSize16 = bpb->fatSize16;
+    s_mountDiagnostic.fatSize32 = bpb->fatSize32;
+    s_mountDiagnostic.totalSectors16 = bpb->totalSectors16;
+    s_mountDiagnostic.totalSectors32 = bpb->totalSectors32;
+    s_mountDiagnostic.bpbFieldsReadable = true;
+}
+
+static void mount_diag_reject_bpb(MountDiagnosticStage stage)
+{
+    if (s_mountDiagnostic.firstBpbRejectStage == FAT_MOUNT_DIAG_STAGE_NONE) {
+        s_mountDiagnostic.firstBpbRejectStage = stage;
+    }
+    s_mountDiagnostic.lastBpbRejectStage = stage;
+}
+
+static void mount_diag_emit()
+{
+    serial::puts("FAT_MOUNT_DIAG id=0x");
+    serial::put_hex32(s_mountDiagnostic.attemptId);
+    serial::puts(" device=0x");
+    serial::put_hex8(s_mountDiagnostic.blockDeviceIndex);
+    serial::puts(" device_type=0x");
+    serial::put_hex8(s_mountDiagnostic.blockDeviceType);
+    serial::puts(" sector_size=0x");
+    serial::put_hex32(s_mountDiagnostic.blockDeviceSectorSize);
+    serial::puts(" initial_lba=0x");
+    serial::put_hex64(s_mountDiagnostic.initialRequestedSector);
+    serial::puts(" candidate_lba=0x");
+    serial::put_hex64(s_mountDiagnostic.candidateBootSector);
+    serial::puts(" reads=0x");
+    serial::put_hex8(s_mountDiagnostic.readCount);
+    serial::puts(" first_read=0x");
+    serial::put_hex8(static_cast<uint8_t>(s_mountDiagnostic.firstReadStatus));
+    serial::puts(" last_read=0x");
+    serial::put_hex8(static_cast<uint8_t>(s_mountDiagnostic.lastReadStatus));
+    serial::puts(" sector0=");
+    serial::put_hex8(s_mountDiagnostic.sectorZeroObtained ? 1 : 0);
+    serial::puts(" signature=0x");
+    serial::put_hex16(s_mountDiagnostic.bootSignature);
+    serial::puts(" signature_readable=");
+    serial::put_hex8(s_mountDiagnostic.bootSignatureReadable ? 1 : 0);
+    serial::puts(" signature_valid=");
+    serial::put_hex8(s_mountDiagnostic.bootSignatureValid ? 1 : 0);
+    serial::puts(" bpb_readable=");
+    serial::put_hex8(s_mountDiagnostic.bpbFieldsReadable ? 1 : 0);
+    serial::puts(" bps=0x");
+    serial::put_hex16(s_mountDiagnostic.bytesPerSector);
+    serial::puts(" spc=0x");
+    serial::put_hex8(s_mountDiagnostic.sectorsPerCluster);
+    serial::puts(" reserved=0x");
+    serial::put_hex16(s_mountDiagnostic.reservedSectorCount);
+    serial::puts(" fats=0x");
+    serial::put_hex8(s_mountDiagnostic.fatCount);
+    serial::puts(" fat16=0x");
+    serial::put_hex16(s_mountDiagnostic.fatSize16);
+    serial::puts(" fat32=0x");
+    serial::put_hex32(s_mountDiagnostic.fatSize32);
+    serial::puts(" total16=0x");
+    serial::put_hex16(s_mountDiagnostic.totalSectors16);
+    serial::puts(" total32=0x");
+    serial::put_hex32(s_mountDiagnostic.totalSectors32);
+    serial::puts(" first_bpb_reject=");
+    serial::puts(mount_diag_stage_name(s_mountDiagnostic.firstBpbRejectStage));
+    serial::puts(" last_bpb_reject=");
+    serial::puts(mount_diag_stage_name(s_mountDiagnostic.lastBpbRejectStage));
+    serial::puts(" final_stage=");
+    serial::puts(mount_diag_stage_name(s_mountDiagnostic.finalStage));
+    serial::putc('\n');
+}
+
+#define FAT_MOUNT_REJECT_IF(condition, stage) \
+    do { \
+        if (condition) { \
+            mount_diag_reject_bpb(stage); \
+            return false; \
+        } \
+    } while (0)
+#else
+#define FAT_MOUNT_REJECT_IF(condition, stage) \
+    do { \
+        if (condition) return false; \
+    } while (0)
+#endif
+
 static void memcopy(void* dst, const void* src, uint32_t len)
 {
     uint8_t* d = static_cast<uint8_t*>(dst);
@@ -382,14 +583,17 @@ static bool try_mount_fat32_boot_sector(uint8_t blockDevIdx, uint64_t partitionO
 #endif
 
     // Basic sanity checks
-    if (bpb->bytesPerSector < 512 || bpb->bytesPerSector > 4096) return false;
-    if (bpb->sectorsPerCluster == 0) return false;
-    if (bpb->numFATs == 0) return false;
+    FAT_MOUNT_REJECT_IF(bpb->bytesPerSector < 512 || bpb->bytesPerSector > 4096,
+                        FAT_MOUNT_DIAG_STAGE_FAT32_BYTES_PER_SECTOR_REJECT);
+    FAT_MOUNT_REJECT_IF(bpb->sectorsPerCluster == 0,
+                        FAT_MOUNT_DIAG_STAGE_FAT32_SECTORS_PER_CLUSTER_REJECT);
+    FAT_MOUNT_REJECT_IF(bpb->numFATs == 0,
+                        FAT_MOUNT_DIAG_STAGE_FAT32_FAT_COUNT_REJECT);
     if (bpb->fatSize32 == 0) {
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
         kernel::serial::puts("[FAT] boot-sector reject reason=fat32-size-zero\n");
 #endif
-        return false;
+        FAT_MOUNT_REJECT_IF(true, FAT_MOUNT_DIAG_STAGE_FAT32_FAT_SIZE_REJECT);
     }
 
     // Check for "FAT32   " signature
@@ -397,7 +601,7 @@ static bool try_mount_fat32_boot_sector(uint8_t blockDevIdx, uint64_t partitionO
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
         kernel::serial::puts("[FAT] boot-sector reject reason=fat32-signature-mismatch\n");
 #endif
-        return false;
+        FAT_MOUNT_REJECT_IF(true, FAT_MOUNT_DIAG_STAGE_FAT32_FILESYSTEM_TYPE_REJECT);
     }
 
     vol.type              = FAT_TYPE_FAT32;
@@ -416,15 +620,20 @@ static bool try_mount_fat32_boot_sector(uint8_t blockDevIdx, uint64_t partitionO
                        ? bpb->totalSectors32
                        : bpb->totalSectors16;
 
-    if (vol.totalSectors == 0) return false;
+    FAT_MOUNT_REJECT_IF(vol.totalSectors == 0,
+                        FAT_MOUNT_DIAG_STAGE_FAT32_TOTAL_SECTORS_REJECT);
 
     vol.firstDataSector = vol.reservedSectors +
                           (vol.numFATs * vol.fatSizeSectors);
 
-    if (vol.totalSectors <= vol.firstDataSector) return false;
+    FAT_MOUNT_REJECT_IF(vol.totalSectors <= vol.firstDataSector,
+                        FAT_MOUNT_DIAG_STAGE_FAT32_DATA_REGION_REJECT);
     uint32_t dataSectors = vol.totalSectors - vol.firstDataSector;
     vol.totalDataClusters = dataSectors / vol.sectorsPerCluster;
-    if (vol.totalDataClusters == 0 || !cluster_byte_count(vol, &dataSectors)) return false;
+    FAT_MOUNT_REJECT_IF(vol.totalDataClusters == 0,
+                        FAT_MOUNT_DIAG_STAGE_FAT32_CLUSTER_COUNT_REJECT);
+    FAT_MOUNT_REJECT_IF(!cluster_byte_count(vol, &dataSectors),
+                        FAT_MOUNT_DIAG_STAGE_FAT32_CLUSTER_SIZE_REJECT);
     vol.nextFreeCluster = 2;
 
     // Copy volume label
@@ -457,15 +666,19 @@ static bool try_mount_fat16_boot_sector(uint8_t blockDevIdx, uint64_t partitionO
     kernel::serial::putc('\n');
 #endif
 
-    if (bpb->bytesPerSector < 512 || bpb->bytesPerSector > 4096) return false;
-    if (bpb->sectorsPerCluster == 0) return false;
-    if (bpb->numFATs == 0) return false;
-    if (bpb->rootEntryCount == 0) return false;
+    FAT_MOUNT_REJECT_IF(bpb->bytesPerSector < 512 || bpb->bytesPerSector > 4096,
+                        FAT_MOUNT_DIAG_STAGE_FAT16_BYTES_PER_SECTOR_REJECT);
+    FAT_MOUNT_REJECT_IF(bpb->sectorsPerCluster == 0,
+                        FAT_MOUNT_DIAG_STAGE_FAT16_SECTORS_PER_CLUSTER_REJECT);
+    FAT_MOUNT_REJECT_IF(bpb->numFATs == 0,
+                        FAT_MOUNT_DIAG_STAGE_FAT16_FAT_COUNT_REJECT);
+    FAT_MOUNT_REJECT_IF(bpb->rootEntryCount == 0,
+                        FAT_MOUNT_DIAG_STAGE_FAT16_ROOT_ENTRY_COUNT_REJECT);
     if (bpb->fatSize16 == 0) {
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
         kernel::serial::puts("[FAT] boot-sector reject reason=fat16-size-zero\n");
 #endif
-        return false;
+        FAT_MOUNT_REJECT_IF(true, FAT_MOUNT_DIAG_STAGE_FAT16_FAT_SIZE_REJECT);
     }
 
     vol.type              = FAT_TYPE_FAT16;
@@ -483,14 +696,19 @@ static bool try_mount_fat16_boot_sector(uint8_t blockDevIdx, uint64_t partitionO
     vol.totalSectors = (bpb->totalSectors32 != 0)
                        ? bpb->totalSectors32
                        : bpb->totalSectors16;
-    if (vol.totalSectors == 0) return false;
+    FAT_MOUNT_REJECT_IF(vol.totalSectors == 0,
+                        FAT_MOUNT_DIAG_STAGE_FAT16_TOTAL_SECTORS_REJECT);
 
     vol.firstDataSector = vol.rootDirFirstSector + vol.rootDirSectors;
-    if (vol.totalSectors <= vol.firstDataSector) return false;
+    FAT_MOUNT_REJECT_IF(vol.totalSectors <= vol.firstDataSector,
+                        FAT_MOUNT_DIAG_STAGE_FAT16_DATA_REGION_REJECT);
 
     uint32_t dataSectors = vol.totalSectors - vol.firstDataSector;
     vol.totalDataClusters = dataSectors / vol.sectorsPerCluster;
-    if (vol.totalDataClusters == 0 || !cluster_byte_count(vol, &dataSectors)) return false;
+    FAT_MOUNT_REJECT_IF(vol.totalDataClusters == 0,
+                        FAT_MOUNT_DIAG_STAGE_FAT16_CLUSTER_COUNT_REJECT);
+    FAT_MOUNT_REJECT_IF(!cluster_byte_count(vol, &dataSectors),
+                        FAT_MOUNT_DIAG_STAGE_FAT16_CLUSTER_SIZE_REJECT);
     vol.nextFreeCluster = 2;
 
     memcopy(vol.volumeLabel, bpb->volumeLabel, 11);
@@ -502,6 +720,9 @@ static bool try_mount_fat16_boot_sector(uint8_t blockDevIdx, uint64_t partitionO
 
 static bool try_mount_fat_boot_sector(uint8_t blockDevIdx, uint64_t partitionOffset, FATVolume& vol, const uint8_t* bootSector)
 {
+#if defined(GXOS_FAT_MOUNT_DIAGNOSTICS)
+    mount_diag_capture_boot_sector(blockDevIdx, partitionOffset, bootSector);
+#endif
     if (try_mount_fat32_boot_sector(blockDevIdx, partitionOffset, vol, bootSector)) {
         return true;
     }
@@ -511,7 +732,15 @@ static bool try_mount_fat_boot_sector(uint8_t blockDevIdx, uint64_t partitionOff
 static bool try_mount_fat(uint8_t blockDevIdx, FATVolume& vol)
 {
     block::Status st = block::read_sectors(blockDevIdx, 0, 1, s_secBuf);
-    if (st != block::BLOCK_OK) return false;
+#if defined(GXOS_FAT_MOUNT_DIAGNOSTICS)
+    mount_diag_record_read(0, st);
+#endif
+    if (st != block::BLOCK_OK) {
+#if defined(GXOS_FAT_MOUNT_DIAGNOSTICS)
+        mount_diag_set_final(FAT_MOUNT_DIAG_STAGE_INITIAL_SECTOR_READ_FAILED);
+#endif
+        return false;
+    }
 
     if (try_mount_fat_boot_sector(blockDevIdx, 0, vol, s_secBuf)) {
         return true;
@@ -528,7 +757,16 @@ static bool try_mount_fat(uint8_t blockDevIdx, FATVolume& vol)
             uint32_t startLBA = *reinterpret_cast<uint32_t*>(&s_secBuf[entry + 8]);
             if (startLBA == 0) continue;
 
-            if (block::read_sectors(blockDevIdx, startLBA, 1, s_secBuf) != block::BLOCK_OK) {
+#if defined(GXOS_FAT_MOUNT_DIAGNOSTICS)
+            st = block::read_sectors(blockDevIdx, startLBA, 1, s_secBuf);
+            mount_diag_record_read(startLBA, st);
+#else
+            st = block::read_sectors(blockDevIdx, startLBA, 1, s_secBuf);
+#endif
+            if (st != block::BLOCK_OK) {
+#if defined(GXOS_FAT_MOUNT_DIAGNOSTICS)
+                mount_diag_set_final(FAT_MOUNT_DIAG_STAGE_PARTITION_SECTOR_READ_FAILED);
+#endif
                 continue;
             }
 
@@ -538,19 +776,40 @@ static bool try_mount_fat(uint8_t blockDevIdx, FATVolume& vol)
         }
     }
 
+#if defined(GXOS_FAT_MOUNT_DIAGNOSTICS)
+    mount_diag_set_final(FAT_MOUNT_DIAG_STAGE_FAT_CANDIDATES_REJECTED);
+#endif
     return false;
 }
 
 static bool try_mount_exfat(uint8_t blockDevIdx, FATVolume& vol)
 {
     block::Status st = block::read_sectors(blockDevIdx, 0, 1, s_secBuf);
-    if (st != block::BLOCK_OK) return false;
+#if defined(GXOS_FAT_MOUNT_DIAGNOSTICS)
+    mount_diag_record_read(0, st);
+#endif
+    if (st != block::BLOCK_OK) {
+#if defined(GXOS_FAT_MOUNT_DIAGNOSTICS)
+        mount_diag_set_final(FAT_MOUNT_DIAG_STAGE_EXFAT_SECTOR_READ_FAILED);
+#endif
+        return false;
+    }
 
     const ExFAT_BootSector* bs = reinterpret_cast<const ExFAT_BootSector*>(s_secBuf);
 
     // Check "EXFAT   " signature
-    if (!str_equal(bs->fsName, "EXFAT   ", 8)) return false;
-    if (bs->bootSignature != 0xAA55) return false;
+    if (!str_equal(bs->fsName, "EXFAT   ", 8)) {
+#if defined(GXOS_FAT_MOUNT_DIAGNOSTICS)
+        mount_diag_set_final(FAT_MOUNT_DIAG_STAGE_EXFAT_FILESYSTEM_TYPE_REJECT);
+#endif
+        return false;
+    }
+    if (bs->bootSignature != 0xAA55) {
+#if defined(GXOS_FAT_MOUNT_DIAGNOSTICS)
+        mount_diag_set_final(FAT_MOUNT_DIAG_STAGE_EXFAT_BOOT_SIGNATURE_REJECT);
+#endif
+        return false;
+    }
 
     vol.type                       = FAT_TYPE_EXFAT;
     vol.blockDevIndex              = blockDevIdx;
@@ -575,6 +834,9 @@ static bool try_mount_exfat(uint8_t blockDevIdx, FATVolume& vol)
 
     vol.volumeLabel[0] = '\0';
     vol.mounted = true;
+#if defined(GXOS_FAT_MOUNT_DIAGNOSTICS)
+    mount_diag_set_final(FAT_MOUNT_DIAG_STAGE_EXFAT_MOUNTED);
+#endif
     return true;
 }
 
@@ -872,14 +1134,29 @@ void set_trash_trace(bool enabled, uint64_t generation)
 
 uint8_t mount(uint8_t blockDevIndex)
 {
-    if (s_volumeCount >= MAX_FAT_VOLUMES) return 0xFF;
+#if defined(GXOS_FAT_MOUNT_DIAGNOSTICS)
+    mount_diag_begin(blockDevIndex);
+#endif
+    if (s_volumeCount >= MAX_FAT_VOLUMES) {
+#if defined(GXOS_FAT_MOUNT_DIAGNOSTICS)
+        mount_diag_set_final(FAT_MOUNT_DIAG_STAGE_MOUNT_CAPACITY_REJECT);
+        mount_diag_emit();
+#endif
+        return 0xFF;
+    }
 
     // Find a free slot
     uint8_t idx = 0xFF;
     for (uint8_t i = 0; i < MAX_FAT_VOLUMES; ++i) {
         if (!s_volumes[i].mounted) { idx = i; break; }
     }
-    if (idx == 0xFF) return 0xFF;
+    if (idx == 0xFF) {
+#if defined(GXOS_FAT_MOUNT_DIAGNOSTICS)
+        mount_diag_set_final(FAT_MOUNT_DIAG_STAGE_MOUNT_CAPACITY_REJECT);
+        mount_diag_emit();
+#endif
+        return 0xFF;
+    }
 
     FATVolume& vol = s_volumes[idx];
     memzero(&vol, sizeof(vol));
@@ -887,13 +1164,23 @@ uint8_t mount(uint8_t blockDevIndex)
     // Try FAT first, then exFAT
     if (try_mount_fat(blockDevIndex, vol)) {
         ++s_volumeCount;
+#if defined(GXOS_FAT_MOUNT_DIAGNOSTICS)
+        mount_diag_set_final(FAT_MOUNT_DIAG_STAGE_MOUNTED);
+        mount_diag_emit();
+#endif
         return idx;
     }
     if (try_mount_exfat(blockDevIndex, vol)) {
         ++s_volumeCount;
+#if defined(GXOS_FAT_MOUNT_DIAGNOSTICS)
+        mount_diag_emit();
+#endif
         return idx;
     }
 
+#if defined(GXOS_FAT_MOUNT_DIAGNOSTICS)
+    mount_diag_emit();
+#endif
     return 0xFF;
 }
 
@@ -2406,6 +2693,13 @@ block::Status last_io_status()
 {
     return s_lastIoStatus;
 }
+
+#if defined(GXOS_FAT_MOUNT_DIAGNOSTICS)
+MountDiagnostic last_mount_diagnostic()
+{
+    return s_mountDiagnostic;
+}
+#endif
 
 const char* delete_status_name(DeleteStatus status)
 {

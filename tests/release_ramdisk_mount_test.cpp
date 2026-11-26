@@ -1,4 +1,5 @@
 #include "kernel/block_device.h"
+#include "kernel/fs_fat.h"
 #include "kernel/ramdisk.h"
 #include "kernel/vfs.h"
 
@@ -70,6 +71,25 @@ int main(int argc, char** argv)
         std::cout << "checks=" << g_checks << " failures=" << g_failures << "\n";
         return 1;
     }
+#if defined(GXOS_FAT_MOUNT_DIAGNOSTICS)
+    const kernel::fs_fat::MountDiagnostic mountDiagnostic =
+        kernel::fs_fat::last_mount_diagnostic();
+    check(mountDiagnostic.initialRequestedSector == 0 &&
+              mountDiagnostic.firstReadStatus == kernel::block::BLOCK_OK &&
+              mountDiagnostic.sectorZeroObtained,
+          "instrumented production mount records the exact initial wallimg sector read");
+    check(mountDiagnostic.bootSignatureReadable && mountDiagnostic.bootSignatureValid &&
+              mountDiagnostic.bpbFieldsReadable &&
+              mountDiagnostic.bytesPerSector == 512 &&
+              mountDiagnostic.sectorsPerCluster == 16 &&
+              mountDiagnostic.reservedSectorCount == 32 &&
+              mountDiagnostic.fatCount == 2 &&
+              mountDiagnostic.fatSize32 == 256 &&
+              mountDiagnostic.totalSectors32 == 131072,
+          "instrumented production mount records the qualified wallimg BPB fields");
+    check(mountDiagnostic.finalStage == kernel::fs_fat::FAT_MOUNT_DIAG_STAGE_MOUNTED,
+          "instrumented production mount records the successful final mount stage");
+#endif
 
     const kernel::vfs::MountPoint* mount = kernel::vfs::get_mount("/");
     check(mount && mount->readOnly && mount->blockDevIndex == device &&

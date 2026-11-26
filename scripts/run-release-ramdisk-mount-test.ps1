@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$RamdiskImage,
-    [string]$OutputDirectory = (Join-Path ([IO.Path]::GetTempPath()) "guidexos_release_ramdisk_mount_test")
+    [string]$OutputDirectory = (Join-Path ([IO.Path]::GetTempPath()) "guidexos_release_ramdisk_mount_test"),
+    [switch]$FatMountDiagnostics
 )
 
 $ErrorActionPreference = "Stop"
@@ -38,6 +39,9 @@ $arguments = @(
     "kernel/core/vfs.cpp",
     "-o", $executable
 )
+if ($FatMountDiagnostics) {
+    $arguments += "-DGXOS_FAT_MOUNT_DIAGNOSTICS"
+}
 
 Write-Host ("Building release ramdisk mount test with {0}" -f $compiler.Source)
 & $compiler.Source @arguments

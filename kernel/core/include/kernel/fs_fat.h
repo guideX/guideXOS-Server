@@ -115,6 +115,75 @@ const char* path_lookup_status_name(PathLookupStatus status);
 PathLookupStatus last_path_lookup_status();
 block::Status last_io_status();
 
+#if defined(GXOS_FAT_MOUNT_DIAGNOSTICS)
+// Stable, bounded identifiers for the diagnostic-only FAT mount trace.
+// These values report observations and existing validation decisions; they do
+// not change which volumes the FAT driver accepts.
+enum MountDiagnosticStage : uint8_t {
+    FAT_MOUNT_DIAG_STAGE_NONE = 0,
+    FAT_MOUNT_DIAG_STAGE_ATTEMPT,
+    FAT_MOUNT_DIAG_STAGE_INITIAL_SECTOR_READ_FAILED,
+    FAT_MOUNT_DIAG_STAGE_FAT32_BYTES_PER_SECTOR_REJECT,
+    FAT_MOUNT_DIAG_STAGE_FAT32_SECTORS_PER_CLUSTER_REJECT,
+    FAT_MOUNT_DIAG_STAGE_FAT32_FAT_COUNT_REJECT,
+    FAT_MOUNT_DIAG_STAGE_FAT32_FAT_SIZE_REJECT,
+    FAT_MOUNT_DIAG_STAGE_FAT32_FILESYSTEM_TYPE_REJECT,
+    FAT_MOUNT_DIAG_STAGE_FAT32_TOTAL_SECTORS_REJECT,
+    FAT_MOUNT_DIAG_STAGE_FAT32_DATA_REGION_REJECT,
+    FAT_MOUNT_DIAG_STAGE_FAT32_CLUSTER_COUNT_REJECT,
+    FAT_MOUNT_DIAG_STAGE_FAT32_CLUSTER_SIZE_REJECT,
+    FAT_MOUNT_DIAG_STAGE_FAT16_BYTES_PER_SECTOR_REJECT,
+    FAT_MOUNT_DIAG_STAGE_FAT16_SECTORS_PER_CLUSTER_REJECT,
+    FAT_MOUNT_DIAG_STAGE_FAT16_FAT_COUNT_REJECT,
+    FAT_MOUNT_DIAG_STAGE_FAT16_ROOT_ENTRY_COUNT_REJECT,
+    FAT_MOUNT_DIAG_STAGE_FAT16_FAT_SIZE_REJECT,
+    FAT_MOUNT_DIAG_STAGE_FAT16_TOTAL_SECTORS_REJECT,
+    FAT_MOUNT_DIAG_STAGE_FAT16_DATA_REGION_REJECT,
+    FAT_MOUNT_DIAG_STAGE_FAT16_CLUSTER_COUNT_REJECT,
+    FAT_MOUNT_DIAG_STAGE_FAT16_CLUSTER_SIZE_REJECT,
+    FAT_MOUNT_DIAG_STAGE_PARTITION_SECTOR_READ_FAILED,
+    FAT_MOUNT_DIAG_STAGE_FAT_CANDIDATES_REJECTED,
+    FAT_MOUNT_DIAG_STAGE_EXFAT_SECTOR_READ_FAILED,
+    FAT_MOUNT_DIAG_STAGE_EXFAT_FILESYSTEM_TYPE_REJECT,
+    FAT_MOUNT_DIAG_STAGE_EXFAT_BOOT_SIGNATURE_REJECT,
+    FAT_MOUNT_DIAG_STAGE_EXFAT_VALIDATION_REJECT,
+    FAT_MOUNT_DIAG_STAGE_EXFAT_MOUNTED,
+    FAT_MOUNT_DIAG_STAGE_MOUNT_CAPACITY_REJECT,
+    FAT_MOUNT_DIAG_STAGE_MOUNTED,
+    FAT_MOUNT_DIAG_STAGE_MOUNT_REJECTED,
+};
+
+struct MountDiagnostic {
+    uint32_t attemptId;
+    uint8_t blockDeviceIndex;
+    uint8_t blockDeviceType;
+    uint8_t readCount;
+    uint32_t blockDeviceSectorSize;
+    uint64_t initialRequestedSector;
+    uint64_t candidateBootSector;
+    block::Status firstReadStatus;
+    block::Status lastReadStatus;
+    bool sectorZeroObtained;
+    bool bootSignatureReadable;
+    bool bootSignatureValid;
+    bool bpbFieldsReadable;
+    uint16_t bootSignature;
+    uint16_t bytesPerSector;
+    uint8_t sectorsPerCluster;
+    uint16_t reservedSectorCount;
+    uint8_t fatCount;
+    uint16_t fatSize16;
+    uint32_t fatSize32;
+    uint16_t totalSectors16;
+    uint32_t totalSectors32;
+    MountDiagnosticStage firstBpbRejectStage;
+    MountDiagnosticStage lastBpbRejectStage;
+    MountDiagnosticStage finalStage;
+};
+
+MountDiagnostic last_mount_diagnostic();
+#endif
+
 // Detailed result for delete_path().  The legacy bool API remains available,
 // but callers must be able to distinguish an intentionally refused rmdir from
 // an I/O or FAT-chain failure.
