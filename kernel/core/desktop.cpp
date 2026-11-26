@@ -41,6 +41,11 @@
 #include "include/kernel/block_device.h"
 #if ARCH_HAS_PIC_8259
 #include "../../guideXOSBootLoader/guidexOSBootInfo.h"
+
+#if defined(GXOS_RAMDISK_INTEGRITY_DIAGNOSTICS)
+extern "C" void kernel_ramdisk_attachment_checkpoint(const void* ramdiskBase,
+                                                       uint64_t ramdiskSize);
+#endif
 #endif
 #include "include/kernel/native_elf_baremetal.h"
 #if defined(GXOS_BARE_METAL)
@@ -5554,6 +5559,9 @@ void set_wallpaper_image_pack(const void* packBase, uint64_t packSize)
         return;
     }
 
+#if defined(GXOS_RAMDISK_INTEGRITY_DIAGNOSTICS)
+    kernel_ramdisk_attachment_checkpoint(packBase, packSize);
+#endif
     uint8_t ramdiskIndex = kernel::ramdisk::create_readonly_release_image_at(packBase, (size_t)packSize, "wallimg");
     if (ramdiskIndex == 0xFF) {
         serial::puts("[desktop] failed to attach wallpaper image pack\n");

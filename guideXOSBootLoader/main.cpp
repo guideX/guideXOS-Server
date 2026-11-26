@@ -36,6 +36,7 @@ Forbidden:
 #include "guidexOSBootInfo.h"   // canonical BootInfo v3
 #include "uefi_shim.h"         // UEFI shims for freestanding environment
 #include "debug_helpers.h"     // Post-ExitBootServices debugging
+#include "../kernel/core/include/kernel/ramdisk_integrity_diagnostic.h"
 #include "paging.h"            // minimal identity page tables
 #include "pci.h"               // PCI enumeration for NIC detection
 
@@ -44,7 +45,15 @@ extern "C" void __halt(void);
 #pragma intrinsic(__halt)
 
 // Assembly trampoline (NASM, win64 ABI)
+#if defined(GXOS_RAMDISK_INTEGRITY_DIAGNOSTICS)
+extern "C" void GuideXOSRamdiskPreCr3Checkpoint(const guideXOS::BootInfo* bi,
+                                                  uint64_t targetCr3);
+extern "C" void BootHandoffTrampoline(
+    void* kernelEntry, void* bootInfo, void* stackTop, void* pml4Phys,
+    void (*diagnosticCheckpoint)(const guideXOS::BootInfo*, uint64_t));
+#else
 extern "C" void BootHandoffTrampoline(void* kernelEntry, void* bootInfo, void* stackTop, void* pml4Phys);
+#endif
 extern "C" void SetupTrampoline(void* executableMemory);
 extern "C" UINTN GetTrampolineCodeSize(void);
 
@@ -686,6 +695,196 @@ static void ZeroBootInfo(BootInfo* bi) {
     SetMem(bi, sizeof(BootInfo), 0);
 }
 
+#if defined(GXOS_RAMDISK_INTEGRITY_DIAGNOSTICS)
+static const volatile uint64_t* ramdisk_diag_read_page_table(void*, uint64_t physicalAddress)
+{
+    if (physicalAddress >= guideXOS::ramdisk_diagnostic::kPhysicalIdentityLimit ||
+        (physicalAddress & guideXOS::ramdisk_diagnostic::kPageMask) != 0u) {
+        return nullptr;
+    }
+    return reinterpret_cast<const volatile uint64_t*>(static_cast<UINTN>(physicalAddress));
+}
+
+static void ramdisk_diag_print_mapping(const char* label, uint64_t root,
+                                       uint64_t virtualAddress)
+{
+    guideXOS::ramdisk_diagnostic::Mapping mapping{};
+    const guideXOS::ramdisk_diagnostic::MappingStatus status =
+        guideXOS::ramdisk_diagnostic::translate(
+            root, virtualAddress, &ramdisk_diag_read_page_table, nullptr, &mapping);
+    guideXOS::debug::SerialPrint(label);
+    guideXOS::debug::SerialPrint(guideXOS::ramdisk_diagnostic::mapping_status_name(status));
+    if (status == guideXOS::ramdisk_diagnostic::MappingStatus::Mapped4K ||
+        status == guideXOS::ramdisk_diagnostic::MappingStatus::Mapped2M ||
+        status == guideXOS::ramdisk_diagnostic::MappingStatus::Mapped1G) {
+        guideXOS::debug::SerialPrint(":");
+        guideXOS::debug::SerialPrintHex64(mapping.physicalAddress);
+        guideXOS::debug::SerialPrint("/shift=");
+        guideXOS::debug::SerialPrintHex32(mapping.pageShift);
+        guideXOS::debug::SerialPrint("/w=");
+        guideXOS::debug::SerialPrint(mapping.writable ? "1" : "0");
+        guideXOS::debug::SerialPrint("/u=");
+        guideXOS::debug::SerialPrint(mapping.user ? "1" : "0");
+        guideXOS::debug::SerialPrint("/x=");
+        guideXOS::debug::SerialPrint(mapping.executable ? "1" : "0");
+    }
+}
+
+static void ramdisk_diag_loader_checkpoint(const guideXOS::BootInfo* bi,
+                                           const char* stage,
+                                           uint64_t targetCr3)
+{
+    guideXOS::debug::SerialPrint("S22R28R3R2_STAGE stage=");
+    guideXOS::debug::SerialPrint(stage ? stage : "unknown");
+    if (!bi || bi->RamdiskBase == 0u || bi->RamdiskSize <
+        guideXOS::ramdisk_diagnostic::kSectorBytes ||
+        bi->RamdiskBase > UINT64_MAX - bi->RamdiskSize) {
+        guideXOS::debug::SerialPrint(" ramdisk=unavailable\n");
+        return;
+    }
+
+    const uint64_t currentCr3 = __readcr3();
+    const uint64_t currentRoot = currentCr3 & guideXOS::ramdisk_diagnostic::kAddressMask;
+    guideXOS::debug::SerialPrint(" base=0x");
+    guideXOS::debug::SerialPrintHex64(bi->RamdiskBase);
+    guideXOS::debug::SerialPrint(" length=0x");
+    guideXOS::debug::SerialPrintHex64(bi->RamdiskSize);
+    guideXOS::debug::SerialPrint(" addressContract=physical vaUsed=0x");
+    guideXOS::debug::SerialPrintHex64(bi->RamdiskBase);
+    guideXOS::debug::SerialPrint(" targetVA=0x");
+    guideXOS::debug::SerialPrintHex64(
+        guideXOS::ramdisk_diagnostic::kKernelRamdiskVirtualBase);
+    guideXOS::debug::SerialPrint(" currentCR3=0x");
+    guideXOS::debug::SerialPrintHex64(currentCr3);
+    guideXOS::debug::SerialPrint(" currentMap=");
+    ramdisk_diag_print_mapping("", currentRoot, bi->RamdiskBase);
+    guideXOS::ramdisk_diagnostic::Mapping currentLast{};
+    const guideXOS::ramdisk_diagnostic::MappingStatus currentLastStatus =
+        guideXOS::ramdisk_diagnostic::translate(
+            currentRoot, bi->RamdiskBase + bi->RamdiskSize - 1u,
+            &ramdisk_diag_read_page_table, nullptr, &currentLast);
+    guideXOS::debug::SerialPrint(" currentLast=");
+    ramdisk_diag_print_mapping("", currentRoot,
+                               bi->RamdiskBase + bi->RamdiskSize - 1u);
+    guideXOS::debug::SerialPrint(" targetCR3=0x");
+    guideXOS::debug::SerialPrintHex64(targetCr3);
+    guideXOS::debug::SerialPrint(" targetMap=");
+    guideXOS::ramdisk_diagnostic::Mapping targetMapping{};
+    guideXOS::ramdisk_diagnostic::Mapping targetLast{};
+    guideXOS::ramdisk_diagnostic::MappingStatus targetStatus =
+        guideXOS::ramdisk_diagnostic::MappingStatus::Invalid;
+    guideXOS::ramdisk_diagnostic::MappingStatus targetLastStatus =
+        guideXOS::ramdisk_diagnostic::MappingStatus::Invalid;
+    if (targetCr3 != 0u) {
+        ramdisk_diag_print_mapping("", targetCr3 & guideXOS::ramdisk_diagnostic::kAddressMask,
+                                   guideXOS::ramdisk_diagnostic::kKernelRamdiskVirtualBase);
+        targetStatus = guideXOS::ramdisk_diagnostic::translate(
+            targetCr3 & guideXOS::ramdisk_diagnostic::kAddressMask,
+            guideXOS::ramdisk_diagnostic::kKernelRamdiskVirtualBase,
+            &ramdisk_diag_read_page_table, nullptr, &targetMapping);
+        targetLastStatus = guideXOS::ramdisk_diagnostic::translate(
+            targetCr3 & guideXOS::ramdisk_diagnostic::kAddressMask,
+            guideXOS::ramdisk_diagnostic::kKernelRamdiskVirtualBase +
+                bi->RamdiskSize - 1u,
+            &ramdisk_diag_read_page_table, nullptr, &targetLast);
+        guideXOS::debug::SerialPrint(" targetLast=");
+        ramdisk_diag_print_mapping("",
+            targetCr3 & guideXOS::ramdisk_diagnostic::kAddressMask,
+            guideXOS::ramdisk_diagnostic::kKernelRamdiskVirtualBase +
+                bi->RamdiskSize - 1u);
+    } else {
+        guideXOS::debug::SerialPrint("not-built");
+    }
+
+    guideXOS::ramdisk_diagnostic::Mapping currentMapping{};
+    const guideXOS::ramdisk_diagnostic::MappingStatus currentStatus =
+        guideXOS::ramdisk_diagnostic::translate(
+            currentRoot, bi->RamdiskBase, &ramdisk_diag_read_page_table, nullptr, &currentMapping);
+    uint64_t currentPagesVerified = 0u;
+    uint64_t currentMismatch = 0u;
+    const bool currentRangeIdentity = guideXOS::ramdisk_diagnostic::identity_range_is_mapped(
+        currentRoot, bi->RamdiskBase, bi->RamdiskSize,
+        &ramdisk_diag_read_page_table, nullptr, &currentPagesVerified, &currentMismatch);
+    uint64_t targetPagesVerified = 0u;
+    uint64_t targetMismatch = 0u;
+    const bool targetRangeBacked = targetCr3 == 0u ||
+        guideXOS::ramdisk_diagnostic::range_maps_to_physical(
+            targetCr3 & guideXOS::ramdisk_diagnostic::kAddressMask,
+            guideXOS::ramdisk_diagnostic::kKernelRamdiskVirtualBase,
+            bi->RamdiskBase, bi->RamdiskSize,
+            &ramdisk_diag_read_page_table, nullptr,
+            &targetPagesVerified, &targetMismatch);
+    const bool currentFirstMapped =
+        currentStatus == guideXOS::ramdisk_diagnostic::MappingStatus::Mapped4K ||
+        currentStatus == guideXOS::ramdisk_diagnostic::MappingStatus::Mapped2M ||
+        currentStatus == guideXOS::ramdisk_diagnostic::MappingStatus::Mapped1G;
+    const bool currentLastMapped =
+        currentLastStatus == guideXOS::ramdisk_diagnostic::MappingStatus::Mapped4K ||
+        currentLastStatus == guideXOS::ramdisk_diagnostic::MappingStatus::Mapped2M ||
+        currentLastStatus == guideXOS::ramdisk_diagnostic::MappingStatus::Mapped1G;
+    const bool targetFirstMapped =
+        targetStatus == guideXOS::ramdisk_diagnostic::MappingStatus::Mapped4K ||
+        targetStatus == guideXOS::ramdisk_diagnostic::MappingStatus::Mapped2M ||
+        targetStatus == guideXOS::ramdisk_diagnostic::MappingStatus::Mapped1G;
+    const bool targetLastMapped =
+        targetLastStatus == guideXOS::ramdisk_diagnostic::MappingStatus::Mapped4K ||
+        targetLastStatus == guideXOS::ramdisk_diagnostic::MappingStatus::Mapped2M ||
+        targetLastStatus == guideXOS::ramdisk_diagnostic::MappingStatus::Mapped1G;
+    const bool fingerprintSafe = currentRangeIdentity && currentFirstMapped &&
+        currentMapping.physicalAddress == bi->RamdiskBase && currentLastMapped &&
+        currentLast.physicalAddress == bi->RamdiskBase + bi->RamdiskSize - 1u &&
+        (targetCr3 == 0u ||
+         (targetRangeBacked && targetFirstMapped &&
+          targetMapping.physicalAddress == bi->RamdiskBase && targetLastMapped &&
+          targetLast.physicalAddress == bi->RamdiskBase + bi->RamdiskSize - 1u));
+    guideXOS::debug::SerialPrint(" currentRangeIdentity=");
+    guideXOS::debug::SerialPrint(currentRangeIdentity ? "yes" : "no");
+    guideXOS::debug::SerialPrint(" currentIdentityPages=");
+    guideXOS::debug::SerialPrintHex64(currentPagesVerified);
+    guideXOS::debug::SerialPrint(" currentFirstMapMismatch=0x");
+    guideXOS::debug::SerialPrintHex64(currentMismatch);
+    guideXOS::debug::SerialPrint(" targetRangeBacked=");
+    guideXOS::debug::SerialPrint(targetCr3 == 0u ? "not-built" :
+                                 (targetRangeBacked ? "yes" : "no"));
+    guideXOS::debug::SerialPrint(" targetBackingPages=");
+    guideXOS::debug::SerialPrintHex64(targetPagesVerified);
+    guideXOS::debug::SerialPrint(" targetFirstMapMismatch=0x");
+    guideXOS::debug::SerialPrintHex64(targetMismatch);
+
+    guideXOS::debug::SerialPrint(" fnv1a64=");
+    if (fingerprintSafe) {
+        guideXOS::ramdisk_diagnostic::SectorZero sector{};
+        const void* sectorBytes = reinterpret_cast<const void*>(
+            static_cast<UINTN>(bi->RamdiskBase));
+        if (guideXOS::ramdisk_diagnostic::observe_sector_zero(sectorBytes, &sector)) {
+            guideXOS::debug::SerialPrintHex64(sector.fnv1a64);
+            guideXOS::debug::SerialPrint(" bpb(sig=0x");
+            guideXOS::debug::SerialPrintHex32(sector.signature);
+            guideXOS::debug::SerialPrint(" bps=0x");
+            guideXOS::debug::SerialPrintHex32(sector.bytesPerSector);
+            guideXOS::debug::SerialPrint(" spc=0x");
+            guideXOS::debug::SerialPrintHex32(sector.sectorsPerCluster);
+            guideXOS::debug::SerialPrint(" reserved=0x");
+            guideXOS::debug::SerialPrintHex32(sector.reservedSectors);
+            guideXOS::debug::SerialPrint(" fats=0x");
+            guideXOS::debug::SerialPrintHex32(sector.fatCount);
+            guideXOS::debug::SerialPrint(")");
+        } else {
+            guideXOS::debug::SerialPrint("unavailable");
+        }
+    } else {
+        guideXOS::debug::SerialPrint("unavailable(mapping-unverified)");
+    }
+    guideXOS::debug::SerialPrint("\n");
+}
+
+extern "C" void GuideXOSRamdiskPreCr3Checkpoint(const guideXOS::BootInfo* bi,
+                                                 uint64_t targetCr3)
+{
+    ramdisk_diag_loader_checkpoint(bi, "trampoline-before-cr3", targetCr3);
+}
+#endif
+
 EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     // Set global SystemTable pointer for uefi_shim.h functions
     gST = SystemTable;
@@ -1253,6 +1452,10 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
 
     Print(L"Building identity page tables with %u ranges...\n", (UINT32)rangeCount);
 
+#if defined(GXOS_RAMDISK_INTEGRITY_DIAGNOSTICS)
+    ramdisk_diag_loader_checkpoint(v1BootInfo, "loader-before-page-table-build", 0u);
+#endif
+
     guideXOS::paging::PageTables pt{};
     {
         EFI_STATUS st = guideXOS::paging::BuildIdentityPageTables(
@@ -1277,6 +1480,23 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
             kernelSpanBytes);
         if (EFI_ERROR(st)) {
             Print(L"Failed to map kernel virtual range\n");
+            return st;
+        }
+    }
+
+    // BootInfo::RamdiskBase is a physical address. The low kernel VA image can
+    // overlap that numeric address, so give the kernel a separate virtual
+    // alias while preserving the physical allocation for ownership and
+    // memory-map checks.
+    if (ramdiskPhys != 0 && ramdiskSize != 0) {
+        EFI_STATUS st = guideXOS::paging::MapRange(
+            SystemTable,
+            pt.Pml4Phys,
+            guideXOS::ramdisk_diagnostic::kKernelRamdiskVirtualBase,
+            ramdiskPhys,
+            (UINTN)ramdiskSize);
+        if (EFI_ERROR(st)) {
+            Print(L"Failed to map kernel RAMDISK virtual range\n");
             return st;
         }
     }
@@ -1510,6 +1730,10 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     }
 #endif
 
+#if defined(GXOS_RAMDISK_INTEGRITY_DIAGNOSTICS)
+    ramdisk_diag_loader_checkpoint(v1BootInfo, "loader-final-before-transfer", pt.Pml4Phys);
+#endif
+
     guideXOS::debug::SerialPrint("\n[BOOT] === CALLING TRAMPOLINE NOW ===\n");
 
     // Use PHYSICAL entry point for the trampoline jump.
@@ -1522,7 +1746,14 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     // relocated physical image.  Jump through that virtual mapping after CR3
     // is loaded; using the physical entry only worked while the allocation
     // happened outside the kernel virtual range.
-    BootHandoffTrampoline((void*)(UINTN)entryVirt, (void*)v1BootInfo, stackTop, (void*)(UINTN)pt.Pml4Phys);
+#if defined(GXOS_RAMDISK_INTEGRITY_DIAGNOSTICS)
+    BootHandoffTrampoline((void*)(UINTN)entryVirt, (void*)v1BootInfo, stackTop,
+                          (void*)(UINTN)pt.Pml4Phys,
+                          &GuideXOSRamdiskPreCr3Checkpoint);
+#else
+    BootHandoffTrampoline((void*)(UINTN)entryVirt, (void*)v1BootInfo, stackTop,
+                          (void*)(UINTN)pt.Pml4Phys);
+#endif
 
     // If we return, halt
     guideXOS::debug::SerialPrint("\n!!! KERNEL RETURNED - THIS SHOULD NOT HAPPEN !!!\n");

@@ -9,6 +9,10 @@
 section .boot
 global _start
 
+%ifdef GXOS_RAMDISK_INTEGRITY_DIAGNOSTICS
+extern kernel_ramdisk_early_entry_checkpoint
+%endif
+
 _start:
     ; Disable interrupts
     cli
@@ -26,9 +30,20 @@ _start:
     ; Keep headroom below the fixed stack boundary for the integrated kernel
     ; entry frame's final spill; stack_top itself is one-past the BSS stack.
     sub rsp, 0x20
-    
-    ; Clear direction flag
-    cld
+    cld                         ; C/C++ diagnostics and kernel entry expect DF=0
+
+%ifdef GXOS_RAMDISK_INTEGRITY_DIAGNOSTICS
+    ; The UEFI trampoline passes its verified target CR3 in RDX for this
+    ; diagnostic-only first-C checkpoint. kernel_main keeps its usual zero
+    ; boot_magic for BootInfo boots.
+    mov r12, rcx
+    mov r13, rdx
+    mov rcx, r12
+    mov rdx, r13
+    call kernel_ramdisk_early_entry_checkpoint
+    mov rcx, r12
+    xor edx, edx
+%endif
     
     ; Jump to kernel main
     extern kernel_main

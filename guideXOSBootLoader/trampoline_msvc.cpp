@@ -4,6 +4,13 @@
 
 #include "Uefi.h"
 #include <stdint.h>
+#if defined(GXOS_RAMDISK_INTEGRITY_DIAGNOSTICS)
+#include "guidexOSBootInfo.h"
+typedef void (*RamdiskDiagnosticCheckpoint)(const guideXOS::BootInfo*, uint64_t);
+typedef void (*TrampolineFunc)(void*, void*, void*, void*, RamdiskDiagnosticCheckpoint);
+#else
+typedef void (*TrampolineFunc)(void*, void*, void*, void*);
+#endif
 
 // MSVC intrinsics
 extern "C" {
@@ -15,8 +22,6 @@ extern "C" {
 
 // Declare the function type for the trampoline
 // MS x64 ABI: RCX=1st, RDX=2nd, R8=3rd, R9=4th
-typedef void (*TrampolineFunc)(void* kernelEntry, void* bootInfo, void* stackTop, void* pml4Phys);
-
 // Serial output helpers for debugging (inline, no stack usage after trampoline)
 static inline void serial_putchar(char c) {
     while ((__inbyte(0x3FD) & 0x20) == 0) { }
@@ -69,6 +74,20 @@ static const uint8_t g_TrampolineCodeBytes[] = {
     // mov r15, r9   ; r15 = pml4Phys (save)
     0x4D, 0x89, 0xCF,
 
+#if defined(GXOS_RAMDISK_INTEGRITY_DIAGNOSTICS)
+    // mov r10, [rsp+0x28] ; fifth argument is the loader checkpoint callback
+    0x4C, 0x8B, 0x54, 0x24, 0x28,
+
+    // Record the last firmware-mapped read and the target CR3 translation.
+    // The callback runs before the mapping transition while the firmware stack
+    // and loader image remain accessible.
+    0x48, 0x83, 0xEC, 0x28,       // sub rsp, 0x28
+    0x4C, 0x89, 0xE9,             // mov rcx, r13
+    0x4C, 0x89, 0xFA,             // mov rdx, r15
+    0x41, 0xFF, 0xD2,             // call r10
+    0x48, 0x83, 0xC4, 0x28,       // add rsp, 0x28
+#endif
+
     // === STAGE 2: Load new page tables (if pml4Phys != 0) ===
     // test r15, r15
     0x4D, 0x85, 0xFF,
@@ -96,8 +115,13 @@ static const uint8_t g_TrampolineCodeBytes[] = {
     // mov rcx, r13  ; RCX = bootInfo (first parameter for kernel)
     0x4C, 0x89, 0xE9,
     
+#if defined(GXOS_RAMDISK_INTEGRITY_DIAGNOSTICS)
+    // mov rdx, r15 ; expected PML4 passed to the kernel entry checkpoint
+    0x4C, 0x89, 0xFA,
+#else
     // xor rdx, rdx  ; clear second param
     0x48, 0x31, 0xD2,
+#endif
     
     // xor r8, r8    ; clear third param
     0x4D, 0x31, 0xC0,
@@ -137,7 +161,14 @@ extern "C" void SetupTrampoline(void* executableMemory)
 // This function transfers control to the kernel
 // It will NOT return
 // IMPORTANT: SetupTrampoline() must be called first!
-extern "C" void BootHandoffTrampoline(void* kernelEntry, void* bootInfo, void* stackTop, void* pml4Phys)
+#if defined(GXOS_RAMDISK_INTEGRITY_DIAGNOSTICS)
+extern "C" void BootHandoffTrampoline(void* kernelEntry, void* bootInfo,
+                                        void* stackTop, void* pml4Phys,
+                                        RamdiskDiagnosticCheckpoint diagnosticCheckpoint)
+#else
+extern "C" void BootHandoffTrampoline(void* kernelEntry, void* bootInfo,
+                                        void* stackTop, void* pml4Phys)
+#endif
 {
     if (g_ExecutableTrampoline == nullptr) {
         // Fallback: try to execute from read-only memory
@@ -148,7 +179,12 @@ extern "C" void BootHandoffTrampoline(void* kernelEntry, void* bootInfo, void* s
     // Call the trampoline code
     // Parameters are already in the right registers per MS x64 ABI
     // This call WILL NOT RETURN
+#if defined(GXOS_RAMDISK_INTEGRITY_DIAGNOSTICS)
+    g_ExecutableTrampoline(kernelEntry, bootInfo, stackTop, pml4Phys,
+                           diagnosticCheckpoint);
+#else
     g_ExecutableTrampoline(kernelEntry, bootInfo, stackTop, pml4Phys);
+#endif
     
     // Should never reach here - but just in case
     for (;;) {

@@ -10,6 +10,7 @@
 #include "include/kernel/build_identity.h"
 #include "include/kernel/amd64_memory_foundation.h"
 #include "include/kernel/protected_task.h"
+#include "include/kernel/physical_frame_owner.h"
 #include "include/kernel/arch.h"
 #include "include/kernel/vga.h"
 #include "include/kernel/framebuffer.h"
@@ -83,6 +84,7 @@
 #include "include/kernel/multiboot.h"
 // Include BootInfo structure from bootloader (x86 / amd64 UEFI only)
 #include "../../guideXOSBootLoader/guidexOSBootInfo.h"
+#include "include/kernel/ramdisk_integrity_diagnostic.h"
 #endif
 
 // Existing proof builds historically selected their coordinator through the
@@ -652,7 +654,256 @@ static void log_framebuffer_summary(
     kernel::serial::puts("\n");
 }
 
+#if defined(GXOS_RAMDISK_INTEGRITY_DIAGNOSTICS)
+static uint64_t s_ramdiskDiagnosticExpectedCr3 = 0u;
+static const guideXOS::BootInfo* s_ramdiskDiagnosticBootInfo = nullptr;
+
+static const volatile uint64_t* ramdisk_diag_read_page_table(void*, uint64_t physicalAddress)
+{
+    if (physicalAddress >= guideXOS::ramdisk_diagnostic::kPhysicalIdentityLimit ||
+        (physicalAddress & guideXOS::ramdisk_diagnostic::kPageMask) != 0u) {
+        return nullptr;
+    }
+    // The loader identity-maps every page-table page before handing off CR3.
+    return reinterpret_cast<const volatile uint64_t*>(
+        static_cast<uintptr_t>(physicalAddress));
+}
+
+static bool ramdisk_diag_mapping_present(
+    guideXOS::ramdisk_diagnostic::MappingStatus status)
+{
+    return status == guideXOS::ramdisk_diagnostic::MappingStatus::Mapped4K ||
+           status == guideXOS::ramdisk_diagnostic::MappingStatus::Mapped2M ||
+           status == guideXOS::ramdisk_diagnostic::MappingStatus::Mapped1G;
+}
+
+static bool ramdisk_diag_identity_mapping(uint64_t root, uint64_t virtualAddress,
+                                          guideXOS::ramdisk_diagnostic::Mapping* out)
+{
+    if (!out) return false;
+    const guideXOS::ramdisk_diagnostic::MappingStatus status =
+        guideXOS::ramdisk_diagnostic::translate(
+            root, virtualAddress, &ramdisk_diag_read_page_table, nullptr, out);
+    return ramdisk_diag_mapping_present(status) &&
+           out->physicalAddress == virtualAddress;
+}
+
+static const char* ramdisk_diag_firmware_reservation(
+    const guideXOS::BootInfo* bi, uint64_t root)
+{
+    if (!bi || bi->MemoryMap == 0u || bi->MemoryMapEntryCount == 0u ||
+        bi->MemoryMapEntryCount > kernel::memory::kMaxFirmwareMemoryDescriptors ||
+        bi->MemoryMapDescriptorSize < sizeof(kernel::memory::FirmwareMemoryDescriptor) ||
+        bi->MemoryMapDescriptorSize > 256u ||
+        (bi->MemoryMapDescriptorSize & 7u) != 0u ||
+        bi->MemoryMapEntryCount > UINT64_MAX / bi->MemoryMapDescriptorSize) {
+        return "unavailable";
+    }
+    const uint64_t mapBytes = bi->MemoryMapEntryCount * bi->MemoryMapDescriptorSize;
+    if (mapBytes == 0u || bi->MemoryMap > UINT64_MAX - mapBytes) {
+        return "unavailable";
+    }
+    const uint64_t mapEnd = bi->MemoryMap + mapBytes;
+    const uint64_t firstPage = bi->MemoryMap & ~guideXOS::ramdisk_diagnostic::kPageMask;
+    const uint64_t lastPage = (mapEnd - 1u) & ~guideXOS::ramdisk_diagnostic::kPageMask;
+    for (uint64_t page = firstPage; page <= lastPage; page += 4096u) {
+        guideXOS::ramdisk_diagnostic::Mapping mapping{};
+        if (!ramdisk_diag_identity_mapping(root, page, &mapping)) {
+            return "map-unverified";
+        }
+    }
+
+    const uint64_t ramdiskEnd = bi->RamdiskBase + bi->RamdiskSize;
+    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(
+        static_cast<uintptr_t>(bi->MemoryMap));
+    bool overlapsLoaderData = false;
+    for (uint64_t index = 0u; index < bi->MemoryMapEntryCount; ++index) {
+        const kernel::memory::FirmwareMemoryDescriptor* descriptor =
+            reinterpret_cast<const kernel::memory::FirmwareMemoryDescriptor*>(
+                bytes + index * bi->MemoryMapDescriptorSize);
+        if (descriptor->numberOfPages == 0u ||
+            descriptor->numberOfPages > UINT64_MAX / 4096u) continue;
+        const uint64_t descriptorBytes = descriptor->numberOfPages * 4096u;
+        if (descriptor->physicalStart > UINT64_MAX - descriptorBytes) continue;
+        const uint64_t descriptorEnd = descriptor->physicalStart + descriptorBytes;
+        if (bi->RamdiskBase < descriptorEnd && descriptor->physicalStart < ramdiskEnd &&
+            descriptor->type == kernel::memory::kEfiLoaderDataMemoryType) {
+            overlapsLoaderData = true;
+            if (descriptor->physicalStart <= bi->RamdiskBase && descriptorEnd >= ramdiskEnd) {
+                return "efi-loader-data-full";
+            }
+        }
+    }
+    return overlapsLoaderData ? "efi-loader-data-partial" : "not-efi-loader-data";
+}
+
+static void ramdisk_diag_checkpoint(const char* stage,
+                                    const guideXOS::BootInfo* bi,
+                                    uint64_t expectedCr3)
+{
+    const uint64_t currentCr3 = kernel::arch::read_cr3();
+    const uint64_t currentRoot = currentCr3 &
+        guideXOS::ramdisk_diagnostic::kAddressMask;
+    const uint64_t expectedRoot = expectedCr3 &
+        guideXOS::ramdisk_diagnostic::kAddressMask;
+    const bool expectedRootMatches = expectedRoot != 0u && currentRoot == expectedRoot;
+
+    kernel::serial::puts("S22R28R3R2_STAGE stage=");
+    kernel::serial::puts(stage ? stage : "unknown");
+    kernel::serial::puts(" currentCR3=0x");
+    kernel::serial::put_hex64(currentCr3);
+    kernel::serial::puts(" expectedCR3=0x");
+    kernel::serial::put_hex64(expectedCr3);
+    kernel::serial::puts(" rootMatch=");
+    kernel::serial::puts(expectedRootMatches ? "yes" : "no");
+    if (!bi || bi->Magic != guideXOS::GUIDEXOS_BOOTINFO_MAGIC ||
+        bi->Version != guideXOS::GUIDEXOS_BOOTINFO_VERSION ||
+        bi->Size != sizeof(guideXOS::BootInfo) || bi->RamdiskBase == 0u ||
+        bi->RamdiskSize < guideXOS::ramdisk_diagnostic::kSectorBytes ||
+        bi->RamdiskBase > UINT64_MAX - bi->RamdiskSize) {
+        kernel::serial::puts(" bootinfo-or-ramdisk=invalid\n");
+        return;
+    }
+
+    kernel::serial::puts(" base=0x");
+    kernel::serial::put_hex64(bi->RamdiskBase);
+    kernel::serial::puts(" length=0x");
+    kernel::serial::put_hex64(bi->RamdiskSize);
+    kernel::serial::puts(" addressContract=physical vaUsed=0x");
+    kernel::serial::put_hex64(
+        guideXOS::ramdisk_diagnostic::kKernelRamdiskVirtualBase);
+    kernel::serial::puts(" mapping=");
+
+    guideXOS::ramdisk_diagnostic::Mapping ramdiskMapping{};
+    guideXOS::ramdisk_diagnostic::Mapping lastMapping{};
+    guideXOS::ramdisk_diagnostic::MappingStatus status =
+        guideXOS::ramdisk_diagnostic::MappingStatus::Invalid;
+    guideXOS::ramdisk_diagnostic::MappingStatus lastStatus =
+        guideXOS::ramdisk_diagnostic::MappingStatus::Invalid;
+    bool rangeMapped = false;
+    uint64_t backingPagesVerified = 0u;
+    uint64_t firstMapMismatch = 0u;
+    if (!expectedRootMatches) {
+        kernel::serial::puts("unverified-root-mismatch");
+    } else {
+        status = guideXOS::ramdisk_diagnostic::translate(
+            currentRoot,
+            guideXOS::ramdisk_diagnostic::kKernelRamdiskVirtualBase,
+            &ramdisk_diag_read_page_table, nullptr, &ramdiskMapping);
+        lastStatus = guideXOS::ramdisk_diagnostic::translate(
+            currentRoot,
+            guideXOS::ramdisk_diagnostic::kKernelRamdiskVirtualBase +
+                bi->RamdiskSize - 1u,
+            &ramdisk_diag_read_page_table, nullptr, &lastMapping);
+        kernel::serial::puts(guideXOS::ramdisk_diagnostic::mapping_status_name(status));
+        if (ramdisk_diag_mapping_present(status)) {
+            kernel::serial::puts(":phys=0x");
+            kernel::serial::put_hex64(ramdiskMapping.physicalAddress);
+            kernel::serial::puts(" shift=0x");
+            kernel::serial::put_hex32(ramdiskMapping.pageShift);
+            kernel::serial::puts(" writable=");
+            kernel::serial::puts(ramdiskMapping.writable ? "yes" : "no");
+            kernel::serial::puts(" user=");
+            kernel::serial::puts(ramdiskMapping.user ? "yes" : "no");
+            kernel::serial::puts(" executable=");
+            kernel::serial::puts(ramdiskMapping.executable ? "yes" : "no");
+            rangeMapped = guideXOS::ramdisk_diagnostic::range_maps_to_physical(
+                currentRoot,
+                guideXOS::ramdisk_diagnostic::kKernelRamdiskVirtualBase,
+                bi->RamdiskBase, bi->RamdiskSize,
+                &ramdisk_diag_read_page_table, nullptr,
+                &backingPagesVerified, &firstMapMismatch) &&
+                ramdisk_diag_mapping_present(lastStatus) &&
+                lastMapping.physicalAddress == bi->RamdiskBase + bi->RamdiskSize - 1u;
+        }
+    }
+
+    kernel::serial::puts(" fullRangeBacking=");
+    kernel::serial::puts(rangeMapped &&
+        ramdiskMapping.physicalAddress == bi->RamdiskBase ? "yes" : "no");
+    kernel::serial::puts(" backingPagesVerified=");
+    kernel::serial::put_hex64(backingPagesVerified);
+    kernel::serial::puts(" firstMapMismatch=0x");
+    kernel::serial::put_hex64(firstMapMismatch);
+    kernel::serial::puts(" fnv1a64=");
+    if (expectedRootMatches && rangeMapped &&
+        ramdiskMapping.physicalAddress == bi->RamdiskBase) {
+        guideXOS::ramdisk_diagnostic::SectorZero sector{};
+        if (guideXOS::ramdisk_diagnostic::observe_sector_zero(
+                reinterpret_cast<const void*>(static_cast<uintptr_t>(
+                    guideXOS::ramdisk_diagnostic::kKernelRamdiskVirtualBase)),
+                &sector)) {
+            kernel::serial::put_hex64(sector.fnv1a64);
+            kernel::serial::puts(" bpb(sig=0x");
+            kernel::serial::put_hex16(sector.signature);
+            kernel::serial::puts(" bps=0x");
+            kernel::serial::put_hex16(sector.bytesPerSector);
+            kernel::serial::puts(" spc=0x");
+            kernel::serial::put_hex8(sector.sectorsPerCluster);
+            kernel::serial::puts(" reserved=0x");
+            kernel::serial::put_hex16(sector.reservedSectors);
+            kernel::serial::puts(" fats=0x");
+            kernel::serial::put_hex8(sector.fatCount);
+            kernel::serial::puts(")");
+        } else {
+            kernel::serial::puts("unavailable");
+        }
+    } else {
+        kernel::serial::puts("unavailable(mapping-unverified)");
+    }
+
+    kernel::serial::puts(" firmwareReservation=");
+    kernel::serial::puts(expectedRootMatches ?
+        ramdisk_diag_firmware_reservation(bi, currentRoot) : "map-unverified");
+    kernel::serial::puts(" taskArena=0x");
+    kernel::serial::put_hex64(bi->TaskFrameArenaBase);
+    kernel::serial::puts("/0x");
+    kernel::serial::put_hex64(bi->TaskFrameArenaSize);
+    const bool arenaRangeValid = bi->TaskFrameArenaBase <=
+        UINT64_MAX - bi->TaskFrameArenaSize;
+    const uint64_t arenaEnd = arenaRangeValid ?
+        bi->TaskFrameArenaBase + bi->TaskFrameArenaSize : 0u;
+    const uint64_t ramdiskEnd = bi->RamdiskBase + bi->RamdiskSize;
+    const bool overlapsArena = arenaRangeValid && bi->TaskFrameArenaSize != 0u &&
+        bi->RamdiskBase < arenaEnd && bi->TaskFrameArenaBase < ramdiskEnd;
+    kernel::serial::puts(" taskArenaRelation=");
+    kernel::serial::puts(!arenaRangeValid ? "invalid" :
+        (overlapsArena ? "overlap" : "outside-task-arena"));
+    kernel::serial::puts(" frameOwner=");
+    kernel::serial::puts(kernel::memory::frame_owner_initialized() ?
+        "initialized-task-arena-only" : "not-initialized");
+    kernel::serial::puts("\n");
+}
+#endif
+
 } // namespace
+
+#if defined(GXOS_RAMDISK_INTEGRITY_DIAGNOSTICS)
+extern "C" void kernel_ramdisk_early_entry_checkpoint(void* bootInfo,
+                                                        uint64_t expectedCr3)
+{
+    kernel::serial::init();
+    s_ramdiskDiagnosticExpectedCr3 = expectedCr3;
+    s_ramdiskDiagnosticBootInfo = static_cast<const guideXOS::BootInfo*>(bootInfo);
+    ramdisk_diag_checkpoint("kernel-entry-after-cr3",
+                            s_ramdiskDiagnosticBootInfo, expectedCr3);
+}
+
+extern "C" void kernel_ramdisk_attachment_checkpoint(const void* ramdiskBase,
+                                                       uint64_t ramdiskSize)
+{
+    if (!s_ramdiskDiagnosticBootInfo ||
+        reinterpret_cast<uintptr_t>(ramdiskBase) !=
+            guideXOS::ramdisk_diagnostic::kKernelRamdiskVirtualBase ||
+        ramdiskSize != s_ramdiskDiagnosticBootInfo->RamdiskSize) {
+        kernel::serial::puts("S22R28R3R2_STAGE stage=kernel-before-ramdisk-attach status=bootinfo-range-mismatch\n");
+        return;
+    }
+    ramdisk_diag_checkpoint("kernel-before-ramdisk-attach",
+                            s_ramdiskDiagnosticBootInfo,
+                            s_ramdiskDiagnosticExpectedCr3);
+}
+#endif
 #endif
 
 #if defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_CONTROL_ACTIVE) || defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_PERSISTENCE_ACTIVE)
@@ -774,6 +1025,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         // Initialize only the bounded task-frame owner. The address-space
         // fixture remains a hosted diagnostic; no task CR3 is activated here.
         (void)kernel::memory::initialize_amd64_task_memory(bootinfo);
+#if defined(GXOS_RAMDISK_INTEGRITY_DIAGNOSTICS)
+        ramdisk_diag_checkpoint("kernel-after-frame-owner-init", bootinfo,
+                                s_ramdiskDiagnosticExpectedCr3);
+#endif
     }
     
     // Initialize framebuffer for graphics mode
@@ -1003,7 +1258,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 
         if (is_bootinfo && bootinfo && bootinfo->RamdiskBase != 0 && bootinfo->RamdiskSize != 0) {
             kernel::serial::puts("[KERNEL] Boot wallpaper pack found in ramdisk.img\n");
-            kernel::desktop::set_wallpaper_image_pack(reinterpret_cast<const void*>(static_cast<uintptr_t>(bootinfo->RamdiskBase)), bootinfo->RamdiskSize);
+            kernel::desktop::set_wallpaper_image_pack(
+                reinterpret_cast<const void*>(static_cast<uintptr_t>(
+                    guideXOS::ramdisk_diagnostic::kKernelRamdiskVirtualBase)),
+                bootinfo->RamdiskSize);
 #if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
             (void)kernel::user_data_volume::mount_documents();
 #endif
