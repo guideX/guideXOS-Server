@@ -36,7 +36,11 @@ namespace native_elf {
 #if defined(ARCH_AMD64)
 
 static const uint32_t kPageSize = 0x1000u;
-static const uint32_t kMaxPackages = 8u;
+// The development App Model inventory contains nine Native ELF packages.
+// Keep discovery large enough to include the timer-preemption pilot while
+// retaining a fixed, bounded package table. Public preview still applies its
+// separate single-PacMan inventory restriction below.
+static const uint32_t kMaxPackages = 9u;
 static const uint32_t kMaxManifestBytes = 8192u;
 static const uint32_t kReadChunkBytes = 65536u;
 static const uint32_t kRuntimeStackBytes = 128u * 1024u;
