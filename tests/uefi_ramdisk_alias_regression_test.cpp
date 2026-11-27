@@ -210,6 +210,14 @@ int main()
                                 true, true, "loader page-table self-map")) return 1;
     }
 
+    if (g_pageTableAllocationCount >
+        guideXOS::GUIDEXOS_MAX_BOOT_PAGE_TABLE_PAGES) {
+        std::printf("FAIL page-table tree uses %zu pages beyond shared boot bound %u\n",
+                    g_pageTableAllocationCount,
+                    guideXOS::GUIDEXOS_MAX_BOOT_PAGE_TABLE_PAGES);
+        return 1;
+    }
+
     std::printf("PASS RAMDISK alias maps %llu pages with supervisor identity-mapped page tables (tablePages=%zu)\n",
                 static_cast<unsigned long long>(pageCount),
                 g_pageTableAllocationCount);

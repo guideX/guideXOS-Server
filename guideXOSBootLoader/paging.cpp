@@ -1,4 +1,5 @@
 #include "paging.h"
+#include "guidexOSBootInfo.h"
 #include "uefi_shim.h"
 
 namespace guideXOS {
@@ -10,7 +11,8 @@ namespace paging
     static inline UINT64* PhysToPtr(EFI_PHYSICAL_ADDRESS p) { return (UINT64*)(UINTN)p; }
 
     // Track allocated page table pages so we can identity-map them
-    static constexpr UINTN MAX_PT_PAGES = 1024;
+    static constexpr UINTN MAX_PT_PAGES =
+        guideXOS::GUIDEXOS_MAX_BOOT_PAGE_TABLE_PAGES;
     static EFI_PHYSICAL_ADDRESS g_ptPages[MAX_PT_PAGES];
     static UINTN g_ptPageCount = 0;
 

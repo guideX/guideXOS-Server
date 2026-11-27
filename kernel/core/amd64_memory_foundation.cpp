@@ -27,7 +27,8 @@ static const uint64_t kPteWritable = 1ull << 1;
 static const uint64_t kPteUser = 1ull << 2;
 static const uint64_t kPteLarge = 1ull << 7;
 static const uint64_t kPteAddressMask = 0x000FFFFFFFFFF000ull;
-static const uint32_t kMaximumBootPageTablePages = 512u;
+static const uint32_t kMaximumBootPageTablePages =
+    guideXOS::GUIDEXOS_MAX_BOOT_PAGE_TABLE_PAGES;
 static const uint32_t kIa32Efer = 0xC0000080u;
 static const uint64_t kEferNxEnable = 1ull << 11;
 

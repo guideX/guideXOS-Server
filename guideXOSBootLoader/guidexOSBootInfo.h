@@ -46,6 +46,10 @@ namespace guideXOS
     // high virtual alias after the loader builds the kernel mapping.
     static const uint64_t GUIDEXOS_RAMDISK_ALIAS_BASE = 0x0000400000000000ull;
 
+    // Loader mapping and the kernel's boot-time page-table audit must accept
+    // the same bounded table tree, including the release RAMDISK alias.
+    static const uint32_t GUIDEXOS_MAX_BOOT_PAGE_TABLE_PAGES = 1024u;
+
     struct FramebufferDescriptor
     {
         uint64_t Base;
