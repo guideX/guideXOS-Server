@@ -49,6 +49,7 @@ enum class PortableExecutionErrorCode : std::uint8_t {
     PrototypeDepthExceeded,
     InternalInvariantFailure,
     ExecutionFrameCapacityExhausted,
+    PreflightLimitExceeded,
 };
 
 struct PortableExecutionError {
@@ -67,6 +68,9 @@ struct PortableExecutionResult {
     std::size_t callDepthHighWater = 0u;
     std::size_t tailCallsExecuted = 0u;
     std::size_t executionFrameHighWater = 0u;
+    std::size_t preflightFrameHighWater = 0u;
+    std::size_t preflightWorkUnits = 0u;
+    bool preflightCompleted = false;
 };
 
 constexpr std::size_t kDefaultPortableExecutionFrameCapacity = 4096u;
@@ -81,6 +85,7 @@ struct PortableExecutionLimits {
     std::size_t maxRuntimeStringLength = 64u * 1024u;
     std::size_t maxAstDepth = 256u;
     std::size_t maxExecutionFrames = kDefaultPortableExecutionFrameCapacity;
+    std::size_t maxPreflightWorkUnits = 65536u;
 };
 
 struct PortableCallFrame {
@@ -101,6 +106,7 @@ enum class PortableExecutionFrameKind : std::uint8_t {
     Statement,
     Expression,
     FunctionBoundary,
+    Preflight,
 };
 
 // One stable, caller-owned record for a suspended statement or expression.
@@ -205,9 +211,8 @@ public:
                 SourceLocation());
             return finish(result, finalValue);
         }
-        if (!supports(ast_, root, limits_.maxCallArguments,
-                limits_.maxAstDepth,
-                EnableObjectOperations && objects_ != nullptr)) {
+        if (!validNode(ast_, root) ||
+            ast_.node(root).kind != AstNodeKind::Program) {
             fail(PortableExecutionErrorCode::UnsupportedOperation,
                 validNode(ast_, root) ? ast_.node(root).location
                     : SourceLocation());
@@ -229,6 +234,20 @@ public:
         machineReturning_ = false;
         machineReturnValue_ = Value::undefined();
         result_ = PortableExecutionResult();
+
+        const bool allowObjects =
+            EnableObjectOperations && objects_ != nullptr;
+        const bool supported = storage_.executionFrameCapacity != 0u
+            ? preflightAst(root, PreflightRole::StatementList, allowObjects)
+            : supports(ast_, root, limits_.maxCallArguments,
+                limits_.maxAstDepth, allowObjects);
+        if (!supported) {
+            if (result_.error.code == PortableExecutionErrorCode::None)
+                fail(PortableExecutionErrorCode::UnsupportedOperation,
+                    ast_.node(root).location);
+            return finish(result, finalValue);
+        }
+        result_.preflightCompleted = true;
 
         if (!preflightGlobalBindings(root) ||
             !instantiateFunctions(root, globalEnvironment) ||
@@ -310,7 +329,11 @@ public:
         if (!environments_.configured() || !functions_.configured() ||
             (objects_ != nullptr && !objects_->configured()) ||
             globalEnvironment_ == kInvalidEnvironmentId ||
-            (storage_.frameCapacity != 0u && storage_.frames == nullptr)) {
+            (storage_.frameCapacity != 0u && storage_.frames == nullptr) ||
+            (storage_.argumentCapacity != 0u &&
+                storage_.argumentValues == nullptr) ||
+            (storage_.executionFrameCapacity != 0u &&
+                storage_.executionFrames == nullptr)) {
             fail(PortableExecutionErrorCode::InternalInvariantFailure,
                 callSite);
             result = result_;
@@ -354,10 +377,21 @@ public:
             } else if (function->kind != FunctionRecord::Kind::User) {
                 fail(PortableExecutionErrorCode::UnsupportedOperation,
                     callSite);
+            } else if (storage_.executionFrameCapacity == 0u) {
+                fail(PortableExecutionErrorCode::ExecutionFrameCapacityExhausted,
+                    callSite);
             } else {
                 Value returned = Value::undefined();
-                if (invokeFunction(callable.functionId(), arguments,
-                        argumentCount, callSite, returned, receiver)) {
+                const bool allowObjects =
+                    EnableObjectOperations && objects_ != nullptr;
+                if (preflightAst(function->declaration,
+                        PreflightRole::Function, allowObjects)) {
+                    result_.preflightCompleted = true;
+                }
+                if (result_.error.code == PortableExecutionErrorCode::None &&
+                    runExecutionMachine(kInvalidAstNodeId, returned,
+                        callable.functionId(), arguments, argumentCount,
+                        receiver, callSite)) {
                     finalValue_ = returned;
                     result_.completed = true;
                     result_.finalValue = returned;
@@ -370,6 +404,20 @@ public:
     }
 
 private:
+    enum class PreflightRole : std::uint8_t {
+        Expression = 0,
+        Statement,
+        StatementList,
+        Function,
+    };
+
+    enum PreflightFrameFlags : std::uint16_t {
+        PreflightRoleMask = 0x0007u,
+        PreflightAllowObjects = 0x0008u,
+        PreflightAllowFunctionDeclarations = 0x0010u,
+        PreflightInFunction = 0x0020u,
+    };
+
     enum class ControlKind : std::uint8_t { Normal = 0, Return, TailCall };
     struct Control {
         ControlKind kind = ControlKind::Normal;
@@ -973,16 +1021,592 @@ private:
         return true;
     }
 
+    bool preflightUnsupported(AstNodeId id)
+    {
+        fail(PortableExecutionErrorCode::UnsupportedOperation,
+            validNode(ast_, id) ? ast_.node(id).location : SourceLocation());
+        return false;
+    }
+
+    bool preflightConsumeWork(SourceLocation location)
+    {
+        if (result_.preflightWorkUnits >= limits_.maxPreflightWorkUnits) {
+            fail(PortableExecutionErrorCode::PreflightLimitExceeded, location);
+            return false;
+        }
+        ++result_.preflightWorkUnits;
+        return true;
+    }
+
+    bool preflightFunctionReturnsFunction(AstNodeId id, bool& returnsFunction)
+    {
+        returnsFunction = false;
+        if (!validNode(ast_, id)) return true;
+        const AstNode& function = ast_.node(id);
+        if (function.kind == AstNodeKind::ArrowFunctionExpression &&
+            function.body == kInvalidAstNodeId) {
+            if (!validNode(ast_, function.expression)) return true;
+            const AstNodeKind result = ast_.node(function.expression).kind;
+            returnsFunction = result == AstNodeKind::FunctionExpression ||
+                result == AstNodeKind::ArrowFunctionExpression;
+            return true;
+        }
+        if (!validNode(ast_, function.body) ||
+            ast_.node(function.body).kind != AstNodeKind::BlockStatement)
+            return true;
+        const AstNode& body = ast_.node(function.body);
+        bool hasFunctionReturn = false;
+        for (std::size_t index = 0u; index < body.childCount; ++index) {
+            if (!preflightConsumeWork(function.location)) return false;
+            const AstNodeId statementId = ast_.childAt(function.body, index);
+            const AstNode& statement = ast_.node(statementId);
+            if (statement.kind != AstNodeKind::ReturnStatement) continue;
+            if (!validNode(ast_, statement.expression)) return true;
+            const AstNodeKind result = ast_.node(statement.expression).kind;
+            if (result != AstNodeKind::FunctionExpression &&
+                result != AstNodeKind::ArrowFunctionExpression) return true;
+            hasFunctionReturn = true;
+        }
+        returnsFunction = hasFunctionReturn;
+        return true;
+    }
+
+    bool preflightNamedFunctionReturnsFunction(SourceView name,
+        bool& found)
+    {
+        found = false;
+        for (std::size_t index = 0u; index < ast_.nodeCount(); ++index) {
+            if (!preflightConsumeWork(SourceLocation())) return false;
+            const AstNode& node = ast_.node(static_cast<AstNodeId>(index));
+            if (node.kind != AstNodeKind::FunctionDeclaration) continue;
+            SourceView declared;
+            if (!isIdentifierName(ast_, node.name, declared) ||
+                !equalName(name, declared)) continue;
+            found = true;
+            bool returnsFunction = false;
+            if (!preflightFunctionReturnsFunction(
+                    static_cast<AstNodeId>(index), returnsFunction))
+                return false;
+            if (!returnsFunction) {
+                found = false;
+                return true;
+            }
+        }
+        return true;
+    }
+
+    bool preflightDeclaredFunctionLike(SourceView name, bool& declared)
+    {
+        bool found = false;
+        bool shadowed = false;
+        for (std::size_t index = 0u; index < ast_.nodeCount(); ++index) {
+            if (!preflightConsumeWork(SourceLocation())) return false;
+            const AstNodeId id = static_cast<AstNodeId>(index);
+            const AstNode& node = ast_.node(id);
+            if (node.kind == AstNodeKind::FunctionDeclaration) {
+                SourceView candidate;
+                if (isIdentifierName(ast_, node.name, candidate) &&
+                    equalName(name, candidate)) found = true;
+            } else if (node.kind == AstNodeKind::VariableDeclarator) {
+                SourceView candidate;
+                if (!isIdentifierName(ast_, node.name, candidate) ||
+                    !equalName(name, candidate)) continue;
+                if (validNode(ast_, node.initializer)) {
+                    const AstNode& initializer = ast_.node(node.initializer);
+                    if (initializer.kind == AstNodeKind::FunctionExpression ||
+                        initializer.kind == AstNodeKind::ArrowFunctionExpression) {
+                        found = true;
+                    } else if (initializer.kind == AstNodeKind::CallExpression &&
+                        validNode(ast_, initializer.callee) &&
+                        ast_.node(initializer.callee).kind ==
+                            AstNodeKind::Identifier) {
+                        SourceView factory;
+                        bool returnsFunction = false;
+                        if (isIdentifierName(ast_, initializer.callee, factory) &&
+                            !preflightNamedFunctionReturnsFunction(factory,
+                                returnsFunction)) return false;
+                        if (returnsFunction) found = true;
+                        else shadowed = true;
+                    } else {
+                        shadowed = true;
+                    }
+                } else {
+                    shadowed = true;
+                }
+            }
+            if (node.kind == AstNodeKind::FunctionDeclaration ||
+                node.kind == AstNodeKind::FunctionExpression ||
+                node.kind == AstNodeKind::ArrowFunctionExpression) {
+                for (std::size_t parameter = 0u;
+                    parameter < node.childCount; ++parameter) {
+                    if (!preflightConsumeWork(node.location)) return false;
+                    SourceView candidate;
+                    const AstNodeId parameterId = ast_.childAt(id, parameter);
+                    if (isIdentifierName(ast_, parameterId, candidate) &&
+                        equalName(name, candidate)) shadowed = true;
+                }
+            }
+        }
+        declared = found && !shadowed;
+        return true;
+    }
+
+    bool preflightPush(AstNodeId node, PreflightRole role,
+        std::uint16_t context)
+    {
+        if (!validNode(ast_, node)) return preflightUnsupported(node);
+        std::size_t depthCapacity = limits_.maxAstDepth;
+        if (depthCapacity != std::numeric_limits<std::size_t>::max())
+            ++depthCapacity;
+        const std::size_t frameCapacity = storage_.executionFrameCapacity <
+                limits_.maxExecutionFrames
+            ? storage_.executionFrameCapacity : limits_.maxExecutionFrames;
+        if (executionFrameTop_ >= frameCapacity) {
+            fail(PortableExecutionErrorCode::ExecutionFrameCapacityExhausted,
+                ast_.node(node).location);
+            return false;
+        }
+        if (executionFrameTop_ >= depthCapacity) {
+            fail(PortableExecutionErrorCode::PreflightLimitExceeded,
+                ast_.node(node).location);
+            return false;
+        }
+        PortableExecutionFrame& frame =
+            storage_.executionFrames[executionFrameTop_++];
+        frame = PortableExecutionFrame();
+        frame.kind = PortableExecutionFrameKind::Preflight;
+        frame.node = node;
+        frame.flags = static_cast<std::uint16_t>(context |
+            static_cast<std::uint16_t>(role));
+        if (executionFrameTop_ > result_.preflightFrameHighWater)
+            result_.preflightFrameHighWater = executionFrameTop_;
+        return true;
+    }
+
+    void preflightClear()
+    {
+        while (executionFrameTop_ != 0u) {
+            storage_.executionFrames[executionFrameTop_ - 1u] =
+                PortableExecutionFrame();
+            --executionFrameTop_;
+        }
+    }
+
+    bool preflightValidateFrame(PortableExecutionFrame& frame)
+    {
+        if (!validNode(ast_, frame.node)) return preflightUnsupported(frame.node);
+        const AstNode& node = ast_.node(frame.node);
+        const std::uint16_t context = static_cast<std::uint16_t>(
+            frame.flags & static_cast<std::uint16_t>(
+                PreflightAllowObjects | PreflightAllowFunctionDeclarations |
+                PreflightInFunction));
+        const bool allowObjects =
+            (context & PreflightAllowObjects) != 0u;
+        switch (static_cast<PreflightRole>(
+                frame.flags & PreflightRoleMask)) {
+        case PreflightRole::StatementList:
+            if (node.kind != AstNodeKind::Program &&
+                node.kind != AstNodeKind::BlockStatement)
+                return preflightUnsupported(frame.node);
+            break;
+        case PreflightRole::Statement:
+            switch (node.kind) {
+            case AstNodeKind::Program:
+            case AstNodeKind::BlockStatement:
+            case AstNodeKind::EmptyStatement:
+                break;
+            case AstNodeKind::ExpressionStatement:
+                if (!validNode(ast_, node.expression))
+                    return preflightUnsupported(frame.node);
+                break;
+            case AstNodeKind::VariableDeclaration:
+                if (node.declarationKind == AstDeclarationKind::Var)
+                    return preflightUnsupported(frame.node);
+                for (std::size_t index = 0u; index < node.childCount; ++index) {
+                    if (!preflightConsumeWork(node.location)) return false;
+                    const AstNodeId declaratorId = ast_.childAt(frame.node,
+                        index);
+                    if (!validNode(ast_, declaratorId) ||
+                        ast_.node(declaratorId).kind !=
+                            AstNodeKind::VariableDeclarator ||
+                        !validNode(ast_, ast_.node(declaratorId).name) ||
+                        ast_.node(ast_.node(declaratorId).name).kind !=
+                            AstNodeKind::Identifier)
+                        return preflightUnsupported(declaratorId);
+                }
+                break;
+            case AstNodeKind::ReturnStatement:
+                break;
+            case AstNodeKind::FunctionDeclaration:
+                if ((context & PreflightAllowFunctionDeclarations) == 0u)
+                    return preflightUnsupported(frame.node);
+                break;
+            default:
+                return preflightUnsupported(frame.node);
+            }
+            break;
+        case PreflightRole::Function:
+            if ((node.kind != AstNodeKind::FunctionDeclaration &&
+                    node.kind != AstNodeKind::FunctionExpression &&
+                    node.kind != AstNodeKind::ArrowFunctionExpression) ||
+                node.childCount > 64u)
+                return preflightUnsupported(frame.node);
+            for (std::size_t index = 0u; index < node.childCount; ++index) {
+                if (!preflightConsumeWork(node.location)) return false;
+                const AstNodeId parameter = ast_.childAt(frame.node, index);
+                if (!validNode(ast_, parameter) ||
+                    ast_.node(parameter).kind != AstNodeKind::Identifier ||
+                    ast_.node(parameter).initializer != kInvalidAstNodeId ||
+                    ast_.node(parameter).prefix)
+                    return preflightUnsupported(frame.node);
+            }
+            if (node.kind == AstNodeKind::ArrowFunctionExpression &&
+                node.body == kInvalidAstNodeId) {
+                if (!validNode(ast_, node.expression))
+                    return preflightUnsupported(frame.node);
+            } else if (!validNode(ast_, node.body) ||
+                ast_.node(node.body).kind != AstNodeKind::BlockStatement) {
+                return preflightUnsupported(frame.node);
+            }
+            break;
+        case PreflightRole::Expression:
+            switch (node.kind) {
+            case AstNodeKind::Identifier:
+            case AstNodeKind::NumericLiteral:
+            case AstNodeKind::StringLiteral:
+            case AstNodeKind::BooleanLiteral:
+            case AstNodeKind::NullLiteral:
+            case AstNodeKind::ThisExpression:
+                break;
+            case AstNodeKind::UnaryExpression:
+                if (!validNode(ast_, node.argument))
+                    return preflightUnsupported(frame.node);
+                break;
+            case AstNodeKind::BinaryExpression:
+            case AstNodeKind::LogicalExpression:
+                if (!validNode(ast_, node.left) ||
+                    !validNode(ast_, node.right) ||
+                    (node.kind == AstNodeKind::BinaryExpression &&
+                        node.binaryOperator == AstBinaryOperator::Remainder))
+                    return preflightUnsupported(frame.node);
+                break;
+            case AstNodeKind::AssignmentExpression:
+                if (!validNode(ast_, node.left) ||
+                    !validNode(ast_, node.right) ||
+                    node.assignmentOperator == AstAssignmentOperator::Remainder ||
+                    (ast_.node(node.left).kind != AstNodeKind::Identifier &&
+                        !(allowObjects &&
+                            node.assignmentOperator ==
+                                AstAssignmentOperator::Assign &&
+                            ast_.node(node.left).kind ==
+                                AstNodeKind::MemberExpression)))
+                    return preflightUnsupported(frame.node);
+                break;
+            case AstNodeKind::CallExpression: {
+                if (!validNode(ast_, node.callee) ||
+                    node.childCount > limits_.maxCallArguments)
+                    return preflightUnsupported(frame.node);
+                const AstNode& callee = ast_.node(node.callee);
+                if (callee.kind == AstNodeKind::Identifier) {
+                    SourceView name;
+                    bool declared = false;
+                    if (!isIdentifierName(ast_, node.callee, name) ||
+                        !preflightDeclaredFunctionLike(name, declared))
+                        return false;
+                    if (!declared)
+                        return preflightUnsupported(frame.node);
+                } else if (allowObjects &&
+                    callee.kind == AstNodeKind::MemberExpression) {
+                    if (!validNode(ast_, callee.object) ||
+                        !validNode(ast_, callee.property) ||
+                        (!callee.computed && ast_.node(callee.property).kind !=
+                            AstNodeKind::Identifier))
+                        return preflightUnsupported(frame.node);
+                } else {
+                    return preflightUnsupported(frame.node);
+                }
+                break;
+            }
+            case AstNodeKind::FunctionExpression:
+            case AstNodeKind::ArrowFunctionExpression:
+                break;
+            case AstNodeKind::MemberExpression:
+                if (!allowObjects || !validNode(ast_, node.object) ||
+                    !validNode(ast_, node.property) ||
+                    (!node.computed && ast_.node(node.property).kind !=
+                        AstNodeKind::Identifier))
+                    return preflightUnsupported(frame.node);
+                break;
+            case AstNodeKind::ObjectLiteral:
+                if (!allowObjects) return preflightUnsupported(frame.node);
+                for (std::size_t index = 0u; index < node.childCount; ++index) {
+                    if (!preflightConsumeWork(node.location)) return false;
+                    const AstNodeId propertyId = ast_.childAt(frame.node, index);
+                    if (!validNode(ast_, propertyId) ||
+                        ast_.node(propertyId).kind != AstNodeKind::ObjectProperty)
+                        return preflightUnsupported(propertyId);
+                    const AstNode& property = ast_.node(propertyId);
+                    if (!validNode(ast_, property.key) ||
+                        !validNode(ast_, property.initializer) ||
+                        (ast_.node(property.key).kind != AstNodeKind::Identifier &&
+                            ast_.node(property.key).kind !=
+                                AstNodeKind::StringLiteral))
+                        return preflightUnsupported(propertyId);
+                }
+                break;
+            case AstNodeKind::ArrayLiteral:
+                if (!allowObjects) return preflightUnsupported(frame.node);
+                for (std::size_t index = 0u; index < node.childCount; ++index) {
+                    if (!preflightConsumeWork(node.location)) return false;
+                    const AstNodeId element = ast_.childAt(frame.node, index);
+                    if (!validNode(ast_, element))
+                        return preflightUnsupported(element);
+                }
+                break;
+            default:
+                return preflightUnsupported(frame.node);
+            }
+            break;
+        }
+        frame.stage = 1u;
+        frame.cursor = 0u;
+        return true;
+    }
+
+    bool preflightNextChild(PortableExecutionFrame& frame, bool& hasChild,
+        AstNodeId& child, PreflightRole& role, std::uint16_t& context)
+    {
+        hasChild = false;
+        child = kInvalidAstNodeId;
+        role = PreflightRole::Expression;
+        context = static_cast<std::uint16_t>(frame.flags &
+            static_cast<std::uint16_t>(PreflightAllowObjects |
+                PreflightInFunction));
+        const PreflightRole parentRole = static_cast<PreflightRole>(
+            frame.flags & PreflightRoleMask);
+        const AstNode& node = ast_.node(frame.node);
+        switch (parentRole) {
+        case PreflightRole::StatementList:
+            if (frame.cursor < node.childCount) {
+                if (!preflightConsumeWork(node.location)) return false;
+                child = ast_.childAt(frame.node, frame.cursor++);
+                role = PreflightRole::Statement;
+                if (node.kind == AstNodeKind::Program)
+                    context |= PreflightAllowFunctionDeclarations;
+                hasChild = true;
+            }
+            break;
+        case PreflightRole::Statement:
+            switch (node.kind) {
+            case AstNodeKind::Program:
+            case AstNodeKind::BlockStatement:
+                if (frame.cursor == 0u) {
+                    ++frame.cursor;
+                    child = frame.node;
+                    role = PreflightRole::StatementList;
+                    if (node.kind == AstNodeKind::Program)
+                        context |= PreflightAllowFunctionDeclarations;
+                    hasChild = true;
+                }
+                break;
+            case AstNodeKind::ExpressionStatement:
+                if (frame.cursor == 0u) {
+                    ++frame.cursor;
+                    child = node.expression;
+                    hasChild = true;
+                }
+                break;
+            case AstNodeKind::VariableDeclaration:
+                while (frame.cursor < node.childCount) {
+                    if (!preflightConsumeWork(node.location)) return false;
+                    const AstNodeId declaratorId = ast_.childAt(frame.node,
+                        frame.cursor++);
+                    const AstNodeId initializer =
+                        ast_.node(declaratorId).initializer;
+                    if (initializer != kInvalidAstNodeId) {
+                        child = initializer;
+                        hasChild = true;
+                        break;
+                    }
+                }
+                break;
+            case AstNodeKind::ReturnStatement:
+                if (frame.cursor == 0u &&
+                    node.expression != kInvalidAstNodeId) {
+                    ++frame.cursor;
+                    child = node.expression;
+                    hasChild = true;
+                }
+                break;
+            case AstNodeKind::FunctionDeclaration:
+                if (frame.cursor == 0u) {
+                    ++frame.cursor;
+                    child = frame.node;
+                    role = PreflightRole::Function;
+                    hasChild = true;
+                }
+                break;
+            default:
+                break;
+            }
+            break;
+        case PreflightRole::Function:
+            if (frame.cursor == 0u) {
+                ++frame.cursor;
+                const bool expressionBody =
+                    node.kind == AstNodeKind::ArrowFunctionExpression &&
+                    node.body == kInvalidAstNodeId;
+                child = expressionBody ? node.expression : node.body;
+                role = expressionBody ? PreflightRole::Expression
+                    : PreflightRole::StatementList;
+                if (!expressionBody) {
+                    context |= PreflightAllowFunctionDeclarations |
+                        PreflightInFunction;
+                }
+                hasChild = true;
+            }
+            break;
+        case PreflightRole::Expression:
+            switch (node.kind) {
+            case AstNodeKind::UnaryExpression:
+                if (frame.cursor == 0u) {
+                    ++frame.cursor;
+                    child = node.argument;
+                    hasChild = true;
+                }
+                break;
+            case AstNodeKind::BinaryExpression:
+            case AstNodeKind::LogicalExpression:
+            case AstNodeKind::AssignmentExpression:
+                if (frame.cursor < 2u) {
+                    child = frame.cursor++ == 0u ? node.left : node.right;
+                    hasChild = true;
+                }
+                break;
+            case AstNodeKind::CallExpression: {
+                const AstNode& callee = ast_.node(node.callee);
+                const std::size_t prefix = callee.kind ==
+                        AstNodeKind::MemberExpression
+                    ? (callee.computed ? 2u : 1u) : 0u;
+                if (frame.cursor < prefix) {
+                    if (frame.cursor++ == 0u) child = callee.object;
+                    else child = callee.property;
+                    hasChild = true;
+                } else if (frame.cursor - prefix < node.childCount) {
+                    if (!preflightConsumeWork(node.location)) return false;
+                    child = ast_.childAt(frame.node,
+                        frame.cursor++ - prefix);
+                    hasChild = true;
+                }
+                break;
+            }
+            case AstNodeKind::FunctionExpression:
+            case AstNodeKind::ArrowFunctionExpression:
+                if (frame.cursor == 0u) {
+                    ++frame.cursor;
+                    child = frame.node;
+                    role = PreflightRole::Function;
+                    hasChild = true;
+                }
+                break;
+            case AstNodeKind::MemberExpression:
+                if (frame.cursor == 0u) {
+                    ++frame.cursor;
+                    child = node.object;
+                    hasChild = true;
+                } else if (frame.cursor == 1u && node.computed) {
+                    ++frame.cursor;
+                    child = node.property;
+                    hasChild = true;
+                } else {
+                    frame.cursor = 2u;
+                }
+                break;
+            case AstNodeKind::ObjectLiteral:
+                while (frame.cursor < node.childCount) {
+                    if (!preflightConsumeWork(node.location)) return false;
+                    const AstNodeId propertyId = ast_.childAt(frame.node,
+                        frame.cursor++);
+                    child = ast_.node(propertyId).initializer;
+                    hasChild = true;
+                    break;
+                }
+                break;
+            case AstNodeKind::ArrayLiteral:
+                while (frame.cursor < node.childCount) {
+                    if (!preflightConsumeWork(node.location)) return false;
+                    const AstNodeId element = ast_.childAt(frame.node,
+                        frame.cursor++);
+                    if (ast_.node(element).kind != AstNodeKind::ArrayElision) {
+                        child = element;
+                        hasChild = true;
+                        break;
+                    }
+                }
+                break;
+            default:
+                break;
+            }
+            break;
+        }
+        return true;
+    }
+
+    bool preflightAst(AstNodeId root, PreflightRole role,
+        bool allowObjects)
+    {
+        preflightClear();
+        result_.preflightFrameHighWater = 0u;
+        result_.preflightWorkUnits = 0u;
+        std::uint16_t context = allowObjects
+            ? static_cast<std::uint16_t>(PreflightAllowObjects) : 0u;
+        if (role == PreflightRole::StatementList)
+            context |= PreflightAllowFunctionDeclarations;
+        if (!preflightPush(root, role, context)) {
+            preflightClear();
+            return false;
+        }
+        while (executionFrameTop_ != 0u &&
+            result_.error.code == PortableExecutionErrorCode::None) {
+            PortableExecutionFrame& frame =
+                storage_.executionFrames[executionFrameTop_ - 1u];
+            if (frame.stage == 0u) {
+                if (!preflightConsumeWork(ast_.node(frame.node).location))
+                    break;
+                if (!preflightValidateFrame(frame)) break;
+                continue;
+            }
+            bool hasChild = false;
+            AstNodeId child = kInvalidAstNodeId;
+            PreflightRole childRole = PreflightRole::Expression;
+            std::uint16_t childContext = 0u;
+            if (!preflightNextChild(frame, hasChild, child, childRole,
+                    childContext)) break;
+            if (hasChild) {
+                if (!preflightPush(child, childRole, childContext)) break;
+                continue;
+            }
+            frame = PortableExecutionFrame();
+            --executionFrameTop_;
+        }
+        const bool supported = executionFrameTop_ == 0u &&
+            result_.error.code == PortableExecutionErrorCode::None;
+        preflightClear();
+        return supported;
+    }
+
     bool preflightGlobalBindings(AstNodeId program)
     {
         const AstNode& root = ast_.node(program);
         for (std::size_t index = 0u; index < root.childCount; ++index) {
+            if (!preflightConsumeWork(root.location)) return false;
             const AstNodeId child = ast_.childAt(program, index);
             const AstNode& declaration = ast_.node(child);
             if (declaration.kind == AstNodeKind::VariableDeclaration) {
                 if (declaration.declarationKind == AstDeclarationKind::Var)
                     continue;
                 for (std::size_t item = 0u; item < declaration.childCount; ++item) {
+                    if (!preflightConsumeWork(declaration.location)) return false;
                     const AstNodeId declaratorId = ast_.childAt(child, item);
                     const AstNode& declarator = ast_.node(declaratorId);
                     SourceView name;
@@ -2281,7 +2905,12 @@ private:
         machineReturning_ = false;
     }
 
-    bool runExecutionMachine(AstNodeId root, Value& result)
+    bool runExecutionMachine(AstNodeId root, Value& result,
+        RuntimeFunctionId entryFunction = kInvalidRuntimeFunctionId,
+        const Value* entryArguments = nullptr,
+        std::size_t entryArgumentCount = 0u,
+        Value entryReceiver = Value::undefined(),
+        SourceLocation entryCallSite = SourceLocation())
     {
         const std::size_t oldCallDepth = callDepth_;
         const EnvironmentId oldEnvironment = currentEnvironment_;
@@ -2290,10 +2919,35 @@ private:
         executionFrameTop_ = 0u;
         machineReturning_ = false;
         machineRootValue_ = Value::undefined();
-        if (!machinePushStatementList(root, false, true)) {
-            machineAbort(oldCallDepth, oldEnvironment, oldThis,
-                oldArgumentTop);
-            return false;
+        if (entryFunction == kInvalidRuntimeFunctionId) {
+            if (!machinePushStatementList(root, false, true)) {
+                machineAbort(oldCallDepth, oldEnvironment, oldThis,
+                    oldArgumentTop);
+                return false;
+            }
+        } else {
+            FunctionRecord activated;
+            if (!pushFunctionActivation(entryFunction, entryArguments,
+                    entryArgumentCount, entryCallSite, entryReceiver,
+                    kInvalidAstNodeId, activated)) {
+                machineAbort(oldCallDepth, oldEnvironment, oldThis,
+                    oldArgumentTop);
+                return false;
+            }
+            result_.argumentValuesHighWater = entryArgumentCount;
+            const std::size_t activation = callDepth_ - 1u;
+            argumentTop_ = oldArgumentTop;
+            if (!machinePush(PortableExecutionFrameKind::FunctionBoundary,
+                    activated.declaration, true, false)) {
+                machineAbort(oldCallDepth, oldEnvironment, oldThis,
+                    oldArgumentTop);
+                return false;
+            }
+            PortableExecutionFrame& boundary =
+                storage_.executionFrames[executionFrameTop_ - 1u];
+            boundary.callFrameIndex = activation;
+            boundary.cursor = activation;
+            boundary.mark = oldArgumentTop;
         }
         while (executionFrameTop_ != 0u &&
             result_.error.code == PortableExecutionErrorCode::None) {
@@ -2336,7 +2990,8 @@ private:
                 oldArgumentTop);
             return false;
         }
-        result = finalValue_;
+        result = entryFunction == kInvalidRuntimeFunctionId
+            ? finalValue_ : machineRootValue_;
         currentEnvironment_ = oldEnvironment;
         currentThis_ = oldThis;
         argumentTop_ = oldArgumentTop;

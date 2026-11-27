@@ -5526,6 +5526,7 @@ RuntimeErrorCode RuntimeContext::mapPortableExecutionError(
         return RuntimeErrorCode::StringLimitExceeded;
     case PortableExecutionErrorCode::ArgumentCapacityExhausted:
     case PortableExecutionErrorCode::ExecutionFrameCapacityExhausted:
+    case PortableExecutionErrorCode::PreflightLimitExceeded:
         return RuntimeErrorCode::PortableCapacityExceeded;
     case PortableExecutionErrorCode::StepBudgetExhausted:
         return RuntimeErrorCode::ExecutionBudgetExceeded;
@@ -7809,50 +7810,53 @@ ScriptResult RuntimeContext::execute(SourceView source)
         }
         ast_ = std::move(parsed.ast);
 
-        if (PortableExecutionCore::supports(ast_, ast_.root(),
+        RuntimeErrorCode storageError = RuntimeErrorCode::None;
+        if (configurePortableExecutionStorage(storageError)) {
+            const PortableExecutionStorageView executionStorage{
+                portableCallFrameStorage_.data(),
+                portableCallFrameStorage_.size(),
+                portableArgumentStorage_.data(),
+                portableArgumentStorage_.size(),
+                portableExecutionFrameStorage_.data(),
+                portableExecutionFrameStorage_.size()};
+            const PortableExecutionLimits executionLimits{
+                limits_.maxCallDepth,
                 limits_.parser.maxCallArguments,
-                limits_.parser.maxExpressionNesting)) {
-            RuntimeErrorCode storageError = RuntimeErrorCode::None;
-            if (configurePortableExecutionStorage(storageError)) {
-                const PortableExecutionStorageView executionStorage{
-                    portableCallFrameStorage_.data(),
-                    portableCallFrameStorage_.size(),
-                    portableArgumentStorage_.data(),
-                    portableArgumentStorage_.size(),
-                    portableExecutionFrameStorage_.data(),
-                    portableExecutionFrameStorage_.size()};
-                const PortableExecutionLimits executionLimits{
-                    limits_.maxCallDepth,
-                    limits_.parser.maxCallArguments,
-                    limits_.maxFunctions > userFunctionCount_
-                        ? limits_.maxFunctions - userFunctionCount_ : 0u,
-                    limits_.maxExecutionSteps,
-                    limits_.maxFunctionEnvironmentBindings,
-                    limits_.maxBindingNameLength,
-                    limits_.maxRuntimeStringLength,
-                    limits_.parser.maxExpressionNesting};
-                PortableExecutionCore portable(ast_, stringStore_,
-                    environmentStore_, portableFunctions_,
-                    executionStorage, executionLimits, executionSteps_);
-                PortableExecutionResult portableResult;
-                const bool succeeded = portable.run(ast_.root(),
-                    globalEnvironmentId_, finalValue_, portableResult);
-                userFunctionCount_ += portableResult.functionsCreated;
-                totalStringBytes_ = stringStore_.bytesUsed();
-                result_.executionSteps = portableResult.executionSteps;
-                if (!succeeded) {
-                    setRuntimeError(mapPortableExecutionError(
-                        portableResult.error.code),
-                        portableResult.error.location);
-                    return result_;
-                }
+                limits_.maxFunctions > userFunctionCount_
+                    ? limits_.maxFunctions - userFunctionCount_ : 0u,
+                limits_.maxExecutionSteps,
+                limits_.maxFunctionEnvironmentBindings,
+                limits_.maxBindingNameLength,
+                limits_.maxRuntimeStringLength,
+                limits_.parser.maxExpressionNesting};
+            PortableExecutionCore portable(ast_, stringStore_,
+                environmentStore_, portableFunctions_, executionStorage,
+                executionLimits, executionSteps_);
+            PortableExecutionResult portableResult;
+            const bool succeeded = portable.run(ast_.root(),
+                globalEnvironmentId_, finalValue_, portableResult);
+            userFunctionCount_ += portableResult.functionsCreated;
+            totalStringBytes_ = stringStore_.bytesUsed();
+            result_.executionSteps = portableResult.executionSteps;
+            if (succeeded) {
                 result_.status = ScriptStatus::Success;
                 return result_;
             }
-            // The portable executor is an optional backend for this bounded
-            // syntax slice. If its scratch cannot be provisioned, preserve
-            // the established hosted path and its accepted functionality.
+            // The core's iterative preflight runs before declarations or
+            // expressions are evaluated. Only an unsupported syntax result
+            // from that preflight may fall back to the hosted evaluator; a
+            // machine failure after preflight must never replay side effects.
+            if (portableResult.error.code !=
+                    PortableExecutionErrorCode::UnsupportedOperation ||
+                portableResult.preflightCompleted) {
+                setRuntimeError(mapPortableExecutionError(
+                    portableResult.error.code),
+                    portableResult.error.location);
+                return result_;
+            }
         }
+        // The portable executor is optional when its caller-owned scratch
+        // cannot be provisioned. Preserve the established hosted path.
 
         Evaluator evaluator(*this);
         if (!evaluator.run()) return result_;
