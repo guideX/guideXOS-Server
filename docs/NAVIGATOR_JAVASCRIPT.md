@@ -14517,3 +14517,14 @@ invocation and hosted fallback have not yet moved to the shared machine. See
 the [JS128 general resumable execution report](NAVIGATOR_JAVASCRIPT_JS128_GENERAL_RESUMABLE_EXECUTION.md)
 for the R0–R10 table, architecture, memory and stack evidence, complete test
 results, protected artifacts, remaining native recursion, and JS129 scope.
+
+## JS129 Recovery1
+
+The original reported JS129 source and commit were not present in the fresh
+checkout or the inspected surviving artifacts. JS129 was reconstructed on
+JS128 as local commit `ff727380a13bf4ed367b895330ea87449c35de63`; it is not
+claimed to be byte-identical to the reported source. The reconstructed unified
+call entry passes its focused suite and AMD64 freestanding qualification.
+Guest execution remains unqualified. See the [JS129 recovery report](NAVIGATOR_JAVASCRIPT_JS129_UNIFIED_CALL_ENTRY_PREFLIGHT.md)
+and [Recovery1 ledger](NAVIGATOR_JAVASCRIPT_RECOVERY1.md). JS130 portable JSON
+callback integration remains pending.
