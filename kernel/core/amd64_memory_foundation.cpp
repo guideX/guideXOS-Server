@@ -1,4 +1,5 @@
 #include "include/kernel/amd64_memory_foundation.h"
+#include "include/kernel/boot_page_table_validation.h"
 #include "include/kernel/physical_frame_owner.h"
 #include "include/kernel/task_address_space.h"
 #include "include/kernel/serial_debug.h"
@@ -27,7 +28,6 @@ static const uint64_t kPteWritable = 1ull << 1;
 static const uint64_t kPteUser = 1ull << 2;
 static const uint64_t kPteLarge = 1ull << 7;
 static const uint64_t kPteAddressMask = 0x000FFFFFFFFFF000ull;
-static const uint32_t kMaximumBootPageTablePages = 512u;
 static const uint32_t kIa32Efer = 0xC0000080u;
 static const uint64_t kEferNxEnable = 1ull << 11;
 
@@ -97,29 +97,19 @@ static bool ranges_overlap(uint64_t firstBase, uint64_t firstSize,
            secondBase < firstBase + firstSize;
 }
 
-static bool page_table_tree_avoids_arena(uint64_t tablePhysical,
-                                         uint32_t level,
-                                         uint64_t arenaBase,
-                                         uint64_t arenaEnd,
-                                         uint32_t* tableCount)
+static const char* boot_page_table_failure_name(
+    BootPageTableValidationFailure failure)
 {
-    if (!tableCount || level > 3u || (tablePhysical & kPageMask) != 0u ||
-        tablePhysical >= kIdentityMappedPhysicalLimit ||
-        (tablePhysical >= arenaBase && tablePhysical < arenaEnd) ||
-        ++*tableCount > kMaximumBootPageTablePages) return false;
-    uint64_t* table = static_cast<uint64_t*>(identity_map_physical(nullptr, tablePhysical));
-    if (!table) return false;
-    if (level == 3u) return true;
-
-    for (uint32_t i = 0; i < 512u; ++i) {
-        const uint64_t entry = table[i];
-        if ((entry & kPtePresent) == 0u) continue;
-        if (level == 0u && (entry & kPteLarge) != 0u) return false;
-        if (level > 0u && (entry & kPteLarge) != 0u) continue;
-        if (!page_table_tree_avoids_arena(entry & kPteAddressMask, level + 1u,
-                                          arenaBase, arenaEnd, tableCount)) return false;
+    switch (failure) {
+    case BootPageTableValidationFailure::None: return "none";
+    case BootPageTableValidationFailure::InvalidInput: return "invalid-input";
+    case BootPageTableValidationFailure::InvalidTableAddress: return "invalid-table-address";
+    case BootPageTableValidationFailure::ProtectedRangeOverlap: return "protected-range-overlap";
+    case BootPageTableValidationFailure::PageCountLimit: return "page-count-limit";
+    case BootPageTableValidationFailure::PhysicalMappingUnavailable: return "physical-mapping-unavailable";
+    case BootPageTableValidationFailure::LargePageAtRoot: return "large-page-at-root";
     }
-    return true;
+    return "unknown";
 }
 
 static uint64_t current_cr3(void*)
@@ -279,12 +269,30 @@ bool initialize_amd64_task_memory(const guideXOS::BootInfo* bootInfo)
         }
     }
     uint32_t pageTablePages = 0u;
-    if (overlapsReservedRange ||
-        !page_table_tree_avoids_arena(kernelRoot, 0u, arenaBase,
-                                      arenaBase + arenaSize, &pageTablePages)) {
-        kernel::serial::puts("[MEMORY-OWNERSHIP] status=overlapping-reservation user-mode=disabled\n");
+    if (overlapsReservedRange) {
+        kernel::serial::puts("[MEMORY-OWNERSHIP] status=overlapping-reservation source=boot-info-range user-mode=disabled\n");
         return false;
     }
+    BootPageTableValidationFailure pageTableFailure =
+        BootPageTableValidationFailure::None;
+    if (!boot_page_table_tree_avoids_range(
+            kernelRoot, 0u, arenaBase, arenaBase + arenaSize,
+            &identity_map_physical, nullptr, &pageTablePages,
+            kMaximumBootPageTablePages, &pageTableFailure)) {
+        kernel::serial::puts("[MEMORY-OWNERSHIP] status=page-table-tree-rejected reason=");
+        kernel::serial::puts(boot_page_table_failure_name(pageTableFailure));
+        kernel::serial::puts(" pages=0x");
+        kernel::serial::put_hex32(pageTablePages);
+        kernel::serial::puts(" limit=0x");
+        kernel::serial::put_hex32(kMaximumBootPageTablePages);
+        kernel::serial::puts(" user-mode=disabled\n");
+        return false;
+    }
+    kernel::serial::puts("[MEMORY-OWNERSHIP] page-table-tree=valid pages=0x");
+    kernel::serial::put_hex32(pageTablePages);
+    kernel::serial::puts(" limit=0x");
+    kernel::serial::put_hex32(kMaximumBootPageTablePages);
+    kernel::serial::putc('\n');
     if (!identity_range_is_kernel_writable(kernelRoot, bootInfo->MemoryMap,
                                             memoryMapBytes) ||
         !identity_range_is_kernel_writable(kernelRoot, bootInfo->TaskFrameArenaBase,

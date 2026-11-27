@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <cstdint>
 
+#include "../kernel/core/include/kernel/boot_page_table_validation.h"
 #include "../kernel/core/include/kernel/physical_frame_owner.h"
 #include "../kernel/core/include/kernel/task_address_space.h"
 
@@ -17,9 +18,13 @@ static const uint64_t kWritable = 2ull;
 static const uint64_t kUser = 4ull;
 static const uint64_t kPageSize = 1ull << 7;
 static const uint64_t kNoExecute = 1ull << 63;
+static const uint64_t kSyntheticPageTableBase = 0x40000000ull;
+static const uint32_t kSyntheticPageTableCount = 525u;
 
 alignas(4096) static uint8_t s_arena[kArenaPages * kOwnedFrameBytes];
 alignas(4096) static uint8_t s_kernelPages[8 * kOwnedFrameBytes];
+alignas(4096) static uint8_t s_syntheticPageTables[
+    kSyntheticPageTableCount * kOwnedFrameBytes];
 alignas(8) static FirmwareMemoryDescriptor s_memoryMap[4];
 static uint64_t s_currentCr3 = kKernelBase;
 static uint32_t s_invalidations = 0u;
@@ -48,6 +53,68 @@ static void* map_physical(void*, uint64_t physicalAddress)
         return &s_kernelPages[physicalAddress - kKernelBase];
     }
     return nullptr;
+}
+
+static void* map_synthetic_page_table(void*, uint64_t physicalAddress)
+{
+    if (physicalAddress < kSyntheticPageTableBase ||
+        physicalAddress >= kSyntheticPageTableBase + sizeof(s_syntheticPageTables)) {
+        return nullptr;
+    }
+    return &s_syntheticPageTables[physicalAddress - kSyntheticPageTableBase];
+}
+
+static bool test_boot_page_table_validation(uint32_t* failures)
+{
+    for (uint32_t i = 0; i < sizeof(s_syntheticPageTables); ++i) {
+        s_syntheticPageTables[i] = 0u;
+    }
+
+    uint64_t* root = static_cast<uint64_t*>(
+        map_synthetic_page_table(nullptr, kSyntheticPageTableBase));
+    for (uint32_t i = 0; i < 512u; ++i) {
+        const uint64_t pdptPhysical =
+            kSyntheticPageTableBase + (1u + i) * kOwnedFrameBytes;
+        root[i] = pdptPhysical | kPresent | kWritable;
+        if (i < 12u) {
+            uint64_t* pdpt = static_cast<uint64_t*>(
+                map_synthetic_page_table(nullptr, pdptPhysical));
+            const uint64_t pdPhysical =
+                kSyntheticPageTableBase + (513u + i) * kOwnedFrameBytes;
+            pdpt[0] = pdPhysical | kPresent | kWritable;
+        }
+    }
+
+    uint32_t visitedPages = 0u;
+    BootPageTableValidationFailure failure = BootPageTableValidationFailure::None;
+    const bool acceptedAtConfiguredLimit = boot_page_table_tree_avoids_range(
+               kSyntheticPageTableBase, 0u, 0x1000000000ull, 0x1000001000ull,
+               &map_synthetic_page_table, nullptr, &visitedPages,
+               kMaximumBootPageTablePages, &failure);
+    expect(acceptedAtConfiguredLimit && visitedPages == kSyntheticPageTableCount &&
+           failure == BootPageTableValidationFailure::None &&
+           kMaximumBootPageTablePages >= kSyntheticPageTableCount,
+           "production boot audit accepts the loader's 525-page tree", failures);
+
+    visitedPages = 0u;
+    failure = BootPageTableValidationFailure::None;
+    expect(!boot_page_table_tree_avoids_range(
+        kSyntheticPageTableBase, 0u, 0x1000000000ull, 0x1000001000ull,
+        &map_synthetic_page_table, nullptr, &visitedPages, 512u, &failure) &&
+        visitedPages == 513u && failure == BootPageTableValidationFailure::PageCountLimit,
+        "the former 512-page bound rejects the boot tree at page 513", failures);
+
+    visitedPages = 0u;
+    failure = BootPageTableValidationFailure::None;
+    expect(!boot_page_table_tree_avoids_range(
+               kSyntheticPageTableBase, 0u,
+               kSyntheticPageTableBase + kOwnedFrameBytes,
+               kSyntheticPageTableBase + 2u * kOwnedFrameBytes,
+               &map_synthetic_page_table, nullptr, &visitedPages,
+               kMaximumBootPageTablePages, &failure) &&
+           failure == BootPageTableValidationFailure::ProtectedRangeOverlap,
+           "boot page-table audit distinguishes protected-range overlap", failures);
+    return *failures == 0u;
 }
 
 static uint64_t current_cr3(void*) { return s_currentCr3; }
@@ -497,6 +564,7 @@ int main()
     set_descriptor(&s_memoryMap[2], kEfiLoaderDataMemoryType, kArenaBase, kArenaPages);
     set_descriptor(&s_memoryMap[3], kEfiLoaderDataMemoryType, kMapBufferPhysical, 1u);
     initialize_kernel_page_tables();
+    test_boot_page_table_validation(&failures);
 
     test_invalid_boot_maps(&failures);
     if (failures == 0u) test_frames(&failures);

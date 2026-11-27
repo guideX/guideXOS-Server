@@ -10,7 +10,9 @@ namespace paging
     static inline UINT64* PhysToPtr(EFI_PHYSICAL_ADDRESS p) { return (UINT64*)(UINTN)p; }
 
     // Track allocated page table pages so we can identity-map them
-    static constexpr UINTN MAX_PT_PAGES = 512;
+    // The low identity/kernel mappings can consume nearly 512 4 KiB tables.
+    // Leave room for the independent RAMDISK alias and the later self-maps.
+    static constexpr UINTN MAX_PT_PAGES = 1024;
     static EFI_PHYSICAL_ADDRESS g_ptPages[MAX_PT_PAGES];
     static UINTN g_ptPageCount = 0;
 
