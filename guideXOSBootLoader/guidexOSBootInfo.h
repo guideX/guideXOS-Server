@@ -41,6 +41,11 @@ namespace guideXOS
     // Bounded diagnostic list size for framebuffer descriptors in BootInfo.
     static const uint32_t GUIDEXOS_MAX_FRAMEBUFFERS = 8u;
 
+    // Kernel virtual mappings overlap low physical addresses, including the
+    // UEFI-loaded RAMDISK's physical base.  Keep the release image at a stable
+    // high virtual alias after the loader builds the kernel mapping.
+    static const uint64_t GUIDEXOS_RAMDISK_ALIAS_BASE = 0x0000400000000000ull;
+
     struct FramebufferDescriptor
     {
         uint64_t Base;

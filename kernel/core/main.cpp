@@ -1003,7 +1003,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 
         if (is_bootinfo && bootinfo && bootinfo->RamdiskBase != 0 && bootinfo->RamdiskSize != 0) {
             kernel::serial::puts("[KERNEL] Boot wallpaper pack found in ramdisk.img\n");
-            kernel::desktop::set_wallpaper_image_pack(reinterpret_cast<const void*>(static_cast<uintptr_t>(bootinfo->RamdiskBase)), bootinfo->RamdiskSize);
+            kernel::desktop::set_wallpaper_image_pack(
+                reinterpret_cast<const void*>(static_cast<uintptr_t>(
+                    guideXOS::GUIDEXOS_RAMDISK_ALIAS_BASE)),
+                bootinfo->RamdiskSize);
 #if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
             (void)kernel::user_data_volume::mount_documents();
 #endif

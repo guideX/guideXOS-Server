@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "../guideXOSBootLoader/guidexOSBootInfo.h"
 #include "../guideXOSBootLoader/paging.h"
 
 EFI_SYSTEM_TABLE* gST = nullptr;
@@ -22,7 +23,7 @@ static const uint64_t kKernelPhysicalBase = 0x190D9000ull;
 static const uint64_t kKernelSpanBytes = 0x22A92A60ull;
 static const uint64_t kRamdiskPhysicalBase = 0x150D9000ull;
 static const uint64_t kRamdiskLength = 0x04000000ull + 123u;
-static const uint64_t kRamdiskAlias = 0x0000400000000000ull;
+static const uint64_t kRamdiskAlias = guideXOS::GUIDEXOS_RAMDISK_ALIAS_BASE;
 static const uint64_t kIdentityBytes = 0x3C000000ull;
 static const size_t kPageTableArenaBytes = 8u * 1024u * 1024u;
 
