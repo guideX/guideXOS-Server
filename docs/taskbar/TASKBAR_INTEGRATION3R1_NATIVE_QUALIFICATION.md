@@ -108,10 +108,16 @@ R1 created no QAC reservation, QEMU child, or writable guest disk; there is no t
 | G15 — Relevant builds and hosted regressions | **PASS** | Existing source-matched report results retained; ISO and packaged inputs rehashed successfully. |
 | G16 — Current mainline compatibility | **PARTIAL** | Current main assessed; no direct taskbar/RAMDISK/storage edits, but shared kernel/Native ELF paths require targeted reconciliation. |
 | G17 — QAC cleanup and resource release | **PASS** | R1 created no QAC resources; the other owner's session remains registered and untouched. |
-| G18 — Documentation and delivery | **PASS** | This report is committed to and synchronized on the integration branch; larger snapshots remain in the local ignored evidence directory. No change to `main`. |
+| G18 — Documentation and delivery | **PARTIAL** | Report is committed locally; the GitHub integration ref remains at `3b67e0b` because this execution could not authenticate its SSH push. Evidence snapshots remain in the local ignored directory. No change to `main`. |
 
 ## 9. Outcome and next action
 
 **Outcome C — `TASKBAR_INTEGRATION3R1_QAC_BLOCKED`.** QAC itself is healthy and accessible; the blocker is its occupied exclusive acceptance reservation. The exact Integration3 artifact is available and verified, but no essential native guest gate passed during R1. Do not treat hosted tests or Recovery2R1 results as a substitute, and do not recommend merging the unreconciled, unqualified candidate to `main`.
 
 **Next action:** after reservation `41bdd9d6effd409893e43190f46b654c` is released by its owner, verify QAC reports no active acceptance owner, obtain a fresh exclusive reservation, and run the native ISO-only interaction phase followed by writable-FAT32 settings/pin persistence, clean S5, cold restart, and read-only FAT verification. Then reconcile the four newer mainline commits in TASKBAR-INTEGRATION4 and repeat targeted qualification on the reconciled candidate. Preserve the existing ISO and earlier qualification artifacts.
+
+## 10. Git documentation delivery
+
+The report was committed locally on `integration/taskbar-integration3` as `e3d17f0d36d2752a1ec9ae72c764b9b00a0b26c6`; a follow-up documentation-only commit records this delivery result. Before commit, the report passed `git diff --check`. The normal fast-forward command `git push origin HEAD:refs/heads/integration/taskbar-integration3` produced no output for about 80 seconds and was canceled for this process only. A bounded SSH probe returned `git@github.com: Permission denied (publickey)`. The connected GitHub read confirmed the remote branch remains at `3b67e0b99b970a7a2dd37ff4278a92c40e032c43`; no push to `main` and no force push occurred.
+
+The local documentation commits are preserved and the worktree is clean. To synchronize them, run `git push origin HEAD:refs/heads/integration/taskbar-integration3` from the candidate checkout in the previously used interactive SSH-authenticated PowerShell session. The branch is a fast-forward from the verified remote tip.
