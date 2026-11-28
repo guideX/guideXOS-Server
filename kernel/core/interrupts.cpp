@@ -514,6 +514,9 @@ extern "C" void irq_dispatch(uint32_t irq_number)
 // The configured IST stack top is 16-byte aligned. A 64-bit stack switch
 // pushes SS/RSP/RFLAGS/CS/RIP, then this stub saves volatile GPRs. Align each
 // ABI call explicitly and restore the exact interrupted frame pointer.
+// CPU7C1: both ABIs require DF=0 at a call, and an interrupted context may
+// have DF set. CLD runs after the GPR saves; the interrupted DF stays in the
+// CPU-pushed RFLAGS and IRETQ restores it.
 //
 // MinGW uses Microsoft x64 ABI (first arg in RCX)
 // Linux/ELF uses System V ABI (first arg in RDI)
@@ -534,6 +537,7 @@ extern "C" void irq_dispatch(uint32_t irq_number)
         "    push %r10\n"                                  \
         "    push %r11\n"                                  \
         "    sub $32, %rsp\n"                              \
+        "    cld\n"                                        \
         "    mov $" #n ", %ecx\n"                          \
         "    call irq_dispatch\n"                          \
         "    add $32, %rsp\n"                              \
@@ -567,6 +571,7 @@ extern "C" void irq_dispatch(uint32_t irq_number)
         "    push %r12\n"                                  \
         "    mov %rsp, %r12\n"                             \
         "    and $-16, %rsp\n"                             \
+        "    cld\n"                                        \
         "    mov $" #n ", %edi\n"                          \
         "    call irq_dispatch\n"                          \
         "    mov %r12, %rsp\n"                             \
@@ -629,152 +634,21 @@ static stub_fn s_stubs[16] = {
 
 #if defined(__x86_64__)
 
-// Every amd64 CPU exception gets a real IDT target.  The stubs normalize the
-// error-code and no-error forms, save all general-purpose registers, and
-// switch to the kernel-owned exception stack before entering C++.
-#define MAKE_EXCEPTION_STUB_NO_ERROR(n)                    \
-    extern "C" void exception_stub_##n();                 \
-    asm(                                                    \
-        ".intel_syntax noprefix\n"                       \
-        ".global exception_stub_" #n "\n"                 \
-        "exception_stub_" #n ":\n"                      \
-        "    push 0\n"                                    \
-        "    push " #n "\n"                                \
-        "    push r15\n"                                   \
-        "    push r14\n"                                   \
-        "    push r13\n"                                   \
-        "    push r12\n"                                   \
-        "    push r11\n"                                   \
-        "    push r10\n"                                   \
-        "    push r9\n"                                    \
-        "    push r8\n"                                    \
-        "    push rdi\n"                                   \
-        "    push rsi\n"                                   \
-        "    push rbp\n"                                   \
-        "    push rbx\n"                                   \
-        "    push rdx\n"                                   \
-        "    push rcx\n"                                   \
-        "    push rax\n"                                   \
-        "    mov r12, rsp\n"                               \
-        "    lea rsp, [rip + gxos_exception_stack + 16384]\n" \
-        "    and rsp, -16\n"                               \
-        "    sub rsp, 32\n"                                \
-        "    mov rcx, r12\n"                               \
-        "    call gxos_native_exception_dispatch\n"         \
-        "    add rsp, 32\n"                                \
-        "    test rax, rax\n"                              \
-        "    jnz .native_exception_recover_" #n "\n"       \
-        "    mov rsp, r12\n"                               \
-        "    pop rax\n"                                   \
-        "    pop rcx\n"                                   \
-        "    pop rdx\n"                                   \
-        "    pop rbx\n"                                   \
-        "    pop rbp\n"                                   \
-        "    pop rsi\n"                                   \
-        "    pop rdi\n"                                   \
-        "    pop r8\n"                                    \
-        "    pop r9\n"                                    \
-        "    pop r10\n"                                   \
-        "    pop r11\n"                                   \
-        "    pop r12\n"                                   \
-        "    pop r13\n"                                   \
-        "    pop r14\n"                                   \
-        "    pop r15\n"                                   \
-        "    add rsp, 16\n"                                \
-        "    iretq\n"                                      \
-        ".native_exception_recover_" #n ":\n"             \
-        "    mov rsp, [rip + gxos_native_fault_recovery_rsp]\n" \
-        "    jmp [rip + gxos_native_fault_recovery_rip]\n"   \
-        ".att_syntax prefix\n"                            \
-    );
-
-#define MAKE_EXCEPTION_STUB_WITH_ERROR(n)                  \
-    extern "C" void exception_stub_##n();                 \
-    asm(                                                    \
-        ".intel_syntax noprefix\n"                       \
-        ".global exception_stub_" #n "\n"                 \
-        "exception_stub_" #n ":\n"                      \
-        "    push " #n "\n"                                \
-        "    push r15\n"                                   \
-        "    push r14\n"                                   \
-        "    push r13\n"                                   \
-        "    push r12\n"                                   \
-        "    push r11\n"                                   \
-        "    push r10\n"                                   \
-        "    push r9\n"                                    \
-        "    push r8\n"                                    \
-        "    push rdi\n"                                   \
-        "    push rsi\n"                                   \
-        "    push rbp\n"                                   \
-        "    push rbx\n"                                   \
-        "    push rdx\n"                                   \
-        "    push rcx\n"                                   \
-        "    push rax\n"                                   \
-        "    mov r12, rsp\n"                               \
-        "    lea rsp, [rip + gxos_exception_stack + 16384]\n" \
-        "    and rsp, -16\n"                               \
-        "    sub rsp, 32\n"                                \
-        "    mov rcx, r12\n"                               \
-        "    call gxos_native_exception_dispatch\n"         \
-        "    add rsp, 32\n"                                \
-        "    test rax, rax\n"                              \
-        "    jnz .native_exception_recover_" #n "\n"       \
-        "    mov rsp, r12\n"                               \
-        "    pop rax\n"                                   \
-        "    pop rcx\n"                                   \
-        "    pop rdx\n"                                   \
-        "    pop rbx\n"                                   \
-        "    pop rbp\n"                                   \
-        "    pop rsi\n"                                   \
-        "    pop rdi\n"                                   \
-        "    pop r8\n"                                    \
-        "    pop r9\n"                                    \
-        "    pop r10\n"                                   \
-        "    pop r11\n"                                   \
-        "    pop r12\n"                                   \
-        "    pop r13\n"                                   \
-        "    pop r14\n"                                   \
-        "    pop r15\n"                                   \
-        "    add rsp, 8\n"                                 \
-        "    iretq\n"                                      \
-        ".native_exception_recover_" #n ":\n"             \
-        "    mov rsp, [rip + gxos_native_fault_recovery_rsp]\n" \
-        "    jmp [rip + gxos_native_fault_recovery_rip]\n"   \
-        ".att_syntax prefix\n"                            \
-    );
-
-MAKE_EXCEPTION_STUB_NO_ERROR(0)
-MAKE_EXCEPTION_STUB_NO_ERROR(1)
-MAKE_EXCEPTION_STUB_NO_ERROR(2)
-MAKE_EXCEPTION_STUB_NO_ERROR(3)
-MAKE_EXCEPTION_STUB_NO_ERROR(4)
-MAKE_EXCEPTION_STUB_NO_ERROR(5)
-MAKE_EXCEPTION_STUB_NO_ERROR(6)
-MAKE_EXCEPTION_STUB_NO_ERROR(7)
-MAKE_EXCEPTION_STUB_WITH_ERROR(8)
-MAKE_EXCEPTION_STUB_NO_ERROR(9)
-MAKE_EXCEPTION_STUB_WITH_ERROR(10)
-MAKE_EXCEPTION_STUB_WITH_ERROR(11)
-MAKE_EXCEPTION_STUB_WITH_ERROR(12)
-MAKE_EXCEPTION_STUB_WITH_ERROR(13)
-MAKE_EXCEPTION_STUB_WITH_ERROR(14)
-MAKE_EXCEPTION_STUB_NO_ERROR(15)
-MAKE_EXCEPTION_STUB_WITH_ERROR(16)
-MAKE_EXCEPTION_STUB_NO_ERROR(17)
-MAKE_EXCEPTION_STUB_NO_ERROR(18)
-MAKE_EXCEPTION_STUB_NO_ERROR(19)
-MAKE_EXCEPTION_STUB_NO_ERROR(20)
-MAKE_EXCEPTION_STUB_NO_ERROR(21)
-MAKE_EXCEPTION_STUB_NO_ERROR(22)
-MAKE_EXCEPTION_STUB_NO_ERROR(23)
-MAKE_EXCEPTION_STUB_NO_ERROR(24)
-MAKE_EXCEPTION_STUB_NO_ERROR(25)
-MAKE_EXCEPTION_STUB_NO_ERROR(26)
-MAKE_EXCEPTION_STUB_NO_ERROR(27)
-MAKE_EXCEPTION_STUB_NO_ERROR(28)
-MAKE_EXCEPTION_STUB_WITH_ERROR(29)
-MAKE_EXCEPTION_STUB_WITH_ERROR(30)
-MAKE_EXCEPTION_STUB_NO_ERROR(31)
+// Every amd64 CPU exception gets a real IDT target. The entry stubs live in
+// kernel/arch/amd64/exception_entry.asm (CPU7C1). They keep a hardware error
+// code only for the vectors that architecturally push one, supply a synthetic
+// zero otherwise, save all 15 GPRs, clear DF, and switch to the kernel-owned
+// exception stack before entering gxos_native_exception_dispatch.
+#define DECLARE_EXCEPTION_STUB(n) extern "C" void exception_stub_##n();
+DECLARE_EXCEPTION_STUB(0)  DECLARE_EXCEPTION_STUB(1)  DECLARE_EXCEPTION_STUB(2)  DECLARE_EXCEPTION_STUB(3)
+DECLARE_EXCEPTION_STUB(4)  DECLARE_EXCEPTION_STUB(5)  DECLARE_EXCEPTION_STUB(6)  DECLARE_EXCEPTION_STUB(7)
+DECLARE_EXCEPTION_STUB(8)  DECLARE_EXCEPTION_STUB(9)  DECLARE_EXCEPTION_STUB(10) DECLARE_EXCEPTION_STUB(11)
+DECLARE_EXCEPTION_STUB(12) DECLARE_EXCEPTION_STUB(13) DECLARE_EXCEPTION_STUB(14) DECLARE_EXCEPTION_STUB(15)
+DECLARE_EXCEPTION_STUB(16) DECLARE_EXCEPTION_STUB(17) DECLARE_EXCEPTION_STUB(18) DECLARE_EXCEPTION_STUB(19)
+DECLARE_EXCEPTION_STUB(20) DECLARE_EXCEPTION_STUB(21) DECLARE_EXCEPTION_STUB(22) DECLARE_EXCEPTION_STUB(23)
+DECLARE_EXCEPTION_STUB(24) DECLARE_EXCEPTION_STUB(25) DECLARE_EXCEPTION_STUB(26) DECLARE_EXCEPTION_STUB(27)
+DECLARE_EXCEPTION_STUB(28) DECLARE_EXCEPTION_STUB(29) DECLARE_EXCEPTION_STUB(30) DECLARE_EXCEPTION_STUB(31)
+#undef DECLARE_EXCEPTION_STUB
 
 typedef void (*exception_stub_fn)();
 static exception_stub_fn s_exception_stubs[32] = {

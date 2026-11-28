@@ -2496,6 +2496,25 @@ extern "C" uint64_t gxos_native_exception_dispatch(const NativeExceptionFrame* f
         for (;;) arch::halt();
     }
 
+    // CPU7C1: the entry stubs produce one normalized frame. Anything that does
+    // not match the architectural frame for this vector (for example a frame
+    // shifted by a missing or extra error word) is never eligible for
+    // recovery or user-fault accounting; report it and fail-stop.
+    const ExceptionFrameStatus frameStatus = classify_exception_frame(*frame);
+    if (frameStatus != ExceptionFrameStatus::Valid) {
+        serial::puts("[EXCEPTION-FRAME] malformed reason=");
+        serial::puts(exception_frame_status_name(frameStatus));
+        serial::puts(" vector=0x"); serial::put_hex64(frame->vector);
+        serial::puts(" error=0x"); serial::put_hex64(frame->errorCode);
+        serial::puts(" RIP=0x"); serial::put_hex64(frame->rip);
+        serial::puts(" CS=0x"); serial::put_hex64(frame->cs);
+        serial::puts(" RFLAGS=0x"); serial::put_hex64(frame->rflags);
+        serial::puts(" RSP=0x"); serial::put_hex64(frame->rsp);
+        serial::puts(" SS=0x"); serial::put_hex64(frame->ss);
+        serial::puts(" policy=halt-no-recovery\n");
+        for (;;) arch::halt();
+    }
+
     // A CPL3 fault must never enter the ring-0 Native ELF recovery trampoline.
     // The current protected diagnostic is deliberately non-faulting; until a
     // full user-fault return/reaper path is qualified, record and stop safely.
@@ -2513,9 +2532,9 @@ extern "C" uint64_t gxos_native_exception_dispatch(const NativeExceptionFrame* f
         for (;;) arch::halt();
     }
 
-    const uint64_t interruptedRsp = reinterpret_cast<uintptr_t>(frame) + sizeof(NativeExceptionFrame);
-    uint16_t ss = 0;
-    asm volatile ("mov %%ss, %0" : "=r"(ss));
+    // The CPU-saved RSP and SS, not an estimate from the frame address.
+    const uint64_t interruptedRsp = frame->rsp;
+    const uint64_t ss = frame->ss;
     const uint64_t cr2 = arch::read_cr2();
     const uint64_t cr3 = arch::read_cr3();
     const bool stackInRuntime = runtime && address_in_range(interruptedRsp,
@@ -2616,7 +2635,7 @@ extern "C" uint64_t gxos_native_exception_dispatch(const NativeExceptionFrame* f
     // deliberately halted rather than attempting unsafe global recovery.
     if (runtime && (ripInApp || stackInRuntime)) {
         serial::puts("[NATIVE-ELF-FAULT] containment=runtime-faulted recovery=return-to-desktop\n");
-        return 1;
+        return kExceptionDispositionRecover;
     }
     serial::puts("[KERNEL-FAULT] panic=unhandled-exception containment=kernel-fault halted=1\n");
     for (;;) arch::halt();

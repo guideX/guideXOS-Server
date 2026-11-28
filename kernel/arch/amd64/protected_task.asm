@@ -155,6 +155,10 @@ gxos_amd64_user_exit_stub:
     push r13
     push r14
     push r15
+    ; CPU7C1: CPL3 controls DF and the interrupt gate does not clear it. The
+    ; Microsoft x64 ABI requires DF=0 at the C++ call. The kernel continuation
+    ; below restores its own saved RFLAGS, so user DF never reaches it.
+    cld
     mov rcx, rsp
     sub rsp, 32
 
