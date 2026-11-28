@@ -42,7 +42,7 @@ ifeq ($(filter $(ARCH),$(VALID_ARCHS)),)
 endif
 
 # Output directories
-BUILD_DIR := build/$(ARCH)
+BUILD_DIR ?= build/$(ARCH)
 OBJ_DIR := $(BUILD_DIR)/obj
 BIN_DIR := $(BUILD_DIR)/bin
 
@@ -108,6 +108,110 @@ DEPFLAGS := -MMD -MP
 # Append architecture-specific flags
 CFLAGS += $(ARCH_CFLAGS)
 
+# The native SQL page reader is linked only in an explicit AMD64 build
+# qualification. This keeps ordinary Server release builds and startup
+# behavior unchanged while exercising the normal source/object/link rules.
+GX_NATIVE_SQL_READ_QUALIFICATION ?= 0
+GX_NATIVE_SQL_READ_DIAGNOSTIC ?= 0
+GX_NATIVE_SQL_READ_API ?= $(if $(filter amd64,$(ARCH)),1,0)
+GX_NATIVE_RAMDISK_PROVENANCE_TRACE ?= 0
+GX_NATIVE_RAMDISK_MAPPING_TRACE ?= 0
+GX_NATIVE_RAMDISK_PACKAGE_R3AS ?= 0
+GX_SQL_DATABASE_ROOT ?= $(abspath $(GUIDEXOS_REPO_ROOT)/../guideXOS_SqlDatabase)
+ifneq ($(filter 1,$(GX_NATIVE_SQL_READ_QUALIFICATION)),)
+CFLAGS += -DGX_NATIVE_SQL_READ_QUALIFICATION=1
+endif
+SQL_NATIVE_SOURCES :=
+SQL_NATIVE_OBJS :=
+SQL_NATIVE_CFLAGS := $(CFLAGS)
+ifneq ($(filter 1,$(GX_NATIVE_SQL_READ_API)),)
+ifneq ($(ARCH),amd64)
+$(error GX_NATIVE_SQL_READ_API is supported only for ARCH=amd64)
+endif
+CFLAGS += -DGX_NATIVE_SQL_READ_API=1
+CFLAGS += -I$(GX_SQL_DATABASE_ROOT)/database
+CFLAGS += -I$(GX_SQL_DATABASE_ROOT)/database/native
+CFLAGS += -I$(GX_SQL_DATABASE_ROOT)/database/portable
+endif
+ifneq ($(filter 1,$(GX_NATIVE_SQL_READ_DIAGNOSTIC)),)
+ifneq ($(filter 1,$(GX_NATIVE_SQL_READ_QUALIFICATION)),)
+ifneq ($(ARCH),amd64)
+$(error GX_NATIVE_SQL_READ_DIAGNOSTIC is supported only for ARCH=amd64)
+endif
+CFLAGS += -DGX_NATIVE_SQL_READ_DIAGNOSTIC=1
+CFLAGS += -I$(GX_SQL_DATABASE_ROOT)/database
+CFLAGS += -I$(GX_SQL_DATABASE_ROOT)/database/native
+CFLAGS += -I$(GX_SQL_DATABASE_ROOT)/database/portable
+else
+$(error GX_NATIVE_SQL_READ_DIAGNOSTIC requires GX_NATIVE_SQL_READ_QUALIFICATION=1)
+endif
+endif
+ifneq ($(filter 1,$(GX_NATIVE_RAMDISK_PROVENANCE_TRACE)),)
+ifneq ($(filter 1,$(GX_NATIVE_SQL_READ_QUALIFICATION)),)
+ifneq ($(filter 1,$(GX_NATIVE_SQL_READ_DIAGNOSTIC)),)
+ifneq ($(ARCH),amd64)
+$(error GX_NATIVE_RAMDISK_PROVENANCE_TRACE is supported only for ARCH=amd64)
+endif
+CFLAGS += -DGX_NATIVE_RAMDISK_PROVENANCE_TRACE=1
+else
+$(error GX_NATIVE_RAMDISK_PROVENANCE_TRACE requires GX_NATIVE_SQL_READ_DIAGNOSTIC=1)
+endif
+else
+$(error GX_NATIVE_RAMDISK_PROVENANCE_TRACE requires GX_NATIVE_SQL_READ_QUALIFICATION=1)
+endif
+endif
+ifneq ($(filter 1,$(GX_NATIVE_RAMDISK_MAPPING_TRACE)),)
+ifneq ($(filter 1,$(GX_NATIVE_SQL_READ_QUALIFICATION)),)
+ifneq ($(filter 1,$(GX_NATIVE_SQL_READ_DIAGNOSTIC)),)
+ifneq ($(ARCH),amd64)
+$(error GX_NATIVE_RAMDISK_MAPPING_TRACE is supported only for ARCH=amd64)
+endif
+ifneq ($(filter 1,$(GX_NATIVE_RAMDISK_PACKAGE_R3AS)),1)
+$(error GX_NATIVE_RAMDISK_MAPPING_TRACE requires GX_NATIVE_RAMDISK_PACKAGE_R3AS=1)
+endif
+CFLAGS += -DGX_NATIVE_RAMDISK_MAPPING_TRACE=1
+CFLAGS += -DGX_NATIVE_RAMDISK_PACKAGE_R3AS=1
+else
+$(error GX_NATIVE_RAMDISK_MAPPING_TRACE requires GX_NATIVE_SQL_READ_DIAGNOSTIC=1)
+endif
+else
+$(error GX_NATIVE_RAMDISK_MAPPING_TRACE requires GX_NATIVE_SQL_READ_QUALIFICATION=1)
+endif
+endif
+ifneq ($(filter 1,$(GX_NATIVE_SQL_READ_API) $(GX_NATIVE_SQL_READ_QUALIFICATION)),)
+ifneq ($(ARCH),amd64)
+$(error Native SQL read API/qualification is supported only for ARCH=amd64)
+endif
+CFLAGS += -DGX_NATIVE_SQL_READ_API=1
+SQL_NATIVE_SOURCES := \
+	$(GX_SQL_DATABASE_ROOT)/database/native/gx_native_sql_index_page_provider.cpp \
+	$(GX_SQL_DATABASE_ROOT)/database/native/gx_native_sql_read_service.cpp \
+	$(GX_SQL_DATABASE_ROOT)/database/database_checksum.cpp \
+	$(GX_SQL_DATABASE_ROOT)/database/database_format.cpp \
+	$(GX_SQL_DATABASE_ROOT)/database/portable/gx_page_codec.cpp \
+	$(GX_SQL_DATABASE_ROOT)/database/portable/gx_allocator.cpp \
+	$(GX_SQL_DATABASE_ROOT)/database/portable/gx_array.cpp \
+	$(GX_SQL_DATABASE_ROOT)/database/portable/gx_page_visit_set.cpp \
+	$(GX_SQL_DATABASE_ROOT)/database/portable/gx_index_boolean_key.cpp \
+	$(GX_SQL_DATABASE_ROOT)/database/portable/gx_index_integer_key.cpp \
+	$(GX_SQL_DATABASE_ROOT)/database/portable/gx_index_text_key.cpp \
+	$(GX_SQL_DATABASE_ROOT)/database/portable/gx_index_physical_key.cpp \
+	$(GX_SQL_DATABASE_ROOT)/database/portable/gx_index_leaf_entry.cpp \
+	$(GX_SQL_DATABASE_ROOT)/database/portable/gx_index_leaf_traversal.cpp \
+	$(GX_SQL_DATABASE_ROOT)/database/portable/gx_index_internal_node.cpp \
+	$(GX_SQL_DATABASE_ROOT)/database/portable/gx_index_tree_descent.cpp \
+	$(GX_SQL_DATABASE_ROOT)/database/portable/gx_index_lookup.cpp
+SQL_NATIVE_MISSING := $(filter-out $(wildcard $(SQL_NATIVE_SOURCES)),$(SQL_NATIVE_SOURCES))
+ifneq ($(strip $(SQL_NATIVE_MISSING)),)
+$(error Native SQL qualification source is missing: $(SQL_NATIVE_MISSING))
+endif
+SQL_NATIVE_OBJS := $(patsubst $(GX_SQL_DATABASE_ROOT)/database/%.cpp,$(OBJ_DIR)/sql/%.o,$(SQL_NATIVE_SOURCES))
+SQL_NATIVE_CFLAGS += -DGX_NATIVE_SQL_READ_QUALIFICATION=1
+SQL_NATIVE_CFLAGS += -I$(GX_SQL_DATABASE_ROOT)/database
+SQL_NATIVE_CFLAGS += -I$(GX_SQL_DATABASE_ROOT)/database/native
+SQL_NATIVE_CFLAGS += -I$(GX_SQL_DATABASE_ROOT)/database/portable
+endif
+
 # Linker flags
 # LINKER_SCRIPT_FLAG is defined per-arch: compiler-driver arches (x86) use -Wl,-T,
 # while plain ld arches (amd64) use -T directly.
@@ -130,8 +234,8 @@ ASM_OBJS += $(patsubst arch/$(ARCH)/%.s,$(OBJ_DIR)/arch/%.o,$(filter %.s,$(ASM_S
 MBEDTLS_C_OBJS := $(patsubst $(GUIDEXOS_REPO_ROOT)/third_party/%.c,$(OBJ_DIR)/third_party/%.o,$(MBEDTLS_C_SOURCES))
 MBEDTLS_COMPILE_PROBE_C_OBJS := $(patsubst $(GUIDEXOS_REPO_ROOT)/third_party/%.c,$(OBJ_DIR)/third_party/%.o,$(MBEDTLS_COMPILE_PROBE_C_SOURCES))
 
-ALL_OBJS := $(CORE_OBJS) $(ARCH_OBJS) $(ASM_OBJS) $(MBEDTLS_C_OBJS)
-DEPFILES := $(CORE_OBJS:.o=.d) $(ARCH_OBJS:.o=.d) $(MBEDTLS_COMPILE_PROBE_C_OBJS:.o=.d)
+ALL_OBJS := $(CORE_OBJS) $(ARCH_OBJS) $(ASM_OBJS) $(MBEDTLS_C_OBJS) $(SQL_NATIVE_OBJS)
+DEPFILES := $(CORE_OBJS:.o=.d) $(ARCH_OBJS:.o=.d) $(MBEDTLS_COMPILE_PROBE_C_OBJS:.o=.d) $(SQL_NATIVE_OBJS:.o=.d)
 
 # Targets
 .PHONY: all clean info verify-mbedtls-guidexos mbedtls-guidexos-compile-probe
@@ -192,6 +296,16 @@ $(OBJ_DIR)/core/%.o: core/%.cpp
 	@echo "Compiling $<..."
 	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
+$(OBJ_DIR)/sql/%.o: $(GX_SQL_DATABASE_ROOT)/database/%.cpp
+	@$(call MKDIR,$(dir $@))
+	@echo "Compiling native SQL qualification source $<..."
+	$(CXX) $(SQL_NATIVE_CFLAGS) $(DEPFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/sql/%.d: $(GX_SQL_DATABASE_ROOT)/database/%.cpp
+	@$(call MKDIR,$(dir $@))
+	@echo "Bootstrapping dependencies for native SQL qualification source $<..."
+	$(CXX) $(SQL_NATIVE_CFLAGS) $(DEPFLAGS) -c $< -o $(OBJ_DIR)/sql/$*.o
+
 $(OBJ_DIR)/core/gxos_tls_foundation.o: $(MBEDTLS_GUIDEXOS_IMPORT_STATE_DEPS)
 
 $(OBJ_DIR)/core/kernel_apps.o: $(MBEDTLS_GUIDEXOS_IMPORT_STATE_DEPS)
@@ -227,7 +341,7 @@ $(OBJ_DIR)/third_party/%.o: $(GUIDEXOS_REPO_ROOT)/third_party/%.c
 	$(CXX) -x c $(filter-out -std=c++14 -fno-exceptions -fno-rtti -nostdinc++,$(CFLAGS)) $(DEPFLAGS) -c $< -o $@
 
 clean:
-	@$(call RM,build/$(ARCH))
+	@$(call RM,$(BUILD_DIR))
 
 info:
 	@echo "Architecture: $(ARCH)"

@@ -21,6 +21,8 @@ static_assert(offsetof(gx_event, param4) == 28, "gx_event.param4 offset changed"
 //     that growth happens only by appending (pinned by ordering asserts).
 //   workspace/build/dev-run/dev-debug eras: 120 -> 240 bytes.
 //   MC5 audio era: play_pcm appended at 240 -> 248 bytes.
+//   SQL read API: four host calls appended at 256 -> 288 bytes.
+//   SQL catalog: one optional host call appended at 288 -> 296 bytes.
 static_assert(offsetof(gx_host_calls, get_ticks_ms) > offsetof(gx_host_calls, present_frame),
               "get_ticks_ms must be appended to the ABI table");
 static_assert(sizeof(uint64_t) == 8, "Native ABI ticks must remain 64-bit");
@@ -79,7 +81,48 @@ static_assert(offsetof(gx_host_calls, development_debug) == 232, "development de
 static_assert(offsetof(gx_host_calls, play_pcm) > offsetof(gx_host_calls, development_debug),
               "play_pcm must be appended after development_debug");
 static_assert(offsetof(gx_host_calls, play_pcm) == 240, "play_pcm slot changed");
-static_assert(sizeof(gx_host_calls) == 248, "gx_host_calls size changed");
+static_assert(offsetof(gx_host_calls, get_document_activation_path) == 248,
+              "document activation slot changed");
+static_assert(offsetof(gx_host_calls, sql_open_read_only_database) == 256,
+              "SQL open slot changed");
+static_assert(offsetof(gx_host_calls, sql_close_database) == 264,
+              "SQL close slot changed");
+static_assert(offsetof(gx_host_calls, sql_lookup_index) == 272,
+              "SQL point lookup slot changed");
+static_assert(offsetof(gx_host_calls, sql_scan_index_range) == 280,
+              "SQL range scan slot changed");
+static_assert(offsetof(gx_host_calls, sql_catalog_query) == 288,
+              "SQL catalog extension slot changed");
+static_assert(sizeof(gx_host_calls) == 296, "gx_host_calls size changed");
+static_assert(sizeof(gx_sql_key) == 16, "SQL Boolean key addition changed key size");
+static_assert(offsetof(gx_sql_key, value) == 8,
+              "SQL key payload offset changed");
+static_assert(sizeof(((gx_sql_key*)0)->value.text_value) == 8,
+              "inline Text key must fit the existing union slot");
+static_assert(sizeof(gx_sql_range) == 48,
+              "SQL Boolean key addition changed range size");
+static_assert(GX_SQL_KEY_BOOLEAN == 3u,
+              "Boolean key tag must be additive");
+static_assert(GX_SQL_KEY_TEXT == 4u,
+              "Text key tag must be additive");
+static_assert(GX_SQL_COMPARISON_TEXT_BYTES_ASCENDING_NULLS_FIRST == 3u,
+              "Text comparison tag must be additive");
+static_assert(GX_SQL_COMPARISON_BOOLEAN_ASCENDING_NULLS_FIRST == 2u,
+              "Boolean comparison tag must be additive");
+static_assert(GX_SQL_INDEX_ROWS_EDGE64 == 5u,
+              "Edge64 identity must preserve the trusted catalog identity");
+static_assert(GX_SQL_COMPARISON_SIGNED_ASCENDING_NO_NULLS == 4u,
+              "Edge64 comparison semantics tag must be additive");
+static_assert(sizeof(gx_sql_catalog_request) == 24,
+              "SQL catalog request ABI size changed");
+static_assert(offsetof(gx_sql_catalog_request, databaseHandle) == 8,
+              "SQL catalog request handle offset changed");
+static_assert(sizeof(gx_sql_catalog_entry) == 92,
+              "SQL catalog entry ABI size changed");
+static_assert(offsetof(gx_sql_catalog_entry, name) == 28,
+              "SQL catalog name offset changed");
+static_assert(sizeof(gx_sql_catalog_result) == 20,
+              "SQL catalog result ABI size changed");
 static_assert(sizeof(gx_development_run_request) == 72, "development run request size changed");
 static_assert(offsetof(gx_development_run_request, projectRoot) == 8, "development run request project root offset changed");
 static_assert(offsetof(gx_development_run_request, artifactSha256) == 56, "development run request artifact hash offset changed");
@@ -127,7 +170,12 @@ int main() {
                              offsetof(gx_host_calls, build_project_release);
     const bool audioAppended = offsetof(gx_host_calls, play_pcm) >
                                offsetof(gx_host_calls, development_debug);
-    if (!appended || !workspaceAppended || !buildAppended || !runAppended || !audioAppended) return 1;
+    const bool sqlAppended = offsetof(gx_host_calls, sql_open_read_only_database) >
+                             offsetof(gx_host_calls, get_document_activation_path) &&
+        offsetof(gx_host_calls, sql_scan_index_range) >
+                             offsetof(gx_host_calls, sql_lookup_index);
+    if (!appended || !workspaceAppended || !buildAppended || !runAppended ||
+        !audioAppended || !sqlAppended) return 1;
     std::cout << "Native ABI layout test PASS\n";
     return 0;
 }

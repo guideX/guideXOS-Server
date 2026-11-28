@@ -15,6 +15,7 @@
 #include "include/kernel/pci_audio.h"
 #include "include/kernel/app_audio_stream.h"
 #include "include/kernel/native_present_validation.h"
+#include "include/kernel/native_sql_application_service.h"
 
 #include "bitmap_font.h"
 #include "sdk/include/guidexos/abi.h"
@@ -653,6 +654,7 @@ static bool parse_package(const char* directory, Package* package) {
     }
     if (!text_equal(package->entryPoint, "gx_main") || !text_equal(package->abi, GX_ABI_NAME)) return false;
     package->hasAudioOutput = json_array_contains(s_manifest, "\"permissions\"", "audio.output");
+    package->hasDatabaseRead = json_array_contains(s_manifest, "\"permissions\"", "database.read");
     char executablePath[256];
     if (!package_path(package, package->executable, executablePath, sizeof(executablePath))) return false;
     vfs::FileInfo info;
@@ -1066,7 +1068,33 @@ static bool load_image(Runtime* runtime) {
 }
 
 static Runtime* runtime_from(gx_app_context* context) {
-    return context ? static_cast<Runtime*>(context->userData) : nullptr;
+    // The active context lives in the kernel-owned Runtime. Do not trust the
+    // app-writable userData field to recover that Runtime from an ABI call.
+    if (!context || !s_activeRuntime || context != &s_activeRuntime->context) return nullptr;
+    return s_activeRuntime;
+}
+
+static bool app_span_contains(const void* region, uint64_t regionBytes,
+                              const void* address, size_t length) {
+    if (!region || !address || length == 0) return false;
+    const uintptr_t begin = reinterpret_cast<uintptr_t>(region);
+    const uintptr_t value = reinterpret_cast<uintptr_t>(address);
+    if (regionBytes > static_cast<uint64_t>(UINTPTR_MAX - begin) ||
+        length > static_cast<size_t>(UINTPTR_MAX - value)) return false;
+    const uintptr_t end = begin + static_cast<uintptr_t>(regionBytes);
+    const uintptr_t valueEnd = value + length;
+    return value >= begin && valueEnd <= end;
+}
+
+static int sql_app_buffer_valid(gx_app_context* context, const void* address,
+                                size_t length, uint8_t /* writable */) {
+    Runtime* runtime = runtime_from(context);
+    if (!runtime) return 0;
+    // Native ELF packages currently share the kernel address space. Bounds
+    // checks reject pointers outside the active image and app stack; they do
+    // not provide page-level privilege isolation.
+    return app_span_contains(runtime->image, runtime->imageBytes, address, length) ||
+        app_span_contains(runtime->stack, kRuntimeStackBytes, address, length);
 }
 
 static gx_result GX_CALL host_log(gx_app_context* context, const char* message) {
@@ -1834,6 +1862,7 @@ static void initialize_host_table(Runtime* runtime) {
     runtime->host.present_frame = host_present_frame;
     runtime->host.get_ticks_ms = host_get_ticks_ms;
     runtime->host.play_pcm = host_play_pcm;
+    kernel::native_sql_application::installHostCalls(&runtime->host);
 }
 
 static bool run_package(Package* package) {
@@ -1841,6 +1870,7 @@ static bool run_package(Package* package) {
     runtime.package = package;
     runtime.exitCode = GX_OK;
     ++s_runtimeSequence;
+    if (s_runtimeSequence == 0) ++s_runtimeSequence;
     runtime.audioOwner = s_runtimeSequence;
     initialize_host_table(&runtime);
     runtime.context.size = sizeof(runtime.context);
@@ -1867,11 +1897,28 @@ static bool run_package(Package* package) {
     serial::puts("..0x"); serial::put_hex64(reinterpret_cast<uintptr_t>(runtime.stack + kRuntimeStackBytes));
     serial::putc('\n');
 
+    if (!kernel::native_sql_application::attach(&runtime.context,
+            runtime.audioOwner, package->hasDatabaseRead ? 1u : 0u,
+            sql_app_buffer_valid)) {
+        delete[] runtime.stack;
+        delete[] runtime.image;
+        runtime.stack = nullptr;
+        runtime.image = nullptr;
+        log_runtime(&runtime, "launch FAIL=sql-app-context-registration");
+        return false;
+    }
+
     s_activeRuntime = &runtime;
     log_breadcrumb(&runtime, "04 GX_MAIN_ENTER");
     gx_result result = gxos_native_call_on_stack(runtime.entry, &runtime.context,
         runtime.stack + kRuntimeStackBytes);
     log_breadcrumb(&runtime, "21 GX_MAIN_RETURN");
+#if defined(GX_NATIVE_SQL_READ_QUALIFICATION) && GX_NATIVE_SQL_READ_QUALIFICATION && \
+    defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+    log_runtime(&runtime, result == GX_OK ?
+        "SQL_APP_LIFECYCLE event=GX_MAIN_RETURN_DETECTED result=OK cleanup=NEXT" :
+        "SQL_APP_LIFECYCLE event=GX_MAIN_RETURN_DETECTED result=APP_ERROR cleanup=NEXT");
+#endif
     serial::puts("[NATIVE-ELF] runtime="); serial::put_hex64(s_runtimeSequence);
     serial::puts(" exit result=0x"); serial::put_hex32(static_cast<uint32_t>(result));
     serial::puts(" requested="); serial::puts(runtime.exitRequested ? "1" : "0");
@@ -1902,14 +1949,26 @@ static bool run_package(Package* package) {
         runtime.owner = nullptr;
         abi_complete(&runtime, NativeAbiOperation::CloseWindow);
     }
+    const kernel::native_sql_application::DetachResult sqlDetach =
+        kernel::native_sql_application::detach(&runtime.context);
+#if defined(GX_NATIVE_SQL_READ_QUALIFICATION) && GX_NATIVE_SQL_READ_QUALIFICATION && \
+    defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+    log_runtime(&runtime, sqlDetach.success ?
+        "SQL_APP_LIFECYCLE event=APP_DETACH_COMPLETE status=PASS owner_sessions_after=0" :
+        "SQL_APP_LIFECYCLE event=APP_DETACH_COMPLETE status=FAIL");
+#endif
     delete[] runtime.stack;
     delete[] runtime.image;
     runtime.stack = nullptr;
     runtime.image = nullptr;
     s_activeRuntime = nullptr;
     gxos_native_set_fault_recovery(0, 0);
-    log_runtime(&runtime, result == GX_OK ? "lifecycle PASS window/resource cleanup complete" : "lifecycle FAIL app-returned-error");
-    return result == GX_OK;
+    const bool lifecyclePassed = result == GX_OK && sqlDetach.success;
+    log_runtime(&runtime, lifecyclePassed ?
+        "lifecycle PASS window/SQL/resource cleanup complete" :
+        (result != GX_OK ? "lifecycle FAIL app-returned-error" :
+                           "lifecycle FAIL sql-detach"));
+    return lifecyclePassed;
 }
 
 bool launch(const char* appName) {

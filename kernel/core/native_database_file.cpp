@@ -316,6 +316,32 @@ extern "C" GxDbFileStatus gx_db_file_get_size(GxDbFileHandle handle,
     return GX_DB_FILE_OK;
 }
 
+#if (defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC) || \
+    (defined(GX_NATIVE_SQL_READ_API) && GX_NATIVE_SQL_READ_API)
+extern "C" GxDbFileStatus gx_db_file_is_read_only(
+    GxDbFileHandle handle, uint8_t* outReadOnly) {
+    if (!outReadOnly) return GX_DB_FILE_INVALID_ARGUMENT;
+    *outReadOnly = 0;
+    BridgeFile* slot = nullptr;
+    const GxDbFileStatus valid = validateHandle(handle, slot);
+    if (valid != GX_DB_FILE_OK) return valid;
+    if (!slot->readOnly) return GX_DB_FILE_OK;
+    const kernel::vfs::FileHandle* file = kernel::vfs::get_handle(slot->nativeHandle);
+    if (!file || !file->open) return GX_DB_FILE_STALE_HANDLE;
+    const kernel::vfs::MountPoint* mount =
+        kernel::vfs::get_mount_by_index(file->mountIndex);
+    if (!mount || !mount->active || !mount->readOnly ||
+        mount->fsType != kernel::vfs::FS_TYPE_FAT32) {
+        return GX_DB_FILE_OK;
+    }
+    const kernel::block::BlockDevice* device =
+        kernel::block::get_device(mount->blockDevIndex);
+    if (!device || !device->readFn || device->writeFn) return GX_DB_FILE_OK;
+    *outReadOnly = 1;
+    return GX_DB_FILE_OK;
+}
+#endif
+
 extern "C" GxDbFileStatus gx_db_file_read_at(GxDbFileHandle handle,
                                                uint64_t offset,
                                                void* buffer, size_t length) {

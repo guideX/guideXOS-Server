@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "com.guidexos.samples.sqlread",
+  "displayName": "SQL Read Demo",
+  "version": "0.1.0",
+  "publisher": "guideXOS SDK",
+  "description": "Exercises the bounded Native ELF read-only SQL API.",
+  "category": "Samples",
+  "kind": "NativeElf",
+  "icon": "",
+  "minGuideXOSVersion": "0.1.0",
+  "supportedArchitectures": ["amd64"],
+  "entries": [
+    {
+      "architecture": "amd64",
+      "path": "bin/amd64/sqlread.elf",
+      "entryPoint": "gx_main",
+      "abi": "guidexos-c-abi-v1",
+      "runtime": "native-elf"
+    }
+  ],
+  "permissions": ["log", "database.read"],
+  "fileAssociations": [],
+  "defaultWindow": {"width": 480, "height": 320, "resizable": false}
+}

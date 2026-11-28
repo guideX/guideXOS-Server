@@ -1,6 +1,7 @@
 #pragma once
 
 #include "types.h"
+#include "sql.h"
 #include "build.h"
 #include "development_run.h"
 #include "development_debug.h"
@@ -150,6 +151,17 @@ typedef struct gx_host_calls {
     gx_result (GX_CALL *play_pcm)(gx_app_context* ctx, const void* pcmData, uint32_t pcmBytes, uint32_t sampleRateHz, uint32_t channels, uint32_t bitsPerSample);
     /* App Model activation is returned as an owned bounded path copy. */
     gx_result (GX_CALL *get_document_activation_path)(gx_app_context* ctx, char* path, uint32_t pathCapacity, uint32_t* requiredBytes);
+    /* Native read-only SQL API. These append-only slots are implemented by
+     * the Native ELF App Model host. Database and index identities are
+     * resolved internally; callers never provide paths or page roots. */
+    gx_sql_status (GX_CALL *sql_open_read_only_database)(gx_app_context* ctx, uint32_t databaseIdentity, uint32_t flags, gx_sql_database_handle* outHandle);
+    gx_sql_status (GX_CALL *sql_close_database)(gx_app_context* ctx, gx_sql_database_handle handle);
+    gx_sql_status (GX_CALL *sql_lookup_index)(gx_app_context* ctx, gx_sql_database_handle handle, uint32_t indexIdentity, const gx_sql_key* key, uint32_t flags, gx_sql_locator* results, uint32_t resultCapacity, uint32_t* outCount);
+    gx_sql_status (GX_CALL *sql_scan_index_range)(gx_app_context* ctx, gx_sql_database_handle handle, uint32_t indexIdentity, const gx_sql_range* range, uint32_t flags, gx_sql_locator* results, uint32_t resultCapacity, uint32_t* outCount);
+    /* Optional bounded catalog extension. New callers check size before reading
+     * this slot; old host-table prefixes and all existing callback offsets are
+     * unchanged. */
+    gx_sql_status (GX_CALL *sql_catalog_query)(gx_app_context* ctx, const gx_sql_catalog_request* request, gx_sql_catalog_entry* entries, uint32_t entryCapacity, gx_sql_catalog_result* outResult);
 } gx_host_calls;
 
 #ifdef __cplusplus

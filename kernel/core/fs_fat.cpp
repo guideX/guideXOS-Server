@@ -28,6 +28,161 @@ static bool s_trashTraceActive = false;
 static uint64_t s_trashTraceGeneration = 0;
 static uint64_t s_fatScanIterations = 0;
 static uint64_t s_allocatedClusters = 0;
+#if defined(GX_NATIVE_RAMDISK_PROVENANCE_TRACE) && GX_NATIVE_RAMDISK_PROVENANCE_TRACE
+static bool s_r3amFatLba0ReadRecorded = false;
+static bool s_r3amFatLba0ResultRecorded = false;
+#endif
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+static const char* s_mountFailureCode = "NOT_RUN";
+static bool s_mountFailureSet = false;
+
+static void report_mount_failure(const char* code)
+{
+    s_mountFailureCode = code;
+    s_mountFailureSet = true;
+    serial::puts("[FAT-RO-DIAG] probe_reject=");
+    serial::puts(code);
+    serial::puts("\n");
+}
+
+static void report_boot_sector_probe(uint64_t lba, const uint8_t* sector)
+{
+    if (!sector) return;
+    const FAT32_BPB* bpb = reinterpret_cast<const FAT32_BPB*>(sector);
+    serial::puts("[FAT-RO-DIAG] volume_boot_read_ok lba=");
+    serial::put_hex64(lba);
+    serial::puts(" count=1\n");
+    serial::puts("[FAT-RO-DIAG] boot_sector lba=");
+    serial::put_hex64(lba);
+    serial::puts(" bps=");
+    serial::put_hex16(bpb->bytesPerSector);
+    serial::puts(" spc=");
+    serial::put_hex8(bpb->sectorsPerCluster);
+    serial::puts(" reserved=");
+    serial::put_hex16(bpb->reservedSectors);
+    serial::puts(" fats=");
+    serial::put_hex8(bpb->numFATs);
+    serial::puts(" total16=");
+    serial::put_hex16(bpb->totalSectors16);
+    serial::puts(" total32=");
+    serial::put_hex32(bpb->totalSectors32);
+    serial::puts(" fat16=");
+    serial::put_hex16(bpb->fatSize16);
+    serial::puts(" fat32=");
+    serial::put_hex32(bpb->fatSize32);
+    serial::puts(" root=");
+    serial::put_hex32(bpb->rootCluster);
+    serial::puts(" hidden=");
+    serial::put_hex32(bpb->hiddenSectors);
+    serial::puts(" fsinfo=");
+    serial::put_hex16(bpb->fsInfoSector);
+    serial::puts(" backup=");
+    serial::put_hex16(bpb->backupBootSector);
+    serial::puts(" flags=");
+    serial::put_hex16(bpb->extFlags);
+    serial::puts(" version=");
+    serial::put_hex16(bpb->fsVersion);
+    serial::puts(" type_hex=");
+    for (uint8_t i = 0; i < 8; ++i) serial::put_hex8(static_cast<uint8_t>(bpb->fsType[i]));
+    serial::puts(" signature=");
+    serial::put_hex8(sector[510]);
+    serial::put_hex8(sector[511]);
+    serial::puts("\n");
+}
+
+#if defined(GX_NATIVE_RAMDISK_PROVENANCE_TRACE) && GX_NATIVE_RAMDISK_PROVENANCE_TRACE
+static bool r3am_is_wallimg(const block::BlockDevice* device)
+{
+    static const char expected[] = "wallimg";
+    if (!device) return false;
+    for (size_t i = 0; i < sizeof(expected); ++i) {
+        if (device->name[i] != expected[i]) return false;
+    }
+    return true;
+}
+
+static void trace_r3am_fat_lba0_read(uint8_t deviceIndex,
+                                     block::Status status,
+                                     const uint8_t* buffer)
+{
+    const block::BlockDevice* device = block::get_device(deviceIndex);
+    if (!r3am_is_wallimg(device) || s_r3amFatLba0ReadRecorded) return;
+    s_r3amFatLba0ReadRecorded = true;
+    const bool valid = status == block::BLOCK_OK && buffer &&
+        device->sectorSize >= 16;
+    serial::puts("SQL_R3AM_FAT_READ valid=");
+    serial::putc(valid ? '1' : '0');
+    serial::puts(" device_id=");
+    serial::put_hex8(deviceIndex);
+    serial::puts(" requested_lba=0000000000000000 read_status=");
+    serial::put_hex8(static_cast<uint8_t>(status));
+    serial::puts(" read_buffer=");
+    serial::put_hex64(reinterpret_cast<uintptr_t>(buffer));
+    serial::puts(" read_buffer_length=");
+    serial::put_hex32(device->sectorSize);
+    serial::puts(" bytes16=");
+    if (valid) {
+        for (uint8_t i = 0; i < 16; ++i) serial::put_hex8(buffer[i]);
+        const uint16_t bps = static_cast<uint16_t>(buffer[0x0B]) |
+            (static_cast<uint16_t>(buffer[0x0C]) << 8);
+        serial::puts(" bps=");
+        serial::put_hex16(bps);
+    } else {
+        serial::puts("unavailable bps=unavailable");
+    }
+    serial::putc('\n');
+}
+
+static void trace_r3am_fat_bpb_result(uint8_t deviceIndex,
+                                      block::Status readStatus,
+                                      bool accepted,
+                                      bool readSucceeded)
+{
+    const block::BlockDevice* device = block::get_device(deviceIndex);
+    if (!r3am_is_wallimg(device) || s_r3amFatLba0ResultRecorded) return;
+    s_r3amFatLba0ResultRecorded = true;
+    serial::puts("SQL_R3AM_FAT_BPB device_id=");
+    serial::put_hex8(deviceIndex);
+    serial::puts(" requested_lba=0000000000000000 read_status=");
+    serial::put_hex8(static_cast<uint8_t>(readStatus));
+    serial::puts(" validation=");
+    serial::puts(accepted ? "ACCEPTED" : (readSucceeded ? "REJECTED" : "NOT_RUN"));
+    serial::puts(" reason=");
+    if (accepted) serial::puts("NONE");
+    else if (readSucceeded && s_mountFailureCode) serial::puts(s_mountFailureCode);
+    else serial::puts("BLOCK_READ_LBA0_FAILED");
+    serial::putc('\n');
+}
+#endif
+
+static const char* cluster_count_class(uint32_t clusterCount)
+{
+    if (clusterCount < 4085u) return "FAT12";
+    if (clusterCount < 65525u) return "FAT16";
+    return "FAT32";
+}
+
+static void report_fat32_geometry(const FATVolume& vol,
+                                  uint32_t dataSectors,
+                                  uint64_t fatEntryCapacity)
+{
+    serial::puts("[FAT-RO-DIAG] fat32_geometry volume_start=");
+    serial::put_hex64(vol.partitionOffset);
+    serial::puts(" total=");
+    serial::put_hex32(vol.totalSectors);
+    serial::puts(" first_data=");
+    serial::put_hex32(vol.firstDataSector);
+    serial::puts(" data_sectors=");
+    serial::put_hex32(dataSectors);
+    serial::puts(" clusters=");
+    serial::put_hex32(vol.totalDataClusters);
+    serial::puts(" cluster_class=");
+    serial::puts(cluster_count_class(vol.totalDataClusters));
+    serial::puts(" fat_entries=");
+    serial::put_hex64(fatEntryCapacity);
+    serial::puts("\n");
+}
+#endif
 
 // A v0.1 file operation must fail boundedly even when the FAT contains a
 // cycle.  Large copies stream through a modest buffer, while this bound
@@ -366,6 +521,10 @@ static bool try_mount_fat32_boot_sector(uint8_t blockDevIdx, uint64_t partitionO
 
     const FAT32_BPB* bpb = reinterpret_cast<const FAT32_BPB*>(bootSector);
 
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+    report_boot_sector_probe(partitionOffset, bootSector);
+#endif
+
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
     kernel::serial::puts("[FAT] boot-sector probe lba=");
     kernel::serial::put_hex32(static_cast<uint32_t>(partitionOffset));
@@ -385,10 +544,42 @@ static bool try_mount_fat32_boot_sector(uint8_t blockDevIdx, uint64_t partitionO
 #endif
 
     // Basic sanity checks
-    if (bpb->bytesPerSector < 512 || bpb->bytesPerSector > 4096) return false;
-    if (bpb->sectorsPerCluster == 0) return false;
-    if (bpb->numFATs == 0) return false;
+    if (bpb->bytesPerSector < 512 || bpb->bytesPerSector > 4096 ||
+        (bpb->bytesPerSector & (bpb->bytesPerSector - 1)) != 0) {
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+        report_mount_failure("FAT32_BYTES_PER_SECTOR_INVALID");
+#endif
+        return false;
+    }
+    if (bpb->sectorsPerCluster == 0 || bpb->sectorsPerCluster > 128 ||
+        (bpb->sectorsPerCluster & (bpb->sectorsPerCluster - 1)) != 0) {
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+        report_mount_failure("FAT32_SECTORS_PER_CLUSTER_INVALID");
+#endif
+        return false;
+    }
+    if (static_cast<uint64_t>(bpb->bytesPerSector) * bpb->sectorsPerCluster > 32768) {
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+        report_mount_failure("FAT32_CLUSTER_SIZE_INVALID");
+#endif
+        return false;
+    }
+    if (bpb->reservedSectors == 0 || bpb->numFATs == 0 || bpb->numFATs > 2) {
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+        report_mount_failure("FAT32_RESERVED_OR_FAT_COUNT_INVALID");
+#endif
+        return false;
+    }
+    if (bootSector[510] != 0x55 || bootSector[511] != 0xAA) {
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+        report_mount_failure("FAT32_BOOT_SIGNATURE_INVALID");
+#endif
+        return false;
+    }
     if (bpb->fatSize32 == 0) {
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+        report_mount_failure("FAT32_FAT_SIZE_ZERO");
+#endif
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
         kernel::serial::puts("[FAT] boot-sector reject reason=fat32-size-zero\n");
 #endif
@@ -397,6 +588,9 @@ static bool try_mount_fat32_boot_sector(uint8_t blockDevIdx, uint64_t partitionO
 
     // Check for "FAT32   " signature
     if (!str_equal(bpb->fsType, "FAT32   ", 8)) {
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+        report_mount_failure("FAT32_TYPE_LABEL_MISMATCH");
+#endif
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
         kernel::serial::puts("[FAT] boot-sector reject reason=fat32-signature-mismatch\n");
 #endif
@@ -419,15 +613,65 @@ static bool try_mount_fat32_boot_sector(uint8_t blockDevIdx, uint64_t partitionO
                        ? bpb->totalSectors32
                        : bpb->totalSectors16;
 
-    if (vol.totalSectors == 0) return false;
+    const block::BlockDevice* device = block::get_device(blockDevIdx);
+    if (!device || !device->readFn) {
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+        report_mount_failure("BLOCK_DEVICE_UNAVAILABLE");
+#endif
+        return false;
+    }
+    if (device->sectorSize != vol.bytesPerSector) {
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+        report_mount_failure("BLOCK_SECTOR_SIZE_MISMATCH");
+#endif
+        return false;
+    }
+    if (vol.totalSectors == 0 || partitionOffset > device->totalSectors ||
+        vol.totalSectors > device->totalSectors - partitionOffset) {
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+        report_mount_failure("FAT32_VOLUME_EXCEEDS_DEVICE");
+#endif
+        return false;
+    }
 
     vol.firstDataSector = vol.reservedSectors +
                           (vol.numFATs * vol.fatSizeSectors);
 
-    if (vol.totalSectors <= vol.firstDataSector) return false;
+    if (vol.totalSectors <= vol.firstDataSector) {
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+        report_mount_failure("FAT32_DATA_REGION_EMPTY");
+#endif
+        return false;
+    }
     uint32_t dataSectors = vol.totalSectors - vol.firstDataSector;
     vol.totalDataClusters = dataSectors / vol.sectorsPerCluster;
-    if (vol.totalDataClusters == 0 || !cluster_byte_count(vol, &dataSectors)) return false;
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+    const uint32_t geometryDataSectors = dataSectors;
+#endif
+    if (vol.totalDataClusters == 0 || !cluster_byte_count(vol, &dataSectors)) {
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+        report_fat32_geometry(vol, geometryDataSectors, 0);
+        report_mount_failure("FAT32_DATA_GEOMETRY_INVALID");
+#endif
+        return false;
+    }
+    if (vol.rootCluster < 2 || vol.rootCluster >= vol.totalDataClusters + 2) {
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+        report_mount_failure("FAT32_ROOT_CLUSTER_INVALID");
+#endif
+        return false;
+    }
+    const uint64_t fatEntryCapacity =
+        (static_cast<uint64_t>(vol.fatSizeSectors) * vol.bytesPerSector) / 4;
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+    report_fat32_geometry(vol, geometryDataSectors, fatEntryCapacity);
+#endif
+    if (fatEntryCapacity < static_cast<uint64_t>(vol.totalDataClusters) + 2) {
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+        report_mount_failure("FAT32_TABLE_TOO_SMALL");
+#endif
+        return false;
+    }
     vol.nextFreeCluster = 2;
 
     // Copy volume label
@@ -435,6 +679,11 @@ static bool try_mount_fat32_boot_sector(uint8_t blockDevIdx, uint64_t partitionO
     vol.volumeLabel[11] = '\0';
 
     vol.mounted = true;
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+    serial::puts("[FAT-RO-DIAG] fat32_variant=accepted label=FAT32 cluster_class=");
+    serial::puts(cluster_count_class(vol.totalDataClusters));
+    serial::puts("\n");
+#endif
     return true;
 }
 
@@ -460,9 +709,12 @@ static bool try_mount_fat16_boot_sector(uint8_t blockDevIdx, uint64_t partitionO
     kernel::serial::putc('\n');
 #endif
 
-    if (bpb->bytesPerSector < 512 || bpb->bytesPerSector > 4096) return false;
-    if (bpb->sectorsPerCluster == 0) return false;
-    if (bpb->numFATs == 0) return false;
+    if (bpb->bytesPerSector < 512 || bpb->bytesPerSector > 4096 ||
+        (bpb->bytesPerSector & (bpb->bytesPerSector - 1)) != 0) return false;
+    if (bpb->sectorsPerCluster == 0 || bpb->sectorsPerCluster > 128 ||
+        (bpb->sectorsPerCluster & (bpb->sectorsPerCluster - 1)) != 0) return false;
+    if (bpb->reservedSectors == 0 || bpb->numFATs == 0 || bpb->numFATs > 2) return false;
+    if (bootSector[510] != 0x55 || bootSector[511] != 0xAA) return false;
     if (bpb->rootEntryCount == 0) return false;
     if (bpb->fatSize16 == 0) {
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
@@ -486,7 +738,10 @@ static bool try_mount_fat16_boot_sector(uint8_t blockDevIdx, uint64_t partitionO
     vol.totalSectors = (bpb->totalSectors32 != 0)
                        ? bpb->totalSectors32
                        : bpb->totalSectors16;
-    if (vol.totalSectors == 0) return false;
+    const block::BlockDevice* device = block::get_device(blockDevIdx);
+    if (!device || !device->readFn || device->sectorSize != vol.bytesPerSector ||
+        vol.totalSectors == 0 || partitionOffset > device->totalSectors ||
+        vol.totalSectors > device->totalSectors - partitionOffset) return false;
 
     vol.firstDataSector = vol.rootDirFirstSector + vol.rootDirSectors;
     if (vol.totalSectors <= vol.firstDataSector) return false;
@@ -513,10 +768,42 @@ static bool try_mount_fat_boot_sector(uint8_t blockDevIdx, uint64_t partitionOff
 
 static bool try_mount_fat(uint8_t blockDevIdx, FATVolume& vol)
 {
+    const block::BlockDevice* device = block::get_device(blockDevIdx);
+    if (!device || !device->readFn) {
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+        report_mount_failure("BLOCK_DEVICE_UNAVAILABLE");
+#endif
+        return false;
+    }
+    if (device->sectorSize < 512 || device->sectorSize > sizeof(s_secBuf) ||
+        (device->sectorSize & (device->sectorSize - 1)) != 0) {
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+        report_mount_failure("BLOCK_SECTOR_SIZE_INVALID");
+#endif
+        return false;
+    }
     block::Status st = block::read_sectors(blockDevIdx, 0, 1, s_secBuf);
-    if (st != block::BLOCK_OK) return false;
+#if defined(GX_NATIVE_RAMDISK_PROVENANCE_TRACE) && GX_NATIVE_RAMDISK_PROVENANCE_TRACE
+    trace_r3am_fat_lba0_read(blockDevIdx, st, s_secBuf);
+#endif
+    if (st != block::BLOCK_OK) {
+#if defined(GX_NATIVE_RAMDISK_PROVENANCE_TRACE) && GX_NATIVE_RAMDISK_PROVENANCE_TRACE
+        trace_r3am_fat_bpb_result(blockDevIdx, st, false, false);
+#endif
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+        serial::puts("[FAT-RO-DIAG] block_read_failed lba=0000000000000000 count=1 status=");
+        serial::put_hex8(static_cast<uint8_t>(st));
+        serial::puts("\n");
+        report_mount_failure("BLOCK_READ_LBA0_FAILED");
+#endif
+        return false;
+    }
 
-    if (try_mount_fat_boot_sector(blockDevIdx, 0, vol, s_secBuf)) {
+    const bool lba0Accepted = try_mount_fat_boot_sector(blockDevIdx, 0, vol, s_secBuf);
+#if defined(GX_NATIVE_RAMDISK_PROVENANCE_TRACE) && GX_NATIVE_RAMDISK_PROVENANCE_TRACE
+    trace_r3am_fat_bpb_result(blockDevIdx, block::BLOCK_OK, lba0Accepted, true);
+#endif
+    if (lba0Accepted) {
         return true;
     }
 
@@ -531,7 +818,17 @@ static bool try_mount_fat(uint8_t blockDevIdx, FATVolume& vol)
             uint32_t startLBA = *reinterpret_cast<uint32_t*>(&s_secBuf[entry + 8]);
             if (startLBA == 0) continue;
 
-            if (block::read_sectors(blockDevIdx, startLBA, 1, s_secBuf) != block::BLOCK_OK) {
+            const block::Status partitionReadStatus =
+                block::read_sectors(blockDevIdx, startLBA, 1, s_secBuf);
+            if (partitionReadStatus != block::BLOCK_OK) {
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+                serial::puts("[FAT-RO-DIAG] partition_boot_read_failed lba=");
+                serial::put_hex32(startLBA);
+                serial::puts(" count=1 status=");
+                serial::put_hex8(static_cast<uint8_t>(partitionReadStatus));
+                serial::puts("\n");
+                report_mount_failure("PARTITION_BOOT_READ_FAILED");
+#endif
                 continue;
             }
 
@@ -1176,6 +1473,10 @@ void init()
     s_lastDeleteStatus = DELETE_OK;
     s_fatScanIterations = 0;
     s_allocatedClusters = 0;
+#if defined(GX_NATIVE_RAMDISK_PROVENANCE_TRACE) && GX_NATIVE_RAMDISK_PROVENANCE_TRACE
+    s_r3amFatLba0ReadRecorded = false;
+    s_r3amFatLba0ResultRecorded = false;
+#endif
 }
 
 void set_trash_trace(bool enabled, uint64_t generation)
@@ -1186,14 +1487,44 @@ void set_trash_trace(bool enabled, uint64_t generation)
 
 uint8_t mount(uint8_t blockDevIndex)
 {
-    if (s_volumeCount >= MAX_FAT_VOLUMES) return 0xFF;
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+    s_mountFailureCode = "NOT_RUN";
+    s_mountFailureSet = false;
+    const block::BlockDevice* device = block::get_device(blockDevIndex);
+    serial::puts("[FAT-RO-DIAG] mount_begin device=");
+    serial::put_hex8(blockDevIndex);
+    serial::puts(" name=");
+    serial::puts(device ? device->name : "(missing)");
+    serial::puts(" generation=");
+    serial::put_hex64(block::device_generation(blockDevIndex));
+    serial::puts(" sectors=");
+    serial::put_hex64(device ? device->totalSectors : 0);
+    serial::puts(" sector_size=");
+    serial::put_hex32(device ? device->sectorSize : 0);
+    serial::puts(" read=");
+    serial::putc(device && device->readFn ? '1' : '0');
+    serial::puts(" write=");
+    serial::putc(device && device->writeFn ? '1' : '0');
+    serial::puts("\n");
+#endif
+    if (s_volumeCount >= MAX_FAT_VOLUMES) {
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+        report_mount_failure("NO_FREE_FAT_VOLUME");
+#endif
+        return 0xFF;
+    }
 
     // Find a free slot
     uint8_t idx = 0xFF;
     for (uint8_t i = 0; i < MAX_FAT_VOLUMES; ++i) {
         if (!s_volumes[i].mounted) { idx = i; break; }
     }
-    if (idx == 0xFF) return 0xFF;
+    if (idx == 0xFF) {
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+        report_mount_failure("NO_FREE_FAT_VOLUME");
+#endif
+        return 0xFF;
+    }
 
     FATVolume& vol = s_volumes[idx];
     memzero(&vol, sizeof(vol));
@@ -1201,15 +1532,46 @@ uint8_t mount(uint8_t blockDevIndex)
     // Try FAT first, then exFAT
     if (try_mount_fat(blockDevIndex, vol)) {
         ++s_volumeCount;
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+        s_mountFailureCode = "NONE";
+        serial::puts("[FAT-RO-DIAG] mount_success filesystem=FAT volume=");
+        serial::put_hex8(idx);
+        serial::puts(" ro_block=");
+        serial::putc(device && device->writeFn ? '0' : '1');
+        serial::puts("\n");
+#endif
         return idx;
     }
     if (try_mount_exfat(blockDevIndex, vol)) {
         ++s_volumeCount;
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+        s_mountFailureCode = "NONE";
+        serial::puts("[FAT-RO-DIAG] mount_success filesystem=EXFAT volume=");
+        serial::put_hex8(idx);
+        serial::puts("\n");
+#endif
         return idx;
     }
 
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+    if (!s_mountFailureSet) {
+        report_mount_failure("NO_SUPPORTED_FILESYSTEM");
+    } else {
+        serial::puts("[FAT-RO-DIAG] mount_failure_final code=");
+        serial::puts(s_mountFailureCode);
+        serial::puts("\n");
+    }
+#endif
+
     return 0xFF;
 }
+
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+const char* mount_failure_code()
+{
+    return s_mountFailureCode;
+}
+#endif
 
 void unmount(uint8_t volumeIndex)
 {

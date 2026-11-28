@@ -438,9 +438,28 @@ uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
     }
 
     const uint64_t blockDeviceGeneration = block::device_generation(blockDevIndex);
-    if (blockDeviceGeneration == 0) return 0xFF;
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+    serial::puts("[VFS-RO-DIAG] mount_begin device=");
+    serial::put_hex8(blockDevIndex);
+    serial::puts(" fs_type=");
+    serial::puts(fs_type_name(fsType));
+    serial::puts(" generation=");
+    serial::put_hex64(blockDeviceGeneration);
+    serial::puts("\n");
+#endif
+    if (blockDeviceGeneration == 0) {
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+        serial::puts("[VFS-RO-DIAG] mount_reject reason=BLOCK_DEVICE_UNAVAILABLE device=");
+        serial::put_hex8(blockDevIndex);
+        serial::puts("\n");
+#endif
+        return 0xFF;
+    }
     
     if (!path || strlen(path) == 0) {
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+        serial::puts("[VFS-RO-DIAG] mount_reject reason=INVALID_MOUNT_PATH\n");
+#endif
         return 0xFF;
     }
     
@@ -449,6 +468,9 @@ uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
         if (s_mounts[i].active && strcmp(s_mounts[i].path, path) == 0) {
 #if defined(__GNUC__) || defined(__clang__)
             serial::puts("[VFS] ERROR: Path already mounted\n");
+#endif
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+            serial::puts("[VFS-RO-DIAG] mount_reject reason=PATH_ALREADY_MOUNTED\n");
 #endif
             return 0xFF;
         }
@@ -466,6 +488,9 @@ uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
     if (index == 0xFF) {
 #if defined(__GNUC__) || defined(__clang__)
         serial::puts("[VFS] ERROR: No free mount slots\n");
+#endif
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+        serial::puts("[VFS-RO-DIAG] mount_reject reason=NO_FREE_VFS_MOUNT_SLOT\n");
 #endif
         return 0xFF;
     }
@@ -497,6 +522,15 @@ uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
 #if defined(__GNUC__) || defined(__clang__)
         serial::puts("[VFS] ERROR: Filesystem mount failed\n");
 #endif
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+        serial::puts("[VFS-RO-DIAG] filesystem_probe_rejected code=");
+        if (fsType == FS_TYPE_FAT32 || fsType == FS_TYPE_EXFAT) {
+            serial::puts(fs_fat::mount_failure_code());
+        } else {
+            serial::puts("NON_FAT_FILESYSTEM_DRIVER_FAILED");
+        }
+        serial::puts("\n");
+#endif
         return 0xFF;
     }
     
@@ -521,6 +555,17 @@ uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
     serial::puts(" at '");
     serial::puts(path);
     serial::puts("'\n");
+#endif
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+    serial::puts("[VFS-RO-DIAG] mount_registered block=");
+    serial::put_hex8(blockDevIndex);
+    serial::puts(" fs_type=");
+    serial::puts(fs_type_name(fsType));
+    serial::puts(" read_only=");
+    serial::putc(mp.readOnly ? '1' : '0');
+    serial::puts(" generation=");
+    serial::put_hex64(blockDeviceGeneration);
+    serial::puts("\n");
 #endif
     
     return index;

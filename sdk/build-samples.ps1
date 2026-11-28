@@ -2,7 +2,10 @@ param(
     [switch]$Clean,
     [switch]$Verbose,
     [switch]$SkipBuild,
-    [switch]$SkipReadElf
+    [switch]$SkipReadElf,
+    [switch]$SqlLifecycleQualification,
+    [string]$SampleName,
+    [string]$OutputRoot
 )
 
 $ErrorActionPreference = 'Stop'
@@ -53,8 +56,36 @@ $Samples = @(
         Manifest = 'app.json'
         StagedAppId = 'com.guidexos.missilecommand'
         Resources = @('resources/DD.ini', 'resources/city.gximg', 'resources/audio/alarm.wav', 'resources/audio/empty.wav', 'resources/audio/explode.wav', 'resources/audio/split.wav', 'resources/audio/ohno.wav', 'resources/audio/swoosh.wav')
+    },
+    [ordered]@{
+        Name = 'SQLReadDemo'
+        SourceDir = Join-Path $SdkRoot 'samples/sqlread'
+        Source = 'main.cpp'
+        OutputDir = Join-Path $AppsRoot 'SQLReadDemo'
+        ElfRelativePath = 'bin/amd64/sqlread.elf'
+        Manifest = 'app.json'
+        StagedAppId = 'com.guidexos.sqlread'
+        Resources = @()
     }
 )
+
+if ($OutputRoot) {
+    $OutputRoot = [IO.Path]::GetFullPath($OutputRoot)
+    foreach ($sample in $Samples) {
+        $sample.OutputDir = Join-Path $OutputRoot $sample.Name
+    }
+}
+if ($SampleName) {
+    $selectedSamples = @($Samples | Where-Object { $_.Name -ieq $SampleName })
+    if ($selectedSamples.Count -eq 0) {
+        throw "Unknown SDK sample '$SampleName'. Known sample names: $($Samples.Name -join ', ')"
+    }
+    $Samples = $selectedSamples
+}
+if ($SqlLifecycleQualification -and
+    ($Samples.Count -ne 1 -or $Samples[0].Name -ne 'SQLReadDemo')) {
+    throw '-SqlLifecycleQualification requires -SampleName SQLReadDemo.'
+}
 
 function Write-Detail($Message) {
     if ($script:VerboseOutput) { Write-Host $Message }
@@ -188,6 +219,9 @@ foreach ($sample in $Samples) {
             $sourcePath = Join-Path $sample.SourceDir $sample.Source
             $objectPath = Join-Path $elfDir ([IO.Path]::GetFileNameWithoutExtension($sample.Source) + '.o')
             $compileArgs = @('--target=x86_64-unknown-elf', '-ffreestanding', '-fno-exceptions', '-fno-rtti', '-fno-stack-protector', "-I$IncludeDir", '-c', $sourcePath, '-o', $objectPath)
+            if ($SqlLifecycleQualification -and $sample.Name -eq 'SQLReadDemo') {
+                $compileArgs = @('-DGX_SQLREAD_LIFECYCLE_QUALIFICATION=1') + $compileArgs
+            }
             Invoke-Checked $clang $compileArgs
 
             $lld = Find-ClangTool @('ld.lld.exe', 'ld.lld')

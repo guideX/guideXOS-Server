@@ -61,6 +61,17 @@ Useful options:
 - `-Verbose` prints compiler and linker commands.
 - `-SkipBuild` only stages manifests/resources and verifies expected files.
 - `-SkipReadElf` skips external ELF header inspection.
+- `-SampleName SQLReadDemo` builds only the SQL reader sample.
+- `-OutputRoot <path>` stages selected sample outputs outside `Apps/`.
+
+The SQLReadDemo package declares `database.read` and exercises the bounded
+read-only SQL host calls over the approved packaged fixture. A phase build that
+must preserve existing `Apps/` packages can use:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File sdk/build-samples.ps1 `
+  -SampleName SQLReadDemo -OutputRoot out/ndb1r4p11r3bc/sdk-apps
+```
 
 ## Test in guideXOS hosted runtime
 

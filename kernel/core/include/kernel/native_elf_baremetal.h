@@ -31,6 +31,10 @@ struct PackageInfo {
     // Whether the manifest grants "audio.output". Parsed boundedly at
     // discovery; gates the play_pcm host call like the hosted runtime.
     bool hasAudioOutput;
+    // Whether the manifest declares "database.read". This follows the
+    // existing Native ELF manifest-permission convention; it is not process
+    // isolation or a signed-package trust decision.
+    bool hasDatabaseRead;
 };
 
 // Scan the mounted /Apps tree for supported NativeElf packages.

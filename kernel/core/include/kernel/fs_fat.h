@@ -492,6 +492,12 @@ void close_file(uint8_t fileHandle);
 // Return volume info.
 const FATVolume* get_volume(uint8_t volumeIndex);
 
+#if defined(GX_NATIVE_SQL_READ_DIAGNOSTIC) && GX_NATIVE_SQL_READ_DIAGNOSTIC
+// Diagnostic-only attribution for the most recent failed FAT mount probe.
+// The value is stable for serial reporting and hosted qualification.
+const char* mount_failure_code();
+#endif
+
 // ================================================================
 // Directory traversal by path (new functions for VFS integration)
 // ================================================================
