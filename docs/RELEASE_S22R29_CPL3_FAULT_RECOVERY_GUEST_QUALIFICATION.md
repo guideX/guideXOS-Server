@@ -4,7 +4,7 @@
 
 ## Result
 
-**Outcome D — `QAC_UNAVAILABLE`.** No S22R29 guest fault experiment was started. At the final QAC check on 2026-11-28 00:38 UTC, another verified owner held the `guideXOSServer` acceptance reservation `41bdd9d6effd409893e43190f46b654c` with QEMU child PID 20428. S22R29 did not attach to, signal, cancel, terminate, or otherwise interfere with that guest. No unmanaged QEMU was launched.
+**Outcome D — `QAC_UNAVAILABLE`.** No S22R29 guest fault experiment was started. At the final QAC check on 2026-11-28 00:45 UTC, another verified owner held the `guideXOSServer` acceptance reservation `41bdd9d6effd409893e43190f46b654c` with QEMU child PID 20428. S22R29 did not attach to, signal, cancel, terminate, or otherwise interfere with that guest. No unmanaged QEMU was launched.
 
 The offline implementation, tests, stack/symbol audits, and diagnostic ISO are preserved. The processor-generated guest exception classes remain unqualified; no `CPL3_FAULT_RECOVERY_GUEST_ACCEPTED` claim is made.
 
