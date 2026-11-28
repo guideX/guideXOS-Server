@@ -20,14 +20,16 @@ foreach ($file in Get-ChildItem -LiteralPath $StackUsageRoot -Filter '*.su' -Fil
     foreach ($line in [IO.File]::ReadAllLines($file.FullName)) {
         $parts = $line -split "`t"
         if ($parts.Count -lt 2) { continue }
-        $locationMatch = [regex]::Match($parts[0], ':(\d+):(\d+):(.+)$')
+        $locationMatch = [regex]::Match($parts[0], '^(.*):(\d+):(\d+):(.+)$')
         if (-not $locationMatch.Success) { continue }
         $bytesMatch = [regex]::Match($parts[1], '^\s*(\d+)(?:\s|$)')
         if (-not $bytesMatch.Success) { continue }
         $records += [PSCustomObject]@{
-            Function = $locationMatch.Groups[3].Value
+            Function = $locationMatch.Groups[4].Value
             Bytes = [int]$bytesMatch.Groups[1].Value
             Source = $file.Name
+            SourcePath = $locationMatch.Groups[1].Value
+            SourceLine = [int]$locationMatch.Groups[2].Value
         }
     }
 }
@@ -41,6 +43,29 @@ function Get-Frame([string]$Pattern) {
     # signature. Use the larger actual record for the guarded path.
     return [int](($matches | Measure-Object -Property Bytes -Maximum).Maximum)
 }
+
+function Get-FrameAtSourceLine([string]$SourceName, [int]$SourceLine) {
+    $matches = @($script:records | Where-Object {
+        $_.SourcePath -match [regex]::Escape($SourceName) -and
+        $_.SourceLine -eq $SourceLine
+    })
+    if ($matches.Count -eq 0) {
+        throw "Required compiler stack record is missing at ${SourceName}:${SourceLine}."
+    }
+    return [int](($matches | Measure-Object -Property Bytes -Maximum).Maximum)
+}
+
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$taskAddressSpaceSource = [IO.File]::ReadAllLines(
+    (Join-Path $repoRoot 'kernel\core\task_address_space.cpp'))
+$walkDeclaration = -1
+for ($i = 0; $i -lt $taskAddressSpaceSource.Length; ++$i) {
+    if ($taskAddressSpaceSource[$i] -match '^\s*static\s+AddressSpaceStatus\s+walk_private_tree\(') {
+        $walkDeclaration = $i + 1
+        break
+    }
+}
+if ($walkDeclaration -lt 1) { throw 'Could not locate the private page-table walk declaration.' }
 
 $frame = [ordered]@{
     kernelMain = Get-Frame 'kernel_main\(void\*, uint32_t\)'
@@ -87,6 +112,14 @@ $frame = [ordered]@{
     displayOptionsRefresh = Get-Frame 'DisplayOptionsApp::refreshPendingTopologyChange\('
     displayOptionsSubmit = Get-Frame 'DisplayOptionsApp::submitDisplayConfiguration\('
     displayOptionsMouse = Get-Frame 'DisplayOptionsApp::onMouseDown\('
+    exceptionDispatch = Get-Frame 'gxos_native_exception_dispatch\('
+    recordUserFault = Get-Frame 'gxos_amd64_record_user_fault\('
+    runOneProtectedTask = Get-Frame '::run_one_cycle\('
+    runFaultRecoveryCycles = Get-Frame '::run_fault_recovery_cycles\('
+    reapFaultedTask = Get-Frame '::cleanup_task\('
+    destroyPrivateAddressSpace = Get-Frame 'destroy_task_address_space\('
+    privatePageTableWalk = Get-FrameAtSourceLine 'task_address_space.cpp' $walkDeclaration
+    releasePrivatePageTables = Get-Frame 'release_private_tables\('
 }
 
 $settingsLaunchPath = $frame.kernelMain + $frame.desktopMouse + $frame.desktopLaunch +
@@ -139,6 +172,29 @@ $com2DeviceDecode = $frame.kernelMain + $frame.bridgePoll + $frame.bridgeServe +
 $com2Worst = (@($com2StorageDispatch, $com2StorageDecode, $com2DeviceDispatch,
     $com2DeviceDecode) | Measure-Object -Maximum).Maximum
 
+# Fault diagnostics use separate static kernel stacks. The privilege-entry
+# stack holds 15 saved GPRs, the normalized vector/error pair, and the CPL3
+# processor frame (176 bytes for error-code and no-error-code exceptions).
+# Dispatch then moves to the independent 16 KiB exception stack. Its C++ frame
+# calls the strict task recorder synchronously after reserving Win64 shadow
+# space and a return address.
+$privilegeEntryBytes = 15 * 8 + 2 * 8 + 5 * 8
+$exceptionDispatchStack = 40 + $frame.exceptionDispatch + $frame.recordUserFault
+
+# The lifecycle stack includes a 40-byte callback call frame. The user-entry
+# routine adds eight saved nonvolatile registers and a return address (72
+# bytes) while the user task is live. The continuation pops that frame before
+# cleanup. Address-space walks recurse through at most three private levels;
+# validation, invalidation, and release are sequential, so the deepest single
+# walk bounds the destruction path.
+$lifecycleEntryPath = 40 + $frame.runFaultRecoveryCycles + $frame.runOneProtectedTask +
+    72 + $unmodeledCallReserve + $interruptReserve + $bootEntryReserve
+$lifecycleReaperPath = 40 + $frame.runFaultRecoveryCycles + $frame.runOneProtectedTask +
+    $frame.reapFaultedTask + $frame.destroyPrivateAddressSpace +
+    (3 * [Math]::Max($frame.privatePageTableWalk, $frame.releasePrivatePageTables)) +
+    $unmodeledCallReserve + $interruptReserve + $bootEntryReserve
+$faultRecoveryLifecycleWorst = [Math]::Max($lifecycleEntryPath, $lifecycleReaperPath)
+
 foreach ($method in @('displayOptionsQuery', 'displayOptionsRefresh', 'displayOptionsSubmit')) {
     if ($frame[$method] -gt 2048) {
         throw "Legacy Display Options frame $method is $($frame[$method]) bytes; limit is 2048."
@@ -157,6 +213,15 @@ if ([Math]::Max([Math]::Max($settingsWorst, $settingsPersistenceWorst), $legacyD
 if ($com2Worst -gt $guardedPathLimit) {
     throw "COM2 service budget is $com2Worst bytes, above the $guardedPathLimit-byte guarded limit."
 }
+if ($privilegeEntryBytes -gt $guardedPathLimit) {
+    throw "CPL3 privilege-entry frame is $privilegeEntryBytes bytes, above the $guardedPathLimit-byte guarded limit."
+}
+if ($exceptionDispatchStack -gt $guardedPathLimit) {
+    throw "CPL3 exception dispatch stack is $exceptionDispatchStack bytes, above the $guardedPathLimit-byte guarded limit."
+}
+if ($faultRecoveryLifecycleWorst -gt $guardedPathLimit) {
+    throw "CPL3 recovery lifecycle path is $faultRecoveryLifecycleWorst bytes, above the $guardedPathLimit-byte guarded limit."
+}
 
 Write-Output ("Settings Display: launch={0} navigation={1} guarded={2}/{3} bytes; headroom={4} bytes." -f `
     $settingsLaunchPath, $settingsNavigationPath, $settingsWorst, $stackCapacity,
@@ -171,4 +236,7 @@ Write-Output ("Legacy Display Options: init={0} query={1} apply={2} refresh={3};
 Write-Output ("COM2: storage-dispatch={0} storage-decode={1} device-dispatch={2} device-decode={3} guarded={4}/{5} bytes; headroom={6} bytes." -f `
     $com2StorageDispatch, $com2StorageDecode, $com2DeviceDispatch, $com2DeviceDecode,
     $com2Worst, $stackCapacity, ($stackCapacity - $com2Worst))
+Write-Output ("CPL3 fault: entry-stack={0}/{1} exception-dispatch={2}/{1} lifecycle-entry={3} lifecycle-reaper={4} guarded-worst={5}/{1} bytes; headroom={6} bytes." -f `
+    $privilegeEntryBytes, $stackCapacity, $exceptionDispatchStack, $lifecycleEntryPath,
+    $lifecycleReaperPath, $faultRecoveryLifecycleWorst, ($stackCapacity - $faultRecoveryLifecycleWorst))
 Write-Output ("GCC .su budget guard passed; minimum required headroom is {0} bytes." -f $requiredHeadroom)

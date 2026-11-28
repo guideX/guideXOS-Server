@@ -10,6 +10,7 @@ global gxos_amd64_call_on_lifecycle_stack
 global gxos_amd64_enter_user
 global gxos_amd64_user_exit_stub
 global gxos_amd64_user_exit_stub_end
+global gxos_amd64_user_kernel_resume
 extern gxos_protected_task_kernel_resume_rsp
 extern gxos_protected_task_kernel_resume_rip
 extern gxos_protected_task_kernel_resume_rflags
@@ -65,7 +66,7 @@ gxos_amd64_enter_user:
     mov r12, rcx
     mov r13, rdx
     mov [rel gxos_protected_task_kernel_resume_rsp], rsp
-    lea rax, [rel .kernel_resume]
+    lea rax, [rel gxos_amd64_user_kernel_resume]
     mov [rel gxos_protected_task_kernel_resume_rip], rax
     pushfq
     pop rax
@@ -123,7 +124,7 @@ gxos_amd64_enter_user:
     xor r15d, r15d
     iretq
 
-.kernel_resume:
+gxos_amd64_user_kernel_resume:
     pop r15
     pop r14
     pop r13
@@ -158,7 +159,13 @@ gxos_amd64_user_exit_stub:
     mov rcx, rsp
     sub rsp, 32
 
-    ; Restore trusted kernel segment bases before entering C++ dispatch.
+    ; Install kernel data selectors first, then restore the saved FS/GS bases
+    ; before entering C++ dispatch.
+    mov ax, 0x10
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
     mov ecx, 0xC0000100
     mov rax, [rel gxos_protected_task_kernel_fs_base]
     mov rdx, rax
@@ -173,11 +180,6 @@ gxos_amd64_user_exit_stub:
     call gxos_amd64_user_exit_dispatch
 
     mov rsp, [rel gxos_protected_task_kernel_resume_rsp]
-    mov ax, 0x10
-    mov ds, ax
-    mov es, ax
-    mov fs, ax
-    mov gs, ax
     push qword [rel gxos_protected_task_kernel_resume_rflags]
     popfq
     jmp qword [rel gxos_protected_task_kernel_resume_rip]
@@ -186,6 +188,7 @@ gxos_amd64_user_exit_stub_end:
 section .bss align=16
 global gxos_amd64_user_entry_stack_bottom
 global gxos_amd64_user_entry_stack_top
+global gxos_task_lifecycle_stack_bottom
 global gxos_task_lifecycle_stack_top
 
 gxos_amd64_user_entry_stack_bottom:

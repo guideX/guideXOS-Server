@@ -28,7 +28,9 @@
 #endif
 
 extern "C" uint32_t gxos_amd64_record_user_fault(
-    uint64_t vector, uint64_t errorCode, uint64_t rip, uint64_t cs, uint64_t cr2);
+    const kernel::native_elf::NativeExceptionFrame* frame,
+    uint64_t cr2, uint64_t taskCr3);
+extern "C" uint32_t gxos_amd64_protected_task_context_active();
 
 namespace kernel {
 namespace native_elf {
@@ -2496,24 +2498,40 @@ extern "C" uint64_t gxos_native_exception_dispatch(const NativeExceptionFrame* f
         for (;;) arch::halt();
     }
 
-    // A CPL3 fault must never enter the ring-0 Native ELF recovery trampoline.
-    // The current protected diagnostic is deliberately non-faulting; until a
-    // full user-fault return/reaper path is qualified, record and stop safely.
+    // Only the bounded protected diagnostic may leave this exception entry by
+    // a kernel continuation. A failed eligibility check remains fatal, and
+    // the user frame is never returned through IRETQ.
     if ((frame->cs & 3u) == 3u) {
-        const uint64_t cr2 = arch::read_cr2();
-        const uint32_t taskId = gxos_amd64_record_user_fault(
-            frame->vector, frame->errorCode, frame->rip, frame->cs, cr2);
+        const uint64_t cr2 = frame->vector == 14u ? arch::read_cr2() : 0u;
+        const uint64_t taskCr3 = arch::read_cr3();
+        const uint32_t taskId = gxos_amd64_record_user_fault(frame, cr2, taskCr3);
         serial::puts("[USER-FAULT] task=0x"); serial::put_hex32(taskId);
         serial::puts(" vector=0x"); serial::put_hex64(frame->vector);
         serial::puts(" error=0x"); serial::put_hex64(frame->errorCode);
         serial::puts(" RIP=0x"); serial::put_hex64(frame->rip);
         serial::puts(" CS=0x"); serial::put_hex64(frame->cs);
+        serial::puts(" RSP=0x"); serial::put_hex64(frame->userRsp);
+        serial::puts(" SS=0x"); serial::put_hex64(frame->userSs);
         serial::puts(" CR2=0x"); serial::put_hex64(cr2);
-        serial::puts(" policy=halt-no-recovery\n");
+        serial::puts(" task-CR3=0x"); serial::put_hex64(taskCr3);
+        if (taskId != 0u) {
+            serial::puts(" policy=task-faulted continuation=kernel\n");
+            return 2u; // assembly abandons the exception frame to the saved kernel continuation
+        }
+        serial::puts(" policy=unsafe-recovery-rejected\n");
         for (;;) arch::halt();
     }
 
-    const uint64_t interruptedRsp = reinterpret_cast<uintptr_t>(frame) + sizeof(NativeExceptionFrame);
+    // A CPL0 exception while a protected task is active is a kernel fault.
+    // Do not route it through either the user-fault reaper or Native ELF's
+    // application-stack recovery trampoline.
+    if (gxos_amd64_protected_task_context_active()) {
+        serial::puts("[KERNEL-FAULT] protected-task-active=1 origin=CPL0 recovery=rejected\n");
+        for (;;) arch::halt();
+    }
+
+    const uint64_t interruptedRsp = reinterpret_cast<uintptr_t>(frame) +
+        offsetof(NativeExceptionFrame, userRsp);
     uint16_t ss = 0;
     asm volatile ("mov %%ss, %0" : "=r"(ss));
     const uint64_t cr2 = arch::read_cr2();

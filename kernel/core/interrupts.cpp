@@ -171,6 +171,14 @@ static irq_handler_t s_handlers[16] = { 0 };
 // Exception diagnostics must not use the interrupted Native ELF stack.  The
 // app stack is intentionally isolated from this bounded kernel-owned stack.
 extern "C" uint8_t gxos_exception_stack[16u * 1024u] = {};
+// A nested exception cannot reuse the single bounded dispatch stack. The
+// entry stub detects it before switching stacks, preserves its raw frame here,
+// and halts without attempting recovery.
+extern "C" volatile uint32_t gxos_exception_dispatch_active = 0u;
+extern "C" volatile uint64_t gxos_exception_nested_vector = 0u;
+extern "C" volatile uint64_t gxos_exception_nested_error = 0u;
+extern "C" volatile uint64_t gxos_exception_nested_rip = 0u;
+extern "C" volatile uint64_t gxos_exception_nested_cs = 0u;
 #endif
 
 // ----------------------------------------------------------------
@@ -599,14 +607,23 @@ static stub_fn s_stubs[16] = {
         "    push rcx\n"                                   \
         "    push rax\n"                                   \
         "    mov r12, rsp\n"                               \
+        "    xor eax, eax\n"                               \
+        "    mov edx, 1\n"                                 \
+        "    lock cmpxchg DWORD PTR [rip + gxos_exception_dispatch_active], edx\n" \
+        "    jnz .nested_exception_fatal_" #n "\n"        \
         "    lea rsp, [rip + gxos_exception_stack + 16384]\n" \
         "    and rsp, -16\n"                               \
         "    sub rsp, 32\n"                                \
         "    mov rcx, r12\n"                               \
         "    call gxos_native_exception_dispatch\n"         \
         "    add rsp, 32\n"                                \
+        "    mov DWORD PTR [rip + gxos_exception_dispatch_active], 0\n" \
         "    test rax, rax\n"                              \
-        "    jnz .native_exception_recover_" #n "\n"       \
+        "    jz .exception_return_" #n "\n"                 \
+        "    cmp rax, 2\n"                                \
+        "    je .protected_task_recover_" #n "\n"          \
+        "    jmp .native_exception_recover_" #n "\n"       \
+        ".exception_return_" #n ":\n"                    \
         "    mov rsp, r12\n"                               \
         "    pop rax\n"                                   \
         "    pop rcx\n"                                   \
@@ -628,6 +645,39 @@ static stub_fn s_stubs[16] = {
         ".native_exception_recover_" #n ":\n"             \
         "    mov rsp, [rip + gxos_native_fault_recovery_rsp]\n" \
         "    jmp [rip + gxos_native_fault_recovery_rip]\n"   \
+        ".protected_task_recover_" #n ":\n"              \
+        "    mov rsp, [rip + gxos_protected_task_kernel_resume_rsp]\n" \
+        "    mov ax, 0x10\n"                              \
+        "    mov ds, ax\n"                                \
+        "    mov es, ax\n"                                \
+        "    mov fs, ax\n"                                \
+        "    mov gs, ax\n"                                \
+        "    mov ecx, 0xC0000100\n"                       \
+        "    mov rax, [rip + gxos_protected_task_kernel_fs_base]\n" \
+        "    mov rdx, rax\n"                              \
+        "    shr rdx, 32\n"                               \
+        "    wrmsr\n"                                     \
+        "    mov ecx, 0xC0000101\n"                       \
+        "    mov rax, [rip + gxos_protected_task_kernel_gs_base]\n" \
+        "    mov rdx, rax\n"                              \
+        "    shr rdx, 32\n"                               \
+        "    wrmsr\n"                                     \
+        "    push QWORD PTR [rip + gxos_protected_task_kernel_resume_rflags]\n" \
+        "    popfq\n"                                     \
+        "    jmp QWORD PTR [rip + gxos_protected_task_kernel_resume_rip]\n" \
+        ".nested_exception_fatal_" #n ":\n"              \
+        "    mov rax, [r12 + 120]\n"                     \
+        "    mov [rip + gxos_exception_nested_vector], rax\n" \
+        "    mov rax, [r12 + 128]\n"                     \
+        "    mov [rip + gxos_exception_nested_error], rax\n" \
+        "    mov rax, [r12 + 136]\n"                     \
+        "    mov [rip + gxos_exception_nested_rip], rax\n" \
+        "    mov rax, [r12 + 144]\n"                     \
+        "    mov [rip + gxos_exception_nested_cs], rax\n" \
+        "    cli\n"                                       \
+        ".nested_exception_halt_" #n ":\n"               \
+        "    hlt\n"                                       \
+        "    jmp .nested_exception_halt_" #n "\n"         \
         ".att_syntax prefix\n"                            \
     );
 
@@ -654,14 +704,23 @@ static stub_fn s_stubs[16] = {
         "    push rcx\n"                                   \
         "    push rax\n"                                   \
         "    mov r12, rsp\n"                               \
+        "    xor eax, eax\n"                               \
+        "    mov edx, 1\n"                                 \
+        "    lock cmpxchg DWORD PTR [rip + gxos_exception_dispatch_active], edx\n" \
+        "    jnz .nested_exception_fatal_" #n "\n"        \
         "    lea rsp, [rip + gxos_exception_stack + 16384]\n" \
         "    and rsp, -16\n"                               \
         "    sub rsp, 32\n"                                \
         "    mov rcx, r12\n"                               \
         "    call gxos_native_exception_dispatch\n"         \
         "    add rsp, 32\n"                                \
+        "    mov DWORD PTR [rip + gxos_exception_dispatch_active], 0\n" \
         "    test rax, rax\n"                              \
-        "    jnz .native_exception_recover_" #n "\n"       \
+        "    jz .exception_return_" #n "\n"                 \
+        "    cmp rax, 2\n"                                \
+        "    je .protected_task_recover_" #n "\n"          \
+        "    jmp .native_exception_recover_" #n "\n"       \
+        ".exception_return_" #n ":\n"                    \
         "    mov rsp, r12\n"                               \
         "    pop rax\n"                                   \
         "    pop rcx\n"                                   \
@@ -678,11 +737,44 @@ static stub_fn s_stubs[16] = {
         "    pop r13\n"                                   \
         "    pop r14\n"                                   \
         "    pop r15\n"                                   \
-        "    add rsp, 8\n"                                 \
+        "    add rsp, 16\n"                                \
         "    iretq\n"                                      \
         ".native_exception_recover_" #n ":\n"             \
         "    mov rsp, [rip + gxos_native_fault_recovery_rsp]\n" \
         "    jmp [rip + gxos_native_fault_recovery_rip]\n"   \
+        ".protected_task_recover_" #n ":\n"              \
+        "    mov rsp, [rip + gxos_protected_task_kernel_resume_rsp]\n" \
+        "    mov ax, 0x10\n"                              \
+        "    mov ds, ax\n"                                \
+        "    mov es, ax\n"                                \
+        "    mov fs, ax\n"                                \
+        "    mov gs, ax\n"                                \
+        "    mov ecx, 0xC0000100\n"                       \
+        "    mov rax, [rip + gxos_protected_task_kernel_fs_base]\n" \
+        "    mov rdx, rax\n"                              \
+        "    shr rdx, 32\n"                               \
+        "    wrmsr\n"                                     \
+        "    mov ecx, 0xC0000101\n"                       \
+        "    mov rax, [rip + gxos_protected_task_kernel_gs_base]\n" \
+        "    mov rdx, rax\n"                              \
+        "    shr rdx, 32\n"                               \
+        "    wrmsr\n"                                     \
+        "    push QWORD PTR [rip + gxos_protected_task_kernel_resume_rflags]\n" \
+        "    popfq\n"                                     \
+        "    jmp QWORD PTR [rip + gxos_protected_task_kernel_resume_rip]\n" \
+        ".nested_exception_fatal_" #n ":\n"              \
+        "    mov rax, [r12 + 120]\n"                     \
+        "    mov [rip + gxos_exception_nested_vector], rax\n" \
+        "    mov rax, [r12 + 128]\n"                     \
+        "    mov [rip + gxos_exception_nested_error], rax\n" \
+        "    mov rax, [r12 + 136]\n"                     \
+        "    mov [rip + gxos_exception_nested_rip], rax\n" \
+        "    mov rax, [r12 + 144]\n"                     \
+        "    mov [rip + gxos_exception_nested_cs], rax\n" \
+        "    cli\n"                                       \
+        ".nested_exception_halt_" #n ":\n"               \
+        "    hlt\n"                                       \
+        "    jmp .nested_exception_halt_" #n "\n"         \
         ".att_syntax prefix\n"                            \
     );
 
@@ -703,11 +795,11 @@ MAKE_EXCEPTION_STUB_WITH_ERROR(13)
 MAKE_EXCEPTION_STUB_WITH_ERROR(14)
 MAKE_EXCEPTION_STUB_NO_ERROR(15)
 MAKE_EXCEPTION_STUB_WITH_ERROR(16)
-MAKE_EXCEPTION_STUB_NO_ERROR(17)
+MAKE_EXCEPTION_STUB_WITH_ERROR(17)
 MAKE_EXCEPTION_STUB_NO_ERROR(18)
 MAKE_EXCEPTION_STUB_NO_ERROR(19)
 MAKE_EXCEPTION_STUB_NO_ERROR(20)
-MAKE_EXCEPTION_STUB_NO_ERROR(21)
+MAKE_EXCEPTION_STUB_WITH_ERROR(21)
 MAKE_EXCEPTION_STUB_NO_ERROR(22)
 MAKE_EXCEPTION_STUB_NO_ERROR(23)
 MAKE_EXCEPTION_STUB_NO_ERROR(24)

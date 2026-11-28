@@ -1158,6 +1158,11 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         // kernel lifecycle/entry stacks and exits before normal services start.
         (void)kernel::protected_task::run_cpl3_diagnostic();
 #endif
+#if defined(GXOS_ENABLE_CPL3_FAULT_RECOVERY_DIAGNOSTIC)
+        // Opt-in S22R29 proof. Each deliberate CPL3 exception must return via
+        // the saved kernel continuation before task resources are reaped.
+        (void)kernel::protected_task::run_cpl3_fault_recovery_diagnostic();
+#endif
 
         // MC6: detect HDA audio controllers once at boot (bounded PCI
         // scan + CORB/RIRB + codec enumeration; no DMA here). The desktop

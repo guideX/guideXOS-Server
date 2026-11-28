@@ -1,7 +1,9 @@
 #include "include/kernel/protected_task.h"
+#include "include/kernel/amd64_exception_contract.h"
 #include "include/kernel/amd64_protected_task_contract.h"
 #include "include/kernel/arch.h"
 #include "include/kernel/interrupts.h"
+#include "include/kernel/native_elf_fault.h"
 #include "include/kernel/physical_frame_owner.h"
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/task_address_space.h"
@@ -15,6 +17,9 @@ uint64_t gxos_protected_task_kernel_fs_base = 0u;
 uint64_t gxos_protected_task_kernel_gs_base = 0u;
 extern uint8_t gxos_amd64_user_entry_stack_bottom[];
 extern uint8_t gxos_amd64_user_entry_stack_top[];
+extern uint8_t gxos_task_lifecycle_stack_bottom[];
+extern uint8_t gxos_task_lifecycle_stack_top[];
+extern uint8_t gxos_amd64_user_kernel_resume[];
 }
 #endif
 
@@ -42,11 +47,20 @@ static const uint32_t kDiagnosticTaskCycles = 3u;
 static const uint64_t kUserStackPointer =
     memory::kTaskUserStackAddress + memory::kOwnedFrameBytes - 16u;
 static const uint64_t kUserExitRip = memory::kTaskUserCodeAddress + 50u;
+static const uint64_t kPageFaultError = 0x4u;
+static const uint64_t kGeneralProtectionError = (0x81u << 3u) | 0x2u;
 
 enum class TerminalStatus : uint8_t {
     None = 0,
     Exited,
     Faulted
+};
+
+enum class DiagnosticKind : uint8_t {
+    Normal = 0,
+    PageFault,
+    InvalidOpcode,
+    GeneralProtection
 };
 
 struct ProtectedTaskDescriptor {
@@ -65,6 +79,11 @@ struct ProtectedTaskDescriptor {
     uint64_t observedFaultError;
     uint64_t observedFaultRip;
     uint64_t observedFaultCr2;
+    uint64_t expectedFaultVector;
+    uint64_t expectedFaultError;
+    uint64_t expectedFaultCr2;
+    DiagnosticKind diagnosticKind;
+    amd64_exception::FaultRecord savedFault;
     amd64_protected_task::UserExitFrame savedExitFrame;
     uint64_t userResult;
     TerminalStatus terminalStatus;
@@ -131,8 +150,29 @@ static void write_u64(void* address, uint64_t value)
     }
 }
 
-static void fill_diagnostic_payload(uint8_t* code)
+static void fill_diagnostic_payload(uint8_t* code, DiagnosticKind kind)
 {
+    if (kind == DiagnosticKind::InvalidOpcode) {
+        code[0] = 0x0Fu;
+        code[1] = 0x0Bu; // UD2: processor-generated #UD at CPL3.
+        return;
+    }
+    if (kind == DiagnosticKind::GeneralProtection) {
+        code[0] = 0xCDu;
+        code[1] = 0x81u; // Absent DPL0 IDT gate: processor-generated #GP(0x40A).
+        return;
+    }
+    if (kind == DiagnosticKind::PageFault) {
+        // Read the explicitly unmapped CPL3 guard page. The following UD2 is
+        // an unexpected-path sentinel: eligibility requires the expected
+        // #PF, so a successful read cannot be misreported as recovery.
+        code[0] = 0x48u; code[1] = 0xBBu; // movabs rbx, imm64
+        write_u64(code + 2u, memory::kTaskUserStackGuardAddress);
+        code[10] = 0x48u; code[11] = 0x8Bu; code[12] = 0x03u; // mov rax,[rbx]
+        code[13] = 0x0Fu; code[14] = 0x0Bu;
+        return;
+    }
+
     // movabs rbx, userData; mov rax,[rbx]; inc rax; mov [rbx],rax;
     // xor ecx,ecx; mov cx,cs; movabs rdx,userData+8; mov [rdx],rcx;
     // mov eax,exit-operation; mov edi,magic; int 0x80; ud2.
@@ -274,14 +314,54 @@ static bool allocate_and_map(memory::FrameKind kind,
     return true;
 }
 
-static bool run_one_cycle(uint32_t cycle)
+static const char* diagnostic_name(DiagnosticKind kind)
+{
+    switch (kind) {
+    case DiagnosticKind::PageFault: return "page-fault";
+    case DiagnosticKind::InvalidOpcode: return "invalid-opcode";
+    case DiagnosticKind::GeneralProtection: return "general-protection";
+    default: return "normal-exit";
+    }
+}
+
+static uint64_t expected_vector(DiagnosticKind kind)
+{
+    switch (kind) {
+    case DiagnosticKind::PageFault: return 14u;
+    case DiagnosticKind::InvalidOpcode: return 6u;
+    case DiagnosticKind::GeneralProtection: return 13u;
+    default: return 0u;
+    }
+}
+
+static uint64_t expected_error(DiagnosticKind kind)
+{
+    switch (kind) {
+    case DiagnosticKind::PageFault: return kPageFaultError;
+    case DiagnosticKind::GeneralProtection: return kGeneralProtectionError;
+    default: return 0u;
+    }
+}
+
+static uint64_t expected_cr2(DiagnosticKind kind)
+{
+    return kind == DiagnosticKind::PageFault ?
+        memory::kTaskUserStackGuardAddress : 0u;
+}
+
+static bool run_one_cycle(uint32_t cycle, uint32_t taskIdBase,
+                          DiagnosticKind kind)
 {
     memory::AddressSpacePlatform platform = memory::amd64_address_space_platform();
     memory::FrameAccounting baseline{};
     memory::get_frame_accounting(&baseline);
 
     s_task = ProtectedTaskDescriptor{};
-    s_task.identity = kDiagnosticTaskIdBase + cycle;
+    s_task.identity = taskIdBase + cycle;
+    s_task.diagnosticKind = kind;
+    s_task.expectedFaultVector = expected_vector(kind);
+    s_task.expectedFaultError = expected_error(kind);
+    s_task.expectedFaultCr2 = expected_cr2(kind);
     s_task.state = amd64_protected_task::TaskState::Empty;
     s_task.kernelCr3 = arch::read_cr3();
     if ((s_task.kernelCr3 & kCr3AddressMask) == 0u ||
@@ -321,7 +401,7 @@ static bool run_one_cycle(uint32_t cycle)
         cleanup_failure_or_halt(platform, baseline);
         return false;
     }
-    fill_diagnostic_payload(code);
+    fill_diagnostic_payload(code, kind);
     data[0] = 41u;
     data[1] = 0u;
 
@@ -376,6 +456,7 @@ static bool run_one_cycle(uint32_t cycle)
     }
 
     serial::puts("[CPL3] entry task=0x"); serial::put_hex32(s_task.identity);
+    serial::puts(" scenario="); serial::puts(diagnostic_name(kind));
     serial::puts(" CR3=0x"); serial::put_hex64(arch::read_cr3() & kCr3AddressMask);
     serial::puts(" RIP=0x"); serial::put_hex64(memory::kTaskUserCodeAddress);
     serial::puts(" RSP=0x"); serial::put_hex64(kUserStackPointer);
@@ -383,6 +464,43 @@ static bool run_one_cycle(uint32_t cycle)
     serial::puts(" SS=0x"); serial::put_hex16(amd64_protected_task::kUserDataSelector);
     serial::puts(" IF=0\n");
     gxos_amd64_enter_user(memory::kTaskUserCodeAddress, kUserStackPointer);
+
+    if (kind != DiagnosticKind::Normal) {
+        const uint64_t taskRootMask = s_task.addressSpace.rootPhysicalAddress & kCr3AddressMask;
+        if (arch::read_cr3() != s_task.kernelCr3 || s_activeTask != nullptr ||
+            s_task.state != amd64_protected_task::TaskState::Faulted ||
+            s_task.terminalStatus != TerminalStatus::Faulted ||
+            s_task.savedFault.taskId != s_task.identity ||
+            (s_task.savedFault.taskCr3 & kCr3AddressMask) != taskRootMask ||
+            s_task.savedFault.frame.vector != s_task.expectedFaultVector ||
+            s_task.savedFault.frame.errorCode != s_task.expectedFaultError ||
+            s_task.savedFault.frame.cs != amd64_protected_task::kUserCodeSelector ||
+            s_task.savedFault.frame.userSs != amd64_protected_task::kUserDataSelector ||
+            s_task.savedFault.cr2 != s_task.expectedFaultCr2) {
+            serial::puts("[CPL3-FAULT] continuation status=validation-failed kernel=halt\n");
+            cleanup_failure_or_halt(platform, baseline);
+            return false;
+        }
+        s_task.observedFaultVector = s_task.savedFault.frame.vector;
+        s_task.observedFaultError = s_task.savedFault.frame.errorCode;
+        s_task.observedFaultRip = s_task.savedFault.frame.rip;
+        s_task.observedFaultCr2 = s_task.savedFault.cr2;
+        if (!cleanup_task(platform, baseline)) {
+            serial::puts("[CPL3-FAULT] task teardown failed after exception\n");
+            return false;
+        }
+        serial::puts("[CPL3-FAULT] recovered task=0x"); serial::put_hex32(s_task.identity);
+        serial::puts(" vector=0x"); serial::put_hex64(s_task.observedFaultVector);
+        serial::puts(" error=0x"); serial::put_hex64(s_task.observedFaultError);
+        serial::puts(" RIP=0x"); serial::put_hex64(s_task.observedFaultRip);
+        serial::puts(" CS=0x"); serial::put_hex64(s_task.savedFault.frame.cs);
+        serial::puts(" RSP=0x"); serial::put_hex64(s_task.savedFault.frame.userRsp);
+        serial::puts(" SS=0x"); serial::put_hex64(s_task.savedFault.frame.userSs);
+        serial::puts(" CR2=0x"); serial::put_hex64(s_task.observedFaultCr2);
+        serial::puts(" task-CR3=0x"); serial::put_hex64(s_task.savedFault.taskCr3 & kCr3AddressMask);
+        serial::puts(" continuation=kernel cleanup=verified state=reaped\n");
+        return true;
+    }
 
     if (arch::read_cr3() != s_task.kernelCr3 || s_activeTask != nullptr ||
         s_task.state != amd64_protected_task::TaskState::Exited ||
@@ -411,12 +529,37 @@ static void run_diagnostic_cycles(void*)
 {
     s_cycleFailed = false;
     for (uint32_t cycle = 0u; cycle < kDiagnosticTaskCycles; ++cycle) {
-        if (!run_one_cycle(cycle)) {
+        if (!run_one_cycle(cycle, kDiagnosticTaskIdBase,
+                           DiagnosticKind::Normal)) {
             s_cycleFailed = true;
             break;
         }
     }
 }
+
+#if defined(GXOS_ENABLE_CPL3_FAULT_RECOVERY_DIAGNOSTIC)
+static void run_fault_recovery_cycles(void*)
+{
+    static const DiagnosticKind sequence[] = {
+        DiagnosticKind::PageFault,
+        DiagnosticKind::Normal,
+        DiagnosticKind::InvalidOpcode,
+        DiagnosticKind::Normal,
+        DiagnosticKind::GeneralProtection,
+        DiagnosticKind::Normal,
+        DiagnosticKind::PageFault,
+        DiagnosticKind::Normal
+    };
+    s_cycleFailed = false;
+    for (uint32_t cycle = 0u;
+         cycle < sizeof(sequence) / sizeof(sequence[0]); ++cycle) {
+        if (!run_one_cycle(cycle, 0x522900u, sequence[cycle])) {
+            s_cycleFailed = true;
+            break;
+        }
+    }
+}
+#endif
 
 } // namespace
 
@@ -462,25 +605,65 @@ extern "C" void gxos_amd64_user_exit_dispatch(
     serial::puts("[CPL3] trap origin=CPL3 vector=0x80 kernel-stack=verified CR3=restored\n");
 }
 
-extern "C" uint32_t gxos_amd64_record_user_fault(uint64_t vector,
-                                                   uint64_t errorCode,
-                                                   uint64_t rip,
-                                                   uint64_t cs,
-                                                   uint64_t cr2)
+extern "C" uint32_t gxos_amd64_record_user_fault(
+    const amd64_exception::NormalizedFrame* frame,
+    uint64_t cr2, uint64_t taskCr3)
 {
     ProtectedTaskDescriptor* task = s_activeTask;
-    if (!amd64_protected_task::is_user_origin(cs) || !task || task != &s_task ||
+    if (!frame || !task || task != &s_task ||
         task->state != amd64_protected_task::TaskState::Running ||
         task->terminalStatus != TerminalStatus::None) {
         return 0u;
     }
-    task->observedFaultVector = vector;
-    task->observedFaultError = errorCode;
-    task->observedFaultRip = rip;
-    task->observedFaultCr2 = cr2;
+
+    amd64_exception::RecoveryContract contract{};
+    contract.frame = frame;
+    contract.taskId = task->identity;
+    contract.activeTaskId = s_activeTask->identity;
+    contract.addressSpaceTaskId = task->addressSpace.taskId;
+    contract.taskState = task->state;
+    contract.activeCr3 = taskCr3;
+    contract.taskRootCr3 = task->addressSpace.rootPhysicalAddress;
+    contract.kernelCr3 = task->kernelCr3;
+    contract.expectedFaultVector = task->expectedFaultVector;
+    contract.expectedFaultErrorCode = task->expectedFaultError;
+    contract.expectedFaultCr2 = task->expectedFaultCr2;
+    contract.cr2 = cr2;
+    contract.continuationRsp = gxos_protected_task_kernel_resume_rsp;
+    contract.lifecycleStackBase = reinterpret_cast<uintptr_t>(
+        gxos_task_lifecycle_stack_bottom);
+    contract.lifecycleStackTop = reinterpret_cast<uintptr_t>(
+        gxos_task_lifecycle_stack_top);
+    contract.continuationRip = gxos_protected_task_kernel_resume_rip;
+    contract.expectedContinuationRip = reinterpret_cast<uintptr_t>(
+        gxos_amd64_user_kernel_resume);
+    contract.continuationRflags = gxos_protected_task_kernel_resume_rflags;
+    contract.kernelFsBase = gxos_protected_task_kernel_fs_base;
+    contract.kernelGsBase = gxos_protected_task_kernel_gs_base;
+    contract.userCodeBase = memory::kTaskUserCodeAddress;
+    contract.userCodeBytes = memory::kOwnedFrameBytes;
+    contract.userStackBase = memory::kTaskUserStackAddress;
+    contract.userStackBytes = memory::kOwnedFrameBytes;
+    if (!amd64_exception::can_recover_diagnostic_fault(contract) ||
+        !amd64_exception::preserve_fault_record(
+            &task->savedFault, task->identity, *frame, cr2, taskCr3)) {
+        return 0u;
+    }
+
     task->terminalStatus = TerminalStatus::Faulted;
     if (!transition_task(amd64_protected_task::TaskState::Faulted)) return 0u;
+    s_activeTask = nullptr;
+    arch::write_cr3(task->kernelCr3);
+    if (arch::read_cr3() != task->kernelCr3) {
+        serial::puts("[CPL3-FAULT] kernel CR3 restoration failed; kernel halted\n");
+        halt_forever();
+    }
     return task->identity;
+}
+
+extern "C" uint32_t gxos_amd64_protected_task_context_active()
+{
+    return s_activeTask != nullptr ? 1u : 0u;
 }
 
 bool run_cpl3_diagnostic()
@@ -507,9 +690,35 @@ bool run_cpl3_diagnostic()
 #endif
 }
 
+bool run_cpl3_fault_recovery_diagnostic()
+{
+#if defined(GXOS_ENABLE_CPL3_DIAGNOSTIC) && \
+    defined(GXOS_ENABLE_CPL3_FAULT_RECOVERY_DIAGNOSTIC)
+    if (!memory::frame_owner_initialized() ||
+        !interrupts::user_selectors_valid()) {
+        serial::puts("[CPL3-FAULT] status=prerequisite-unavailable skipped=1\n");
+        return false;
+    }
+    gxos_amd64_call_on_lifecycle_stack(&run_fault_recovery_cycles, nullptr);
+    if (s_cycleFailed) {
+        serial::puts("[CPL3-FAULT] status=failed sequence=bounded\n");
+        return false;
+    }
+    serial::puts("[CPL3-FAULT] status=passed page-fault=2 invalid-opcode=1 general-protection=1 normal-after-each=1 preemption=0\n");
+    return true;
+#else
+    return false;
+#endif
+}
+
 #else
 
 bool run_cpl3_diagnostic()
+{
+    return false;
+}
+
+bool run_cpl3_fault_recovery_diagnostic()
 {
     return false;
 }
