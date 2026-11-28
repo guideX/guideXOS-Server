@@ -485,10 +485,19 @@ if (-not (Test-Path -LiteralPath $PeToElfScript)) {
     throw "PE-to-ELF converter not found: $PeToElfScript"
 }
 
-$expectedPeToElfSha256 = "5BED5BBE8883EDD700ED2406FA43A7B26F762212D06898BB75B540E07B2F5621"
+# Identity is checked on the LF-normalized content so that it does not depend
+# on the worktree's line-ending conversion. This is the canonical content of
+# Git blob addce25858d56a7eb110838d30373aad7185e178 (C101 clean rebuild SHA).
+# The former raw-worktree value 5BED5BBE... was a mixed-EOL file on the lost
+# D: worktree and cannot be reproduced from Git.
+$expectedPeToElfCanonicalSha256 = "43C1A71FE87AEE75EAE4F2BC1A3AD8DDDF22BD78FA94105FB2EBD80DA7BC6F3C"
 $actualPeToElfSha256 = Get-Sha256Hex $PeToElfScript
-if ($actualPeToElfSha256 -ne $expectedPeToElfSha256) {
-    throw "PE-to-ELF converter hash mismatch. Expected $expectedPeToElfSha256, got ${actualPeToElfSha256}: $PeToElfScript"
+$peToElfCanonicalBytes = [System.Text.Encoding]::UTF8.GetBytes(
+    ([System.IO.File]::ReadAllText($PeToElfScript, [System.Text.UTF8Encoding]::new($false))).Replace("`r`n", "`n"))
+$actualPeToElfCanonicalSha256 = [System.BitConverter]::ToString(
+    [System.Security.Cryptography.SHA256]::Create().ComputeHash($peToElfCanonicalBytes)).Replace('-', '')
+if ($actualPeToElfCanonicalSha256 -ne $expectedPeToElfCanonicalSha256) {
+    throw "PE-to-ELF converter hash mismatch. Expected canonical $expectedPeToElfCanonicalSha256, got ${actualPeToElfCanonicalSha256}: $PeToElfScript"
 }
 
 $bundledPython = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
@@ -604,6 +613,7 @@ $toolchainLines = @(
     "ArtifactMap=$artifactMap"
     "PeToElfScript=$PeToElfScript"
     "PeToElfSha256=$actualPeToElfSha256"
+    "PeToElfCanonicalSha256=$actualPeToElfCanonicalSha256"
     "PythonExe=$PythonExe"
     "ReadelfExe=$readelfExe"
     "ObjdumpExe=$objdumpExe"

@@ -124,6 +124,14 @@ $psi.FileName = $make
 $psi.WorkingDirectory = $repo
 $psi.UseShellExecute = $false
 $psi.CreateNoWindow = $true
+# The kernel Makefile uses cmd.exe recipe syntax on Windows_NT. GNU make picks
+# any sh.exe on PATH (for example Git for Windows' usr\bin) instead, which
+# breaks those recipes. Hide POSIX shell directories from the make process only.
+$makePath = @(($env:PATH -split [System.IO.Path]::PathSeparator) | Where-Object {
+    -not [string]::IsNullOrWhiteSpace($_) -and
+        -not (Test-Path -LiteralPath (Join-Path $_ 'sh.exe') -PathType Leaf)
+}) -join [System.IO.Path]::PathSeparator
+$psi.Environment['PATH'] = $makePath
 $psi.RedirectStandardOutput = $true
 $psi.RedirectStandardError = $true
 foreach ($argument in @(

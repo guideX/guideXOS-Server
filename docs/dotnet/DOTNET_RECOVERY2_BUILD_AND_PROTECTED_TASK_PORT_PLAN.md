@@ -279,3 +279,38 @@ Missing, because it was lost:
 5. **Is S22R28 a better basis than recreating ISOLATION1A?** Yes. It is guest-qualified for real CPL3, which ISOLATION1A never was, and it is shared with CPU Improvements.
 6. **What is the smallest next milestone?** RECOVERY2b, a trusted full production candidate. After that, RECOVERY3 step 1.
 7. **Is the work committed and pushed?** It is committed on `dotnet-recovery2`. For the push, see §H.
+
+## Continuation — PowerShell 7 installed (November 27, 2026 Pacific)
+
+PowerShell 7.7.0 was installed as an MSIX package. It is reachable as `%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe`; sessions started before the install need that path or a fresh PATH. Outcome stays **B**: both production halves now build from the committed scripts, but the Mbed TLS/TF-PSA tree is still the Main-derived substitute described in §C.
+
+### Two committed scripts needed small corrections
+
+1. **`scripts/dotnet/build-c188-production-kernel.ps1`.** Run unmodified, make picked Git for Windows' `usr\bin\sh.exe` from PATH and every `cmd.exe`-syntax `MKDIR` recipe failed (`/usr/bin/sh: … unexpected end of file from 'if'`). The script now removes PATH directories that contain `sh.exe` from the make child process only. The make arguments and feature list are unchanged.
+2. **`scripts/dotnet/build-managed-hostlog-proof.ps1`.** The PE→ELF converter guard expected raw-file SHA-256 `5BED5BBE…`. The C101 report records that value as the *lost D: worktree's* bytes: 13,709 bytes for Git blob `addce258…`, which is a mixed CRLF/LF materialization (249 of 345 lines CRLF) that cannot be reproduced from Git. The fresh `core.autocrlf=true` checkout gives `0FD299A4…` (13,805 bytes), and the blob itself gives `43C1A71F…`, which is C101's own clean-rebuild SHA. The guard now checks the LF-normalized content against `43C1A71F…`. The raw worktree hash is still recorded as `PeToElfSha256`, and the new `PeToElfCanonicalSha256` line is added to `toolchain.txt`. The converter source is unchanged.
+
+The overlay `third_party/mbedtls/guidexos/mbedtls_sources.mk` (git-ignored) also gained `MBEDTLS_GUIDEXOS_REPO_ROOT ?= ..`, so the unmodified kernel make call enables the same 57-source subset. The overlay file is now SHA-256 `8a887fc2…`.
+
+### Dependency staging
+
+| Dependency | Result |
+| --- | --- |
+| NuGet `runtime.win-x64.microsoft.dotnet.ilcompiler\9.0.0` | All 12 hashed files in `runtime-pack.lock.json` match |
+| Pinned NativeAOT runtime sources | The non-Git copy at `E:\CodexArtifacts\…\gc-feasibility-baseline\nativeaot-runtime` (7,498 files) was copied to `out\dotnet\gc-feasibility-baseline\nativeaot-runtime`. The two lock-tracked sources (`StackFrameIterator.cpp`, `CoffNativeCodeManager.cpp`) match the locked **preimage** SHA-256 and length exactly after CRLF materialization. The other files have no lock hashes, so this is partial provenance, not a Git-verified checkout. The production profile does not use FP repair or the ThreadStore paths that need `git archive`. |
+| MSVC | VS 18 Community `vcvars64.bat` |
+| Python | The bundled runtime Python that the script prefers |
+
+### Results
+
+| Stage | Command | Result |
+| --- | --- | --- |
+| Kernel | `pwsh -NoProfile -File scripts/dotnet/build-c188-production-kernel.ps1 -BuildRoot out\dotnet\c188-external-app-identity\recovery2b-kernel-20261128T0010Z` | **PASS.** All script checks passed (identities, dev-marker absence, freestanding flags, ELF64 x86-64). `kernel.elf` SHA-256 `09984B31C69399E8529B86FAAC7B1D3322463E285DA5CC4156AB07620C6751B9`, **byte-identical** to the RECOVERY2 wrapper build. 57 Mbed TLS sources compiled. |
+| Managed NativeAOT | `pwsh -NoProfile -File scripts/dotnet/build-c188-production-nativeaot.ps1 -BuildRoot out\dotnet\c188-external-app-identity\recovery2b-nativeaot-20261128T0030Z` | **PASS.** Profile `C160Composite`, production selectors 4–8, no CounterApp descriptor or C188 selector route, persistent composite lifecycle. `HostLogProof.elf` SHA-256 `714CBDF6C99616A46F3BED354F38B6634658505FC62064A1F33D9BF033643D86` (ELF64 x86-64, seven `PT_LOAD`, entry `0x10010e8e0`). Map `47D1E272…`, runtime-pack manifest `A96EBE3B…`, build log `8A72880D…`. NuGet warning NU1903 reports a known vulnerability advisory for the locked ILCompiler 9.0.0; the lock is unchanged. |
+
+The R33/R36 candidate used the R23 Settings-candidate profile (proof controls, C188R30 trace, n=2 descriptors), not this proof-disabled production profile, so a hash comparison against those artifacts does not apply. The ramdisk, bootloader and ESP were not built, and no QEMU or QAC was used.
+
+### Remaining
+
+- The Mbed TLS decision from §C (recover the original tree, or adopt Main's variant on purpose and commit the glue) is still open.
+- `dotnet-recovery2` is still unpushed until GitHub SSH or HTTPS credentials work on this machine.
+- The next step is RECOVERY2b items 1 and 4 (§I) and then RECOVERY3. Steps 2 and 3 of the §I prompt are now done.
