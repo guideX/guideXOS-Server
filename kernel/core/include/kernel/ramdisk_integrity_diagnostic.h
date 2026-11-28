@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include "../../../../guideXOSBootLoader/guidexOSBootInfo.h"
 
 namespace guideXOS {
 namespace ramdisk_diagnostic {
@@ -12,7 +13,8 @@ static const uint64_t kAddressMask = 0x000FFFFFFFFFF000ull;
 static const uint64_t kPhysicalIdentityLimit = 1ull << 47;
 // Keep the RAMDISK's physical BootInfo range separate from the relocated
 // kernel's low virtual image, which can overlap the same numeric address.
-static const uint64_t kKernelRamdiskVirtualBase = 0x0000400000000000ull;
+static const uint64_t kKernelRamdiskVirtualBase =
+    GUIDEXOS_RAMDISK_ALIAS_BASE;
 
 enum class MappingStatus : uint8_t {
     Mapped4K = 0,

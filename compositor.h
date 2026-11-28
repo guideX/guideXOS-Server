@@ -16,6 +16,7 @@
 #include "desktop_service.h"
 #include "vnc_server.h"
 #include "system_tray.h"
+#include "taskbar_application_model.h"
 #include "desktop_wallpaper.h"
 #include "bitmap_font.h"
 #include "video_backend.h"
@@ -104,6 +105,7 @@ namespace gxos { namespace gui {
         WindowAnimState animState{};
         bool visible{true};
         bool resizable{true};
+        std::string appId;
     };
     enum class DesktopItemKind {
         SystemObject,
@@ -178,6 +180,17 @@ namespace gxos { namespace gui {
         static bool isStartMenuAppPinnedToDesktop(const std::string& appName);
         static bool isStartMenuAllProgramsView();
         static bool removeRecentProgramFromStartMenu(const std::string& act);
+        static std::vector<TaskbarApplicationEntry> taskbarApplications();
+        static bool setTaskbarActivity(const std::string& appId, uint64_t windowId,
+                                       TaskbarProgressState progress, uint8_t percent, bool attention);
+        static bool clearTaskbarActivity(const std::string& appId, uint64_t windowId);
+        static void acknowledgeTaskbarActivity(const std::string& appId, uint64_t windowId);
+        static bool isTaskbarAppPinned(const std::string& canonicalAppId);
+        static bool pinTaskbarApp(const std::string& canonicalAppId);
+        static bool unpinTaskbarApp(const std::string& canonicalAppId);
+        static bool launchTaskbarApp(const std::string& canonicalAppId, std::string& error);
+        static bool dispatchTaskbarWindowAction(TaskbarWindowAction action, uint64_t windowId);
+        static bool dispatchTaskbarCloseAll(const std::string& canonicalAppId);
         static bool pinFilesystemEntryToDesktop(const std::string& path, bool isDirectory, const std::string& label = "", const std::string& iconName = "");
         static bool isFilesystemEntryPinnedToDesktop(const std::string& path, bool isDirectory);
         static bool removeDesktopShortcut(int index);
@@ -198,6 +211,8 @@ namespace gxos { namespace gui {
         static int hostedDisplayViewportIndex();
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         static HWND g_hwnd; // expose for helper drawing
+        static bool taskbarPreviewPixels(uint64_t windowId, const uint32_t*& pixels, int& width, int& height);
+        static bool taskbarWindowPreviewState(uint64_t windowId, bool& minimized, bool& focused, HBITMAP& icon);
         static constexpr UINT kHostedTitleInputDiagnosticMessage = WM_APP + 0x5A1;
 #endif
         static std::vector<DesktopItem> g_items; // expose for icon renderer
@@ -237,6 +252,9 @@ namespace gxos { namespace gui {
         static void pinAction(const std::string& act);
         static void unpinAction(const std::string& act);
         static void saveDesktopConfig();
+        static void syncTaskbarPreferencesFromConfig();
+        static bool updateHostedTaskbarAutoHide(
+            int mx, int my, const DisplayVirtualDesktop& desktop, const DisplayViewport& viewport);
         static void addRecent(const std::string& act);
         static void refreshDesktopItems();
         static void refreshAllProgramsList();
@@ -262,7 +280,7 @@ namespace gxos { namespace gui {
         static bool IsShiftDown();
 #endif
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
-        static uint64_t hitTestTaskbarButton(int mx, int my, const DisplayVirtualDesktop& desktop, const DisplayViewport& viewport, int fallbackWidth, int fallbackHeight);
+        static size_t hitTestTaskbarButton(int mx, int my, const DisplayVirtualDesktop& desktop, const DisplayViewport& viewport, int fallbackWidth, int fallbackHeight);
         static void initWindow();
         static void shutdownWindow();
         static void requestRepaint();

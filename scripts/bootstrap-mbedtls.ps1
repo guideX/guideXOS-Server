@@ -66,7 +66,10 @@ Write-Output ('MBEDTLS_BOOTSTRAP_TF_PSA_COMMIT=' + $lock.tfPsaCrypto.commit)
 if ($LASTEXITCODE -ne 0) { throw "Mbed TLS clone failed." }
 & git -C $source checkout --detach $lock.mbedtls.commit
 if ($LASTEXITCODE -ne 0) { throw "Mbed TLS checkout failed for $($lock.mbedtls.commit)." }
-& git -C $source submodule update --init --recursive
+# TF-PSA-Crypto's pinned mldsa-native submodule contains paths beyond the
+# default Win32 MAX_PATH. Enable Git's per-command long-path support without
+# changing the owner's global Git configuration.
+& git -c core.longpaths=true -C $source submodule update --init --recursive
 if ($LASTEXITCODE -ne 0) { throw "Mbed TLS submodule initialization failed." }
 
 $actualMbedTlsCommit = (& git -C $source rev-parse HEAD).Trim()

@@ -1,4 +1,5 @@
 #include "paging.h"
+#include "guidexOSBootInfo.h"
 #include "uefi_shim.h"
 
 namespace guideXOS {
@@ -9,10 +10,21 @@ namespace paging
 
     static inline UINT64* PhysToPtr(EFI_PHYSICAL_ADDRESS p) { return (UINT64*)(UINTN)p; }
 
+    static const UINT64 kPhysicalAddressMask = 0x000FFFFFFFFFF000ull;
+    static const UINT64 kIdentityMappedPhysicalLimit = 1ull << 47;
+    static const UINT64 kPageMask = 0xFFFull;
+
+    static bool IsCanonicalAddress48(UINT64 address)
+    {
+        const UINT64 upper = address >> 48;
+        return (address & (1ull << 47)) != 0u ? upper == 0xFFFFu : upper == 0u;
+    }
+
     // Track allocated page table pages so we can identity-map them
-    // The low identity/kernel mappings can consume nearly 512 4 KiB tables.
-    // Leave room for the independent RAMDISK alias and the later self-maps.
-    static constexpr UINTN MAX_PT_PAGES = 1024;
+    // Keep the loader's page-table allocation bound identical to the kernel
+    // validation contract, including the RAMDISK alias mapping.
+    static constexpr UINTN MAX_PT_PAGES =
+        guideXOS::GUIDEXOS_MAX_BOOT_PAGE_TABLE_PAGES;
     static EFI_PHYSICAL_ADDRESS g_ptPages[MAX_PT_PAGES];
     static UINTN g_ptPageCount = 0;
 
@@ -39,6 +51,11 @@ namespace paging
     // Walk/allocate PML4->PDPT->PD->PT for a given virtual address (identity => vaddr==paddr)
     static EFI_STATUS EnsurePtForVaddr(EFI_SYSTEM_TABLE* SystemTable, EFI_PHYSICAL_ADDRESS pml4Phys, UINT64 vaddr, EFI_PHYSICAL_ADDRESS* outPtPhys)
     {
+        if (!SystemTable || !SystemTable->BootServices || !outPtPhys ||
+            pml4Phys == 0u || (pml4Phys & kPageMask) != 0u ||
+            pml4Phys >= kIdentityMappedPhysicalLimit ||
+            !IsCanonicalAddress48(vaddr)) return EFI_INVALID_PARAMETER;
+
         const UINTN pml4i = (UINTN)((vaddr >> 39) & 0x1FFull);
         const UINTN pdpti = (UINTN)((vaddr >> 30) & 0x1FFull);
         const UINTN pdi   = (UINTN)((vaddr >> 21) & 0x1FFull);
@@ -52,7 +69,10 @@ namespace paging
             if (EFI_ERROR(st)) return st;
             pml4[pml4i] = (UINT64)pdptPhys | PTE_P | PTE_W;
         } else {
-            pdptPhys = (EFI_PHYSICAL_ADDRESS)(pml4[pml4i] & ~0xFFFull);
+            pdptPhys = (EFI_PHYSICAL_ADDRESS)(pml4[pml4i] & kPhysicalAddressMask);
+            if (pdptPhys == 0u || pdptPhys >= kIdentityMappedPhysicalLimit) {
+                return EFI_INVALID_PARAMETER;
+            }
         }
 
         UINT64* pdpt = PhysToPtr(pdptPhys);
@@ -64,7 +84,10 @@ namespace paging
             if (EFI_ERROR(st)) return st;
             pdpt[pdpti] = (UINT64)pdPhys | PTE_P | PTE_W;
         } else {
-            pdPhys = (EFI_PHYSICAL_ADDRESS)(pdpt[pdpti] & ~0xFFFull);
+            pdPhys = (EFI_PHYSICAL_ADDRESS)(pdpt[pdpti] & kPhysicalAddressMask);
+            if (pdPhys == 0u || pdPhys >= kIdentityMappedPhysicalLimit) {
+                return EFI_INVALID_PARAMETER;
+            }
         }
 
         UINT64* pd = PhysToPtr(pdPhys);
@@ -80,10 +103,50 @@ namespace paging
                 // Unexpected: already a 2MiB mapping. For minimal loader, treat as error.
                 return EFI_UNSUPPORTED;
             }
-            ptPhys = (EFI_PHYSICAL_ADDRESS)(pd[pdi] & ~0xFFFull);
+            ptPhys = (EFI_PHYSICAL_ADDRESS)(pd[pdi] & kPhysicalAddressMask);
+            if (ptPhys == 0u || ptPhys >= kIdentityMappedPhysicalLimit) {
+                return EFI_INVALID_PARAMETER;
+            }
         }
 
         *outPtPhys = ptPhys;
+        return EFI_SUCCESS;
+    }
+
+    // Locate an existing 4 KiB leaf table without allocating or changing any
+    // page-table entries. Large-page parents are rejected because this loader
+    // cannot safely split them while preserving their permissions.
+    static EFI_STATUS FindExistingPtForVaddr(
+        EFI_PHYSICAL_ADDRESS pml4Phys,
+        UINT64 vaddr,
+        EFI_PHYSICAL_ADDRESS* outPtPhys)
+    {
+        if (!outPtPhys || pml4Phys == 0u ||
+            (pml4Phys & kPageMask) != 0u ||
+            pml4Phys >= kIdentityMappedPhysicalLimit ||
+            !IsCanonicalAddress48(vaddr)) return EFI_INVALID_PARAMETER;
+
+        const UINTN indices[3] = {
+            (UINTN)((vaddr >> 39) & 0x1FFull),
+            (UINTN)((vaddr >> 30) & 0x1FFull),
+            (UINTN)((vaddr >> 21) & 0x1FFull)
+        };
+        UINT64* table = PhysToPtr(pml4Phys);
+        for (UINTN level = 0u; level < 3u; ++level) {
+            const UINT64 entry = table[indices[level]];
+            if ((entry & PTE_P) == 0u) {
+                *outPtPhys = 0u;
+                return EFI_SUCCESS;
+            }
+            if ((entry & PTE_PS) != 0u) return EFI_UNSUPPORTED;
+            const EFI_PHYSICAL_ADDRESS nextPhys =
+                (EFI_PHYSICAL_ADDRESS)(entry & kPhysicalAddressMask);
+            if (nextPhys == 0u || nextPhys >= kIdentityMappedPhysicalLimit) {
+                return EFI_INVALID_PARAMETER;
+            }
+            table = PhysToPtr(nextPhys);
+        }
+        *outPtPhys = (EFI_PHYSICAL_ADDRESS)(UINTN)table;
         return EFI_SUCCESS;
     }
 
@@ -133,15 +196,59 @@ namespace paging
         EFI_PHYSICAL_ADDRESS pml4Phys,
         UINT64 virtBase,
         EFI_PHYSICAL_ADDRESS physBase,
-        UINTN sizeBytes)
+        UINTN sizeBytes,
+        bool allowExistingMappingReplacement)
     {
         if (sizeBytes == 0) return EFI_SUCCESS;
 
-        UINT64 vStart = virtBase & ~0xFFFULL;
-        UINT64 vEnd   = (virtBase + (UINT64)sizeBytes + 0xFFFULL) & ~0xFFFULL;
-        UINT64 phys   = physBase & ~0xFFFULL;
+        const UINT64 length = (UINT64)sizeBytes;
+        if (!SystemTable || !SystemTable->BootServices || pml4Phys == 0u ||
+            (pml4Phys & kPageMask) != 0u ||
+            pml4Phys >= kIdentityMappedPhysicalLimit ||
+            !IsCanonicalAddress48(virtBase) ||
+            virtBase > UINT64_MAX - length ||
+            physBase >= kIdentityMappedPhysicalLimit ||
+            length > kIdentityMappedPhysicalLimit - physBase ||
+            (virtBase & kPageMask) != (physBase & kPageMask)) {
+            return EFI_INVALID_PARAMETER;
+        }
 
-        for (UINT64 v = vStart; v < vEnd; v += 0x1000, phys += 0x1000) {
+        const UINT64 virtualEnd = virtBase + length;
+        const UINT64 lastVirtual = virtualEnd - 1u;
+        if (!IsCanonicalAddress48(lastVirtual) ||
+            ((virtBase ^ lastVirtual) & (1ull << 47)) != 0u) {
+            return EFI_INVALID_PARAMETER;
+        }
+
+        const UINT64 vStart = virtBase & ~kPageMask;
+        const UINT64 lastPage = lastVirtual & ~kPageMask;
+        if (lastPage > UINT64_MAX - 0x1000u) return EFI_INVALID_PARAMETER;
+        const UINT64 vEnd = lastPage + 0x1000u;
+        const UINT64 physStart = physBase & ~kPageMask;
+        const UINT64 pageCount = (vEnd - vStart) / 0x1000u;
+
+        // Validate the complete target range before changing any PTE. The
+        // kernel image intentionally replaces low identity mappings; the
+        // RAMDISK alias uses the default and rejects conflicting ownership.
+        for (UINT64 page = 0u; page < pageCount; ++page) {
+            const UINT64 v = vStart + page * 0x1000u;
+            const UINT64 expectedPhys = physStart + page * 0x1000u;
+            EFI_PHYSICAL_ADDRESS existingPt = 0u;
+            EFI_STATUS st = FindExistingPtForVaddr(pml4Phys, v, &existingPt);
+            if (EFI_ERROR(st)) return st;
+            if (existingPt == 0u) continue;
+            const UINTN pti = (UINTN)((v >> 12) & 0x1FFull);
+            const UINT64 existingEntry = PhysToPtr(existingPt)[pti];
+            if ((existingEntry & PTE_P) != 0u &&
+                (existingEntry & kPhysicalAddressMask) != expectedPhys &&
+                !allowExistingMappingReplacement) {
+                return EFI_ACCESS_DENIED;
+            }
+        }
+
+        for (UINT64 page = 0u; page < pageCount; ++page) {
+            const UINT64 v = vStart + page * 0x1000u;
+            const UINT64 phys = physStart + page * 0x1000u;
             EFI_PHYSICAL_ADDRESS ptPhys = 0;
             EFI_STATUS st = EnsurePtForVaddr(SystemTable, pml4Phys, v, &ptPhys);
             if (EFI_ERROR(st)) return st;

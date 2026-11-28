@@ -9,6 +9,7 @@
 #include "include/kernel/desktop.h"
 #include "include/kernel/kernel_ipc.h"
 #include "include/kernel/serial_debug.h"
+#include "../../taskbar_application_model_core.h"
 
 extern "C" void desktop_request_redraw();
 
@@ -59,6 +60,16 @@ static bool streq(const char* a, const char* b) {
 KernelApp::KernelApp() : m_state(AppState::NotLoaded), m_window(nullptr) {
     m_name[0] = '\0';
     m_runtimeAppId[0] = '\0';
+}
+
+bool KernelApp::bindRuntimeAppIdFromTrustedLaunch(const char* appId) {
+    if (!gxos::gui::IsSafeTaskbarAppIdentity(appId, MAX_APP_ID)) return false;
+    if (m_runtimeAppId[0] &&
+        !gxos::gui::SameCanonicalTaskbarAppIdentity(m_runtimeAppId, appId)) {
+        return false;
+    }
+    strcopy(m_runtimeAppId, appId, MAX_APP_ID);
+    return gxos::gui::SameCanonicalTaskbarAppIdentity(m_runtimeAppId, appId);
 }
 
 KernelApp::~KernelApp() {
@@ -418,6 +429,35 @@ bool AppManager::launchApp(const char* name) {
     return true;
 }
 
+bool AppManager::launchAppById(const char* appId) {
+    if (!s_initialized || !appId || !appId[0]) {
+        AppLogger::logLaunch(appId ? appId : "unknown", LaunchResult::NotAvailable);
+        return false;
+    }
+
+    const AppInfo* info = getAppInfoById(appId);
+    if (!info || !info->available || !info->factory) {
+        AppLogger::logLaunch(appId, LaunchResult::NotAvailable);
+        return false;
+    }
+
+    // Canonical identity is the taskbar's launch key. This also handles
+    // registered launch aliases that share a single trusted App Model ID.
+    for (int i = s_runningAppCount - 1; i >= 0; --i) {
+        KernelApp* running = s_runningApps[i];
+        if (!running || running->getState() == AppState::Terminated ||
+            !streq(running->getRuntimeAppId(), appId)) continue;
+        if (running->getWindow()) {
+            compositor::KernelCompositor::setFocus(running->getWindow()->id);
+        }
+        AppLogger::logLaunch(info->name, LaunchResult::AlreadyRunning);
+        kernel::desktop::record_recent_program(info->name);
+        return true;
+    }
+
+    return launchApp(info->name);
+}
+
 bool AppManager::launchAppWithParam(const char* name, const char* param) {
     if (!s_initialized || !name) {
         AppLogger::logLaunch(name ? name : "unknown", LaunchResult::NotAvailable);
@@ -519,6 +559,16 @@ const AppInfo* AppManager::getAppInfo(const char* name) {
     
     for (int i = 0; i < s_registeredAppCount; i++) {
         if (streq(s_registeredApps[i].name, name)) {
+            return &s_registeredApps[i];
+        }
+    }
+    return nullptr;
+}
+
+const AppInfo* AppManager::getAppInfoById(const char* appId) {
+    if (!appId || !appId[0]) return nullptr;
+    for (int i = 0; i < s_registeredAppCount; ++i) {
+        if (s_registeredApps[i].appId[0] && streq(s_registeredApps[i].appId, appId)) {
             return &s_registeredApps[i];
         }
     }

@@ -1477,28 +1477,33 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
             pt.Pml4Phys,
             kernelMinVaddr,
             kernelPhysBase,
-            kernelSpanBytes);
+            kernelSpanBytes,
+            true);
         if (EFI_ERROR(st)) {
             Print(L"Failed to map kernel virtual range\n");
             return st;
         }
     }
 
-    // BootInfo::RamdiskBase is a physical address. The low kernel VA image can
-    // overlap that numeric address, so give the kernel a separate virtual
-    // alias while preserving the physical allocation for ownership and
-    // memory-map checks.
+    // BootInfo::RamdiskBase remains the physical allocation used for ownership
+    // and firmware-map checks. The kernel consumes the image through the
+    // shared high virtual alias because the kernel image can cover the same
+    // numeric address in its virtual range.
     if (ramdiskPhys != 0 && ramdiskSize != 0) {
         EFI_STATUS st = guideXOS::paging::MapRange(
             SystemTable,
             pt.Pml4Phys,
-            guideXOS::ramdisk_diagnostic::kKernelRamdiskVirtualBase,
+            guideXOS::GUIDEXOS_RAMDISK_ALIAS_BASE,
             ramdiskPhys,
             (UINTN)ramdiskSize);
         if (EFI_ERROR(st)) {
-            Print(L"Failed to map kernel RAMDISK virtual range\n");
+            Print(L"Failed to map RAMDISK virtual alias\n");
             return st;
         }
+        Print(L"Mapping RAMDISK alias: %p -> %p size %Lu\n",
+              (VOID*)(UINTN)guideXOS::GUIDEXOS_RAMDISK_ALIAS_BASE,
+              (VOID*)(UINTN)ramdiskPhys,
+              ramdiskSize);
     }
 
     // CRITICAL: Identity-map all page table pages allocated by MapRange()
@@ -1715,13 +1720,13 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
 #if defined(GXOS_RAMDISK_STAGE_FINGERPRINTS)
     if (v1BootInfo->RamdiskBase != 0 && v1BootInfo->RamdiskSize >= 512) {
         const UINT8* sector0 = reinterpret_cast<const UINT8*>(
-            static_cast<UINTN>(v1BootInfo->RamdiskBase));
+            static_cast<UINTN>(guideXOS::GUIDEXOS_RAMDISK_ALIAS_BASE));
         UINT64 fingerprint = 14695981039346656037ull;
         for (UINTN i = 0; i < 512; ++i) {
             fingerprint = (fingerprint ^ sector0[i]) * 1099511628211ull;
         }
         guideXOS::debug::SerialPrint("S22R28R3_STAGE_FP stage=loader-handoff base=");
-        guideXOS::debug::SerialPrintHex64(v1BootInfo->RamdiskBase);
+        guideXOS::debug::SerialPrintHex64(guideXOS::GUIDEXOS_RAMDISK_ALIAS_BASE);
         guideXOS::debug::SerialPrint(" bytes=0x00000200 fnv1a64=");
         guideXOS::debug::SerialPrintHex64(fingerprint);
         guideXOS::debug::SerialPrint("\n");

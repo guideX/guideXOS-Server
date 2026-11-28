@@ -11,6 +11,7 @@
 #include "clock_time_settings.h"
 #include "desktop_theme.h"
 #include "display_model.h"
+#include "taskbar_customization_core.h"
 
 namespace gxos { namespace gui {
     constexpr uint64_t kDesktopConfigMaxBytes = 1024 * 1024;
@@ -67,6 +68,11 @@ namespace gxos { namespace gui {
         std::string desktopThemeId; // stable theme id, e.g. classic or scifi
         std::string backgroundScaleMode; // fill, fit, stretch, center, or tile
         std::string taskbarPosition; // bottom, top, left, or right
+        std::string taskbarSize; // compact, standard, or expanded
+        std::string taskbarPresentation; // icons-only or icons-labels
+        bool taskbarAutoHide{false};
+        bool taskbarShowPreviews{true};
+        bool taskbarShowActivity{true};
         std::string displayMode; // mirror or extend
         std::string displayPrimaryDisplayId; // stable monitor id if known
         std::string displayArrangement; // serialized monitor layout, if known
@@ -77,6 +83,8 @@ namespace gxos { namespace gui {
         // Canonical App Model identities parallel to pinned. An empty identity
         // is reserved for fixed shell actions and path targets.
         std::vector<std::string> pinnedAppIds;
+        // Taskbar pins are independent of Start Menu pins and use canonical IDs.
+        std::vector<std::string> taskbarPinnedAppIds;
         std::vector<std::string> recent;
         // Canonical App Model identities parallel to recent.
         std::vector<std::string> recentAppIds;
@@ -119,6 +127,11 @@ namespace gxos { namespace gui {
             if(out.desktopThemeId.empty() && extractSection(txt, "desktop.theme", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.desktopThemeId); } }
             if(extractSection(txt, "desktop.background.scale", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.backgroundScaleMode); } }
             if(extractSection(txt, "desktop.taskbar.position", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.taskbarPosition); } }
+            if(extractSection(txt, "desktop.taskbar.size", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.taskbarSize); } }
+            if(extractSection(txt, "desktop.taskbar.presentation", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.taskbarPresentation); } }
+            if(extractSection(txt, "desktop.taskbar.autoHide", section)){ size_t i=0; skipWS(section,i); parseJSONBool(section, i, out.taskbarAutoHide); }
+            if(extractSection(txt, "desktop.taskbar.showPreviews", section)){ size_t i=0; skipWS(section,i); parseJSONBool(section, i, out.taskbarShowPreviews); }
+            if(extractSection(txt, "desktop.taskbar.showActivity", section)){ size_t i=0; skipWS(section,i); parseJSONBool(section, i, out.taskbarShowActivity); }
             if(extractSection(txt, "desktop.display.mode", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.displayMode); } }
             if(extractSection(txt, "desktop.display.primaryId", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.displayPrimaryDisplayId); } }
             if(extractSection(txt, "desktop.display.arrangement", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.displayArrangement); } }
@@ -129,6 +142,7 @@ namespace gxos { namespace gui {
             if(!out.use24HourTime && extractSection(txt, "desktop.clock.use24Hour", section)){ size_t i=0; skipWS(section,i); parseJSONBool(section, i, out.use24HourTime); }
             if(extractSection(txt, "pinned", section) && !parseStringArray(section, out.pinned, kDesktopConfigMaxPinnedEntries, kDesktopConfigMaxPinnedLabelBytes)) { err = "invalid or oversized pinned launch list"; return false; }
             if(extractSection(txt, "pinnedAppIds", section) && !parseStringArray(section, out.pinnedAppIds, kDesktopConfigMaxPinnedEntries, kDesktopConfigMaxLaunchIdBytes)) { err = "invalid or oversized pinned App Model identity list"; return false; }
+            if(extractSection(txt, "taskbarPinnedAppIds", section) && !parseStringArray(section, out.taskbarPinnedAppIds, kDesktopConfigMaxPinnedEntries, kDesktopConfigMaxLaunchIdBytes)) { err = "invalid or oversized taskbar App Model identity list"; return false; }
             if(extractSection(txt, "recent", section) && !parseStringArray(section, out.recent, kDesktopConfigMaxRecentEntries, kDesktopConfigMaxRecentLabelBytes)) { err = "invalid or oversized recent launch list"; return false; }
             if(extractSection(txt, "recentAppIds", section) && !parseStringArray(section, out.recentAppIds, kDesktopConfigMaxRecentEntries, kDesktopConfigMaxLaunchIdBytes)) { err = "invalid or oversized recent App Model identity list"; return false; }
             if (extractSection(txt, "pinnedAppIds", section) && out.pinnedAppIds.size() != out.pinned.size()) {
@@ -174,6 +188,9 @@ namespace gxos { namespace gui {
                 out.desktopThemeId = DesktopThemeIdToString(themeId);
             }
             out.displayMode = normalizeDisplayModeName(out.displayMode);
+            out.taskbarPosition = TaskbarDockName(ParseTaskbarDock(out.taskbarPosition.c_str()));
+            out.taskbarSize = TaskbarSizeModeName(ParseTaskbarSizeMode(out.taskbarSize.c_str()));
+            out.taskbarPresentation = TaskbarPresentationName(ParseTaskbarPresentation(out.taskbarPresentation.c_str()));
             if (out.displayPrimaryDisplayId.empty()) out.displayPrimaryDisplayId = "display-1";
             out.timeZoneId = gxos::clocktime::NormalizeTimeZoneId(out.timeZoneId);
             return true;
@@ -183,6 +200,7 @@ namespace gxos { namespace gui {
                 data.recent.size() > kDesktopConfigMaxRecentEntries ||
                 data.desktopShortcuts.size() > kDesktopConfigMaxShortcutEntries ||
                 data.pinnedAppIds.size() > kDesktopConfigMaxPinnedEntries ||
+                data.taskbarPinnedAppIds.size() > kDesktopConfigMaxPinnedEntries ||
                 data.recentAppIds.size() > kDesktopConfigMaxRecentEntries ||
                 (!data.pinnedAppIds.empty() && data.pinnedAppIds.size() != data.pinned.size()) ||
                 (!data.recentAppIds.empty() && data.recentAppIds.size() != data.recent.size())) {
@@ -196,6 +214,7 @@ namespace gxos { namespace gui {
             for (const std::string& value : data.pinned) if (value.size() > kDesktopConfigMaxPinnedLabelBytes || value.find('\0') != std::string::npos || hasControl(value)) { err = "pinned launch label exceeds its byte or character limit"; return false; }
             for (const std::string& value : data.recent) if (value.size() > kDesktopConfigMaxRecentLabelBytes || value.find('\0') != std::string::npos || hasControl(value)) { err = "recent launch label exceeds its byte or character limit"; return false; }
             for (const std::string& value : data.pinnedAppIds) if (value.size() > kDesktopConfigMaxLaunchIdBytes || value.find('\0') != std::string::npos || hasControl(value)) { err = "pinned App Model identity exceeds its byte or character limit"; return false; }
+            for (const std::string& value : data.taskbarPinnedAppIds) if (value.empty() || value.size() > kDesktopConfigMaxLaunchIdBytes || value.find('\0') != std::string::npos || hasControl(value)) { err = "taskbar App Model identity exceeds its byte or character limit"; return false; }
             for (const std::string& value : data.recentAppIds) if (value.size() > kDesktopConfigMaxLaunchIdBytes || value.find('\0') != std::string::npos || hasControl(value)) { err = "recent App Model identity exceeds its byte or character limit"; return false; }
             for (const DesktopShortcutRec& shortcut : data.desktopShortcuts) {
                 const bool appTarget = shortcut.shortcutType == "App" && !shortcut.targetAppId.empty() && shortcut.targetPath.empty();
@@ -221,6 +240,11 @@ namespace gxos { namespace gui {
             f << "  \"desktop.theme.id\": " << jsonEscape(DesktopThemeIdToString(themeId)) << ",\n";
             f << "  \"desktop.background.scale\": " << jsonEscape(data.backgroundScaleMode.empty() ? "fill" : data.backgroundScaleMode) << ",\n";
             f << "  \"desktop.taskbar.position\": " << jsonEscape(data.taskbarPosition.empty() ? "bottom" : data.taskbarPosition) << ",\n";
+            f << "  \"desktop.taskbar.size\": " << jsonEscape(TaskbarSizeModeName(ParseTaskbarSizeMode(data.taskbarSize.c_str()))) << ",\n";
+            f << "  \"desktop.taskbar.presentation\": " << jsonEscape(TaskbarPresentationName(ParseTaskbarPresentation(data.taskbarPresentation.c_str()))) << ",\n";
+            f << "  \"desktop.taskbar.autoHide\": " << (data.taskbarAutoHide ? "true" : "false") << ",\n";
+            f << "  \"desktop.taskbar.showPreviews\": " << (data.taskbarShowPreviews ? "true" : "false") << ",\n";
+            f << "  \"desktop.taskbar.showActivity\": " << (data.taskbarShowActivity ? "true" : "false") << ",\n";
             f << "  \"desktop.display.mode\": " << jsonEscape(normalizeDisplayModeName(data.displayMode)) << ",\n";
             f << "  \"desktop.display.primaryId\": " << jsonEscape(data.displayPrimaryDisplayId.empty() ? "display-1" : data.displayPrimaryDisplayId) << ",\n";
             f << "  \"desktop.display.arrangement\": " << jsonEscape(data.displayArrangement) << ",\n";
@@ -229,6 +253,7 @@ namespace gxos { namespace gui {
             f << "  \"desktop.clock.use24HourTime\": " << (data.use24HourTime ? "true" : "false") << ",\n";
             f << "  \"pinned\": ["; for(size_t i=0;i<data.pinned.size();++i){ if(i) f<<","; f<<jsonEscape(data.pinned[i]);} f << "],\n";
             f << "  \"pinnedAppIds\": ["; for(size_t i=0;i<data.pinned.size();++i){ if(i) f<<","; f<<jsonEscape(i < data.pinnedAppIds.size() ? data.pinnedAppIds[i] : std::string());} f << "],\n";
+            f << "  \"taskbarPinnedAppIds\": ["; for(size_t i=0;i<data.taskbarPinnedAppIds.size();++i){ if(i) f<<","; f<<jsonEscape(data.taskbarPinnedAppIds[i]);} f << "],\n";
             f << "  \"recent\": ["; for(size_t i=0;i<data.recent.size();++i){ if(i) f<<","; f<<jsonEscape(data.recent[i]);} f << "],\n";
             f << "  \"recentAppIds\": ["; for(size_t i=0;i<data.recent.size();++i){ if(i) f<<","; f<<jsonEscape(i < data.recentAppIds.size() ? data.recentAppIds[i] : std::string());} f << "],\n";
             f << "  \"desktopShortcuts\": [\n";
@@ -263,8 +288,25 @@ namespace gxos { namespace gui {
             f << "}\n";
             const std::string serialized = f.str();
             if (serialized.size() > kDesktopConfigMaxBytes) { err = "desktop config exceeds its byte limit"; return false; }
+            const std::string temporaryPath = path + ".taskbar-tmp";
             std::vector<uint8_t> bytes(serialized.begin(), serialized.end());
-            if (!FS::writeAll(path, bytes)) { err = "write fail"; return false; }
+            if (!FS::writeAll(temporaryPath, bytes)) {
+                FS::removeFile(temporaryPath);
+                err = "temporary write failed";
+                return false;
+            }
+            std::vector<uint8_t> verification;
+            const FSResult verifyResult = FS::readAll(temporaryPath, verification, kDesktopConfigMaxBytes);
+            if (!verifyResult.success || verification != bytes) {
+                FS::removeFile(temporaryPath);
+                err = "temporary desktop config verification failed";
+                return false;
+            }
+            if (!FS::renameFile(temporaryPath, path, true)) {
+                FS::removeFile(temporaryPath);
+                err = "atomic desktop config replacement failed";
+                return false;
+            }
             return true;
         }
     };

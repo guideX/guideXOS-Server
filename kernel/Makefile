@@ -3,20 +3,15 @@
 # Copyright (c) 2024 guideX
 #
 
-# Detect OS for cross-platform compatibility
-ifeq ($(OS),Windows_NT)
-    MKDIR = if not exist "$(subst /,\,$1)" mkdir "$(subst /,\,$1)"
-    RM = if exist "$(subst /,\,$1)" rmdir /s /q "$(subst /,\,$1)"
-else
-    MKDIR = mkdir -p $1
-    RM = rm -rf $1
-endif
-
 # Resolve repository paths from this Makefile rather than from the caller's
 # current directory.  The build wrappers invoke make from kernel/; absolute
 # dependency paths keep the profile checks independent of that wrapper detail.
 GUIDEXOS_KERNEL_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 GUIDEXOS_REPO_ROOT := $(abspath $(GUIDEXOS_KERNEL_DIR)/..)
+
+# Keep OS-specific directory commands separately testable without parsing the
+# full build graph (which correctly requires the pinned Mbed TLS dependency).
+include $(GUIDEXOS_KERNEL_DIR)/makefile-platform.mk
 
 # Detect architecture if not specified
 ifndef ARCH

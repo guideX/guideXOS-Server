@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include "../guideXOSBootLoader/paging.h"
+#include "../guideXOSBootLoader/guidexOSBootInfo.h"
 
 EFI_SYSTEM_TABLE* gST = nullptr;
 
@@ -21,7 +22,7 @@ static const uint64_t kKernelPhysicalBase = 0x190D9000ull;
 static const uint64_t kKernelSpanBytes = 0x22A92A60ull;
 static const uint64_t kRamdiskPhysicalBase = 0x150D9000ull;
 static const uint64_t kRamdiskLength = 0x04000000ull + 123u;
-static const uint64_t kRamdiskAlias = 0x0000400000000000ull;
+static const uint64_t kRamdiskAlias = guideXOS::GUIDEXOS_RAMDISK_ALIAS_BASE;
 static const uint64_t kIdentityBytes = 0x3C000000ull; // 960 MiB low identity map
 static const size_t kPageTableArenaBytes = 8u * 1024u * 1024u;
 
@@ -95,6 +96,98 @@ static void reset_arena()
     g_pageTableAllocationCount = 0;
 }
 
+static bool run_maprange_validation_case()
+{
+    reset_arena();
+
+    EFI_BOOT_SERVICES bootServices{};
+    bootServices.AllocatePages = &fake_allocate_pages;
+    EFI_SYSTEM_TABLE systemTable{};
+    systemTable.BootServices = &bootServices;
+
+    const EFI_PHYSICAL_ADDRESS ranges[] = {
+        0,
+        static_cast<EFI_PHYSICAL_ADDRESS>(
+            reinterpret_cast<uintptr_t>(g_pageTableArena))
+    };
+    const UINTN sizes[] = {
+        static_cast<UINTN>(kIdentityBytes),
+        static_cast<UINTN>(kPageTableArenaBytes)
+    };
+    guideXOS::paging::PageTables pageTables{};
+    EFI_STATUS status = guideXOS::paging::BuildIdentityPageTables(
+        &systemTable, ranges, ranges + 2, sizes, &pageTables);
+    if (EFI_ERROR(status)) {
+        std::printf("FAIL validation fixture page-table build status=0x%llx\n",
+                    static_cast<unsigned long long>(status));
+        return false;
+    }
+
+    const size_t allocationsBeforeInvalidCalls = g_pageTableAllocationCount;
+    const EFI_STATUS nonCanonical = guideXOS::paging::MapRange(
+        &systemTable, pageTables.Pml4Phys, 0x0000800000000000ull,
+        kRamdiskPhysicalBase, 0x1000u);
+    const EFI_STATUS overflowing = guideXOS::paging::MapRange(
+        &systemTable, pageTables.Pml4Phys, UINT64_MAX - 0x7FFu,
+        UINT64_MAX - 0x7FFu, 0x1000u);
+    const EFI_STATUS mismatchedOffsets = guideXOS::paging::MapRange(
+        &systemTable, pageTables.Pml4Phys, kRamdiskAlias + 1u,
+        kRamdiskPhysicalBase, 0x1000u);
+    if (nonCanonical != EFI_INVALID_PARAMETER ||
+        overflowing != EFI_INVALID_PARAMETER ||
+        mismatchedOffsets != EFI_INVALID_PARAMETER ||
+        g_pageTableAllocationCount != allocationsBeforeInvalidCalls) {
+        std::printf("FAIL invalid MapRange inputs were not rejected before allocation\n");
+        return false;
+    }
+
+    status = guideXOS::paging::MapRange(
+        &systemTable, pageTables.Pml4Phys, kRamdiskAlias,
+        kRamdiskPhysicalBase, static_cast<UINTN>(kPageSize));
+    if (EFI_ERROR(status)) {
+        std::printf("FAIL conflict fixture first mapping status=0x%llx\n",
+                    static_cast<unsigned long long>(status));
+        return false;
+    }
+    status = guideXOS::paging::MapRange(
+        &systemTable, pageTables.Pml4Phys, kRamdiskAlias + kPageSize,
+        kRamdiskPhysicalBase + 3u * kPageSize,
+        static_cast<UINTN>(kPageSize));
+    if (EFI_ERROR(status)) {
+        std::printf("FAIL conflict fixture second mapping status=0x%llx\n",
+                    static_cast<unsigned long long>(status));
+        return false;
+    }
+
+    const size_t allocationsBeforeConflict = g_pageTableAllocationCount;
+    status = guideXOS::paging::MapRange(
+        &systemTable, pageTables.Pml4Phys, kRamdiskAlias,
+        kRamdiskPhysicalBase, static_cast<UINTN>(3u * kPageSize));
+    uint64_t physical = 0u;
+    uint64_t leaf = 0u;
+    bool user = false;
+    const bool firstPreserved = walk_translation(
+        pageTables.Pml4Phys, kRamdiskAlias, &physical, &leaf, &user) &&
+        physical == kRamdiskPhysicalBase;
+    const bool conflictPreserved = walk_translation(
+        pageTables.Pml4Phys, kRamdiskAlias + kPageSize,
+        &physical, &leaf, &user) &&
+        physical == kRamdiskPhysicalBase + 3u * kPageSize;
+    const bool laterPageStillAbsent = !walk_translation(
+        pageTables.Pml4Phys, kRamdiskAlias + 2u * kPageSize,
+        &physical, &leaf, &user);
+    if (status != EFI_ACCESS_DENIED || !firstPreserved ||
+        !conflictPreserved || !laterPageStillAbsent ||
+        g_pageTableAllocationCount != allocationsBeforeConflict) {
+        std::printf("FAIL alias overlap was not rejected atomically (status=0x%llx)\n",
+                    static_cast<unsigned long long>(status));
+        return false;
+    }
+
+    std::printf("PASS MapRange rejects noncanonical, overflowing, misaligned, and conflicting alias ranges before mutation\n");
+    return true;
+}
+
 static bool run_alias_case(bool expectLegacyExhaustion)
 {
     reset_arena();
@@ -125,7 +218,7 @@ static bool run_alias_case(bool expectLegacyExhaustion)
 
     status = guideXOS::paging::MapRange(
         &systemTable, pageTables.Pml4Phys, kKernelVirtualBase,
-        kKernelPhysicalBase, static_cast<UINTN>(kKernelSpanBytes));
+        kKernelPhysicalBase, static_cast<UINTN>(kKernelSpanBytes), true);
     if (EFI_ERROR(status)) {
         std::printf("FAIL kernel image map status=0x%llx pages=%zu\n",
                     static_cast<unsigned long long>(status),
@@ -243,6 +336,7 @@ int main(int argc, char** argv)
         return 2;
     }
 
+    if (!expectLegacyExhaustion && !run_maprange_validation_case()) return 1;
     const bool passed = run_alias_case(expectLegacyExhaustion);
     return passed ? 0 : 1;
 }

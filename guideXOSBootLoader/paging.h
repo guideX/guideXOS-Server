@@ -49,7 +49,8 @@ namespace paging
         EFI_PHYSICAL_ADDRESS pml4Phys,
         UINT64 virtBase,
         EFI_PHYSICAL_ADDRESS physBase,
-        UINTN sizeBytes);
+        UINTN sizeBytes,
+        bool allowExistingMappingReplacement = false);
 
     // Identity-map all page table pages allocated so far.
     // MUST be called after MapRange() to ensure newly allocated PT pages are accessible.

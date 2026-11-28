@@ -50,6 +50,10 @@ Write-Host ("Building hosted test with {0}" -f $compiler.Source)
 if ($LASTEXITCODE -ne 0) { throw "FAT persistence test build failed with exit code $LASTEXITCODE." }
 
 Write-Host "Running actual FAT/VFS sources against a writable image copy."
+Write-Host "Preparing the disposable image copy with the hosted test fixture."
+& $executable --prepare-fixture $testImage
+if ($LASTEXITCODE -ne 0) { throw "FAT persistence fixture preparation failed with exit code $LASTEXITCODE." }
+
 & $executable $testImage
 if ($LASTEXITCODE -ne 0) { throw "FAT persistence test failed with exit code $LASTEXITCODE." }
 Write-Host ("Hosted FAT persistence test PASS. Image copy: {0}" -f $testImage)

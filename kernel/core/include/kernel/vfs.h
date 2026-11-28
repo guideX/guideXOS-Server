@@ -311,6 +311,10 @@ int64_t file_size(uint8_t handle);
 // Flush file buffers.
 Status flush(uint8_t handle);
 
+// Flush every mounted writable filesystem that supports an explicit sync.
+// The first failure is returned after all mounted FAT volumes have been tried.
+Status sync_all();
+
 // Get file handle info.
 const FileHandle* get_handle(uint8_t handle);
 

@@ -13,6 +13,8 @@
 
 #include "kernel/types.h"
 #include "kernel/kernel_app.h"
+#include "../../../../taskbar_application_model_core.h"
+#include "../../../../taskbar_customization_core.h"
 
 namespace kernel {
 namespace compositor {
@@ -218,15 +220,40 @@ private:
 
 struct TaskbarButton {
     uint32_t windowId;
+    char appId[app::MAX_APP_ID];
     char title[app::MAX_TITLE_LEN];
+    uint32_t windowIds[MAX_WINDOWS];
+    char windowTitles[MAX_WINDOWS][app::MAX_TITLE_LEN];
+    uint32_t iconColor;
+    int windowCount;
+    bool pinned;
+    bool relaunchable;
+    bool missingApplication;
+    bool running;
+    bool minimized;
     bool active;
     bool hover;
+    bool overflowEntry;
+    gxos::gui::TaskbarActivity activity;
     int x, y, w, h;
     
-    TaskbarButton() : windowId(0), active(false), hover(false),
+    TaskbarButton() : windowId(0), iconColor(0xFF4690C8), windowCount(0),
+                      pinned(false), relaunchable(false), missingApplication(false),
+                      running(false), minimized(false), active(false), hover(false), overflowEntry(false),
                       x(0), y(0), w(0), h(0) {
+        appId[0] = '\0';
         title[0] = '\0';
+        for (int i = 0; i < MAX_WINDOWS; ++i) {
+            windowIds[i] = 0;
+            windowTitles[i][0] = '\0';
+        }
     }
+};
+
+enum class TaskbarPinPersistenceState : uint8_t {
+    Ready,
+    Unsupported,
+    StorageFailure
 };
 
 class TaskbarManager {
@@ -234,14 +261,34 @@ public:
     static void init(uint32_t screenW, uint32_t screenH, uint32_t taskbarH, uint32_t startX);
     static void setLayout(uint32_t taskbarX, uint32_t taskbarY, uint32_t taskbarW, uint32_t taskbarH,
                           bool vertical, uint32_t buttonStartX, uint32_t buttonStartY);
+    static void setPresentation(gxos::gui::TaskbarSizeMode size, bool showLabels,
+                                bool showActivity, bool showPreviews, bool taskbarVisible);
     static void updateButtons();
     static void drawButtons();
     static bool handleClick(int32_t mx, int32_t my);
     static void updateHover(int32_t mx, int32_t my);
+    static bool handlePointerDown(int32_t mx, int32_t my, uint8_t button);
+    static bool handleKeyDown(uint32_t keyCode);
+    static bool handleMenuHover(int32_t mx, int32_t my);
+    static bool handleWheel(int32_t mx, int32_t my, int8_t wheelDelta);
+    static bool setActivity(const char* appId, uint32_t windowId,
+                            gxos::gui::TaskbarProgressState progress, uint8_t percent, bool attention);
+    static bool clearActivity(const char* appId, uint32_t windowId);
+    static void acknowledgeActivity(const char* appId, uint32_t windowId);
+    static bool beginFileOperationActivity(uint32_t ownerWindowId);
+    static bool updateFileOperationActivity(gxos::gui::TaskbarProgressState progress, uint8_t percent);
+    static void endFileOperationActivity(uint32_t ownerWindowId);
+    static bool menuVisible();
+    static bool menuContainsPoint(int32_t mx, int32_t my);
+    static bool isTaskbarButtonAt(int32_t mx, int32_t my);
+    static void closeMenu();
     
 private:
-    static const int MAX_TASKBAR_BUTTONS = 8;
-    static TaskbarButton s_buttons[MAX_TASKBAR_BUTTONS];
+    static const int MAX_TASKBAR_PINS = 8;
+    static const int MAX_TASKBAR_BUTTONS = MAX_WINDOWS + MAX_TASKBAR_PINS;
+    static const int MAX_TASKBAR_DISPLAY_BUTTONS = MAX_TASKBAR_BUTTONS + 1;
+    static const int MAX_TASKBAR_MENU_ITEMS = MAX_WINDOWS + 8;
+    static TaskbarButton s_buttons[MAX_TASKBAR_DISPLAY_BUTTONS];
     static int s_buttonCount;
     static uint32_t s_screenW;
     static uint32_t s_screenH;
@@ -251,7 +298,79 @@ private:
     static uint32_t s_taskbarY;
     static uint32_t s_taskbarW;
     static bool s_vertical;
+    static gxos::gui::TaskbarSizeMode s_sizeMode;
+    static bool s_showLabels;
+    static bool s_showActivity;
+    static bool s_showPreviews;
+    static bool s_taskbarVisible;
     static uint32_t s_startY;
+    static int32_t s_mouseX;
+    static int32_t s_mouseY;
+    static char s_pinnedAppIds[MAX_TASKBAR_PINS][app::MAX_APP_ID];
+    static int s_pinCount;
+    static TaskbarPinPersistenceState s_pinPersistence;
+    static gxos::gui::TaskbarPinStoreLoadGate s_pinLoadGate;
+    static bool s_pinStoreCorrupt;
+    static gxos::gui::TaskbarActivityStore s_activityStore;
+    static uint32_t s_fileOperationOwnerWindowId;
+    static int s_visibleButtonCount;
+    static int s_overflowFirstIndex;
+    static int s_previewButtonIndex;
+    static uint32_t s_previewWindowIds[4];
+    static int s_previewWindowCount;
+    static int s_previewX, s_previewY, s_previewW, s_previewH;
+    static int s_previewCardX[4], s_previewCardY[4], s_previewCardW[4], s_previewCardH[4];
+
+    enum class MenuCommand : uint8_t {
+        None,
+        ActivateWindow,
+        MinimizeWindow,
+        ToggleMaximizeWindow,
+        CloseWindow,
+        CloseAllWindows,
+        PinApp,
+        UnpinApp,
+        LaunchApp,
+        SelectOverflowEntry
+    };
+
+    struct MenuItem {
+        char label[64];
+        uint32_t windowId;
+        char appId[app::MAX_APP_ID];
+        MenuCommand command;
+        bool enabled;
+    };
+
+    static MenuItem s_menuItems[MAX_TASKBAR_MENU_ITEMS];
+    static int s_menuItemCount;
+    static int s_menuHover;
+    static int s_menuScroll;
+    static int s_menuX;
+    static int s_menuY;
+    static int s_menuW;
+    static int s_menuH;
+    static bool s_menuOpen;
+    static char s_menuAppId[app::MAX_APP_ID];
+
+    static void loadPinnedApplications();
+    static void ensurePinnedApplicationsLoaded();
+    static bool savePinnedApplications();
+    static bool pinApplication(const char* appId);
+    static bool unpinApplication(const char* appId);
+    static void openMenuForButton(int buttonIndex, int32_t mx, int32_t my);
+    static void openOverflowMenu(int32_t mx, int32_t my);
+    static void updatePreviewLayout();
+    static bool previewContainsPoint(int32_t mx, int32_t my);
+    static int previewCardAt(int32_t mx, int32_t my);
+    static void closePreview();
+    static void appendMenuItem(const char* label, MenuCommand command, uint32_t windowId = 0, bool enabled = true);
+    static void layoutMenu(int32_t anchorX, int32_t anchorY);
+    static int menuVisibleRowCount();
+    static int menuItemAt(int32_t mx, int32_t my);
+    static void dispatchMenuItem(int index);
+    static void activateWindow(uint32_t windowId);
+    static int findButtonAt(int32_t mx, int32_t my);
 };
 
 } // namespace compositor

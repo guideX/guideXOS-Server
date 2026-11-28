@@ -18,6 +18,7 @@
 #include "include/kernel/pci_audio.h"
 #include "include/kernel/app_audio_stream.h"
 #include "include/kernel/native_present_validation.h"
+#include "../../taskbar_application_model_core.h"
 
 #include "bitmap_font.h"
 #include "sdk/include/guidexos/abi.h"
@@ -85,6 +86,7 @@ public:
     }
 
     bool init() override { return true; }
+    bool bindTrustedApplicationIdentity();
 
     void shutdown() override {
         m_closed = true;
@@ -331,6 +333,7 @@ private:
 struct Runtime {
     Package* package;
     NativeWindowOwner* owner;
+    char trustedAppId[app::MAX_APP_ID];
     gx_app_context context;
     gx_host_calls host;
     uint8_t* verifiedElf;
@@ -367,6 +370,15 @@ struct Runtime {
     // (StopOwner) reclaims exactly this app's sounds.
     uint64_t audioOwner;
 };
+
+bool NativeWindowOwner::bindTrustedApplicationIdentity() {
+    if (!m_runtime || !m_runtime->package ||
+        !gxos::gui::MatchesTrustedTaskbarAppIdentity(
+            m_runtime->trustedAppId, m_runtime->package->id, app::MAX_APP_ID)) {
+        return false;
+    }
+    return bindRuntimeAppIdFromTrustedLaunch(m_runtime->trustedAppId);
+}
 
 void NativeWindowOwner::record_frame_guard_failure() {
     if (m_runtime) ++m_runtime->frameGuardFailures;
@@ -818,6 +830,7 @@ static bool parse_package(const char* directory, Package* package) {
         !json_string(s_manifest, "\"runtime\"", runtime, sizeof(runtime)) ||
         !text_equal(runtime, "native-elf")) return false;
     if (!json_string(s_manifest, "\"id\"", package->id, sizeof(package->id)) ||
+        !gxos::gui::IsSafeTaskbarAppIdentity(package->id, app::MAX_APP_ID) ||
         !json_string(s_manifest, "\"displayName\"", package->displayName, sizeof(package->displayName)) ||
         !json_string(s_manifest, "\"architecture\"", architecture, sizeof(architecture)) ||
         !text_equal(architecture, "amd64") ||
@@ -1274,6 +1287,16 @@ static Package* find_package(const char* appName) {
     return nullptr;
 }
 
+static Package* find_package_by_id(const char* appId) {
+    if (!gxos::gui::IsSafeTaskbarAppIdentity(appId, app::MAX_APP_ID)) return nullptr;
+    for (uint32_t i = 0; i < s_packageCount; ++i) {
+        Package* package = &s_packages[i];
+        if (package->valid &&
+            gxos::gui::SameCanonicalTaskbarAppIdentity(appId, package->id)) return package;
+    }
+    return nullptr;
+}
+
 bool is_available(const char* appName) {
     if (!s_discovered) discover();
     return find_package(appName) != nullptr;
@@ -1286,6 +1309,15 @@ const PackageInfo* lookup_package(const char* appName) {
 
 const PackageInfo* registered_package(const char* appName) {
     return find_package(appName);
+}
+
+const PackageInfo* lookup_package_by_id(const char* appId) {
+    if (!s_discovered) discover();
+    return find_package_by_id(appId);
+}
+
+const PackageInfo* registered_package_by_id(const char* appId) {
+    return find_package_by_id(appId);
 }
 
 uint32_t package_count() {
@@ -1877,7 +1909,8 @@ static gx_result GX_CALL host_request_window_ex(gx_app_context* context, const c
         return GX_ERROR_UNSUPPORTED;
     }
     runtime->owner = new NativeWindowOwner(runtime);
-    if (!runtime->owner || !runtime->owner->create(title, width, height, flags)) {
+    if (!runtime->owner || !runtime->owner->bindTrustedApplicationIdentity() ||
+        !runtime->owner->create(title, width, height, flags)) {
         if (runtime->owner) delete runtime->owner;
         runtime->owner = nullptr;
         abi_complete(runtime, NativeAbiOperation::CreateWindow);
@@ -2647,6 +2680,10 @@ static void initialize_host_table(Runtime* runtime) {
 static bool run_package(Package* package) {
     Runtime runtime{};
     runtime.package = package;
+    if (!package || !gxos::gui::IsSafeTaskbarAppIdentity(package->id, app::MAX_APP_ID) ||
+        !text_copy(runtime.trustedAppId, sizeof(runtime.trustedAppId), package->id)) {
+        return false;
+    }
     runtime.exitCode = GX_OK;
     ++s_runtimeSequence;
     runtime.audioOwner = s_runtimeSequence;
@@ -2762,10 +2799,8 @@ static bool run_package(Package* package) {
     return result == GX_OK;
 }
 
-bool launch(const char* appName) {
+static bool launch_package(Package* package) {
     if (s_launchInProgress) return false;
-    if (!s_discovered) discover();
-    Package* package = find_package(appName);
     if (!package) {
 #if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
         log_security_reject("package-not-authorized-or-not-discovered");
@@ -2782,6 +2817,22 @@ bool launch(const char* appName) {
     const bool result = run_package(package);
     s_launchInProgress = false;
     return result;
+}
+
+bool launch(const char* appName) {
+    if (!s_discovered) discover();
+    return launch_package(find_package(appName));
+}
+
+bool launch_by_id(const char* appId) {
+    if (!s_discovered) discover();
+    if (!gxos::gui::IsSafeTaskbarAppIdentity(appId, app::MAX_APP_ID)) return false;
+    Package* package = find_package_by_id(appId);
+    if (!package || !gxos::gui::MatchesTrustedTaskbarAppIdentity(
+            appId, package->id, app::MAX_APP_ID)) {
+        return false;
+    }
+    return launch_package(package);
 }
 
 // Kernel slide base for audio DMA translation (see audio_virt_to_phys).
@@ -2855,9 +2906,12 @@ void app_audio_app_proof() {
 void log_apps_lifecycle_checkpoint(AppsLifecycleCheckpoint, bool, bool, uint32_t) {}
 void discover() {}
 bool launch(const char*) { return false; }
+bool launch_by_id(const char*) { return false; }
 bool is_available(const char*) { return false; }
 const PackageInfo* lookup_package(const char*) { return nullptr; }
 const PackageInfo* registered_package(const char*) { return nullptr; }
+const PackageInfo* lookup_package_by_id(const char*) { return nullptr; }
+const PackageInfo* registered_package_by_id(const char*) { return nullptr; }
 uint32_t package_count() { return 0; }
 const PackageInfo* package_at(uint32_t) { return nullptr; }
 void app_audio_pump() {}

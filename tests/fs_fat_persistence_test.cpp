@@ -5,6 +5,7 @@
 #include "kernel/vfs.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -17,7 +18,10 @@ constexpr uint32_t kSectorSize = 512;
 std::fstream g_image;
 uint64_t g_sectorCount = 0;
 uint64_t g_writesUntilFailure = UINT64_MAX;
-bool g_failFlush = false;
+uint64_t g_failWriteLba = UINT64_MAX;
+uint32_t g_failWriteLbaMatchesRemaining = UINT32_MAX;
+uint32_t g_flushFailuresRemaining = 0;
+kernel::block::Status g_flushFailureStatus = kernel::block::BLOCK_ERR_IO;
 uint32_t g_fatStart = 0;
 uint32_t g_fatSectors = 0;
 uint8_t g_fatCopies = 0;
@@ -93,6 +97,14 @@ kernel::block::Status image_write(uint8_t, uint64_t lba, uint32_t count, const v
     if (!input || !count || lba > g_sectorCount || count > g_sectorCount - lba) {
         return kernel::block::BLOCK_ERR_INVALID;
     }
+    if (lba == g_failWriteLba && g_failWriteLbaMatchesRemaining != UINT32_MAX) {
+        if (g_failWriteLbaMatchesRemaining == 0u) {
+            g_failWriteLba = UINT64_MAX;
+            g_failWriteLbaMatchesRemaining = UINT32_MAX;
+            return kernel::block::BLOCK_ERR_IO;
+        }
+        --g_failWriteLbaMatchesRemaining;
+    }
     if (g_writesUntilFailure == 0) return kernel::block::BLOCK_ERR_IO;
     if (g_writesUntilFailure != UINT64_MAX) --g_writesUntilFailure;
     g_image.clear();
@@ -108,7 +120,10 @@ kernel::block::Status refuse_full_fat_write(uint8_t, uint64_t, uint32_t, const v
 
 kernel::block::Status image_flush(uint8_t)
 {
-    if (g_failFlush) return kernel::block::BLOCK_ERR_IO;
+    if (g_flushFailuresRemaining != 0u) {
+        --g_flushFailuresRemaining;
+        return g_flushFailureStatus;
+    }
     g_image.flush();
     return g_image.good() ? kernel::block::BLOCK_OK : kernel::block::BLOCK_ERR_IO;
 }
@@ -191,6 +206,137 @@ bool read_equals(const char* path, const std::vector<uint8_t>& expected)
     return count == static_cast<int32_t>(expected.size()) &&
         std::equal(expected.begin(), expected.end(), actual.begin());
 }
+
+bool read_fat32_entry(const kernel::fs_fat::FATVolume& volume, uint32_t cluster,
+                      uint32_t copy, uint32_t* value)
+{
+    if (!value || volume.type != kernel::fs_fat::FAT_TYPE_FAT32 ||
+        volume.bytesPerSector != kSectorSize || copy >= volume.numFATs) return false;
+    const uint32_t byteOffset = cluster * 4u;
+    const uint32_t sectorOffset = byteOffset / volume.bytesPerSector;
+    const uint32_t entryOffset = byteOffset % volume.bytesPerSector;
+    if (sectorOffset >= volume.fatSizeSectors) return false;
+    const uint64_t relativeLba = volume.reservedSectors +
+        static_cast<uint64_t>(copy) * volume.fatSizeSectors + sectorOffset;
+    uint8_t sector[kSectorSize];
+    if (kernel::block::read_sectors(volume.blockDevIndex,
+            volume.partitionOffset + relativeLba, 1, sector) != kernel::block::BLOCK_OK) {
+        return false;
+    }
+    *value = read_le32(sector + entryOffset) & 0x0FFFFFFFu;
+    return true;
+}
+
+bool find_free_fat32_cluster(const kernel::fs_fat::FATVolume& volume,
+                             uint32_t start, uint32_t* cluster)
+{
+    if (!cluster || volume.type != kernel::fs_fat::FAT_TYPE_FAT32 ||
+        volume.totalDataClusters == 0) return false;
+    const uint32_t first = start >= 2u && start - 2u < volume.totalDataClusters ? start : 2u;
+    for (uint32_t scan = 0; scan < volume.totalDataClusters; ++scan) {
+        const uint32_t candidate = static_cast<uint32_t>(
+            (static_cast<uint64_t>(first - 2u) + scan) % volume.totalDataClusters + 2u);
+        uint32_t value = 0;
+        if (!read_fat32_entry(volume, candidate, 0, &value)) return false;
+        if (value == 0) {
+            *cluster = candidate;
+            return true;
+        }
+    }
+    return false;
+}
+
+uint64_t fat32_entry_sector_lba(const kernel::fs_fat::FATVolume& volume,
+                                uint32_t cluster, uint32_t copy)
+{
+    const uint32_t sectorOffset = (cluster * 4u) / volume.bytesPerSector;
+    return volume.partitionOffset + volume.reservedSectors +
+        static_cast<uint64_t>(copy) * volume.fatSizeSectors + sectorOffset;
+}
+
+bool fill_directory_cluster(const char* path, uint32_t slots, const char* label)
+{
+    if (kernel::vfs::mkdir(path) != kernel::vfs::VFS_OK) return false;
+    for (uint32_t index = 0; index < slots; ++index) {
+        char childPath[96];
+        char fileName[16];
+        std::snprintf(fileName, sizeof(fileName), "F%07u.TXT", index);
+        std::snprintf(childPath, sizeof(childPath), "%s/%s", path, fileName);
+        if (kernel::vfs::create_file(childPath, label, 1u) != 1) return false;
+    }
+    return true;
+}
+
+uint8_t fat_lfn_checksum(const char shortName[11])
+{
+    uint8_t checksum = 0;
+    for (uint32_t index = 0; index < 11; ++index) {
+        const uint8_t byte = static_cast<uint8_t>(shortName[index]);
+        checksum = static_cast<uint8_t>(((checksum & 1u) ? 0x80u : 0u) +
+            (checksum >> 1) + byte);
+    }
+    return checksum;
+}
+
+bool insert_lfn_at_root_end(const char* longName, const char shortName[11])
+{
+    const kernel::vfs::MountPoint* mount = kernel::vfs::get_mount("/Documents");
+    if (!mount) return false;
+    const kernel::fs_fat::FATVolume* volume =
+        kernel::fs_fat::get_volume(mount->fsVolumeIndex);
+    if (!volume || volume->type != kernel::fs_fat::FAT_TYPE_FAT32 ||
+        volume->bytesPerSector != kSectorSize || volume->rootCluster < 2u ||
+        !longName || !shortName) {
+        return false;
+    }
+
+    const size_t nameLength = std::strlen(longName);
+    if (nameLength == 0 || nameLength > 12u) return false;
+    uint8_t sector[kSectorSize];
+    uint32_t cluster = volume->rootCluster;
+    for (uint32_t step = 0; step < volume->totalDataClusters; ++step) {
+        const uint64_t clusterSector = volume->partitionOffset + volume->firstDataSector +
+            static_cast<uint64_t>(cluster - 2u) * volume->sectorsPerCluster;
+        for (uint32_t sectorInCluster = 0;
+             sectorInCluster < volume->sectorsPerCluster; ++sectorInCluster) {
+            const uint64_t lba = clusterSector + sectorInCluster;
+            if (kernel::block::read_sectors(volume->blockDevIndex, lba, 1, sector) !=
+                kernel::block::BLOCK_OK) {
+                return false;
+            }
+            for (uint32_t offset = 0; offset + sizeof(kernel::fs_fat::FAT32_LFNEntry) <=
+                 sizeof(sector); offset += sizeof(kernel::fs_fat::FAT32_DirEntry)) {
+                if (sector[offset] != 0x00u) continue;
+
+                kernel::fs_fat::FAT32_LFNEntry entry{};
+                entry.order = 0x41u;
+                entry.attr = kernel::fs_fat::ATTR_LFN;
+                entry.type = 0;
+                entry.checksum = fat_lfn_checksum(shortName);
+                entry.firstClusterLo = 0;
+                uint16_t characters[13];
+                for (uint32_t index = 0; index < 13; ++index) characters[index] = 0xFFFFu;
+                for (size_t index = 0; index < nameLength; ++index) {
+                    characters[index] = static_cast<uint8_t>(longName[index]);
+                }
+                if (nameLength < 13u) characters[nameLength] = 0;
+                for (uint32_t index = 0; index < 5; ++index) entry.name1[index] = characters[index];
+                for (uint32_t index = 0; index < 6; ++index) entry.name2[index] = characters[index + 5];
+                for (uint32_t index = 0; index < 2; ++index) entry.name3[index] = characters[index + 11];
+                std::memcpy(sector + offset, &entry, sizeof(entry));
+                return kernel::block::write_sectors(volume->blockDevIndex, lba, 1, sector) ==
+                        kernel::block::BLOCK_OK &&
+                    kernel::block::flush(volume->blockDevIndex) == kernel::block::BLOCK_OK;
+            }
+        }
+        uint32_t next = 0;
+        if (!read_fat32_entry(*volume, cluster, 0, &next) || next >= 0x0FFFFFF8u || next < 2u) {
+            return false;
+        }
+        cluster = next;
+    }
+    return false;
+}
 }
 
 namespace kernel {
@@ -210,8 +356,40 @@ bool read_dir(uint8_t, Ext4DirEntry*) { return false; }
 
 int main(int argc, char** argv)
 {
+    if (argc == 3 && std::string(argv[1]) == "--prepare-fixture") {
+        if (!setup_device(argv[2])) {
+            std::cerr << "Could not open a writable, sector-aligned image copy.\n";
+            return 2;
+        }
+        kernel::vfs::init();
+        if (kernel::vfs::mount_type("/Documents", 0,
+                                    kernel::vfs::FS_TYPE_FAT32) == 0xFF) {
+            std::cerr << "Could not mount fixture at /Documents.\n";
+            return 2;
+        }
+        kernel::vfs::FileInfo info{};
+        if (kernel::vfs::stat("/Documents/APPDATA", &info) ==
+                kernel::vfs::VFS_ERR_NOT_FOUND &&
+            kernel::vfs::mkdir("/Documents/APPDATA") != kernel::vfs::VFS_OK) {
+            std::cerr << "Could not create fixture APPDATA directory.\n";
+            return 2;
+        }
+        if (kernel::vfs::stat("/Documents/UNTITLED.TXT", &info) ==
+                kernel::vfs::VFS_ERR_NOT_FOUND) {
+            static const char document[] = "Hosted FAT persistence fixture.\n";
+            if (kernel::vfs::create_file("/Documents/UNTITLED.TXT", document,
+                    static_cast<uint32_t>(sizeof(document) - 1u)) !=
+                    static_cast<int32_t>(sizeof(document) - 1u)) {
+                std::cerr << "Could not create fixture Notepad document.\n";
+                return 2;
+            }
+        }
+        std::cout << "Prepared writable FAT32 fixture with APPDATA and UNTITLED.TXT.\n";
+        return 0;
+    }
     if (argc != 2) {
-        std::cerr << "usage: fs_fat_persistence_test <writable-image-copy>\n";
+        std::cerr << "usage: fs_fat_persistence_test <writable-image-copy>\n"
+                  << "   or: fs_fat_persistence_test --prepare-fixture <writable-image-copy>\n";
         return 2;
     }
     if (!setup_device(argv[1])) {
@@ -341,6 +519,119 @@ int main(int argc, char** argv)
     check(kernel::vfs::unmount("/AppData") == kernel::vfs::VFS_OK,
           "AppData settings alias releases before the broader VFS teardown checks");
 
+    const char lfnTestShortName[11] = {'L','F','N','T','E','S','T',' ','T','M','P'};
+    check(insert_lfn_at_root_end("lfntest.tmp", lfnTestShortName),
+          "install a checksum-valid LFN entry before the root-directory end marker");
+    const char lfnRenameContents[] = "rename keeps the current long name valid";
+    const int32_t lfnRenameSize = static_cast<int32_t>(sizeof(lfnRenameContents) - 1u);
+    check(kernel::vfs::create_file("/Documents/LFNTEST.TMP", lfnRenameContents,
+                                   static_cast<uint32_t>(lfnRenameSize)) == lfnRenameSize &&
+              kernel::vfs::stat("/Documents/lfntest.tmp", &info) == kernel::vfs::VFS_OK,
+          "create and resolve a file through its checksum-valid long filename");
+    check(kernel::vfs::rename("/Documents/lfntest.tmp", "/Documents/renamed.tmp") ==
+              kernel::vfs::VFS_OK,
+          "same-directory rename updates the LFN text and short-name checksum together");
+    check(kernel::vfs::stat("/Documents/lfntest.tmp", &info) ==
+              kernel::vfs::VFS_ERR_NOT_FOUND &&
+              kernel::vfs::stat("/Documents/renamed.tmp", &info) == kernel::vfs::VFS_OK &&
+              info.size == static_cast<uint64_t>(lfnRenameSize),
+          "renamed entry rejects its old long name and resolves its new long name");
+    check(kernel::vfs::read_file("/Documents/renamed.tmp", savedDocumentAfter,
+                                 static_cast<uint32_t>(sizeof(savedDocumentAfter))) ==
+              lfnRenameSize &&
+              std::memcmp(savedDocumentAfter, lfnRenameContents,
+                          static_cast<size_t>(lfnRenameSize)) == 0,
+          "renamed LFN-backed file retains its original bytes");
+    const uint8_t renamedDirectory = kernel::vfs::opendir("/Documents");
+    bool sawOldLongName = false;
+    bool sawNewLongName = false;
+    if (renamedDirectory != 0xFF) {
+        kernel::vfs::DirEntry entry{};
+        while (kernel::vfs::readdir(renamedDirectory, &entry)) {
+            if (std::string(entry.name) == "lfntest.tmp") sawOldLongName = true;
+            if (std::string(entry.name) == "renamed.tmp") sawNewLongName = true;
+        }
+        kernel::vfs::closedir(renamedDirectory);
+    }
+    check(renamedDirectory != 0xFF && !sawOldLongName && sawNewLongName,
+          "directory enumeration shows the renamed LFN without the old name");
+    check(kernel::vfs::unlink("/Documents/renamed.tmp") == kernel::vfs::VFS_OK &&
+              kernel::vfs::stat("/Documents/renamed.tmp", &info) ==
+                  kernel::vfs::VFS_ERR_NOT_FOUND &&
+              kernel::vfs::stat("/Documents/lfntest.tmp", &info) ==
+                  kernel::vfs::VFS_ERR_NOT_FOUND,
+          "unlink removes the short entry and its associated long-name records");
+
+    const char staleLfnName[] = "stalex.tmp";
+    const char staleLfnChecksumName[11] = {'O','T','H','E','R',' ',' ',' ','T','M','P'};
+    const char staleLfnContents[] = "stale LFN checksum fixture";
+    const int32_t staleLfnSize = static_cast<int32_t>(sizeof(staleLfnContents) - 1u);
+    check(insert_lfn_at_root_end(staleLfnName, staleLfnChecksumName) &&
+              kernel::vfs::create_file("/Documents/STALE.TMP", staleLfnContents,
+                  static_cast<uint32_t>(staleLfnSize)) == staleLfnSize &&
+              kernel::vfs::stat("/Documents/stalex.tmp", &info) ==
+                  kernel::vfs::VFS_ERR_NOT_FOUND &&
+              kernel::vfs::stat("/Documents/STALE.TMP", &info) == kernel::vfs::VFS_OK,
+          "checksum-mismatched LFN is ignored while its short-name entry remains addressable");
+    check(kernel::vfs::rename("/Documents/STALE.TMP", "/Documents/renamed2.tmp") ==
+              kernel::vfs::VFS_OK,
+          "rename through a short name does not depend on a stale LFN association");
+    const uint8_t staleLfnDirectory = kernel::vfs::opendir("/Documents");
+    bool sawRenamedShortName = false;
+    bool sawStaleLongName = false;
+    if (staleLfnDirectory != 0xFF) {
+        kernel::vfs::DirEntry entry{};
+        while (kernel::vfs::readdir(staleLfnDirectory, &entry)) {
+            if (std::string(entry.name) == "RENAMED2.TMP") sawRenamedShortName = true;
+            if (std::string(entry.name) == staleLfnName) sawStaleLongName = true;
+        }
+        kernel::vfs::closedir(staleLfnDirectory);
+    }
+    check(staleLfnDirectory != 0xFF && sawRenamedShortName && !sawStaleLongName,
+          "rename ignores the checksum-mismatched LFN for directory enumeration");
+    check(kernel::vfs::unlink("/Documents/renamed2.tmp") == kernel::vfs::VFS_OK &&
+              kernel::vfs::stat("/Documents/renamed2.tmp", &info) ==
+                  kernel::vfs::VFS_ERR_NOT_FOUND &&
+              kernel::vfs::stat("/Documents/stalex.tmp", &info) ==
+                  kernel::vfs::VFS_ERR_NOT_FOUND,
+          "delete through a short name leaves no resolvable stale long-name alias");
+
+    static const char renameRollbackContents[] = "preserve settings before retry";
+    const int32_t renameRollbackSize =
+        static_cast<int32_t>(sizeof(renameRollbackContents) - 1u);
+    check(kernel::vfs::create_file("/Documents/RETRY.TMP", renameRollbackContents,
+                                   static_cast<uint32_t>(renameRollbackSize)) ==
+              renameRollbackSize,
+          "create a settings-like file before an injected rename flush failure");
+    g_flushFailureStatus = kernel::block::BLOCK_ERR_TIMEOUT;
+    g_flushFailuresRemaining = 1;
+    const kernel::vfs::Status renameFlushFailure = kernel::vfs::rename(
+        "/Documents/RETRY.TMP", "/Documents/RETRY.NEW");
+    g_flushFailuresRemaining = 0;
+    (void)image_flush(0);
+    check(renameFlushFailure == kernel::vfs::VFS_ERR_IO_TIMEOUT &&
+              kernel::fs_fat::last_io_status() == kernel::block::BLOCK_ERR_TIMEOUT,
+          "rename preserves the original flush timeout after a successful rollback");
+    char renameRollbackReadback[64]{};
+    check(kernel::vfs::stat("/Documents/RETRY.TMP", &info) == kernel::vfs::VFS_OK &&
+              info.size == static_cast<uint64_t>(renameRollbackSize) &&
+              kernel::vfs::stat("/Documents/RETRY.NEW", &info) ==
+                  kernel::vfs::VFS_ERR_NOT_FOUND &&
+              kernel::vfs::read_file("/Documents/RETRY.TMP", renameRollbackReadback,
+                                     sizeof(renameRollbackReadback)) == renameRollbackSize &&
+              std::memcmp(renameRollbackReadback, renameRollbackContents,
+                          static_cast<size_t>(renameRollbackSize)) == 0,
+          "failed rename preserves the original settings file and bytes for retry");
+    g_flushFailureStatus = kernel::block::BLOCK_ERR_IO;
+    check(kernel::vfs::rename("/Documents/RETRY.TMP", "/Documents/RETRY.NEW") ==
+              kernel::vfs::VFS_OK &&
+              kernel::vfs::stat("/Documents/RETRY.NEW", &info) == kernel::vfs::VFS_OK &&
+              kernel::vfs::stat("/Documents/RETRY.TMP", &info) ==
+                  kernel::vfs::VFS_ERR_NOT_FOUND,
+          "the settings-like rename succeeds after the transient flush fault clears");
+    check(kernel::vfs::unlink("/Documents/RETRY.NEW") == kernel::vfs::VFS_OK,
+          "remove the settings rename retry fixture after requalification");
+
     check(kernel::vfs::mkdir("/Documents/NOTES") == kernel::vfs::VFS_OK,
           "create a supported 8.3 document directory");
     check(kernel::vfs::stat("/Documents/NOTES", &info) == kernel::vfs::VFS_OK &&
@@ -376,6 +667,112 @@ int main(int argc, char** argv)
                                  static_cast<uint32_t>(payload.size())) == 26 &&
               std::memcmp(payload.data(), "short replacement appended", 26) == 0,
           "appended content is readable in the expected order");
+
+    check(kernel::vfs::create_file("/Documents/ABCDEFGH.TXT", "8.3 boundary", 12) == 12 &&
+              kernel::vfs::stat("/Documents/ABCDEFGH.TXT", &info) == kernel::vfs::VFS_OK &&
+              kernel::vfs::unlink("/Documents/ABCDEFGH.TXT") == kernel::vfs::VFS_OK,
+          "accept a legal eight-character base and three-character extension");
+    check(kernel::vfs::create_file("/Documents/ABCDEFGH", "base only", 9) == 9 &&
+              kernel::vfs::unlink("/Documents/ABCDEFGH") == kernel::vfs::VFS_OK,
+          "accept the eight-character filename boundary without an extension");
+    check(kernel::vfs::mkdir("/Documents/DOCS") == kernel::vfs::VFS_OK &&
+              kernel::vfs::stat("/Documents/DOCS", &info) == kernel::vfs::VFS_OK &&
+              info.type == kernel::vfs::FILE_TYPE_DIRECTORY &&
+              kernel::vfs::rmdir("/Documents/DOCS") == kernel::vfs::VFS_OK,
+          "create and remove the supported short-name Documents backing directory");
+    const int32_t invalidNameStatus = kernel::vfs::create_file(
+        "/Documents/ABCDEFGHI.TXT", "invalid", 7);
+    check(invalidNameStatus == kernel::vfs::VFS_ERR_INVALID &&
+              kernel::vfs::last_open_status() == kernel::vfs::VFS_ERR_INVALID,
+          "reject a nine-character base and preserve the invalid-name status");
+    check(kernel::vfs::create_file("/Documents/FILE.TOOLONG", "invalid", 7) ==
+              kernel::vfs::VFS_ERR_INVALID &&
+              kernel::vfs::create_file("/Documents/DOUBLE.DOT.TXT", "invalid", 7) ==
+              kernel::vfs::VFS_ERR_INVALID &&
+              kernel::vfs::create_file("/Documents/TRAIL.", "invalid", 7) ==
+              kernel::vfs::VFS_ERR_INVALID &&
+              kernel::vfs::create_file("/Documents/.HIDDEN", "invalid", 7) ==
+              kernel::vfs::VFS_ERR_INVALID,
+          "reject overlong extensions, multiple dots, trailing dots, and leading dots");
+    check(kernel::vfs::create_file("/Documents/BAD:NAME.TXT", "invalid", 7) ==
+              kernel::vfs::VFS_ERR_INVALID &&
+              kernel::vfs::create_file("/Documents/BAD?NAME.TXT", "invalid", 7) ==
+              kernel::vfs::VFS_ERR_INVALID &&
+              kernel::vfs::create_file("/Documents/BAD\\NAME.TXT", "invalid", 7) ==
+              kernel::vfs::VFS_ERR_INVALID,
+          "reject FAT-reserved filename characters and a backslash separator");
+    static const char* legacyAuxiliaryPaths[] = {
+        "/Documents/display-options.cfg",
+        "/Documents/desktop.taskbar.position",
+        "/Documents/desktop.system.icons",
+        "/Documents/desktop.background.scale",
+        "/Documents/.startmenu_recent",
+    };
+    bool legacyAuxiliaryPathsRejected = true;
+    for (const char* path : legacyAuxiliaryPaths) {
+        if (kernel::vfs::create_file(path, "invalid", 7) != kernel::vfs::VFS_ERR_INVALID ||
+            kernel::vfs::last_open_status() != kernel::vfs::VFS_ERR_INVALID) {
+            legacyAuxiliaryPathsRejected = false;
+        }
+    }
+    check(legacyAuxiliaryPathsRejected,
+          "reject each exact legacy auxiliary settings filename and preserve invalid-name status");
+    bool legacyAuxiliaryWritesRejected = true;
+    for (const char* path : legacyAuxiliaryPaths) {
+        if (kernel::vfs::write_file(path, "invalid", 7) != kernel::vfs::VFS_ERR_INVALID) {
+            legacyAuxiliaryWritesRejected = false;
+        }
+    }
+    check(legacyAuxiliaryWritesRejected,
+          "propagate the invalid-name error from each exact legacy auxiliary settings write");
+    char normalizedLegacyPath[kernel::vfs::VFS_MAX_PATH]{};
+    kernel::vfs::normalize_path("/Documents//./desktop.taskbar.position",
+                                normalizedLegacyPath, sizeof(normalizedLegacyPath));
+    check(std::strcmp(normalizedLegacyPath, "/Documents/desktop.taskbar.position") == 0 &&
+              kernel::vfs::create_file(normalizedLegacyPath, "invalid", 7) ==
+                  kernel::vfs::VFS_ERR_INVALID &&
+              kernel::vfs::last_open_status() == kernel::vfs::VFS_ERR_INVALID,
+          "normalize separators before preserving the legacy invalid-name status");
+    check(kernel::vfs::create_file("/Documents/MISSING/CHILD.TXT", "invalid", 7) ==
+              kernel::vfs::VFS_ERR_NOT_FOUND,
+          "report a missing parent directory separately from an invalid filename");
+
+    check(kernel::vfs::write_file("/Documents/DESKTOP.TMP", "save-one", 8) == 8 &&
+              kernel::vfs::write_file("/Documents/DESKTOP.TMP", "save-two", 8) == 8 &&
+              kernel::vfs::write_file("/Documents/DESKTOP.TMP", "save-three", 10) == 10 &&
+              kernel::vfs::rename("/Documents/DESKTOP.TMP", "/Documents/DESKTOP.NEW") ==
+                  kernel::vfs::VFS_OK &&
+              kernel::vfs::read_file("/Documents/DESKTOP.NEW", payload.data(),
+                  static_cast<uint32_t>(payload.size())) == 10 &&
+              std::memcmp(payload.data(), "save-three", 10) == 0 &&
+              kernel::vfs::stat("/Documents/DESKTOP.TMP", &info) ==
+                  kernel::vfs::VFS_ERR_NOT_FOUND &&
+              kernel::vfs::unlink("/Documents/DESKTOP.NEW") == kernel::vfs::VFS_OK,
+          "repeatedly replace a settings-style temporary file and reopen its renamed contents");
+
+    static const char pinStoreInitial[] = "version=1\n";
+    static const char pinStoreFirst[] = "version=1\nappId=com.guidexos.pacman\n";
+    static const char pinStoreSecond[] =
+        "version=1\nappId=com.guidexos.pacman\nappId=gxos.builtin.fileexplorer\n";
+    check(kernel::vfs::create_file("/Documents/taskbar.pin", pinStoreInitial,
+                                   sizeof(pinStoreInitial) - 1) ==
+              static_cast<int32_t>(sizeof(pinStoreInitial) - 1),
+          "create the taskbar pin store using a FAT-supported 8.3 path");
+    check(kernel::vfs::write_file("/Documents/taskbar.pin", pinStoreFirst,
+                                  sizeof(pinStoreFirst) - 1) ==
+              static_cast<int32_t>(sizeof(pinStoreFirst) - 1),
+          "write a taskbar pin through the supported short-name path");
+    check(kernel::vfs::write_file("/Documents/taskbar.pin", pinStoreSecond,
+                                  sizeof(pinStoreSecond) - 1) ==
+              static_cast<int32_t>(sizeof(pinStoreSecond) - 1),
+          "replace the taskbar pin store repeatedly without changing its path");
+    std::vector<char> pinStoreReadback(sizeof(pinStoreSecond));
+    check(kernel::vfs::read_file("/Documents/taskbar.pin", pinStoreReadback.data(),
+                                 static_cast<uint32_t>(pinStoreReadback.size())) ==
+              static_cast<int32_t>(sizeof(pinStoreSecond) - 1) &&
+              std::memcmp(pinStoreReadback.data(), pinStoreSecond,
+                          sizeof(pinStoreSecond) - 1) == 0,
+          "reopened taskbar pin store contains the complete latest pin set");
 
     for (int iteration = 0; iteration < 12; ++iteration) {
         const uint8_t handle = kernel::vfs::open("/Documents/NOTES/REPORT.BIN",
@@ -456,10 +853,11 @@ int main(int argc, char** argv)
         kernel::vfs::seek(flushHandle, 0, static_cast<kernel::vfs::SeekOrigin>(0)) ==
             kernel::vfs::VFS_OK &&
         kernel::vfs::write(flushHandle, "S", 1) == 1;
-    g_failFlush = true;
+    g_flushFailureStatus = kernel::block::BLOCK_ERR_IO;
+    g_flushFailuresRemaining = 1;
     const kernel::vfs::Status failedClose = flushHandle == 0xFF
         ? kernel::vfs::VFS_ERR_INVALID : kernel::vfs::close(flushHandle);
-    g_failFlush = false;
+    g_flushFailuresRemaining = 0;
     check(wroteBeforeFlushFailure && failedClose == kernel::vfs::VFS_ERR_IO,
           "close surfaces a failed device flush instead of reporting a saved file");
 
@@ -479,6 +877,123 @@ int main(int argc, char** argv)
               static_cast<uint32_t>(payload.size())) == 26 &&
               std::memcmp(payload.data(), "Short EDITacement appended", 26) == 0,
           "filesystem teardown and remount recover saved bytes from the image");
+
+    const kernel::vfs::MountPoint* documentsMount = kernel::vfs::get_mount("/Documents");
+    const kernel::fs_fat::FATVolume* documentsVolume = documentsMount
+        ? kernel::fs_fat::get_volume(documentsMount->fsVolumeIndex) : nullptr;
+    const uint32_t directorySlots = documentsVolume && documentsVolume->bytesPerSector == kSectorSize
+        ? documentsVolume->bytesPerSector * documentsVolume->sectorsPerCluster / 32u : 0u;
+    const bool growthFixtureReady = documentsVolume && documentsVolume->type ==
+        kernel::fs_fat::FAT_TYPE_FAT32 && directorySlots > 2u && g_fatCopies >= 2u;
+    check(growthFixtureReady,
+          "FAT32 directory-growth fixture has a cluster and mirrored FAT copies");
+    if (growthFixtureReady) {
+        const uint32_t entriesToFill = directorySlots - 2u;
+        const bool filled = fill_directory_cluster("/Documents/GROW", entriesToFill, "G") &&
+            fill_directory_cluster("/Documents/FAILGR", entriesToFill, "F");
+        check(filled,
+              "fill two FAT32 directory clusters through their final directory slots");
+
+        kernel::vfs::FileInfo growInfo{};
+        kernel::fs_fat::DirEntry growEntry{};
+        uint32_t growTailPrimary = 0;
+        uint32_t growTailMirror = 0;
+        const bool growTailRead = kernel::vfs::stat("/Documents/GROW", &growInfo) ==
+                kernel::vfs::VFS_OK &&
+            kernel::fs_fat::lookup_path(documentsMount->fsVolumeIndex, "GROW", &growEntry) &&
+            read_fat32_entry(*documentsVolume, growEntry.firstCluster, 0, &growTailPrimary) &&
+            read_fat32_entry(*documentsVolume, growEntry.firstCluster, 1, &growTailMirror);
+        check(growTailRead && growTailPrimary >= 0x0FFFFFF8u &&
+                  growTailMirror >= 0x0FFFFFF8u,
+              "full directory reaches a valid mirrored FAT end marker before extension");
+
+        const int32_t growthCreate = kernel::vfs::create_file(
+            "/Documents/GROW/LAST.TXT", "G", 1u);
+        uint32_t grownTail = 0;
+        uint32_t grownTailMirror = 0;
+        uint32_t grownClusterEnd = 0;
+        uint32_t grownClusterEndMirror = 0;
+        const bool growthLinked = growTailRead &&
+            read_fat32_entry(*documentsVolume, growEntry.firstCluster, 0, &grownTail) &&
+            read_fat32_entry(*documentsVolume, growEntry.firstCluster, 1, &grownTailMirror) &&
+            grownTail >= 2u && grownTail < 0x0FFFFFF8u &&
+            read_fat32_entry(*documentsVolume, grownTail, 0, &grownClusterEnd) &&
+            read_fat32_entry(*documentsVolume, grownTail, 1, &grownClusterEndMirror);
+        kernel::vfs::FileInfo lastInfo{};
+        check(growthCreate == 1 && growthLinked && grownTail == grownTailMirror &&
+                  grownClusterEnd >= 0x0FFFFFF8u &&
+                  grownClusterEndMirror >= 0x0FFFFFF8u &&
+                  kernel::vfs::stat("/Documents/GROW/LAST.TXT", &lastInfo) ==
+                      kernel::vfs::VFS_OK && lastInfo.size == 1u,
+              "FAT32 full directory grows, links both FAT copies, and publishes the new file");
+
+        kernel::vfs::FileInfo failInfo{};
+        kernel::fs_fat::DirEntry failEntry{};
+        uint32_t failedFileCluster = 0;
+        uint32_t failedGrowthCluster = 0;
+        const bool failureTargetsReady = kernel::vfs::stat("/Documents/FAILGR", &failInfo) ==
+                kernel::vfs::VFS_OK &&
+            kernel::fs_fat::lookup_path(documentsMount->fsVolumeIndex, "FAILGR", &failEntry) &&
+            find_free_fat32_cluster(*documentsVolume, documentsVolume->nextFreeCluster,
+                                    &failedFileCluster) &&
+            find_free_fat32_cluster(*documentsVolume, failedFileCluster + 1u,
+                                    &failedGrowthCluster);
+        const uint64_t tailMirrorLba = failureTargetsReady
+            ? fat32_entry_sector_lba(*documentsVolume, failEntry.firstCluster, 1u) : UINT64_MAX;
+        uint32_t matchingAllocations = 0;
+        if (failureTargetsReady && fat32_entry_sector_lba(
+                *documentsVolume, failedFileCluster, 1u) == tailMirrorLba) {
+            ++matchingAllocations;
+        }
+        if (failureTargetsReady && fat32_entry_sector_lba(
+                *documentsVolume, failedGrowthCluster, 1u) == tailMirrorLba) {
+            ++matchingAllocations;
+        }
+        g_failWriteLba = tailMirrorLba;
+        g_failWriteLbaMatchesRemaining = failureTargetsReady
+            ? matchingAllocations : UINT32_MAX;
+        const int32_t failedGrowthCreate = failureTargetsReady
+            ? kernel::vfs::create_file("/Documents/FAILGR/FAIL.TXT", "X", 1u)
+            : kernel::vfs::VFS_ERR_INVALID;
+        g_failWriteLba = UINT64_MAX;
+        g_failWriteLbaMatchesRemaining = UINT32_MAX;
+        uint32_t failedTailPrimary = 0;
+        uint32_t failedTailMirror = 0;
+        uint32_t failedFileFat = UINT32_MAX;
+        uint32_t failedFileFatMirror = UINT32_MAX;
+        uint32_t failedGrowthFat = UINT32_MAX;
+        uint32_t failedGrowthFatMirror = UINT32_MAX;
+        const bool rollbackVerified = failureTargetsReady &&
+            read_fat32_entry(*documentsVolume, failEntry.firstCluster, 0, &failedTailPrimary) &&
+            read_fat32_entry(*documentsVolume, failEntry.firstCluster, 1, &failedTailMirror) &&
+            read_fat32_entry(*documentsVolume, failedFileCluster, 0, &failedFileFat) &&
+            read_fat32_entry(*documentsVolume, failedFileCluster, 1, &failedFileFatMirror) &&
+            read_fat32_entry(*documentsVolume, failedGrowthCluster, 0, &failedGrowthFat) &&
+            read_fat32_entry(*documentsVolume, failedGrowthCluster, 1, &failedGrowthFatMirror);
+        check(failureTargetsReady && failedGrowthCreate == kernel::vfs::VFS_ERR_IO &&
+                  rollbackVerified && failedTailPrimary >= 0x0FFFFFF8u &&
+                  failedTailMirror >= 0x0FFFFFF8u && failedFileFat == 0u &&
+                  failedFileFatMirror == 0u && failedGrowthFat == 0u &&
+                  failedGrowthFatMirror == 0u &&
+                  kernel::vfs::stat("/Documents/FAILGR/FAIL.TXT", &lastInfo) ==
+                      kernel::vfs::VFS_ERR_NOT_FOUND,
+              "failed FAT mirror link rolls back the directory tail and both allocated clusters");
+    }
+
+    const uint8_t syncHandle = kernel::vfs::open("/Documents/NOTES/REPORT.BIN",
+                                                 kernel::vfs::OPEN_RDWR);
+    const bool syncWriteReady = syncHandle != 0xFF &&
+        kernel::vfs::seek(syncHandle, 0,
+            static_cast<kernel::vfs::SeekOrigin>(0)) == kernel::vfs::VFS_OK &&
+        kernel::vfs::write(syncHandle, "S", 1) == 1;
+    g_flushFailureStatus = kernel::block::BLOCK_ERR_TIMEOUT;
+    g_flushFailuresRemaining = 1;
+    const kernel::vfs::Status failedSync = kernel::vfs::sync_all();
+    check(syncWriteReady && failedSync == kernel::vfs::VFS_ERR_IO_TIMEOUT &&
+              kernel::vfs::get_handle(syncHandle) == nullptr,
+          "shutdown sync closes outstanding writes and propagates a close-time flush timeout");
+    check(kernel::vfs::sync_all() == kernel::vfs::VFS_OK,
+          "filesystem synchronization succeeds after the injected flush failure clears");
     reset_mounts();
 
     g_writesUntilFailure = 2;

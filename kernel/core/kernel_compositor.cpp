@@ -9,6 +9,9 @@
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/image_adapter.h"
 #include "include/kernel/serial_debug.h"
+#include "include/kernel/vfs.h"
+#include "include/kernel/native_elf_baremetal.h"
+#include "../../taskbar_application_model_core.h"
 
 namespace kernel {
 namespace compositor {
@@ -182,10 +185,24 @@ void KernelCompositor::init(uint32_t screenW, uint32_t screenH, uint32_t taskbar
 }
 
 void KernelCompositor::setWorkArea(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    const bool changed = s_workX != x || s_workY != y || s_workW != w || s_workH != h;
     s_workX = x;
     s_workY = y;
     s_workW = w;
     s_workH = h;
+    if (!changed) return;
+    for (int i = 0; i < MAX_WINDOWS; ++i) {
+        if (!s_windows[i].valid || !s_windows[i].window) continue;
+        app::KernelWindow* window = s_windows[i].window;
+        if (!(window->flags & app::WF_MAXIMIZED)) continue;
+        if (window->x == static_cast<int>(s_workX) && window->y == static_cast<int>(s_workY) &&
+            window->w == static_cast<int>(s_workW) && window->h == static_cast<int>(s_workH)) continue;
+        window->x = static_cast<int>(s_workX);
+        window->y = static_cast<int>(s_workY);
+        window->w = static_cast<int>(s_workW);
+        window->h = static_cast<int>(s_workH);
+        window->dirty = true;
+    }
 }
 
 void KernelCompositor::reconcileDisplayTopology(uint32_t screenW, uint32_t screenH) {
@@ -262,6 +279,8 @@ void KernelCompositor::unregisterWindow(app::KernelWindow* window) {
     
     for (int i = 0; i < MAX_WINDOWS; i++) {
         if (s_windows[i].valid && s_windows[i].window == window) {
+            TaskbarManager::endFileOperationActivity(window->id);
+            TaskbarManager::clearActivity(nullptr, window->id);
             s_windows[i].valid = false;
             s_windows[i].window = nullptr;
             s_windowCount--;
@@ -273,7 +292,8 @@ void KernelCompositor::unregisterWindow(app::KernelWindow* window) {
                 s_focusedWindowId = 0;
                 // Focus next window if available
                 for (int j = MAX_WINDOWS - 1; j >= 0; j--) {
-                    if (s_windows[j].valid && s_windows[j].window) {
+                    if (s_windows[j].valid && s_windows[j].window &&
+                        !(s_windows[j].window->flags & app::WF_MINIMIZED)) {
                         setFocus(s_windows[j].window->id);
                         break;
                     }
@@ -320,6 +340,11 @@ static void log_close_target(const char* prefix, const app::KernelWindow* win)
 void KernelCompositor::setFocus(uint32_t windowId) {
     app::KernelWindow* newWin = getWindow(windowId);
     if (!newWin) return;
+
+    // Focusing is an activation operation. A taskbar selection must make a
+    // minimized window visible before it can receive focus.
+    newWin->flags &= ~app::WF_MINIMIZED;
+    TaskbarManager::acknowledgeActivity(newWin->owner ? newWin->owner->getRuntimeAppId() : "", windowId);
 
     if (s_focusedWindowId == windowId) {
         newWin->flags |= app::WF_FOCUSED;
@@ -370,6 +395,20 @@ void KernelCompositor::minimizeWindow(uint32_t windowId) {
     if (win) {
         win->flags |= app::WF_MINIMIZED;
         win->dirty = true;
+        if (s_focusedWindowId == windowId) {
+            win->flags &= ~app::WF_FOCUSED;
+            if (win->owner) win->owner->onWindowBlur();
+            s_focusedWindowId = 0;
+            // Keep a useful active window after minimizing the focused one.
+            for (int i = MAX_WINDOWS - 1; i >= 0; --i) {
+                if (!s_windows[i].valid || !s_windows[i].window) continue;
+                app::KernelWindow* candidate = s_windows[i].window;
+                if (candidate->id == windowId || !(candidate->flags & app::WF_VISIBLE) ||
+                    (candidate->flags & app::WF_MINIMIZED)) continue;
+                setFocus(candidate->id);
+                break;
+            }
+        }
     }
 }
 
@@ -415,6 +454,11 @@ void KernelCompositor::minimizeWindowsForShowDesktop() {
         if ((win->flags & app::WF_VISIBLE) && !(win->flags & app::WF_MINIMIZED)) {
             s_showDesktopMinimized[s_showDesktopMinimizedCount++] = win->id;
             win->flags |= app::WF_MINIMIZED;
+            if (win->flags & app::WF_FOCUSED) {
+                win->flags &= ~app::WF_FOCUSED;
+                if (win->owner) win->owner->onWindowBlur();
+                if (s_focusedWindowId == win->id) s_focusedWindowId = 0;
+            }
             win->dirty = true;
             if (s_showDesktopMinimizedCount >= MAX_WINDOWS) break;
         }
@@ -1142,8 +1186,99 @@ void KernelCompositor::drawTextCentered(uint32_t x, uint32_t y, uint32_t w, uint
 // TaskbarManager implementation
 // ============================================================
 
-TaskbarButton TaskbarManager::s_buttons[MAX_TASKBAR_BUTTONS];
+// Keep the active store name within FAT's supported 8.3 create-name contract.
+// Existing installations may still have the earlier long-name store, so load
+// it as a fallback and write future updates to the short path.
+static const char* kTaskbarPinStorePath = "/taskbar.pin";
+static const char* kLegacyTaskbarPinStorePath = "/desktop.taskbar.pins";
+static const int kTaskbarButtonMaxWidth = 176;
+static const int kTaskbarMenuWidth = 220;
+static const int kTaskbarMenuRowHeight = 20;
+
+static int taskbarTextLength(const char* value) {
+    int length = 0;
+    if (!value) return 0;
+    while (value[length]) ++length;
+    return length;
+}
+
+static void copyTaskbarText(char* out, int outSize, const char* value) {
+    if (!out || outSize <= 0) return;
+    int i = 0;
+    if (value) {
+        while (value[i] && i + 1 < outSize) {
+            out[i] = value[i];
+            ++i;
+        }
+    }
+    out[i] = '\0';
+}
+
+static bool validTaskbarAppId(const char* value) {
+    return gxos::gui::IsSafeTaskbarAppIdentity(value, kernel::app::MAX_APP_ID);
+}
+
+static bool launchTaskbarAppById(const char* appId) {
+    const app::AppInfo* info = app::AppManager::getAppInfoById(appId);
+    if (info) return info->available && info->factory && app::AppManager::launchAppById(appId);
+    return native_elf::launch_by_id(appId);
+}
+
+static bool taskbarStringsEqual(const char* left, const char* right) {
+    if (!left || !right) return false;
+    while (*left && *right && *left == *right) {
+        ++left;
+        ++right;
+    }
+    return *left == *right;
+}
+
+static void makeTaskbarFitText(char* out, int outSize, const char* value, int maxChars) {
+    if (!out || outSize <= 0) return;
+    const int length = taskbarTextLength(value);
+    if (maxChars <= 0) {
+        out[0] = '\0';
+        return;
+    }
+    if (length <= maxChars) {
+        copyTaskbarText(out, outSize, value);
+        return;
+    }
+    if (maxChars < 4) {
+        int dots = maxChars < outSize - 1 ? maxChars : outSize - 1;
+        for (int i = 0; i < dots; ++i) out[i] = '.';
+        out[dots] = '\0';
+        return;
+    }
+    int copied = maxChars - 3;
+    if (copied + 4 > outSize) copied = outSize - 4;
+    if (copied < 0) copied = 0;
+    int i = 0;
+    while (i < copied && value[i]) {
+        out[i] = value[i];
+        ++i;
+    }
+    out[i++] = '.';
+    out[i++] = '.';
+    out[i++] = '.';
+    out[i] = '\0';
+}
+
+TaskbarButton TaskbarManager::s_buttons[MAX_TASKBAR_DISPLAY_BUTTONS];
 int TaskbarManager::s_buttonCount = 0;
+int TaskbarManager::s_visibleButtonCount = 0;
+int TaskbarManager::s_overflowFirstIndex = 0;
+int TaskbarManager::s_previewButtonIndex = -1;
+uint32_t TaskbarManager::s_previewWindowIds[4] = {};
+int TaskbarManager::s_previewWindowCount = 0;
+int TaskbarManager::s_previewX = 0;
+int TaskbarManager::s_previewY = 0;
+int TaskbarManager::s_previewW = 0;
+int TaskbarManager::s_previewH = 0;
+int TaskbarManager::s_previewCardX[4] = {};
+int TaskbarManager::s_previewCardY[4] = {};
+int TaskbarManager::s_previewCardW[4] = {};
+int TaskbarManager::s_previewCardH[4] = {};
 uint32_t TaskbarManager::s_screenW = 0;
 uint32_t TaskbarManager::s_screenH = 0;
 uint32_t TaskbarManager::s_taskbarH = 0;
@@ -1152,19 +1287,52 @@ uint32_t TaskbarManager::s_taskbarX = 0;
 uint32_t TaskbarManager::s_taskbarY = 0;
 uint32_t TaskbarManager::s_taskbarW = 0;
 bool TaskbarManager::s_vertical = false;
+gxos::gui::TaskbarSizeMode TaskbarManager::s_sizeMode = gxos::gui::TaskbarSizeMode::Standard;
+bool TaskbarManager::s_showLabels = true;
+bool TaskbarManager::s_showActivity = true;
+bool TaskbarManager::s_showPreviews = true;
+bool TaskbarManager::s_taskbarVisible = true;
 uint32_t TaskbarManager::s_startY = 0;
+int32_t TaskbarManager::s_mouseX = -1;
+int32_t TaskbarManager::s_mouseY = -1;
+char TaskbarManager::s_pinnedAppIds[MAX_TASKBAR_PINS][app::MAX_APP_ID] = {};
+int TaskbarManager::s_pinCount = 0;
+TaskbarPinPersistenceState TaskbarManager::s_pinPersistence = TaskbarPinPersistenceState::Unsupported;
+gxos::gui::TaskbarPinStoreLoadGate TaskbarManager::s_pinLoadGate;
+bool TaskbarManager::s_pinStoreCorrupt = false;
+gxos::gui::TaskbarActivityStore TaskbarManager::s_activityStore;
+uint32_t TaskbarManager::s_fileOperationOwnerWindowId = 0;
+TaskbarManager::MenuItem TaskbarManager::s_menuItems[MAX_TASKBAR_MENU_ITEMS];
+int TaskbarManager::s_menuItemCount = 0;
+int TaskbarManager::s_menuHover = -1;
+int TaskbarManager::s_menuScroll = 0;
+int TaskbarManager::s_menuX = 0;
+int TaskbarManager::s_menuY = 0;
+int TaskbarManager::s_menuW = 0;
+int TaskbarManager::s_menuH = 0;
+bool TaskbarManager::s_menuOpen = false;
+char TaskbarManager::s_menuAppId[app::MAX_APP_ID] = {};
 
 void TaskbarManager::init(uint32_t screenW, uint32_t screenH, uint32_t taskbarH, uint32_t startX) {
     s_screenW = screenW;
     s_screenH = screenH;
-    s_taskbarH = taskbarH;
+    s_taskbarH = taskbarH < screenH ? taskbarH : screenH;
     s_startX = startX;
     s_taskbarX = 0;
-    s_taskbarY = screenH - taskbarH;
+    s_taskbarY = screenH - s_taskbarH;
     s_taskbarW = screenW;
     s_vertical = false;
     s_startY = s_taskbarY + 6;
     s_buttonCount = 0;
+    s_mouseX = -1;
+    s_mouseY = -1;
+    s_menuOpen = false;
+    s_menuItemCount = 0;
+    s_pinCount = 0;
+    s_pinStoreCorrupt = false;
+    s_pinLoadGate.reset();
+    s_fileOperationOwnerWindowId = 0;
+    loadPinnedApplications();
 }
 
 void TaskbarManager::setLayout(uint32_t taskbarX, uint32_t taskbarY, uint32_t taskbarW, uint32_t taskbarH,
@@ -1178,101 +1346,1033 @@ void TaskbarManager::setLayout(uint32_t taskbarX, uint32_t taskbarY, uint32_t ta
     s_startY = buttonStartY;
 }
 
-void TaskbarManager::updateButtons() {
-    s_buttonCount = 0;
-    uint32_t btnX = s_startX;
-    uint32_t btnY = s_startY;
-    uint32_t btnH = s_vertical ? 28 : (s_taskbarH > 12 ? s_taskbarH - 12 : s_taskbarH);
-    uint32_t maxX = s_taskbarX + s_taskbarW;
-    uint32_t maxY = s_taskbarY + s_taskbarH;
-    
-    for (int i = 0; i < MAX_WINDOWS; i++) {
-        if (!KernelCompositor::s_windows[i].valid) continue;
-        app::KernelWindow* win = KernelCompositor::s_windows[i].window;
-        if (!win) continue;
-        
-        TaskbarButton& btn = s_buttons[s_buttonCount];
-        btn.windowId = win->id;
-        
-        // Copy title
-        int j = 0;
-        while (win->title[j] && j < app::MAX_TITLE_LEN - 1) {
-            btn.title[j] = win->title[j];
-            j++;
-        }
-        btn.title[j] = '\0';
-        
-        btn.active = (win->flags & app::WF_FOCUSED) != 0;
-        btn.x = (int)btnX;
-        btn.y = (int)btnY;
-        btn.w = s_vertical ? (int)(s_taskbarW > 8 ? s_taskbarW - 8 : s_taskbarW) : measureText(btn.title) + 24;
-        btn.h = (int)btnH;
+void TaskbarManager::setPresentation(gxos::gui::TaskbarSizeMode size, bool showLabels,
+                                     bool showActivity, bool showPreviews, bool taskbarVisible) {
+    s_sizeMode = size;
+    s_showLabels = showLabels;
+    s_showActivity = showActivity;
+    s_showPreviews = showPreviews;
+    s_taskbarVisible = taskbarVisible;
+    if (!s_showPreviews) closePreview();
+}
 
-        if ((!s_vertical && btnX + (uint32_t)btn.w > maxX) ||
-            (s_vertical && btnY + (uint32_t)btn.h > maxY)) {
-            break;
+void TaskbarManager::updateButtons() {
+    ensurePinnedApplicationsLoaded();
+    s_buttonCount = 0;
+    for (int i = 0; i < s_pinCount && s_buttonCount < MAX_TASKBAR_BUTTONS; ++i) {
+        TaskbarButton& button = s_buttons[s_buttonCount++];
+        button = TaskbarButton();
+        copyTaskbarText(button.appId, app::MAX_APP_ID, s_pinnedAppIds[i]);
+        button.pinned = true;
+        const app::AppInfo* info = app::AppManager::getAppInfoById(button.appId);
+        const native_elf::PackageInfo* package = info ? nullptr :
+            native_elf::lookup_package_by_id(button.appId);
+        button.relaunchable = info ? (info->available && info->factory) : package != nullptr;
+        button.missingApplication = !button.relaunchable;
+        if (info) {
+            copyTaskbarText(button.title, app::MAX_TITLE_LEN, info->name);
+            button.iconColor = info->iconColor;
+        } else if (package) {
+            copyTaskbarText(button.title, app::MAX_TITLE_LEN, package->displayName);
+        } else {
+            copyTaskbarText(button.title, app::MAX_TITLE_LEN, "Missing app");
         }
-        
-        if (s_vertical) btnY += btn.h + 4;
-        else btnX += btn.w + 4;
-        s_buttonCount++;
-        
-        if (s_buttonCount >= MAX_TASKBAR_BUTTONS) break;
     }
+
+    // The compositor's current windows remain the source of truth. Canonical
+    // identities are grouped; windows without one receive their own entry.
+    for (int i = 0; i < MAX_WINDOWS; ++i) {
+        if (!KernelCompositor::s_windows[i].valid) continue;
+        app::KernelWindow* window = KernelCompositor::s_windows[i].window;
+        if (!window) continue;
+        const char* appId = window->owner ? window->owner->getRuntimeAppId() : "";
+        int buttonIndex = -1;
+        if (gxos::gui::HasCanonicalTaskbarAppIdentity(appId)) {
+            for (int j = 0; j < s_buttonCount; ++j) {
+                if (gxos::gui::SameCanonicalTaskbarAppIdentity(s_buttons[j].appId, appId)) {
+                    buttonIndex = j;
+                    break;
+                }
+            }
+        }
+        if (buttonIndex < 0) {
+            if (s_buttonCount >= MAX_TASKBAR_BUTTONS) break;
+            buttonIndex = s_buttonCount++;
+            TaskbarButton& button = s_buttons[buttonIndex];
+            button = TaskbarButton();
+            if (gxos::gui::HasCanonicalTaskbarAppIdentity(appId)) {
+                copyTaskbarText(button.appId, app::MAX_APP_ID, appId);
+                const app::AppInfo* info = app::AppManager::getAppInfoById(appId);
+                const native_elf::PackageInfo* package = info ? nullptr :
+                    native_elf::registered_package_by_id(appId);
+                if (info) {
+                    copyTaskbarText(button.title, app::MAX_TITLE_LEN, info->name);
+                    button.iconColor = info->iconColor;
+                    button.relaunchable = info->available && info->factory;
+                } else if (package) {
+                    copyTaskbarText(button.title, app::MAX_TITLE_LEN, package->displayName);
+                    button.relaunchable = true;
+                } else {
+                    copyTaskbarText(button.title, app::MAX_TITLE_LEN,
+                                    window->title[0] ? window->title : appId);
+                }
+            } else {
+                // No identity means no grouping, even when titles match.
+                copyTaskbarText(button.title, app::MAX_TITLE_LEN,
+                                window->title[0] ? window->title : "Window");
+            }
+        }
+
+        TaskbarButton& button = s_buttons[buttonIndex];
+        if (button.windowCount >= MAX_WINDOWS) continue;
+        const int member = button.windowCount++;
+        button.windowIds[member] = window->id;
+        copyTaskbarText(button.windowTitles[member], app::MAX_TITLE_LEN,
+                        window->title[0] ? window->title : button.title);
+        button.running = true;
+        if (window->flags & app::WF_FOCUSED) {
+            button.active = true;
+            button.windowId = window->id;
+        } else if (button.windowId == 0 && !(window->flags & app::WF_MINIMIZED)) {
+            button.windowId = window->id;
+        } else if (button.windowId == 0) {
+            button.windowId = window->id;
+        }
+    }
+
+    for (int i = 0; i < s_buttonCount; ++i) {
+        TaskbarButton& button = s_buttons[i];
+        button.minimized = button.windowCount > 0;
+        for (int j = 0; j < button.windowCount; ++j) {
+            app::KernelWindow* window = KernelCompositor::getWindow(button.windowIds[j]);
+            if (window && !(window->flags & app::WF_MINIMIZED)) button.minimized = false;
+            if (window && (window->flags & app::WF_FOCUSED)) {
+                button.active = true;
+                button.windowId = window->id;
+            }
+        }
+        button.activity = s_showActivity ? s_activityStore.resolve(button.appId, button.windowIds,
+            static_cast<size_t>(button.windowCount)) : gxos::gui::TaskbarActivity{};
+    }
+
+    // Preserve application order while the focused window and z-order change.
+    for (int i = s_pinCount + 1; i < s_buttonCount; ++i) {
+        TaskbarButton entry = s_buttons[i];
+        uint32_t orderKey = 0xFFFFFFFFu;
+        for (int w = 0; w < entry.windowCount; ++w) {
+            if (entry.windowIds[w] < orderKey) orderKey = entry.windowIds[w];
+        }
+        int j = i;
+        while (j > s_pinCount) {
+            uint32_t previousKey = 0xFFFFFFFFu;
+            for (int w = 0; w < s_buttons[j - 1].windowCount; ++w) {
+                if (s_buttons[j - 1].windowIds[w] < previousKey) previousKey = s_buttons[j - 1].windowIds[w];
+            }
+            if (previousKey <= orderKey) break;
+            s_buttons[j] = s_buttons[j - 1];
+            --j;
+        }
+        s_buttons[j] = entry;
+    }
+
+    int x = static_cast<int>(s_startX);
+    int y = static_cast<int>(s_startY);
+    const int maxX = static_cast<int>(s_taskbarX + s_taskbarW);
+    const int maxY = static_cast<int>(s_taskbarY + s_taskbarH);
+    const int taskbarThickness = s_vertical ? static_cast<int>(s_taskbarW) : static_cast<int>(s_taskbarH);
+    const int buttonHeight = s_vertical
+        ? (taskbarThickness > 8 ? taskbarThickness - 8 : taskbarThickness)
+        : (taskbarThickness > 12 ? taskbarThickness - 12 : taskbarThickness);
+    int totalPreferred = 0;
+    for (int i = 0; i < s_buttonCount; ++i) {
+        const int desired = s_showLabels ? measureText(s_buttons[i].title) + 34 : taskbarThickness;
+        const int minimum = s_showLabels ? 58 : (taskbarThickness < 36 ? 36 : taskbarThickness);
+        totalPreferred += desired < minimum ? minimum : (desired > kTaskbarButtonMaxWidth ? kTaskbarButtonMaxWidth : desired);
+        if (i > 0) totalPreferred += 4;
+    }
+    const int horizontalAvailable = maxX - x;
+    const bool needsOverflow = s_vertical
+        ? static_cast<int>(s_buttonCount) > ((maxY - y + 4) / (buttonHeight + 4))
+        : totalPreferred > horizontalAvailable;
+    const int overflowSpace = needsOverflow ? (s_vertical ? buttonHeight : (horizontalAvailable < 40 ? horizontalAvailable : 40)) : 0;
+    const int appLimit = s_vertical ? (maxY - y - overflowSpace) : (maxX - x - overflowSpace - (needsOverflow ? 4 : 0));
+    int used = 0;
+    s_visibleButtonCount = 0;
+    s_overflowFirstIndex = s_buttonCount;
+    for (int i = 0; i < s_buttonCount; ++i) {
+        TaskbarButton& button = s_buttons[i];
+        const int available = s_vertical ? static_cast<int>(s_taskbarW > 8 ? s_taskbarW - 8 : s_taskbarW) : appLimit - used;
+        if (available <= 0) break;
+        const int desiredW = s_vertical ? available : (s_showLabels ? measureText(button.title) + 34 : taskbarThickness);
+        const int minimum = s_showLabels ? 58 : (taskbarThickness < 36 ? 36 : taskbarThickness);
+        const int width = s_vertical ? available : (desiredW < minimum ? minimum : (desiredW > kTaskbarButtonMaxWidth ? kTaskbarButtonMaxWidth : desiredW));
+        if (needsOverflow && used > 0 && width + 4 > available) break;
+        const int boundedW = width < available ? width : available;
+        const int availableH = maxY - y;
+        if (availableH <= 0) break;
+        const int desiredH = buttonHeight;
+        const int height = desiredH < availableH ? desiredH : availableH;
+        if (boundedW <= 0 || height <= 0) break;
+        button.x = x;
+        button.y = y;
+        button.w = boundedW;
+        button.h = height;
+        button.hover = s_mouseX >= button.x && s_mouseX < button.x + button.w &&
+            s_mouseY >= button.y && s_mouseY < button.y + button.h;
+        ++s_visibleButtonCount;
+        used += boundedW + (s_vertical ? 4 : 4);
+        if (s_vertical) y += button.h + 4;
+        else x += button.w + 4;
+    }
+    s_overflowFirstIndex = s_visibleButtonCount;
+    if (needsOverflow && s_buttonCount > s_visibleButtonCount && appLimit + overflowSpace >= 0) {
+        TaskbarButton& overflow = s_buttons[s_buttonCount];
+        overflow = TaskbarButton();
+        overflow.overflowEntry = true;
+        copyTaskbarText(overflow.title, app::MAX_TITLE_LEN, "More");
+        if (s_vertical) {
+            const int height = maxY - y < buttonHeight ? maxY - y : buttonHeight;
+            if (height > 0) {
+                overflow.x = static_cast<int>(s_taskbarX + 4);
+                overflow.y = y;
+                overflow.w = static_cast<int>(s_taskbarW > 8 ? s_taskbarW - 8 : s_taskbarW);
+                overflow.h = height;
+            }
+        } else {
+            const int width = overflowSpace < maxX - x ? overflowSpace : maxX - x;
+            const int height = maxY - static_cast<int>(s_taskbarY) - 12;
+            if (width > 0 && height > 0) {
+                overflow.x = x;
+                overflow.y = static_cast<int>(s_taskbarY) + 6;
+                overflow.w = width;
+                overflow.h = height;
+            }
+        }
+        overflow.hover = s_mouseX >= overflow.x && s_mouseX < overflow.x + overflow.w &&
+            s_mouseY >= overflow.y && s_mouseY < overflow.y + overflow.h;
+    }
+    if (s_previewButtonIndex >= s_visibleButtonCount || s_previewButtonIndex < 0 ||
+        s_buttons[s_previewButtonIndex].windowCount == 0) closePreview();
+    updatePreviewLayout();
 }
 
 void TaskbarManager::drawButtons() {
+    if (!s_taskbarVisible) return;
     updateButtons();
 
-    for (int i = 0; i < s_buttonCount; i++) {
+    const int drawCount = s_visibleButtonCount +
+        ((s_buttonCount > s_visibleButtonCount && s_buttons[s_buttonCount].overflowEntry) ? 1 : 0);
+    for (int i = 0; i < drawCount; i++) {
         TaskbarButton& btn = s_buttons[i];
         
-        uint32_t bgColor = btn.active ? KernelCompositor::rgb(70, 100, 150) :
+        uint32_t bgColor = btn.overflowEntry ? KernelCompositor::rgb(48, 62, 82) : btn.missingApplication ? KernelCompositor::rgb(86, 48, 50) :
+                           btn.active ? KernelCompositor::rgb(70, 100, 150) :
                            btn.hover ? KernelCompositor::rgb(60, 65, 75) :
                                        KernelCompositor::rgb(55, 58, 70);
         
         KernelCompositor::fillRect(btn.x, btn.y, btn.w, btn.h, bgColor);
-        
-        if (btn.active) {
-            KernelCompositor::fillRect(btn.x + 2, btn.y + btn.h - 3, btn.w - 4, 2,
-                                       KernelCompositor::rgb(100, 160, 240));
+        if (btn.w >= 18 && btn.h >= 10) {
+            const int iconX = s_vertical || !s_showLabels ? btn.x + (btn.w - 8) / 2 : btn.x + 5;
+            const int iconY = s_vertical && s_showLabels ? btn.y + 2 : btn.y + (btn.h - 8) / 2;
+            KernelCompositor::fillRect(iconX, iconY, 8, 8, btn.missingApplication
+                ? KernelCompositor::rgb(230, 105, 96) : btn.iconColor);
         }
-        
-        KernelCompositor::drawTextCentered(btn.x, btn.y, btn.w, btn.h, btn.title,
-                                           KernelCompositor::rgb(230, 230, 240));
+        if ((btn.active || btn.running) && btn.w > 4 && btn.h >= 3) {
+            KernelCompositor::fillRect(btn.x + 2, btn.y + btn.h - 3, btn.w - 4, 2,
+                btn.active ? KernelCompositor::rgb(100, 160, 240) : KernelCompositor::rgb(132, 140, 154));
+        }
+
+        if (s_showLabels) {
+            char label[app::MAX_TITLE_LEN];
+            const int textWidth = s_vertical ? btn.w - 2 : (btn.w > 16 ? btn.w - 16 : btn.w);
+            const int labelChars = textWidth > 0 ? textWidth / 6 : 0;
+            makeTaskbarFitText(label, sizeof(label), btn.title, labelChars);
+            if (s_vertical) {
+                KernelCompositor::drawTextCentered(btn.x + 1, btn.y + 10,
+                    btn.w > 2 ? btn.w - 2 : btn.w, btn.h > 10 ? btn.h - 10 : 1, label,
+                    KernelCompositor::rgb(230, 230, 240));
+            } else {
+                KernelCompositor::drawTextCentered(btn.x + (btn.w >= 22 ? 14 : 2), btn.y,
+                    btn.w > 16 ? btn.w - 16 : btn.w, btn.h, label,
+                    KernelCompositor::rgb(230, 230, 240));
+            }
+        }
+        if (btn.windowCount > 1 && btn.w >= 32) {
+            char countLabel[4];
+            countLabel[0] = static_cast<char>('0' + (btn.windowCount > 9 ? 9 : btn.windowCount));
+            countLabel[1] = '\0';
+            KernelCompositor::fillRect(btn.x + btn.w - 16, btn.y + 2, 14, 14,
+                                       KernelCompositor::rgb(85, 110, 145));
+            KernelCompositor::drawTextCentered(btn.x + btn.w - 16, btn.y + 2, 14, 14,
+                                               countLabel, KernelCompositor::rgb(245, 245, 250));
+        } else if (btn.pinned && btn.windowCount == 0 && btn.w >= 18) {
+            KernelCompositor::fillRect(btn.x + btn.w - 7, btn.y + btn.h / 2 - 2, 4, 4,
+                                       KernelCompositor::rgb(155, 190, 240));
+        }
+        if (s_showActivity && btn.activity.attention && btn.w >= 24 && btn.h >= 14) {
+            KernelCompositor::fillRect(btn.x + btn.w - 10, btn.y + 3, 6, 6,
+                KernelCompositor::rgb(236, 112, 91));
+        }
+        if (s_showActivity && btn.activity.progress != gxos::gui::TaskbarProgressState::None && btn.w > 4 && btn.h >= 4) {
+            const uint32_t color = btn.activity.progress == gxos::gui::TaskbarProgressState::Failed
+                ? KernelCompositor::rgb(238, 102, 91)
+                : btn.activity.progress == gxos::gui::TaskbarProgressState::Completed
+                    ? KernelCompositor::rgb(93, 190, 133) : KernelCompositor::rgb(105, 176, 238);
+            const int barW = btn.activity.progress == gxos::gui::TaskbarProgressState::Determinate ||
+                    btn.activity.progress == gxos::gui::TaskbarProgressState::Completed
+                ? (btn.w - 4) * btn.activity.percent / 100
+                : (btn.w - 4) / 3;
+            if (barW > 0) KernelCompositor::fillRect(btn.x + 2, btn.y + btn.h - 3, barW, 2, color);
+        }
+    }
+
+    if (s_menuOpen) {
+        KernelCompositor::fillRect(s_menuX + 2, s_menuY + 2, s_menuW, s_menuH,
+                                   KernelCompositor::rgb(20, 20, 25));
+        KernelCompositor::fillRect(s_menuX, s_menuY, s_menuW, s_menuH,
+                                   KernelCompositor::rgb(44, 46, 55));
+        KernelCompositor::drawRect(s_menuX, s_menuY, s_menuW, s_menuH,
+                                   KernelCompositor::rgb(100, 112, 135));
+        const int visibleRows = menuVisibleRowCount();
+        for (int row = 0; row < visibleRows; ++row) {
+            const int itemIndex = s_menuScroll + row;
+            if (itemIndex >= s_menuItemCount) break;
+            const int rowY = s_menuY + 2 + row * kTaskbarMenuRowHeight;
+            if (rowY + kTaskbarMenuRowHeight > s_menuY + s_menuH) break;
+            if (itemIndex == s_menuHover) {
+                KernelCompositor::fillRect(s_menuX + 1, rowY, s_menuW - 2, kTaskbarMenuRowHeight,
+                                           KernelCompositor::rgb(58, 88, 136));
+            }
+            const uint32_t textColor = s_menuItems[itemIndex].enabled
+                ? KernelCompositor::rgb(235, 236, 242)
+                : KernelCompositor::rgb(145, 149, 158);
+            KernelCompositor::drawText(s_menuX + 8, rowY + 6,
+                                       s_menuItems[itemIndex].label, textColor);
+        }
+    }
+    if (s_previewButtonIndex >= 0 && s_previewW > 0 && s_previewH > 0) {
+        KernelCompositor::fillRect(s_previewX + 2, s_previewY + 2, s_previewW, s_previewH,
+            KernelCompositor::rgb(16, 18, 24));
+        KernelCompositor::fillRect(s_previewX, s_previewY, s_previewW, s_previewH,
+            KernelCompositor::rgb(38, 42, 52));
+        KernelCompositor::drawRect(s_previewX, s_previewY, s_previewW, s_previewH,
+            KernelCompositor::rgb(102, 124, 158));
+        const TaskbarButton& button = s_buttons[s_previewButtonIndex];
+        for (int card = 0; card < s_previewWindowCount; ++card) {
+            const int cx = s_previewCardX[card];
+            const int cy = s_previewCardY[card];
+            const int cw = s_previewCardW[card];
+            const int ch = s_previewCardH[card];
+            const uint32_t id = s_previewWindowIds[card];
+            app::KernelWindow* window = KernelCompositor::getWindow(id);
+            if (!window) continue;
+            const bool minimized = (window->flags & app::WF_MINIMIZED) != 0;
+            const bool active = (window->flags & app::WF_FOCUSED) != 0;
+            KernelCompositor::fillRect(cx, cy, cw, ch,
+                minimized ? KernelCompositor::rgb(42, 43, 50) : KernelCompositor::rgb(26, 29, 36));
+            KernelCompositor::drawRect(cx, cy, cw, ch,
+                active ? KernelCompositor::rgb(106, 158, 232) : KernelCompositor::rgb(76, 84, 100));
+            KernelCompositor::fillRect(cx + 7, cy + 7, 10, 10, button.iconColor);
+            char title[app::MAX_TITLE_LEN];
+            copyTaskbarText(title, sizeof(title), window->title[0] ? window->title : button.title);
+            makeTaskbarFitText(title, sizeof(title), title, (cw - 28) / 6);
+            KernelCompositor::drawText(cx + 22, cy + 8, title,
+                KernelCompositor::rgb(231, 234, 241));
+            const char* state = minimized ? "Minimized" : active ? "Active" : "Running";
+            KernelCompositor::drawText(cx + 8, cy + ch - 18, state,
+                minimized ? KernelCompositor::rgb(163, 166, 176) :
+                    active ? KernelCompositor::rgb(127, 177, 240) : KernelCompositor::rgb(184, 190, 202));
+        }
     }
 }
 
 bool TaskbarManager::handleClick(int32_t mx, int32_t my) {
     updateButtons();
-
-    for (int i = 0; i < s_buttonCount; i++) {
-        TaskbarButton& btn = s_buttons[i];
-        if (mx >= btn.x && mx < btn.x + btn.w &&
-            my >= btn.y && my < btn.y + btn.h) {
-            
-            app::KernelWindow* win = KernelCompositor::getWindow(btn.windowId);
-            if (win) {
-                if (win->flags & app::WF_MINIMIZED) {
-                    KernelCompositor::restoreWindow(btn.windowId);
-                } else if (win->flags & app::WF_FOCUSED) {
-                    KernelCompositor::minimizeWindow(btn.windowId);
-                } else {
-                    KernelCompositor::setFocus(btn.windowId);
-                }
-            }
-            return true;
-        }
+    const int index = findButtonAt(mx, my);
+    if (index < 0) return false;
+    if (index == s_buttonCount && s_buttons[index].overflowEntry) {
+        openOverflowMenu(mx, my);
+        return true;
     }
-    return false;
+    TaskbarButton& button = s_buttons[index];
+    bool focused = false;
+    if (button.windowCount > 0) {
+        app::KernelWindow* window = KernelCompositor::getWindow(button.windowId);
+        focused = window && (window->flags & app::WF_FOCUSED);
+    }
+    const gxos::gui::TaskbarCoreClickAction action = gxos::gui::DecideTaskbarCoreClick(
+        static_cast<unsigned int>(button.windowCount), focused, button.minimized, button.relaunchable);
+    switch (action) {
+    case gxos::gui::TaskbarCoreClickAction::ShowWindowChooser:
+        openMenuForButton(index, mx, my);
+        return true;
+    case gxos::gui::TaskbarCoreClickAction::Launch:
+        launchTaskbarAppById(button.appId);
+        return true;
+    case gxos::gui::TaskbarCoreClickAction::Minimize:
+        KernelCompositor::minimizeWindow(button.windowId);
+        return true;
+    case gxos::gui::TaskbarCoreClickAction::Activate:
+        activateWindow(button.windowId);
+        return true;
+    case gxos::gui::TaskbarCoreClickAction::None:
+    default:
+        return true;
+    }
 }
 
 void TaskbarManager::updateHover(int32_t mx, int32_t my) {
-    for (int i = 0; i < s_buttonCount; i++) {
-        TaskbarButton& btn = s_buttons[i];
-        btn.hover = (mx >= btn.x && mx < btn.x + btn.w &&
-                     my >= btn.y && my < btn.y + btn.h);
+    s_mouseX = mx;
+    s_mouseY = my;
+    if (!s_showPreviews) {
+        closePreview();
+        return;
     }
+    updateButtons();
+    gxos::gui::TaskbarPreviewHoverState currentState;
+    if (s_previewButtonIndex >= 0)
+        currentState.entryIndex = static_cast<size_t>(s_previewButtonIndex);
+    const int index = findButtonAt(mx, my);
+    const bool hoveredEntryRunning = index >= 0 && index < s_buttonCount && s_buttons[index].windowCount > 0;
+    const gxos::gui::TaskbarPreviewHoverState nextState = gxos::gui::DecideTaskbarPreviewHoverTransition(
+        currentState, index >= 0 ? static_cast<size_t>(index) : gxos::gui::kTaskbarNoPreviewEntry,
+        static_cast<size_t>(s_buttonCount), hoveredEntryRunning,
+        currentState.visible() && previewContainsPoint(mx, my), s_menuOpen);
+    if (!nextState.visible()) {
+        closePreview();
+        return;
+    }
+    if (nextState.entryIndex != currentState.entryIndex) {
+        s_previewButtonIndex = static_cast<int>(nextState.entryIndex);
+        updatePreviewLayout();
+    }
+}
+
+bool TaskbarManager::handlePointerDown(int32_t mx, int32_t my, uint8_t button) {
+    updateButtons();
+    if (s_menuOpen) {
+        const int item = menuItemAt(mx, my);
+        if (button == 1 && item >= 0) dispatchMenuItem(item);
+        closeMenu();
+        return true;
+    }
+    if (button == 1 && previewContainsPoint(mx, my)) {
+        const int card = previewCardAt(mx, my);
+        if (card >= 0 && card < s_previewWindowCount) {
+            const uint32_t windowId = s_previewWindowIds[card];
+            closePreview();
+            activateWindow(windowId);
+            return true;
+        }
+        return true;
+    }
+    if (s_previewButtonIndex >= 0) closePreview();
+    const int index = findButtonAt(mx, my);
+    if (button == 2 && index >= 0) {
+        if (index == s_buttonCount && s_buttons[index].overflowEntry) {
+            openOverflowMenu(mx, my);
+            return true;
+        }
+        openMenuForButton(index, mx, my);
+        return true;
+    }
+    if (button == 1 && index >= 0) return handleClick(mx, my);
+    return false;
+}
+
+bool TaskbarManager::handleKeyDown(uint32_t keyCode) {
+    if (!s_menuOpen) {
+        if (keyCode == 27u && s_previewButtonIndex >= 0) { closePreview(); return true; }
+        return false;
+    }
+    if (keyCode == 27u) {
+        closeMenu();
+        return true;
+    }
+    const int visibleRows = menuVisibleRowCount();
+    int selected = s_menuHover >= 0 ? s_menuHover : s_menuScroll;
+    if (keyCode == 0x100u || keyCode == 0x101u) {
+        if (keyCode == 0x100u) --selected;
+        else ++selected;
+        if (selected < 0) selected = 0;
+        if (selected >= s_menuItemCount) selected = s_menuItemCount - 1;
+        if (selected < s_menuScroll) s_menuScroll = selected;
+        if (selected >= s_menuScroll + visibleRows) s_menuScroll = selected - visibleRows + 1;
+        s_menuHover = selected;
+        return true;
+    }
+    if (keyCode == 10u || keyCode == 13u) {
+        if (selected >= 0 && selected < s_menuItemCount) dispatchMenuItem(selected);
+        closeMenu();
+        return true;
+    }
+    return true;
+}
+
+bool TaskbarManager::handleMenuHover(int32_t mx, int32_t my) {
+    if (!s_menuOpen) {
+        const int oldPreview = s_previewButtonIndex;
+        updateHover(mx, my);
+        return oldPreview != s_previewButtonIndex;
+    }
+    const int next = menuItemAt(mx, my);
+    if (next == s_menuHover) return false;
+    s_menuHover = next;
+    return true;
+}
+
+bool TaskbarManager::handleWheel(int32_t mx, int32_t my, int8_t wheelDelta) {
+    if (!s_menuOpen || !menuContainsPoint(mx, my) || wheelDelta == 0) return false;
+    const int visibleRows = menuVisibleRowCount();
+    const int maximumScroll = s_menuItemCount > visibleRows ? s_menuItemCount - visibleRows : 0;
+    if (wheelDelta > 0 && s_menuScroll > 0) --s_menuScroll;
+    else if (wheelDelta < 0 && s_menuScroll < maximumScroll) ++s_menuScroll;
+    else return false;
+    s_menuHover = -1;
+    return true;
+}
+
+bool TaskbarManager::menuVisible() { return s_menuOpen || s_previewButtonIndex >= 0; }
+
+bool TaskbarManager::menuContainsPoint(int32_t mx, int32_t my) {
+    return (s_menuOpen && mx >= s_menuX && mx < s_menuX + s_menuW &&
+        my >= s_menuY && my < s_menuY + s_menuH) || previewContainsPoint(mx, my);
+}
+
+bool TaskbarManager::isTaskbarButtonAt(int32_t mx, int32_t my) {
+    updateButtons();
+    return findButtonAt(mx, my) >= 0;
+}
+
+void TaskbarManager::closeMenu() {
+    s_menuOpen = false;
+    s_menuItemCount = 0;
+    s_menuHover = -1;
+    s_menuScroll = 0;
+    s_menuAppId[0] = '\0';
+}
+
+int TaskbarManager::findButtonAt(int32_t mx, int32_t my) {
+    for (int i = 0; i < s_visibleButtonCount; ++i) {
+        const TaskbarButton& button = s_buttons[i];
+        if (mx >= button.x && mx < button.x + button.w &&
+            my >= button.y && my < button.y + button.h) return i;
+    }
+    if (s_buttonCount > s_visibleButtonCount && s_buttons[s_buttonCount].overflowEntry) {
+        const TaskbarButton& button = s_buttons[s_buttonCount];
+        if (mx >= button.x && mx < button.x + button.w && my >= button.y && my < button.y + button.h)
+            return s_buttonCount;
+    }
+    return -1;
+}
+
+bool TaskbarManager::setActivity(const char* appId, uint32_t windowId,
+                                gxos::gui::TaskbarProgressState progress, uint8_t percent, bool attention) {
+    if (windowId != 0 && !KernelCompositor::getWindow(windowId)) return false;
+    return s_activityStore.set(appId, windowId, progress, percent, attention);
+}
+
+bool TaskbarManager::clearActivity(const char* appId, uint32_t windowId) {
+    return s_activityStore.clear(appId, windowId);
+}
+
+void TaskbarManager::acknowledgeActivity(const char* appId, uint32_t windowId) {
+    s_activityStore.acknowledgeWindow(appId, windowId);
+}
+
+bool TaskbarManager::beginFileOperationActivity(uint32_t ownerWindowId) {
+    app::KernelWindow* ownerWindow = KernelCompositor::getWindow(ownerWindowId);
+    if (!ownerWindow || !ownerWindow->owner ||
+        !gxos::gui::HasCanonicalTaskbarAppIdentity(ownerWindow->owner->getRuntimeAppId())) {
+        return false;
+    }
+    if (s_fileOperationOwnerWindowId != 0) {
+        s_activityStore.clear(nullptr, s_fileOperationOwnerWindowId);
+    }
+    s_fileOperationOwnerWindowId = ownerWindowId;
+    return true;
+}
+
+bool TaskbarManager::updateFileOperationActivity(
+    gxos::gui::TaskbarProgressState progress, uint8_t percent) {
+    const uint32_t ownerWindowId = s_fileOperationOwnerWindowId;
+    if (ownerWindowId == 0) return false;
+    app::KernelWindow* ownerWindow = KernelCompositor::getWindow(ownerWindowId);
+    if (!ownerWindow || !ownerWindow->owner ||
+        !gxos::gui::HasCanonicalTaskbarAppIdentity(ownerWindow->owner->getRuntimeAppId())) {
+        endFileOperationActivity(ownerWindowId);
+        return false;
+    }
+    return s_activityStore.set(nullptr, ownerWindowId, progress, percent, false);
+}
+
+void TaskbarManager::endFileOperationActivity(uint32_t ownerWindowId) {
+    if (ownerWindowId == 0 || s_fileOperationOwnerWindowId != ownerWindowId) return;
+    s_activityStore.clear(nullptr, ownerWindowId);
+    s_fileOperationOwnerWindowId = 0;
+}
+
+void TaskbarManager::closePreview() {
+    s_previewButtonIndex = -1;
+    s_previewWindowCount = 0;
+    s_previewW = s_previewH = 0;
+}
+
+void TaskbarManager::updatePreviewLayout() {
+    s_previewWindowCount = 0;
+    s_previewW = s_previewH = 0;
+    if (s_previewButtonIndex < 0 || s_previewButtonIndex >= s_buttonCount || s_menuOpen) return;
+    const TaskbarButton& button = s_buttons[s_previewButtonIndex];
+    if (button.windowCount <= 0) return;
+    gxos::gui::TaskbarDockEdge edge = gxos::gui::TaskbarDockEdge::Bottom;
+    if (s_vertical) edge = s_taskbarX + s_taskbarW / 2 < s_screenW / 2
+        ? gxos::gui::TaskbarDockEdge::Left : gxos::gui::TaskbarDockEdge::Right;
+    const gxos::gui::TaskbarRect anchor{button.x, button.y, button.x + button.w, button.y + button.h};
+    const gxos::gui::TaskbarRect bounds{0, 0, static_cast<int>(s_screenW), static_cast<int>(s_screenH)};
+    const int requestedWidth = button.windowCount > 1 ? 660 : 270;
+    const gxos::gui::TaskbarRect popup = gxos::gui::PositionTaskbarPopup(anchor, bounds,
+        requestedWidth, 138, edge, 0);
+    if (popup.empty()) return;
+    s_previewX = popup.left;
+    s_previewY = popup.top;
+    s_previewW = popup.right - popup.left;
+    s_previewH = popup.bottom - popup.top;
+    const int inset = 8;
+    const int gap = 8;
+    const int cardW = button.windowCount > 1
+        ? (s_previewW - inset * 2 - gap * 3) / 4 : s_previewW - inset * 2;
+    if (cardW <= 0) return;
+    const int capacity = button.windowCount > 1
+        ? ((s_previewW - inset * 2 + gap) / (cardW + gap)) : 1;
+    const int count = button.windowCount < capacity ? button.windowCount : capacity;
+    s_previewWindowCount = count > 4 ? 4 : count;
+    for (int i = 0; i < s_previewWindowCount; ++i) {
+        const uint32_t id = button.windowIds[i];
+        app::KernelWindow* window = KernelCompositor::getWindow(id);
+        if (!window) continue;
+        const int width = button.windowCount > 1
+            ? (s_previewW - inset * 2 - gap * (s_previewWindowCount - 1)) / s_previewWindowCount
+            : s_previewW - inset * 2;
+        s_previewCardX[i] = s_previewX + inset + i * (width + gap);
+        s_previewCardY[i] = s_previewY + inset;
+        s_previewCardW[i] = width;
+        s_previewCardH[i] = s_previewH - inset * 2;
+        s_previewWindowIds[i] = id;
+    }
+}
+
+bool TaskbarManager::previewContainsPoint(int32_t mx, int32_t my) {
+    return s_previewButtonIndex >= 0 && s_previewW > 0 && s_previewH > 0 &&
+        mx >= s_previewX && mx < s_previewX + s_previewW &&
+        my >= s_previewY && my < s_previewY + s_previewH;
+}
+
+int TaskbarManager::previewCardAt(int32_t mx, int32_t my) {
+    for (int i = 0; i < s_previewWindowCount; ++i) {
+        if (mx >= s_previewCardX[i] && mx < s_previewCardX[i] + s_previewCardW[i] &&
+            my >= s_previewCardY[i] && my < s_previewCardY[i] + s_previewCardH[i]) return i;
+    }
+    return -1;
+}
+
+void TaskbarManager::activateWindow(uint32_t windowId) {
+    if (!KernelCompositor::getWindow(windowId)) return;
+    KernelCompositor::restoreWindow(windowId);
+    KernelCompositor::setFocus(windowId);
+}
+
+void TaskbarManager::appendMenuItem(const char* label, MenuCommand command, uint32_t windowId, bool enabled) {
+    if (s_menuItemCount >= MAX_TASKBAR_MENU_ITEMS) return;
+    MenuItem& item = s_menuItems[s_menuItemCount++];
+    makeTaskbarFitText(item.label, sizeof(item.label), label, 33);
+    item.command = command;
+    item.windowId = windowId;
+    item.enabled = enabled;
+    item.appId[0] = '\0';
+}
+
+void TaskbarManager::openOverflowMenu(int32_t mx, int32_t my) {
+    if (s_buttonCount <= s_visibleButtonCount) return;
+    closePreview();
+    closeMenu();
+    s_menuOpen = true;
+    for (int i = s_visibleButtonCount; i < s_buttonCount; ++i) {
+        const TaskbarButton& button = s_buttons[i];
+        if (button.overflowEntry) continue;
+        uint32_t targetWindow = button.windowCount > 0 ? button.windowId : 0;
+        const bool enabled = targetWindow != 0 || button.relaunchable;
+        appendMenuItem(button.title[0] ? button.title : "Application",
+            MenuCommand::SelectOverflowEntry, targetWindow, enabled);
+        if (s_menuItemCount > 0) {
+            copyTaskbarText(s_menuItems[s_menuItemCount - 1].appId,
+                sizeof(s_menuItems[s_menuItemCount - 1].appId), button.appId);
+        }
+    }
+    TaskbarButton& overflow = s_buttons[s_buttonCount];
+    layoutMenu(mx >= 0 ? mx : overflow.x + overflow.w / 2,
+        my >= 0 ? my : overflow.y);
+}
+
+void TaskbarManager::openMenuForButton(int buttonIndex, int32_t mx, int32_t my) {
+    closePreview();
+    if (buttonIndex < 0 || buttonIndex >= s_buttonCount) return;
+    const TaskbarButton& button = s_buttons[buttonIndex];
+    closeMenu();
+    s_menuOpen = true;
+    copyTaskbarText(s_menuAppId, sizeof(s_menuAppId), button.appId);
+
+    for (int i = 0; i < button.windowCount; ++i) {
+        char label[64];
+        const app::KernelWindow* window = KernelCompositor::getWindow(button.windowIds[i]);
+        const char* prefix = window && (window->flags & app::WF_MINIMIZED) ? "Restore: " : "Activate: ";
+        copyTaskbarText(label, sizeof(label), prefix);
+        int position = taskbarTextLength(label);
+        const char* title = button.windowTitles[i][0] ? button.windowTitles[i] : button.title;
+        int j = 0;
+        while (title[j] && position + 1 < (int)sizeof(label)) label[position++] = title[j++];
+        label[position] = '\0';
+        appendMenuItem(label, MenuCommand::ActivateWindow, button.windowIds[i]);
+    }
+
+    int primaryIndex = -1;
+    for (int i = 0; i < button.windowCount; ++i) {
+        app::KernelWindow* window = KernelCompositor::getWindow(button.windowIds[i]);
+        if (window && (window->flags & app::WF_FOCUSED)) { primaryIndex = i; break; }
+    }
+    if (primaryIndex < 0) {
+        for (int i = 0; i < button.windowCount; ++i) {
+            app::KernelWindow* window = KernelCompositor::getWindow(button.windowIds[i]);
+            if (window && !(window->flags & app::WF_MINIMIZED)) { primaryIndex = i; break; }
+        }
+    }
+    if (primaryIndex < 0 && button.windowCount > 0) primaryIndex = 0;
+    app::KernelWindow* primary = primaryIndex >= 0
+        ? KernelCompositor::getWindow(button.windowIds[primaryIndex]) : nullptr;
+    if (primary) {
+        if (!(primary->flags & app::WF_MINIMIZED)) appendMenuItem("Minimize", MenuCommand::MinimizeWindow, primary->id);
+        if (primary->flags & app::WF_RESIZABLE) {
+            appendMenuItem((primary->flags & app::WF_MAXIMIZED) ? "Restore Down" : "Maximize",
+                           MenuCommand::ToggleMaximizeWindow, primary->id);
+        }
+        if (primary->flags & app::WF_CLOSABLE) appendMenuItem("Close Window", MenuCommand::CloseWindow, primary->id);
+        if (button.windowCount > 1) appendMenuItem("Close All Windows", MenuCommand::CloseAllWindows);
+    } else if (button.relaunchable) {
+        appendMenuItem("Launch", MenuCommand::LaunchApp);
+    } else if (button.pinned) {
+        char unavailable[64];
+        copyTaskbarText(unavailable, sizeof(unavailable), "Unavailable: ");
+        int position = taskbarTextLength(unavailable);
+        int i = 0;
+        while (button.appId[i] && position + 1 < (int)sizeof(unavailable)) unavailable[position++] = button.appId[i++];
+        unavailable[position] = '\0';
+        appendMenuItem(unavailable, MenuCommand::None, 0, false);
+    }
+
+    if (button.appId[0] && button.relaunchable) {
+        if (button.pinned) appendMenuItem("Unpin from Taskbar", MenuCommand::UnpinApp);
+        else if (s_pinCount >= MAX_TASKBAR_PINS) appendMenuItem("Pin limit reached", MenuCommand::None, 0, false);
+        else appendMenuItem("Pin to Taskbar", MenuCommand::PinApp);
+        const char* persistence = s_pinPersistence == TaskbarPinPersistenceState::Ready
+            ? "Pin storage: available"
+            : s_pinPersistence == TaskbarPinPersistenceState::Unsupported
+                ? "Pin storage: unavailable"
+                : "Pin storage: write/read error";
+        appendMenuItem(persistence, MenuCommand::None, 0, false);
+    } else if (button.pinned) {
+        appendMenuItem("Unpin from Taskbar", MenuCommand::UnpinApp);
+        const char* persistence = s_pinPersistence == TaskbarPinPersistenceState::Ready
+            ? "Pin storage: available"
+            : s_pinPersistence == TaskbarPinPersistenceState::Unsupported
+                ? "Pin storage: unavailable"
+                : "Pin storage: write/read error";
+        appendMenuItem(persistence, MenuCommand::None, 0, false);
+    }
+
+    if (s_vertical) layoutMenu(button.x + button.w, button.y);
+    else layoutMenu(button.x, button.y - 4);
+    if (s_menuItemCount == 0) {
+        (void)mx;
+        (void)my;
+        closeMenu();
+    }
+}
+
+void TaskbarManager::layoutMenu(int32_t anchorX, int32_t anchorY) {
+    if (s_screenW == 0 || s_screenH == 0) {
+        s_menuX = s_menuY = s_menuW = s_menuH = 0;
+        return;
+    }
+    s_menuW = static_cast<int>(s_screenW < (uint32_t)kTaskbarMenuWidth ? s_screenW : (uint32_t)kTaskbarMenuWidth);
+    const int requestedHeight = s_menuItemCount * kTaskbarMenuRowHeight + 4;
+    s_menuH = requestedHeight < (int)s_screenH ? requestedHeight : (int)s_screenH;
+    if (s_menuW < 1) s_menuW = 1;
+    if (s_menuH < 1) s_menuH = 1;
+    s_menuX = anchorX;
+    s_menuY = anchorY;
+    if (!s_vertical && anchorY > (int)s_screenH / 2) s_menuY -= s_menuH;
+    if (s_menuX + s_menuW > (int)s_screenW) s_menuX = (int)s_screenW - s_menuW;
+    if (s_menuY + s_menuH > (int)s_screenH) s_menuY = (int)s_screenH - s_menuH;
+    if (s_menuX < 0) s_menuX = 0;
+    if (s_menuY < 0) s_menuY = 0;
+    s_menuScroll = 0;
+    s_menuHover = -1;
+}
+
+int TaskbarManager::menuVisibleRowCount() {
+    int rows = (s_menuH - 4) / kTaskbarMenuRowHeight;
+    return rows > 0 ? rows : 1;
+}
+
+int TaskbarManager::menuItemAt(int32_t mx, int32_t my) {
+    if (!menuContainsPoint(mx, my)) return -1;
+    const int row = (my - s_menuY - 2) / kTaskbarMenuRowHeight;
+    if (row < 0 || row >= menuVisibleRowCount()) return -1;
+    const int index = s_menuScroll + row;
+    return index >= 0 && index < s_menuItemCount ? index : -1;
+}
+
+void TaskbarManager::dispatchMenuItem(int index) {
+    if (index < 0 || index >= s_menuItemCount) return;
+    const MenuItem item = s_menuItems[index];
+    if (!item.enabled) return;
+    switch (item.command) {
+    case MenuCommand::ActivateWindow:
+        activateWindow(item.windowId);
+        break;
+    case MenuCommand::MinimizeWindow:
+        KernelCompositor::minimizeWindow(item.windowId);
+        break;
+    case MenuCommand::ToggleMaximizeWindow:
+        KernelCompositor::maximizeWindow(item.windowId);
+        break;
+    case MenuCommand::CloseWindow: {
+        app::KernelWindow* window = KernelCompositor::getWindow(item.windowId);
+        if (window && (window->flags & app::WF_MINIMIZED)) KernelCompositor::restoreWindow(item.windowId);
+        KernelCompositor::requestCloseWindow(item.windowId);
+        break;
+    }
+    case MenuCommand::CloseAllWindows: {
+        uint32_t targets[MAX_WINDOWS];
+        int count = 0;
+        for (int i = 0; i < MAX_WINDOWS; ++i) {
+            if (!KernelCompositor::s_windows[i].valid || !KernelCompositor::s_windows[i].window) continue;
+            app::KernelWindow* window = KernelCompositor::s_windows[i].window;
+            const char* appId = window->owner ? window->owner->getRuntimeAppId() : "";
+            if (gxos::gui::SameCanonicalTaskbarAppIdentity(s_menuAppId, appId) && count < MAX_WINDOWS) {
+                targets[count++] = window->id;
+            }
+        }
+        for (int i = 0; i < count; ++i) {
+            app::KernelWindow* window = KernelCompositor::getWindow(targets[i]);
+            if (window && (window->flags & app::WF_MINIMIZED)) KernelCompositor::restoreWindow(targets[i]);
+            KernelCompositor::requestCloseWindow(targets[i]);
+        }
+        break;
+    }
+    case MenuCommand::PinApp:
+        pinApplication(s_menuAppId);
+        break;
+    case MenuCommand::UnpinApp:
+        unpinApplication(s_menuAppId);
+        break;
+    case MenuCommand::LaunchApp:
+        launchTaskbarAppById(s_menuAppId);
+        break;
+    case MenuCommand::SelectOverflowEntry:
+        if (item.windowId != 0) activateWindow(item.windowId);
+        else if (item.appId[0] != '\0') launchTaskbarAppById(item.appId);
+        break;
+    case MenuCommand::None:
+    default:
+        break;
+    }
+}
+
+void TaskbarManager::loadPinnedApplications() {
+    if (s_pinLoadGate.loaded()) return;
+    const vfs::MountPoint* mount = vfs::get_mount(kTaskbarPinStorePath);
+    if (!mount || mount->readOnly) {
+        s_pinPersistence = TaskbarPinPersistenceState::Unsupported;
+        if (s_pinLoadGate.markUnavailableReported()) {
+            serial::puts("[taskbar] pin persistence=unsupported reason=");
+            serial::puts(!mount ? "settings-volume-unmounted\n" : "settings-volume-read-only\n");
+        }
+        return;
+    }
+    s_pinCount = 0;
+    s_pinLoadGate.markLoaded();
+    vfs::FileInfo info{};
+    const char* loadPath = kTaskbarPinStorePath;
+    vfs::Status statStatus = vfs::stat(loadPath, &info);
+    if (statStatus == vfs::VFS_ERR_NOT_FOUND) {
+        loadPath = kLegacyTaskbarPinStorePath;
+        statStatus = vfs::stat(loadPath, &info);
+        if (statStatus == vfs::VFS_ERR_NOT_FOUND) {
+            s_pinPersistence = TaskbarPinPersistenceState::Ready;
+            return;
+        }
+    }
+    if (statStatus != vfs::VFS_OK || info.type != vfs::FILE_TYPE_REGULAR ||
+        info.size == 0 || info.size > 512u) {
+        s_pinStoreCorrupt = true;
+        s_pinPersistence = TaskbarPinPersistenceState::StorageFailure;
+        serial::puts("[taskbar] pin persistence=storage-failure reason=invalid-store\n");
+        return;
+    }
+    char text[513];
+    const int32_t count = vfs::read_file(loadPath, text, 512u);
+    if (count <= 0 || static_cast<uint64_t>(count) != info.size) {
+        s_pinStoreCorrupt = true;
+        s_pinPersistence = TaskbarPinPersistenceState::StorageFailure;
+        serial::puts("[taskbar] pin persistence=storage-failure reason=read\n");
+        return;
+    }
+    text[count] = '\0';
+    bool sawVersion = false;
+    bool malformed = false;
+    char* cursor = text;
+    while (*cursor) {
+        char* line = cursor;
+        while (*cursor && *cursor != '\n' && *cursor != '\r') ++cursor;
+        if (*cursor) {
+            *cursor++ = '\0';
+            while (*cursor == '\n' || *cursor == '\r') ++cursor;
+        }
+        if (taskbarStringsEqual(line, "version=1")) {
+            sawVersion = true;
+            continue;
+        }
+        if (line[0] == '\0') continue;
+        if (line[0] != 'a' || line[1] != 'p' || line[2] != 'p' || line[3] != 'I' ||
+            line[4] != 'd' || line[5] != '=') {
+            malformed = true;
+            continue;
+        }
+        const char* appId = line + 6;
+        if (!validTaskbarAppId(appId)) {
+            malformed = true;
+            continue;
+        }
+        bool duplicate = false;
+        for (int i = 0; i < s_pinCount; ++i) {
+            if (taskbarStringsEqual(s_pinnedAppIds[i], appId)) duplicate = true;
+        }
+        if (duplicate) continue;
+        if (s_pinCount >= MAX_TASKBAR_PINS) {
+            malformed = true;
+            continue;
+        }
+        copyTaskbarText(s_pinnedAppIds[s_pinCount++], app::MAX_APP_ID, appId);
+    }
+    if (!sawVersion) malformed = true;
+    s_pinStoreCorrupt = malformed;
+    s_pinPersistence = malformed ? TaskbarPinPersistenceState::StorageFailure : TaskbarPinPersistenceState::Ready;
+    serial::puts(malformed ? "[taskbar] pin persistence=storage-failure reason=invalid-record\n"
+                           : "[taskbar] pin persistence=loaded\n");
+}
+
+void TaskbarManager::ensurePinnedApplicationsLoaded() {
+    if (s_pinLoadGate.loaded()) return;
+    const vfs::MountPoint* mount = vfs::get_mount(kTaskbarPinStorePath);
+    if (s_pinLoadGate.shouldAttempt(mount && !mount->readOnly)) loadPinnedApplications();
+}
+
+bool TaskbarManager::savePinnedApplications() {
+    const vfs::MountPoint* mount = vfs::get_mount(kTaskbarPinStorePath);
+    if (!mount || mount->readOnly) {
+        s_pinPersistence = TaskbarPinPersistenceState::Unsupported;
+        serial::puts("[taskbar] pin persistence=unsupported reason=");
+        serial::puts(!mount ? "settings-volume-unmounted\n" : "settings-volume-read-only\n");
+        return false;
+    }
+    if (s_pinStoreCorrupt) {
+        s_pinPersistence = TaskbarPinPersistenceState::StorageFailure;
+        serial::puts("[taskbar] pin persistence=storage-failure reason=preserving-invalid-store\n");
+        return false;
+    }
+    char text[512];
+    int position = 0;
+    const char* header = "version=1\n";
+    for (int i = 0; header[i] && position + 1 < (int)sizeof(text); ++i) text[position++] = header[i];
+    for (int pin = 0; pin < s_pinCount; ++pin) {
+        const char* prefix = "appId=";
+        for (int i = 0; prefix[i] && position + 1 < (int)sizeof(text); ++i) text[position++] = prefix[i];
+        for (int i = 0; s_pinnedAppIds[pin][i] && position + 1 < (int)sizeof(text); ++i) text[position++] = s_pinnedAppIds[pin][i];
+        text[position++] = '\n';
+    }
+    text[position] = '\0';
+    int32_t written = vfs::write_file(kTaskbarPinStorePath, text, static_cast<uint32_t>(position));
+    const bool sawIoTimeout = written == vfs::VFS_ERR_IO_TIMEOUT;
+    if (sawIoTimeout) {
+        // The first FAT create can publish the directory entry before the ATA
+        // cache flush times out. Retrying this complete, idempotent snapshot
+        // updates the now-visible file and lets transient device timeouts recover.
+        serial::puts("[taskbar] pin persistence retry attempt=2 reason=io-timeout\n");
+        written = vfs::write_file(kTaskbarPinStorePath, text, static_cast<uint32_t>(position));
+    }
+    if (sawIoTimeout &&
+        (written == vfs::VFS_ERR_IO_TIMEOUT || written == vfs::VFS_ERR_EXISTS)) {
+        // A just-published FAT entry can briefly be missed by open() while the
+        // create path reports that the same entry already exists. Make one
+        // final attempt to rewrite the snapshot through the normal lookup path.
+        serial::puts("[taskbar] pin persistence retry attempt=3 reason=transient-fat-state\n");
+        written = vfs::write_file(kTaskbarPinStorePath, text, static_cast<uint32_t>(position));
+    }
+    if (written != position) {
+        s_pinPersistence = TaskbarPinPersistenceState::StorageFailure;
+        serial::puts("[taskbar] pin persistence=storage-failure reason=write\n");
+        return false;
+    }
+    char readback[512];
+    const int32_t read = vfs::read_file(kTaskbarPinStorePath, readback, sizeof(readback));
+    bool matches = read == position;
+    if (matches) {
+        for (int i = 0; i < position; ++i) if (readback[i] != text[i]) matches = false;
+    }
+    if (!matches) {
+        s_pinPersistence = TaskbarPinPersistenceState::StorageFailure;
+        serial::puts("[taskbar] pin persistence=storage-failure reason=readback\n");
+        return false;
+    }
+    s_pinPersistence = TaskbarPinPersistenceState::Ready;
+    serial::puts("[taskbar] pin persistence=saved path=");
+    serial::puts(kTaskbarPinStorePath);
+    serial::puts(" pins=");
+    serial::put_hex32(static_cast<uint32_t>(s_pinCount));
+    serial::putc('\n');
+    return true;
+}
+
+bool TaskbarManager::pinApplication(const char* appId) {
+    ensurePinnedApplicationsLoaded();
+    if (!validTaskbarAppId(appId)) return false;
+    const app::AppInfo* info = app::AppManager::getAppInfoById(appId);
+    if (info) {
+        if (!info->available || !info->factory) return false;
+    } else if (!native_elf::lookup_package_by_id(appId)) {
+        return false;
+    }
+    for (int i = 0; i < s_pinCount; ++i) if (taskbarStringsEqual(s_pinnedAppIds[i], appId)) return false;
+    if (s_pinCount >= MAX_TASKBAR_PINS) return false;
+    copyTaskbarText(s_pinnedAppIds[s_pinCount++], app::MAX_APP_ID, appId);
+    savePinnedApplications();
+    return true;
+}
+
+bool TaskbarManager::unpinApplication(const char* appId) {
+    ensurePinnedApplicationsLoaded();
+    if (!gxos::gui::HasCanonicalTaskbarAppIdentity(appId)) return false;
+    int found = -1;
+    for (int i = 0; i < s_pinCount; ++i) {
+        if (taskbarStringsEqual(s_pinnedAppIds[i], appId)) { found = i; break; }
+    }
+    if (found < 0) return false;
+    for (int i = found; i + 1 < s_pinCount; ++i) {
+        copyTaskbarText(s_pinnedAppIds[i], app::MAX_APP_ID, s_pinnedAppIds[i + 1]);
+    }
+    s_pinnedAppIds[--s_pinCount][0] = '\0';
+    savePinnedApplications();
+    return true;
 }
 
 } // namespace compositor

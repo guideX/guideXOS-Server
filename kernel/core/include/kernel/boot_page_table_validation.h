@@ -1,13 +1,15 @@
 #pragma once
 
 #include <stdint.h>
+#include "../../../../guideXOSBootLoader/guidexOSBootInfo.h"
 
 namespace kernel {
 namespace memory {
 
 // Bound the boot tree walk while allowing the loader's 1,024 tracked tables
 // to be audited before any frames in the task arena become allocatable.
-static const uint32_t kMaximumBootPageTablePages = 1024u;
+static const uint32_t kMaximumBootPageTablePages =
+    guideXOS::GUIDEXOS_MAX_BOOT_PAGE_TABLE_PAGES;
 
 enum class BootPageTableValidationFailure : uint32_t {
     None = 0u,

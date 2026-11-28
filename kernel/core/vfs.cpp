@@ -1258,6 +1258,75 @@ Status flush(uint8_t handle)
         : (blockStatus == block::BLOCK_ERR_TIMEOUT ? VFS_ERR_IO_TIMEOUT : VFS_ERR_IO);
 }
 
+Status sync_all()
+{
+    bool syncedFatVolumes[fs_fat::MAX_FAT_VOLUMES] = {};
+    Status firstFailure = VFS_OK;
+
+    // Synchronous VFS writes normally close their handles in the same call,
+    // but close any remaining writable handle so its close-time flush result
+    // is included in the shutdown decision.
+    for (uint8_t handle = 0; handle < VFS_MAX_OPEN_FILES; ++handle) {
+        if (!s_files[handle].open || !(s_files[handle].flags & OPEN_WRITE)) continue;
+        const Status closeStatus = close(handle);
+        if (closeStatus != VFS_OK && firstFailure == VFS_OK) {
+            firstFailure = closeStatus;
+        }
+    }
+
+    for (uint8_t index = 0; index < VFS_MAX_MOUNTS; ++index) {
+        const MountPoint* mount = get_mount_by_index(index);
+        if (!mount || mount->readOnly) continue;
+
+        if (mount->fsType == FS_TYPE_FAT32 || mount->fsType == FS_TYPE_EXFAT) {
+            if (mount->fsVolumeIndex >= fs_fat::MAX_FAT_VOLUMES) {
+                if (firstFailure == VFS_OK) firstFailure = VFS_ERR_NOT_MOUNT;
+                continue;
+            }
+            if (syncedFatVolumes[mount->fsVolumeIndex]) {
+                continue;
+            }
+            syncedFatVolumes[mount->fsVolumeIndex] = true;
+            block::Status blockStatus = block::BLOCK_OK;
+            if (!fs_fat::flush(mount->fsVolumeIndex, &blockStatus)) {
+                const Status status = blockStatus == block::BLOCK_ERR_TIMEOUT
+                    ? VFS_ERR_IO_TIMEOUT : VFS_ERR_IO;
+#if defined(__GNUC__) || defined(__clang__)
+                serial::puts("[VFS] sync failed mount=");
+                serial::puts(mount->path);
+                serial::puts(" status=");
+                serial::puts(status_name(status));
+                serial::puts(" block=");
+                serial::puts(block_status_name(blockStatus));
+                serial::putc('\n');
+#endif
+                if (firstFailure == VFS_OK) firstFailure = status;
+                continue;
+            }
+#if defined(__GNUC__) || defined(__clang__)
+            serial::puts("[VFS] sync complete mount=");
+            serial::puts(mount->path);
+            serial::puts(" fs=");
+            serial::puts(fs_type_name(mount->fsType));
+            serial::putc('\n');
+#endif
+            continue;
+        }
+
+        if (mount->fsType != FS_TYPE_RAMDISK && firstFailure == VFS_OK) {
+            firstFailure = VFS_ERR_NOT_SUPPORTED;
+#if defined(__GNUC__) || defined(__clang__)
+            serial::puts("[VFS] sync unsupported writable mount=");
+            serial::puts(mount->path);
+            serial::puts(" fs=");
+            serial::puts(fs_type_name(mount->fsType));
+            serial::putc('\n');
+#endif
+        }
+    }
+    return firstFailure;
+}
+
 const FileHandle* get_handle(uint8_t handle)
 {
     if (handle >= VFS_MAX_OPEN_FILES) return nullptr;
@@ -1653,7 +1722,16 @@ Status rename(const char* oldPath, const char* newPath)
     const char* relNewPath = resolve_relative_path(newPath, newMount, resolvedNewPath, sizeof(resolvedNewPath));
     switch (oldMount->fsType) {
         case FS_TYPE_FAT32:
-            return fs_fat::rename_path(oldMount->fsVolumeIndex, relOldPath, relNewPath) ? VFS_OK : VFS_ERR_NOT_SUPPORTED;
+            if (fs_fat::rename_path(oldMount->fsVolumeIndex, relOldPath, relNewPath)) {
+                return VFS_OK;
+            }
+            switch (fs_fat::last_io_status()) {
+                case block::BLOCK_ERR_TIMEOUT: return VFS_ERR_IO_TIMEOUT;
+                case block::BLOCK_ERR_IO:
+                case block::BLOCK_ERR_NO_MEDIA:
+                case block::BLOCK_ERR_NOT_READY: return VFS_ERR_IO;
+                default: return VFS_ERR_NOT_SUPPORTED;
+            }
 
         default:
             break;
