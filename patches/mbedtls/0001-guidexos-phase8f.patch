@@ -1,0 +1,1268 @@
+diff --git a/library/ssl_tls.c b/library/ssl_tls.c
+index e8a44f8..5c580a7 100644
+--- a/library/ssl_tls.c
++++ b/library/ssl_tls.c
+@@ -36,6 +36,14 @@
+ #include "mbedtls/oid.h"
+ #endif
+ 
++#if defined(GXOS_BARE_METAL) && defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE)
++extern void gxos_tls_smoke_debug_trace(const char *event, uint32_t value);
++#define GXOS_TLS_SMOKE_DEBUG_TRACE(event, value) \
++    gxos_tls_smoke_debug_trace((event), (uint32_t) (value))
++#else
++#define GXOS_TLS_SMOKE_DEBUG_TRACE(event, value) do { ((void) (event)); ((void) (value)); } while (0)
++#endif
++
+ /* Define local translating functions to save code size by not using too many
+  * arguments in each translating place. */
+ static int local_err_translation(psa_status_t status)
+@@ -7069,6 +7077,7 @@ int mbedtls_ssl_parse_certificate(mbedtls_ssl_context *ssl)
+     mbedtls_x509_crt *chain = NULL;
+ 
+     MBEDTLS_SSL_DEBUG_MSG(2, ("=> parse certificate"));
++    GXOS_TLS_SMOKE_DEBUG_TRACE("parse_certificate.enter", ssl->state);
+ 
+     crt_expected = ssl_parse_certificate_coordinate(ssl, authmode);
+     if (crt_expected == SSL_CERTIFICATE_SKIP) {
+@@ -7091,6 +7100,7 @@ int mbedtls_ssl_parse_certificate(mbedtls_ssl_context *ssl)
+         MBEDTLS_SSL_DEBUG_RET(1, "mbedtls_ssl_read_record", ret);
+         goto exit;
+     }
++    GXOS_TLS_SMOKE_DEBUG_TRACE("parse_certificate.read_done", ssl->in_hslen);
+ 
+ #if defined(MBEDTLS_SSL_SRV_C)
+     if (ssl_srv_check_client_no_crt_notification(ssl) == 0) {
+@@ -7125,6 +7135,7 @@ int mbedtls_ssl_parse_certificate(mbedtls_ssl_context *ssl)
+     if (ret != 0) {
+         goto exit;
+     }
++    GXOS_TLS_SMOKE_DEBUG_TRACE("parse_certificate.chain_done", 0);
+ 
+ #if defined(MBEDTLS_SSL_ECP_RESTARTABLE_ENABLED)
+     if (ssl->handshake->ecrs_enabled) {
+@@ -7137,12 +7148,14 @@ crt_verify:
+     }
+ #endif
+ 
++    GXOS_TLS_SMOKE_DEBUG_TRACE("parse_certificate.verify_begin", authmode);
+     ret = mbedtls_ssl_verify_certificate(ssl, authmode, chain,
+                                          ssl->handshake->ciphersuite_info,
+                                          rs_ctx);
+     if (ret != 0) {
+         goto exit;
+     }
++    GXOS_TLS_SMOKE_DEBUG_TRACE("parse_certificate.verify_done", 0);
+ 
+ #if !defined(MBEDTLS_SSL_KEEP_PEER_CERTIFICATE)
+     {
+@@ -7185,6 +7198,7 @@ crt_verify:
+     MBEDTLS_SSL_DEBUG_MSG(2, ("<= parse certificate"));
+ 
+ exit:
++    GXOS_TLS_SMOKE_DEBUG_TRACE("parse_certificate.exit", (uint32_t) ret);
+ 
+     if (ret == 0) {
+         mbedtls_ssl_handshake_increment_state(ssl);
+@@ -8723,6 +8737,8 @@ int mbedtls_ssl_verify_certificate(mbedtls_ssl_context *ssl,
+         MBEDTLS_SSL_DEBUG_RET(1, "get_hostname_for_verification", ret);
+         return ret;
+     }
++    GXOS_TLS_SMOKE_DEBUG_TRACE("verify_certificate.hostname_ready",
++                               hostname != NULL && hostname[0] != '\0');
+ 
+     int have_ca_chain_or_callback = 0;
+ #if defined(MBEDTLS_X509_TRUSTED_CERTIFICATE_CALLBACK)
+@@ -8759,6 +8775,8 @@ int mbedtls_ssl_verify_certificate(mbedtls_ssl_context *ssl,
+             have_ca_chain_or_callback = 1;
+         }
+ 
++        GXOS_TLS_SMOKE_DEBUG_TRACE("verify_certificate.x509_begin",
++                                   have_ca_chain_or_callback);
+         ret = mbedtls_x509_crt_verify_restartable(
+             chain,
+             ca_chain, ca_crl,
+@@ -8766,6 +8784,7 @@ int mbedtls_ssl_verify_certificate(mbedtls_ssl_context *ssl,
+             hostname,
+             &ssl->session_negotiate->verify_result,
+             f_vrfy, p_vrfy, rs_ctx);
++        GXOS_TLS_SMOKE_DEBUG_TRACE("verify_certificate.x509_done", (uint32_t) ret);
+     }
+ 
+     if (ret != 0) {
+diff --git a/library/ssl_tls12_client.c b/library/ssl_tls12_client.c
+index a0170d5..5649309 100644
+--- a/library/ssl_tls12_client.c
++++ b/library/ssl_tls12_client.c
+@@ -12,6 +12,7 @@
+ #include "mbedtls/platform.h"
+ 
+ #include "mbedtls/ssl.h"
++#include "ssl_debug_helpers.h"
+ #include "ssl_client.h"
+ #include "debug_internal.h"
+ #include "mbedtls/error.h"
+@@ -19,6 +20,14 @@
+ #include "mbedtls_utils.h"
+ 
+ #include "psa/crypto.h"
++#if defined(GXOS_BARE_METAL) && defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE)
++extern void gxos_tls_smoke_debug_trace(const char *event, uint32_t value);
++#define GXOS_TLS_SMOKE_DEBUG_TRACE(event, value) \
++    gxos_tls_smoke_debug_trace((event), (uint32_t) (value))
++#else
++#define GXOS_TLS_SMOKE_DEBUG_TRACE(event, value) do { ((void) (event)); ((void) (value)); } while (0)
++#endif
++
+ #if defined(MBEDTLS_KEY_EXCHANGE_ECDHE_PSK_ENABLED)
+ /* Define a local translating function to save code size by not using too many
+  * arguments in each translating place. */
+@@ -1655,9 +1664,11 @@ static int ssl_parse_server_ecdh_params(mbedtls_ssl_context *ssl,
+     /* Next two bytes are the namedcurve value */
+     tls_id = MBEDTLS_GET_UINT16_BE(*p, 0);
+     *p += 2;
++    GXOS_TLS_SMOKE_DEBUG_TRACE("parse_ske.ecdh_group", tls_id);
+ 
+     /* Check it's a curve we offered */
+     if (mbedtls_ssl_check_curve_tls_id(ssl, tls_id) != 0) {
++        GXOS_TLS_SMOKE_DEBUG_TRACE("parse_ske.ecdh_group_rejected", tls_id);
+         MBEDTLS_SSL_DEBUG_MSG(2,
+                               ("bad server key exchange message (ECDHE curve): %u",
+                                (unsigned) tls_id));
+@@ -1671,6 +1682,7 @@ static int ssl_parse_server_ecdh_params(mbedtls_ssl_context *ssl,
+     }
+     handshake->xxdh_psa_type = key_type;
+     handshake->xxdh_psa_bits = ec_bits;
++    GXOS_TLS_SMOKE_DEBUG_TRACE("parse_ske.ecdh_bits", (uint32_t) ec_bits);
+ 
+     /* Keep a copy of the peer's public key */
+     ecpoint_len = *(*p)++;
+@@ -1742,32 +1754,77 @@ static int ssl_parse_signature_algorithm(mbedtls_ssl_context *ssl,
+ {
+     if (mbedtls_ssl_get_pk_sigalg_and_md_alg_from_sig_alg(sig_alg, pk_alg, md_alg) != 0) {
+         MBEDTLS_SSL_DEBUG_MSG(1,
+-                              ("Server used unsupported value in SigAlg extension 0x%04x",
+-                               sig_alg));
++                              ("Server used unsupported %s signature algorithm",
++                               mbedtls_ssl_sig_alg_to_str(sig_alg)));
+         return MBEDTLS_SSL_ALERT_MSG_ILLEGAL_PARAMETER;
+     }
+ 
+     /*
+-     * mbedtls_ssl_get_pk_sigalg_and_md_alg_from_sig_alg() understands sig_alg code points across
+-     * TLS versions. Make sure that the received sig_alg extension is valid in TLS 1.2.
++     * mbedtls_ssl_get_pk_sigalg_and_md_alg_from_sig_alg() understands
++     * signature algorithm code points from both TLS 1.2 and TLS 1.3. Make sure
++     * that the selected signature algorithm is acceptable when TLS 1.2 is
++     * negotiated.
++     *
++     * In TLS 1.2, RSA-PSS signature algorithms (rsa_pss_rsae_*) are not
++     * defined by RFC 5246. However, RFC 8446 Section 4.2.3 requires that
++     * implementations which advertise support for RSASSA-PSS must be
++     * prepared to accept such signatures even when TLS 1.2 is negotiated,
++     * provided they were offered in the signature_algorithms extension.
++     *
++     * Therefore, we allow rsa_pss_rsae_* here if:
++     *  - the implementation supports them, and
++     *  - they were offered in the signature_algorithms extension (checked by
++     *    `mbedtls_ssl_sig_alg_is_offered()` below).
++     *
++     * If we were to add full support for rsa_pss_rsae_* signature algorithms
++     * in TLS 1.2 (not defined by RFC 5246; RFC 8446 requires implementations
++     * that advertise RSASSA-PSS to accept such signatures even when TLS 1.2
++     * is negotiated; in practice, several TLS implementations also offer and
++     * use these algorithms in TLS 1.2-only configurations), we should then
++     * integrate RSA-PSS into the TLS 1.2 signature algorithm support logic
++     * (`mbedtls_ssl_tls12_sig_alg_is_supported()`) instead of handling it as a
++     * special case here.
+      */
+     if (!mbedtls_ssl_sig_alg_is_supported(ssl, sig_alg)) {
+-        MBEDTLS_SSL_DEBUG_MSG(1,
+-                              ("Server used unsupported value in SigAlg extension 0x%04x",
+-                               sig_alg));
+-        return MBEDTLS_SSL_ALERT_MSG_ILLEGAL_PARAMETER;
++        switch (sig_alg) {
++#if defined(PSA_WANT_ALG_RSA_PSS)
++#if defined(PSA_WANT_ALG_SHA_256)
++            case MBEDTLS_TLS1_3_SIG_RSA_PSS_RSAE_SHA256:
++#endif
++#if defined(PSA_WANT_ALG_SHA_384)
++            case MBEDTLS_TLS1_3_SIG_RSA_PSS_RSAE_SHA384:
++#endif
++#if defined(PSA_WANT_ALG_SHA_512)
++            case MBEDTLS_TLS1_3_SIG_RSA_PSS_RSAE_SHA512:
++#endif
++#if defined(PSA_WANT_ALG_SHA_256) || defined(PSA_WANT_ALG_SHA_384) || defined(PSA_WANT_ALG_SHA_512)
++        MBEDTLS_SSL_DEBUG_MSG(3,
++                              (
++                                  "Accepting TLS 1.2 RSA-PSS signature algorithm %s via compatibility exception",
++                                  mbedtls_ssl_sig_alg_to_str(sig_alg)));
++        break;
++#endif
++#endif /* PSA_WANT_ALG_RSA_PSS */
++            default:
++                MBEDTLS_SSL_DEBUG_MSG(1,
++                                      ("Server used unsupported %s signature algorithm",
++                                       mbedtls_ssl_sig_alg_to_str(sig_alg)));
++                return MBEDTLS_SSL_ALERT_MSG_ILLEGAL_PARAMETER;
++        }
+     }
+ 
+     /*
+      * Check if the signature algorithm is acceptable
+      */
+     if (!mbedtls_ssl_sig_alg_is_offered(ssl, sig_alg)) {
+-        MBEDTLS_SSL_DEBUG_MSG(1, ("Server used SigAlg value 0x%04x that was not offered", sig_alg));
++        MBEDTLS_SSL_DEBUG_MSG(1,
++                              ("Server used the signature algorithm %s that was not offered",
++                               mbedtls_ssl_sig_alg_to_str(sig_alg)));
+         return MBEDTLS_SSL_ALERT_MSG_ILLEGAL_PARAMETER;
+     }
+ 
+-    MBEDTLS_SSL_DEBUG_MSG(2, ("Server used SignatureAlgorithm %d", sig_alg & 0x00FF));
+-    MBEDTLS_SSL_DEBUG_MSG(2, ("Server used HashAlgorithm %d", sig_alg >> 8));
++    MBEDTLS_SSL_DEBUG_MSG(2, ("Server used the signature algorithm %s",
++                              mbedtls_ssl_sig_alg_to_str(sig_alg)));
+ 
+     return 0;
+ }
+@@ -1783,6 +1840,7 @@ static int ssl_parse_server_key_exchange(mbedtls_ssl_context *ssl)
+     unsigned char *p = NULL, *end = NULL;
+ 
+     MBEDTLS_SSL_DEBUG_MSG(2, ("=> parse server key exchange"));
++    GXOS_TLS_SMOKE_DEBUG_TRACE("parse_ske.enter", ssl->state);
+ 
+ #if defined(MBEDTLS_SSL_ECP_RESTARTABLE_ENABLED)
+     if (ssl->handshake->ecrs_enabled &&
+@@ -1795,6 +1853,7 @@ static int ssl_parse_server_key_exchange(mbedtls_ssl_context *ssl)
+         MBEDTLS_SSL_DEBUG_RET(1, "mbedtls_ssl_read_record", ret);
+         return ret;
+     }
++    GXOS_TLS_SMOKE_DEBUG_TRACE("parse_ske.read_done", ssl->in_hslen);
+ 
+     if (ssl->in_msgtype != MBEDTLS_SSL_MSG_HANDSHAKE) {
+         MBEDTLS_SSL_DEBUG_MSG(1, ("bad server key exchange message"));
+@@ -1871,6 +1930,8 @@ start_processing:
+                 MBEDTLS_SSL_ALERT_MSG_ILLEGAL_PARAMETER);
+             return MBEDTLS_ERR_SSL_ILLEGAL_PARAMETER;
+         }
++        GXOS_TLS_SMOKE_DEBUG_TRACE("parse_ske.ecdh_done",
++                                   (uint32_t) (p - (ssl->in_msg + mbedtls_ssl_hs_hdr_len(ssl))));
+     } else
+ #endif /* MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED ||
+           MBEDTLS_KEY_EXCHANGE_ECDHE_PSK_ENABLED ||
+@@ -1950,6 +2011,7 @@ start_processing:
+          */
+         MBEDTLS_SSL_CHK_BUF_READ_PTR(p, end, 2);
+         uint16_t sig_alg = MBEDTLS_GET_UINT16_BE(p, 0);
++        GXOS_TLS_SMOKE_DEBUG_TRACE("parse_ske.sig_alg", sig_alg);
+         if (ssl_parse_signature_algorithm(ssl, sig_alg, &md_alg, &pk_alg) != 0) {
+             MBEDTLS_SSL_DEBUG_MSG(1,
+                                   ("bad server key exchange message"));
+@@ -2004,12 +2066,14 @@ start_processing:
+          * Compute the hash that has been signed
+          */
+         if (md_alg != MBEDTLS_MD_NONE) {
++            GXOS_TLS_SMOKE_DEBUG_TRACE("parse_ske.hash_begin", md_alg);
+             ret = mbedtls_ssl_get_key_exchange_md_tls1_2(ssl, hash, &hashlen,
+                                                          params, params_len,
+                                                          md_alg);
+             if (ret != 0) {
+                 return ret;
+             }
++            GXOS_TLS_SMOKE_DEBUG_TRACE("parse_ske.hash_done", (uint32_t) hashlen);
+         } else {
+             MBEDTLS_SSL_DEBUG_MSG(1, ("should never happen"));
+             return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+@@ -2034,8 +2098,10 @@ start_processing:
+                                         p, sig_len);
+         } else
+ #endif /* MBEDTLS_X509_RSASSA_PSS_SUPPORT */
++        GXOS_TLS_SMOKE_DEBUG_TRACE("parse_ske.verify_begin", pk_alg);
+         ret = mbedtls_pk_verify_restartable(peer_pk,
+                                             md_alg, hash, hashlen, p, sig_len, rs_ctx);
++        GXOS_TLS_SMOKE_DEBUG_TRACE("parse_ske.verify_done", (uint32_t) ret);
+ 
+         if (ret != 0) {
+             int send_alert_msg = 1;
+@@ -2067,6 +2133,7 @@ start_processing:
+ #endif /* MBEDTLS_KEY_EXCHANGE_WITH_SERVER_SIGNATURE_ENABLED */
+ 
+ exit:
++    GXOS_TLS_SMOKE_DEBUG_TRACE("parse_ske.exit", (uint32_t) ret);
+     mbedtls_ssl_handshake_increment_state(ssl);
+ 
+     MBEDTLS_SSL_DEBUG_MSG(2, ("<= parse server key exchange"));
+@@ -2360,6 +2427,7 @@ static int ssl_write_client_key_exchange(mbedtls_ssl_context *ssl)
+         /* Generate ECDH private key. */
+         status = psa_generate_key(&key_attributes,
+                                   &handshake->xxdh_psa_privkey);
++        GXOS_TLS_SMOKE_DEBUG_TRACE("client_kx.ecdhe.generate_key", (uint32_t) status);
+         if (status != PSA_SUCCESS) {
+             return MBEDTLS_ERR_SSL_HW_ACCEL_FAILED;
+         }
+@@ -2375,6 +2443,7 @@ static int ssl_write_client_key_exchange(mbedtls_ssl_context *ssl)
+         status = psa_export_public_key(handshake->xxdh_psa_privkey,
+                                        own_pubkey, own_pubkey_max_len,
+                                        &own_pubkey_len);
++        GXOS_TLS_SMOKE_DEBUG_TRACE("client_kx.ecdhe.export_pub", (uint32_t) status);
+         if (status != PSA_SUCCESS) {
+             psa_destroy_key(handshake->xxdh_psa_privkey);
+             handshake->xxdh_psa_privkey = MBEDTLS_SVC_KEY_ID_INIT;
+@@ -2394,9 +2463,11 @@ static int ssl_write_client_key_exchange(mbedtls_ssl_context *ssl)
+                                        ssl->handshake->premaster,
+                                        sizeof(ssl->handshake->premaster),
+                                        &ssl->handshake->pmslen);
++        GXOS_TLS_SMOKE_DEBUG_TRACE("client_kx.ecdhe.raw_agree", (uint32_t) status);
+ 
+         destruction_status = psa_destroy_key(handshake->xxdh_psa_privkey);
+         handshake->xxdh_psa_privkey = MBEDTLS_SVC_KEY_ID_INIT;
++        GXOS_TLS_SMOKE_DEBUG_TRACE("client_kx.ecdhe.destroy", (uint32_t) destruction_status);
+ 
+         if (status != PSA_SUCCESS || destruction_status != PSA_SUCCESS) {
+             return MBEDTLS_ERR_SSL_HW_ACCEL_FAILED;
+@@ -2600,9 +2671,11 @@ static int ssl_write_client_key_exchange(mbedtls_ssl_context *ssl)
+     mbedtls_ssl_handshake_increment_state(ssl);
+ 
+     if ((ret = mbedtls_ssl_write_handshake_msg_ext(ssl, 1, 1)) != 0) {
++        GXOS_TLS_SMOKE_DEBUG_TRACE("client_kx.write_msg", (uint32_t) ret);
+         MBEDTLS_SSL_DEBUG_RET(1, "mbedtls_ssl_write_handshake_msg_ext", ret);
+         return ret;
+     }
++    GXOS_TLS_SMOKE_DEBUG_TRACE("client_kx.write_msg", 0);
+ 
+     MBEDTLS_SSL_DEBUG_MSG(2, ("<= write client key exchange"));
+ 
+@@ -2898,6 +2971,7 @@ int mbedtls_ssl_handshake_client_step(mbedtls_ssl_context *ssl)
+ 
+     switch (ssl->state) {
+         case MBEDTLS_SSL_HELLO_REQUEST:
++            GXOS_TLS_SMOKE_DEBUG_TRACE("client_step.hello_request", ssl->state);
+             mbedtls_ssl_handshake_set_state(ssl, MBEDTLS_SSL_CLIENT_HELLO);
+             break;
+ 
+@@ -2905,6 +2979,7 @@ int mbedtls_ssl_handshake_client_step(mbedtls_ssl_context *ssl)
+          *  ==>   ClientHello
+          */
+         case MBEDTLS_SSL_CLIENT_HELLO:
++            GXOS_TLS_SMOKE_DEBUG_TRACE("client_step.client_hello", ssl->state);
+             ret = mbedtls_ssl_write_client_hello(ssl);
+             break;
+ 
+@@ -2916,22 +2991,27 @@ int mbedtls_ssl_handshake_client_step(mbedtls_ssl_context *ssl)
+          *        ServerHelloDone
+          */
+         case MBEDTLS_SSL_SERVER_HELLO:
++            GXOS_TLS_SMOKE_DEBUG_TRACE("client_step.server_hello", ssl->state);
+             ret = ssl_parse_server_hello(ssl);
+             break;
+ 
+         case MBEDTLS_SSL_SERVER_CERTIFICATE:
++            GXOS_TLS_SMOKE_DEBUG_TRACE("client_step.server_certificate", ssl->state);
+             ret = mbedtls_ssl_parse_certificate(ssl);
+             break;
+ 
+         case MBEDTLS_SSL_SERVER_KEY_EXCHANGE:
++            GXOS_TLS_SMOKE_DEBUG_TRACE("client_step.server_key_exchange", ssl->state);
+             ret = ssl_parse_server_key_exchange(ssl);
+             break;
+ 
+         case MBEDTLS_SSL_CERTIFICATE_REQUEST:
++            GXOS_TLS_SMOKE_DEBUG_TRACE("client_step.certificate_request", ssl->state);
+             ret = ssl_parse_certificate_request(ssl);
+             break;
+ 
+         case MBEDTLS_SSL_SERVER_HELLO_DONE:
++            GXOS_TLS_SMOKE_DEBUG_TRACE("client_step.server_hello_done", ssl->state);
+             ret = ssl_parse_server_hello_done(ssl);
+             break;
+ 
+@@ -2943,22 +3023,27 @@ int mbedtls_ssl_handshake_client_step(mbedtls_ssl_context *ssl)
+          *        Finished
+          */
+         case MBEDTLS_SSL_CLIENT_CERTIFICATE:
++            GXOS_TLS_SMOKE_DEBUG_TRACE("client_step.client_certificate", ssl->state);
+             ret = mbedtls_ssl_write_certificate(ssl);
+             break;
+ 
+         case MBEDTLS_SSL_CLIENT_KEY_EXCHANGE:
++            GXOS_TLS_SMOKE_DEBUG_TRACE("client_step.client_key_exchange", ssl->state);
+             ret = ssl_write_client_key_exchange(ssl);
+             break;
+ 
+         case MBEDTLS_SSL_CERTIFICATE_VERIFY:
++            GXOS_TLS_SMOKE_DEBUG_TRACE("client_step.certificate_verify", ssl->state);
+             ret = ssl_write_certificate_verify(ssl);
+             break;
+ 
+         case MBEDTLS_SSL_CLIENT_CHANGE_CIPHER_SPEC:
++            GXOS_TLS_SMOKE_DEBUG_TRACE("client_step.client_ccs", ssl->state);
+             ret = mbedtls_ssl_write_change_cipher_spec(ssl);
+             break;
+ 
+         case MBEDTLS_SSL_CLIENT_FINISHED:
++            GXOS_TLS_SMOKE_DEBUG_TRACE("client_step.client_finished", ssl->state);
+             ret = mbedtls_ssl_write_finished(ssl);
+             break;
+ 
+@@ -2974,19 +3059,23 @@ int mbedtls_ssl_handshake_client_step(mbedtls_ssl_context *ssl)
+ #endif
+ 
+         case MBEDTLS_SSL_SERVER_CHANGE_CIPHER_SPEC:
++            GXOS_TLS_SMOKE_DEBUG_TRACE("client_step.server_ccs", ssl->state);
+             ret = mbedtls_ssl_parse_change_cipher_spec(ssl);
+             break;
+ 
+         case MBEDTLS_SSL_SERVER_FINISHED:
++            GXOS_TLS_SMOKE_DEBUG_TRACE("client_step.server_finished", ssl->state);
+             ret = mbedtls_ssl_parse_finished(ssl);
+             break;
+ 
+         case MBEDTLS_SSL_FLUSH_BUFFERS:
++            GXOS_TLS_SMOKE_DEBUG_TRACE("client_step.flush_buffers", ssl->state);
+             MBEDTLS_SSL_DEBUG_MSG(2, ("handshake: done"));
+             mbedtls_ssl_handshake_set_state(ssl, MBEDTLS_SSL_HANDSHAKE_WRAPUP);
+             break;
+ 
+         case MBEDTLS_SSL_HANDSHAKE_WRAPUP:
++            GXOS_TLS_SMOKE_DEBUG_TRACE("client_step.wrapup", ssl->state);
+             mbedtls_ssl_handshake_wrapup(ssl);
+             break;
+ 
+diff --git a/library/x509_crt.c b/library/x509_crt.c
+index 3232760..9069dd8 100644
+--- a/library/x509_crt.c
++++ b/library/x509_crt.c
+@@ -2129,17 +2129,21 @@ static int x509_crt_check_signature(const mbedtls_x509_crt *child,
+ 
+ #if defined(MBEDTLS_ECP_RESTARTABLE)
+     if (rs_ctx != NULL && child->sig_pk == MBEDTLS_PK_SIGALG_ECDSA) {
+-        return mbedtls_pk_verify_restartable(&parent->pk,
+-                                             child->sig_md, hash, hash_len,
+-                                             child->sig.p, child->sig.len, &rs_ctx->pk);
++        int verify_ret = mbedtls_pk_verify_restartable(&parent->pk,
++                                                       child->sig_md, hash, hash_len,
++                                                       child->sig.p, child->sig.len, &rs_ctx->pk);
++        return verify_ret;
+     }
+ #else
+     (void) rs_ctx;
+ #endif
+ 
+-    return mbedtls_pk_verify_ext(child->sig_pk, &parent->pk,
+-                                 child->sig_md, hash, hash_len,
+-                                 child->sig.p, child->sig.len);
++    {
++        int verify_ret = mbedtls_pk_verify_ext(child->sig_pk, &parent->pk,
++                                               child->sig_md, hash, hash_len,
++                                               child->sig.p, child->sig.len);
++        return verify_ret;
++    }
+ }
+ 
+ /*
+diff --git a/library/ssl_msg.c b/library/ssl_msg.c
+index 87d6478..bd8a70a 100644
+--- a/library/ssl_msg.c
++++ b/library/ssl_msg.c
+@@ -16,6 +16,15 @@
+ 
+ #include "mbedtls/platform.h"
+ 
++#if defined(GXOS_BARE_METAL) && defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE)
++#include <stdint.h>
++extern void gxos_tls_smoke_debug_trace(const char *event, uint32_t value);
++#define GXOS_TLS_SMOKE_DEBUG_TRACE(event, value) \
++    gxos_tls_smoke_debug_trace((event), (uint32_t) (value))
++#else
++#define GXOS_TLS_SMOKE_DEBUG_TRACE(event, value) do { ((void) (event)); ((void) (value)); } while (0)
++#endif
++
+ #include "mbedtls/ssl.h"
+ #include "debug_internal.h"
+ #include "ssl_debug_helpers.h"
+@@ -4808,6 +4817,14 @@ static int ssl_get_next_record(mbedtls_ssl_context *ssl)
+         }
+     }
+ 
++    /* Record-boundary evidence is intentionally metadata-only: no TLS
++     * payload is emitted.  Values are the wire content type, legacy record
++     * version, and encoded payload length. */
++    GXOS_TLS_SMOKE_DEBUG_TRACE("record.header_type", rec.type);
++    GXOS_TLS_SMOKE_DEBUG_TRACE("record.header_version",
++        ((uint32_t) rec.ver[0] << 8) | rec.ver[1]);
++    GXOS_TLS_SMOKE_DEBUG_TRACE("record.header_length", rec.data_len);
++
+ #if defined(MBEDTLS_SSL_PROTO_DTLS)
+     if (ssl->conf->transport == MBEDTLS_SSL_TRANSPORT_DATAGRAM) {
+         /* Remember offset of next record within datagram. */
+diff --git a/tf-psa-crypto/platform/memory_buffer_alloc.c b/tf-psa-crypto/platform/memory_buffer_alloc.c
+index df9da87..0cc57f9 100644
+--- a/tf-psa-crypto/platform/memory_buffer_alloc.c
++++ b/tf-psa-crypto/platform/memory_buffer_alloc.c
+@@ -294,7 +294,9 @@ static void *buffer_alloc_calloc(size_t n, size_t size)
+     }
+ 
+     p = ((unsigned char *) cur) + sizeof(memory_header) + len;
+-    new = (memory_header *) p;
++    /* Double casting is required to prevent compilation warning on Clang-based
++     * compilers when "-Wcast-align" is used. */
++    new = (memory_header *) (void *) p;
+ 
+     new->size = cur->size - len - sizeof(memory_header);
+     new->alloc = 0;
+@@ -375,7 +377,9 @@ static void buffer_alloc_free(void *ptr)
+     }
+ 
+     p -= sizeof(memory_header);
+-    hdr = (memory_header *) p;
++    /* Double casting is required to prevent compilation warning on Clang-based
++     * compilers when "-Wcast-align" is used. */
++    hdr = (memory_header *) (void *) p;
+ 
+     if (verify_header(hdr) != 0) {
+         mbedtls_exit(1);
+@@ -586,7 +590,9 @@ void mbedtls_memory_buffer_alloc_init(unsigned char *buf, size_t len)
+     heap.buf = buf;
+     heap.len = len;
+ 
+-    heap.first = (memory_header *) buf;
++    /* Double casting is required to prevent compilation warning on Clang-based
++     * compilers when "-Wcast-align" is used. */
++    heap.first = (memory_header *) (void *) buf;
+     heap.first->size = len - sizeof(memory_header);
+     heap.first->magic1 = MAGIC1;
+     heap.first->magic2 = MAGIC2;
+diff --git a/tf-psa-crypto/core/psa_crypto.c b/tf-psa-crypto/core/psa_crypto.c
+index d7931d2..a90712d 100644
+--- a/tf-psa-crypto/core/psa_crypto.c
++++ b/tf-psa-crypto/core/psa_crypto.c
+@@ -38,6 +38,16 @@
+ #include <string.h>
+ #include "mbedtls/platform.h"
+ 
++#if defined(GXOS_BARE_METAL) && defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE) && \
++    defined(GXOS_TLS_DETAILED_CRYPTO_TRACE)
++extern void gxos_tls_smoke_debug_trace(const char *event, uint32_t value);
++#define GXOS_TLS_SMOKE_DEBUG_TRACE(event, value) \
++    gxos_tls_smoke_debug_trace((event), (uint32_t) (value))
++#else
++#define GXOS_TLS_SMOKE_DEBUG_TRACE(event, value) \
++    do { ((void) (event)); ((void) (value)); } while (0)
++#endif
++
+ #include "mbedtls/private/aes.h"
+ #include "mbedtls/asn1.h"
+ #include "mbedtls/asn1write.h"
+@@ -1494,6 +1504,8 @@ psa_status_t psa_export_public_key(mbedtls_svc_key_id_t key,
+         return PSA_ERROR_BUFFER_TOO_SMALL;
+     }
+ 
++    GXOS_TLS_SMOKE_DEBUG_TRACE("psa_export_public_key.begin", 0);
++
+     /* Set the key to empty now, so that even when there are errors, we always
+      * set data_length to a value between 0 and data_size. On error, setting
+      * the key to empty is a good choice because an empty key representation is
+@@ -1502,6 +1514,7 @@ psa_status_t psa_export_public_key(mbedtls_svc_key_id_t key,
+ 
+     /* Exporting a public key doesn't require a usage flag. */
+     status = psa_get_and_lock_key_slot_with_policy(key, &slot, 0, 0);
++    GXOS_TLS_SMOKE_DEBUG_TRACE("psa_export_public_key.lock", (uint32_t) status);
+     if (status != PSA_SUCCESS) {
+         return status;
+     }
+@@ -1513,12 +1526,15 @@ psa_status_t psa_export_public_key(mbedtls_svc_key_id_t key,
+         goto exit;
+     }
+ 
++    GXOS_TLS_SMOKE_DEBUG_TRACE("psa_export_public_key.driver_begin", 0);
+     status = psa_driver_wrapper_export_public_key(
+         &slot->attr, slot->key.data, slot->key.bytes,
+         data, data_size, data_length);
++    GXOS_TLS_SMOKE_DEBUG_TRACE("psa_export_public_key.driver_done", (uint32_t) status);
+ 
+ exit:
+     unlock_status = psa_unregister_read_under_mutex(slot);
++    GXOS_TLS_SMOKE_DEBUG_TRACE("psa_export_public_key.unlock", (uint32_t) unlock_status);
+ 
+     LOCAL_OUTPUT_FREE(data_external, data);
+     return (status == PSA_SUCCESS) ? unlock_status : status;
+@@ -6946,7 +6962,9 @@ static int psa_key_derivation_allows_free_form_secret_input(
+ psa_status_t psa_key_derivation_setup(psa_key_derivation_operation_t *operation,
+                                       psa_algorithm_t alg)
+ {
++#if defined(AT_LEAST_ONE_BUILTIN_KDF)
+     psa_status_t status;
++#endif
+ 
+     if (operation->alg != 0) {
+         return PSA_ERROR_BAD_STATE;
+@@ -6979,10 +6997,12 @@ psa_status_t psa_key_derivation_setup(psa_key_derivation_operation_t *operation,
+         return PSA_ERROR_INVALID_ARGUMENT;
+     }
+ 
++#if defined(AT_LEAST_ONE_BUILTIN_KDF)
+     if (status == PSA_SUCCESS) {
+         operation->alg = alg;
+     }
+     return status;
++#endif /* AT_LEAST_ONE_BUILTIN_KDF */
+ }
+ 
+ #if defined(BUILTIN_ALG_ANY_HKDF)
+diff --git a/tf-psa-crypto/extras/pkparse.c b/tf-psa-crypto/extras/pkparse.c
+index ae3ef58..f7b26e7 100644
+--- a/tf-psa-crypto/extras/pkparse.c
++++ b/tf-psa-crypto/extras/pkparse.c
+@@ -26,6 +26,15 @@
+ #include "mbedtls/psa_util.h"
+ #include "psa/crypto.h"
+ 
++#if defined(GXOS_BARE_METAL) && defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE)
++extern void gxos_tls_smoke_debug_trace(const char *event, uint32_t value);
++#define GXOS_TLS_SMOKE_DEBUG_TRACE(event, value) \
++    gxos_tls_smoke_debug_trace((event), (uint32_t) (value))
++#else
++#define GXOS_TLS_SMOKE_DEBUG_TRACE(event, value) \
++    do { ((void) (event)); ((void) (value)); } while (0)
++#endif
++
+ /* Extended formats */
+ #if defined(MBEDTLS_PEM_PARSE_C)
+ #include "mbedtls/pem.h"
+@@ -384,7 +393,21 @@ static int pk_use_ecparams(const mbedtls_asn1_buf *params, mbedtls_pk_context *p
+     mbedtls_ecp_group_id grp_id;
+ 
+     if (params->tag == MBEDTLS_ASN1_OID) {
+-        if (mbedtls_oid_get_ec_grp(params, &grp_id) != 0) {
++        uint32_t oid_shape = 0;
++        int oid_ret;
++
++        if (params->p != NULL && params->len != 0) {
++            /* Log only the bounded OID shape, never the certificate bytes. */
++            oid_shape = ((uint32_t) params->len << 16) |
++                        ((uint32_t) params->p[0] << 8) |
++                        (uint32_t) params->p[params->len - 1];
++        }
++        GXOS_TLS_SMOKE_DEBUG_TRACE("pkparse.ec_oid_shape", oid_shape);
++        oid_ret = mbedtls_oid_get_ec_grp(params, &grp_id);
++        GXOS_TLS_SMOKE_DEBUG_TRACE("pkparse.ec_oid_result",
++                                   oid_ret == 0 ? (uint32_t) grp_id :
++                                   (uint32_t) oid_ret);
++        if (oid_ret != 0) {
+             return MBEDTLS_ERR_PK_UNKNOWN_NAMED_CURVE;
+         }
+     } else {
+diff --git a/tf-psa-crypto/extras/pk.c b/tf-psa-crypto/extras/pk.c
+index 99d1fa4..185a0bd 100644
+--- a/tf-psa-crypto/extras/pk.c
++++ b/tf-psa-crypto/extras/pk.c
+@@ -25,6 +25,13 @@
+ #include <limits.h>
+ #include <stdint.h>
+ 
++#if defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE)
++extern void gxos_tls_smoke_debug_trace(const char *event, uint32_t value);
++#define GXOS_TLS_SMOKE_TRACE(event, value) gxos_tls_smoke_debug_trace((event), (uint32_t) (value))
++#else
++#define GXOS_TLS_SMOKE_TRACE(event, value) ((void) (event), (void) (value))
++#endif
++
+ #if !defined(PK_EXPORT_KEYS_ON_THE_STACK)
+ #include "mbedtls/platform.h" // for calloc/free
+ #endif
+@@ -1253,13 +1260,23 @@ int mbedtls_pk_verify_ext(mbedtls_pk_sigalg_t type,
+     psa_set_key_usage_flags(&attributes, PSA_KEY_USAGE_VERIFY_HASH);
+     psa_set_key_algorithm(&attributes, psa_sig_alg);
+ 
++    GXOS_TLS_SMOKE_TRACE("rsa_pss_verify.key_type",
++                         (uint32_t) psa_get_key_type(&attributes));
++    GXOS_TLS_SMOKE_TRACE("rsa_pss_verify.key_bits", (uint32_t) ctx->bits);
++    GXOS_TLS_SMOKE_TRACE("rsa_pss_verify.alg", (uint32_t) psa_sig_alg);
++    GXOS_TLS_SMOKE_TRACE("rsa_pss_verify.hash_len", (uint32_t) hash_len);
++    GXOS_TLS_SMOKE_TRACE("rsa_pss_verify.sig_len", (uint32_t) sig_len);
++
++    GXOS_TLS_SMOKE_TRACE("rsa_pss_verify.import_begin", (uint32_t) ctx->pub_raw_len);
+     status = psa_import_key(&attributes,
+                             ctx->pub_raw, ctx->pub_raw_len,
+                             &key_id);
+     if (status != PSA_SUCCESS) {
++        GXOS_TLS_SMOKE_TRACE("rsa_pss_verify.import_fail", (uint32_t) status);
+         psa_destroy_key(key_id);
+         return PSA_PK_TO_MBEDTLS_ERR(status);
+     }
++    GXOS_TLS_SMOKE_TRACE("rsa_pss_verify.import_done", (uint32_t) key_id);
+ 
+     /* This function must fail on a valid signature with trailing data in a
+      * buffer (checked below). Moreover mbedtls_psa_rsa_verify_hash() requires
+@@ -1268,8 +1285,11 @@ int mbedtls_pk_verify_ext(mbedtls_pk_sigalg_t type,
+      * verification. */
+     signature_length = sig_len > mbedtls_pk_get_len(ctx) ?
+                        mbedtls_pk_get_len(ctx) : sig_len;
++    GXOS_TLS_SMOKE_TRACE("rsa_pss_verify.verify_begin",
++                         (uint32_t) signature_length);
+     status = psa_verify_hash(key_id, psa_sig_alg, hash,
+                              hash_len, sig, signature_length);
++    GXOS_TLS_SMOKE_TRACE("rsa_pss_verify.verify_done", (uint32_t) status);
+     destruction_status = psa_destroy_key(key_id);
+ 
+     if (status == PSA_SUCCESS && sig_len > mbedtls_pk_get_len(ctx)) {
+diff --git a/tf-psa-crypto/extras/pk_wrap.c b/tf-psa-crypto/extras/pk_wrap.c
+index 8e4c773..9c86cc0 100644
+--- a/tf-psa-crypto/extras/pk_wrap.c
++++ b/tf-psa-crypto/extras/pk_wrap.c
+@@ -33,6 +33,13 @@
+ #include <stdint.h>
+ #include <string.h>
+ 
++#if defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE)
++extern void gxos_tls_smoke_debug_trace(const char *event, uint32_t value);
++#define GXOS_TLS_SMOKE_TRACE(event, value) gxos_tls_smoke_debug_trace((event), (uint32_t) (value))
++#else
++#define GXOS_TLS_SMOKE_TRACE(event, value) ((void) (event), (void) (value))
++#endif
++
+ #if defined(PSA_WANT_KEY_TYPE_RSA_PUBLIC_KEY)
+ static int rsa_can_do(mbedtls_pk_type_t type)
+ {
+@@ -66,25 +73,38 @@ static int rsa_verify_wrap(mbedtls_pk_context *pk, mbedtls_md_type_t md_alg,
+     psa_set_key_algorithm(&attributes, psa_alg_md);
+     psa_set_key_type(&attributes, PSA_KEY_TYPE_RSA_PUBLIC_KEY);
+ 
++    GXOS_TLS_SMOKE_TRACE("rsa_verify_wrap.key_bits", (uint32_t) (rsa_len * 8u));
++    GXOS_TLS_SMOKE_TRACE("rsa_verify_wrap.pub_len", (uint32_t) pk->pub_raw_len);
++    GXOS_TLS_SMOKE_TRACE("rsa_verify_wrap.alg", (uint32_t) psa_alg_md);
++    GXOS_TLS_SMOKE_TRACE("rsa_verify_wrap.hash_len", (uint32_t) hash_len);
++    GXOS_TLS_SMOKE_TRACE("rsa_verify_wrap.import_begin", (uint32_t) rsa_len);
+     status = psa_import_key(&attributes, pk->pub_raw, pk->pub_raw_len, &key_id);
+     if (status != PSA_SUCCESS) {
++        GXOS_TLS_SMOKE_TRACE("rsa_verify_wrap.import_fail", (uint32_t) status);
+         ret = PSA_PK_TO_MBEDTLS_ERR(status);
+         goto cleanup;
+     }
++    GXOS_TLS_SMOKE_TRACE("rsa_verify_wrap.import_done", (uint32_t) key_id);
+ 
++    GXOS_TLS_SMOKE_TRACE("rsa_verify_wrap.verify_begin", (uint32_t) sig_len);
+     status = psa_verify_hash(key_id, psa_alg_md, hash, hash_len,
+                              sig, sig_len);
+     if (status != PSA_SUCCESS) {
++        GXOS_TLS_SMOKE_TRACE("rsa_verify_wrap.verify_fail", (uint32_t) status);
+         ret = PSA_PK_RSA_TO_MBEDTLS_ERR(status);
+         goto cleanup;
+     }
++    GXOS_TLS_SMOKE_TRACE("rsa_verify_wrap.verify_done", 0);
+     ret = 0;
+ 
+ cleanup:
++    GXOS_TLS_SMOKE_TRACE("rsa_verify_wrap.destroy_begin", (uint32_t) key_id);
+     status = psa_destroy_key(key_id);
+     if (ret == 0 && status != PSA_SUCCESS) {
++        GXOS_TLS_SMOKE_TRACE("rsa_verify_wrap.destroy_fail", (uint32_t) status);
+         ret = PSA_PK_TO_MBEDTLS_ERR(status);
+     }
++    GXOS_TLS_SMOKE_TRACE("rsa_verify_wrap.destroy_done", (uint32_t) ret);
+ 
+     return ret;
+ }
+diff --git a/tf-psa-crypto/drivers/builtin/src/bignum.c b/tf-psa-crypto/drivers/builtin/src/bignum.c
+index 385fec8..e2559e7 100644
+--- a/tf-psa-crypto/drivers/builtin/src/bignum.c
++++ b/tf-psa-crypto/drivers/builtin/src/bignum.c
+@@ -38,6 +38,13 @@
+ 
+ #include "mbedtls/platform.h"
+ 
++#if defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE) && defined(GXOS_TLS_DETAILED_CRYPTO_TRACE)
++extern void gxos_tls_smoke_debug_trace(const char *event, uint32_t value);
++#define GXOS_TLS_SMOKE_TRACE(event, value) gxos_tls_smoke_debug_trace((event), (uint32_t) (value))
++#else
++#define GXOS_TLS_SMOKE_TRACE(event, value) ((void) (event), (void) (value))
++#endif
++
+ 
+ 
+ /*
+@@ -1202,6 +1209,10 @@ int mbedtls_mpi_mul_mpi(mbedtls_mpi *X, const mbedtls_mpi *A, const mbedtls_mpi
+     mbedtls_mpi TA, TB;
+     int result_is_zero = 0;
+ 
++    GXOS_TLS_SMOKE_TRACE("mpi_mul.enter",
++                         ((uint32_t) (A->n & 0xFFFFu) << 16) |
++                         (uint32_t) (B->n & 0xFFFFu));
++
+     mbedtls_mpi_init(&TA);
+     mbedtls_mpi_init(&TB);
+ 
+@@ -1230,10 +1241,19 @@ int mbedtls_mpi_mul_mpi(mbedtls_mpi *X, const mbedtls_mpi *A, const mbedtls_mpi
+         result_is_zero = 1;
+     }
+ 
++    GXOS_TLS_SMOKE_TRACE("mpi_mul.trim",
++                         ((uint32_t) (i & 0xFFFFu) << 16) |
++                         (uint32_t) (j & 0xFFFFu));
++
+     MBEDTLS_MPI_CHK(mbedtls_mpi_grow(X, i + j));
++    GXOS_TLS_SMOKE_TRACE("mpi_mul.grow_done", (uint32_t) X->n);
+     MBEDTLS_MPI_CHK(mbedtls_mpi_lset(X, 0));
+ 
++    GXOS_TLS_SMOKE_TRACE("mpi_mul.core_begin",
++                         ((uint32_t) (i & 0xFFFFu) << 16) |
++                         (uint32_t) (j & 0xFFFFu));
+     mbedtls_mpi_core_mul(X->p, A->p, i, B->p, j);
++    GXOS_TLS_SMOKE_TRACE("mpi_mul.core_done", (uint32_t) X->n);
+ 
+     /* If the result is 0, we don't shortcut the operation, which reduces
+      * but does not eliminate side channels leaking the zero-ness. We do
+@@ -1625,6 +1645,7 @@ static int mbedtls_mpi_exp_mod_optionally_safe(mbedtls_mpi *X, const mbedtls_mpi
+                                                const mbedtls_mpi *N, mbedtls_mpi *prec_RR)
+ {
+     int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;
++    GXOS_TLS_SMOKE_TRACE("mpi_exp.enter", (uint32_t) N->n);
+ 
+     if (mbedtls_mpi_cmp_int(N, 0) <= 0 || (N->p[0] & 1) == 0) {
+         return MBEDTLS_ERR_MPI_BAD_INPUT_DATA;
+@@ -1651,10 +1672,12 @@ static int mbedtls_mpi_exp_mod_optionally_safe(mbedtls_mpi *X, const mbedtls_mpi
+      * Allocate working memory for mbedtls_mpi_core_exp_mod()
+      */
+     size_t T_limbs = mbedtls_mpi_core_exp_mod_working_limbs(N->n, E->n);
++    GXOS_TLS_SMOKE_TRACE("mpi_exp.alloc_begin", (uint32_t) T_limbs);
+     mbedtls_mpi_uint *T = (mbedtls_mpi_uint *) mbedtls_calloc(T_limbs, sizeof(mbedtls_mpi_uint));
+     if (T == NULL) {
+         return MBEDTLS_ERR_MPI_ALLOC_FAILED;
+     }
++    GXOS_TLS_SMOKE_TRACE("mpi_exp.alloc_done", (uint32_t) T_limbs);
+ 
+     mbedtls_mpi RR;
+     mbedtls_mpi_init(&RR);
+@@ -1663,14 +1686,18 @@ static int mbedtls_mpi_exp_mod_optionally_safe(mbedtls_mpi *X, const mbedtls_mpi
+      * If 1st call, pre-compute R^2 mod N
+      */
+     if (prec_RR == NULL || prec_RR->p == NULL) {
++        GXOS_TLS_SMOKE_TRACE("mpi_exp.rr_begin", (uint32_t) N->n);
+         MBEDTLS_MPI_CHK(mbedtls_mpi_core_get_mont_r2_unsafe(&RR, N));
++        GXOS_TLS_SMOKE_TRACE("mpi_exp.rr_done", (uint32_t) RR.n);
+ 
+         if (prec_RR != NULL) {
+             *prec_RR = RR;
+         }
+     } else {
++        GXOS_TLS_SMOKE_TRACE("mpi_exp.rr_reuse_begin", (uint32_t) prec_RR->n);
+         MBEDTLS_MPI_CHK(mbedtls_mpi_grow(prec_RR, N->n));
+         RR = *prec_RR;
++        GXOS_TLS_SMOKE_TRACE("mpi_exp.rr_reuse_done", (uint32_t) RR.n);
+     }
+ 
+     /*
+@@ -1678,6 +1705,7 @@ static int mbedtls_mpi_exp_mod_optionally_safe(mbedtls_mpi *X, const mbedtls_mpi
+      * save memory.
+      */
+     MBEDTLS_MPI_CHK(mbedtls_mpi_copy(X, A));
++    GXOS_TLS_SMOKE_TRACE("mpi_exp.copy_done", (uint32_t) X->n);
+ 
+     /*
+      * Compensate for negative A (and correct at the end).
+@@ -1696,21 +1724,31 @@ static int mbedtls_mpi_exp_mod_optionally_safe(mbedtls_mpi *X, const mbedtls_mpi
+      */
+     if (mbedtls_mpi_cmp_mpi(X, N) >= 0) {
+         MBEDTLS_MPI_CHK(mbedtls_mpi_mod_mpi(X, X, N));
++        GXOS_TLS_SMOKE_TRACE("mpi_exp.mod_done", (uint32_t) X->n);
+     }
+     MBEDTLS_MPI_CHK(mbedtls_mpi_grow(X, N->n));
++    GXOS_TLS_SMOKE_TRACE("mpi_exp.grow_done", (uint32_t) X->n);
+ 
+     /*
+      * Convert to and from Montgomery around mbedtls_mpi_core_exp_mod().
+      */
+     {
+         mbedtls_mpi_uint mm = mbedtls_mpi_core_montmul_init(N->p);
++        GXOS_TLS_SMOKE_TRACE("mpi_exp.to_mont_begin", (uint32_t) mm);
+         mbedtls_mpi_core_to_mont_rep(X->p, X->p, N->p, N->n, mm, RR.p, T);
++        GXOS_TLS_SMOKE_TRACE("mpi_exp.to_mont_done", (uint32_t) X->n);
+         if (E_public == MBEDTLS_MPI_IS_PUBLIC) {
++            GXOS_TLS_SMOKE_TRACE("mpi_exp.core_public_begin", (uint32_t) E->n);
+             mbedtls_mpi_core_exp_mod_unsafe(X->p, X->p, N->p, N->n, E->p, E->n, RR.p, T);
++            GXOS_TLS_SMOKE_TRACE("mpi_exp.core_public_done", (uint32_t) X->n);
+         } else {
++            GXOS_TLS_SMOKE_TRACE("mpi_exp.core_secret_begin", (uint32_t) E->n);
+             mbedtls_mpi_core_exp_mod(X->p, X->p, N->p, N->n, E->p, E->n, RR.p, T);
++            GXOS_TLS_SMOKE_TRACE("mpi_exp.core_secret_done", (uint32_t) X->n);
+         }
++        GXOS_TLS_SMOKE_TRACE("mpi_exp.from_mont_begin", (uint32_t) X->n);
+         mbedtls_mpi_core_from_mont_rep(X->p, X->p, N->p, N->n, mm, T);
++        GXOS_TLS_SMOKE_TRACE("mpi_exp.from_mont_done", (uint32_t) X->n);
+     }
+ 
+     /*
+@@ -1724,6 +1762,7 @@ static int mbedtls_mpi_exp_mod_optionally_safe(mbedtls_mpi *X, const mbedtls_mpi
+     }
+ 
+ cleanup:
++    GXOS_TLS_SMOKE_TRACE("mpi_exp.exit", (uint32_t) ret);
+ 
+     mbedtls_mpi_zeroize_and_free(T, T_limbs);
+ 
+diff --git a/tf-psa-crypto/drivers/builtin/src/bignum_core.c b/tf-psa-crypto/drivers/builtin/src/bignum_core.c
+index fc1b537..1ee72aa 100644
+--- a/tf-psa-crypto/drivers/builtin/src/bignum_core.c
++++ b/tf-psa-crypto/drivers/builtin/src/bignum_core.c
+@@ -589,8 +589,17 @@ int mbedtls_mpi_core_get_mont_r2_unsafe(mbedtls_mpi *X,
+     int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;
+ 
+     MBEDTLS_MPI_CHK(mbedtls_mpi_lset(X, 1));
+-    MBEDTLS_MPI_CHK(mbedtls_mpi_shift_l(X, N->n * 2 * biL));
+-    MBEDTLS_MPI_CHK(mbedtls_mpi_mod_mpi(X, X, N));
++    /* Compute R^2 mod N with bounded doubling steps instead of a giant
++     * left-shift followed by division. This is slower, but it avoids the
++     * freestanding public-key verify hang we hit in the guideXOS smoke path
++     * while preserving the exact same result.
++     */
++    for (size_t i = 0; i < N->n * 2 * biL; ++i) {
++        MBEDTLS_MPI_CHK(mbedtls_mpi_shift_l(X, 1));
++        if (mbedtls_mpi_cmp_mpi(X, N) >= 0) {
++            MBEDTLS_MPI_CHK(mbedtls_mpi_sub_mpi(X, X, N));
++        }
++    }
+     MBEDTLS_MPI_CHK(mbedtls_mpi_shrink(X, N->n));
+ 
+ cleanup:
+diff --git a/tf-psa-crypto/drivers/builtin/src/ecp.c b/tf-psa-crypto/drivers/builtin/src/ecp.c
+index ec72714..89c851e 100644
+--- a/tf-psa-crypto/drivers/builtin/src/ecp.c
++++ b/tf-psa-crypto/drivers/builtin/src/ecp.c
+@@ -46,6 +46,16 @@
+ 
+ #include "mbedtls/platform.h"
+ 
++#if defined(GXOS_BARE_METAL) && defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE) && \
++    defined(GXOS_TLS_DETAILED_CRYPTO_TRACE)
++extern void gxos_tls_smoke_debug_trace(const char *event, uint32_t value);
++#define GXOS_TLS_SMOKE_TRACE(event, value) \
++    gxos_tls_smoke_debug_trace((event), (uint32_t) (value))
++#else
++#define GXOS_TLS_SMOKE_TRACE(event, value) \
++    do { ((void) (event)); ((void) (value)); } while (0)
++#endif
++
+ #if defined(MBEDTLS_SELF_TEST)
+ /*
+  * Counts of point addition and doubling, and field multiplications.
+@@ -956,17 +966,25 @@ static int ecp_modp(mbedtls_mpi *N, const mbedtls_ecp_group *grp)
+ {
+     int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;
+ 
++    GXOS_TLS_SMOKE_TRACE("ecp_modp.enter",
++                         ((uint32_t) (N->n & 0xFFFFu) << 16) |
++                         (uint32_t) (grp->pbits & 0xFFFFu));
++
+     if (grp->modp == NULL) {
++        GXOS_TLS_SMOKE_TRACE("ecp_modp.generic", (uint32_t) N->n);
+         return mbedtls_mpi_mod_mpi(N, N, &grp->P);
+     }
+ 
+     /* N->s < 0 is a much faster test, which fails only if N is 0 */
+     if ((N->s < 0 && mbedtls_mpi_cmp_int(N, 0) != 0) ||
+         mbedtls_mpi_bitlen(N) > 2 * grp->pbits) {
++        GXOS_TLS_SMOKE_TRACE("ecp_modp.bad_shape", (uint32_t) N->n);
+         return MBEDTLS_ERR_ECP_BAD_INPUT_DATA;
+     }
+ 
++    GXOS_TLS_SMOKE_TRACE("ecp_modp.begin", (uint32_t) N->n);
+     MBEDTLS_MPI_CHK(grp->modp(N));
++    GXOS_TLS_SMOKE_TRACE("ecp_modp.done", (uint32_t) N->n);
+ 
+     /* N->s < 0 is a much faster test, which fails only if N is 0 */
+     while (N->s < 0 && mbedtls_mpi_cmp_int(N, 0) != 0) {
+@@ -2575,8 +2593,15 @@ static int ecp_check_pubkey_sw(const mbedtls_ecp_group *grp, const mbedtls_ecp_p
+      * YY = Y^2
+      * RHS = X^3 + A X + B
+      */
++    GXOS_TLS_SMOKE_TRACE("ecp_check_sw.y2_shape",
++                         ((uint32_t) (pt->Y.n & 0xFFFFu) << 16) |
++                         (uint32_t) (pt->X.n & 0xFFFFu));
++    GXOS_TLS_SMOKE_TRACE("ecp_check_sw.y2_begin", (uint32_t) grp->id);
+     MPI_ECP_SQR(&YY,  &pt->Y);
++    GXOS_TLS_SMOKE_TRACE("ecp_check_sw.y2_done", (uint32_t) YY.n);
++    GXOS_TLS_SMOKE_TRACE("ecp_check_sw.rhs_begin", (uint32_t) grp->id);
+     MBEDTLS_MPI_CHK(ecp_sw_rhs(grp, &RHS, &pt->X));
++    GXOS_TLS_SMOKE_TRACE("ecp_check_sw.rhs_done", (uint32_t) RHS.n);
+ 
+     if (MPI_ECP_CMP(&YY, &RHS) != 0) {
+         ret = MBEDTLS_ERR_ECP_INVALID_KEY;
+diff --git a/tf-psa-crypto/drivers/builtin/src/psa_crypto_ecp.c b/tf-psa-crypto/drivers/builtin/src/psa_crypto_ecp.c
+index 156519f..448e297 100644
+--- a/tf-psa-crypto/drivers/builtin/src/psa_crypto_ecp.c
++++ b/tf-psa-crypto/drivers/builtin/src/psa_crypto_ecp.c
+@@ -20,6 +20,16 @@
+ #include <string.h>
+ #include "mbedtls/platform.h"
+ 
++#if defined(GXOS_BARE_METAL) && defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE) && \
++    defined(GXOS_TLS_DETAILED_CRYPTO_TRACE)
++extern void gxos_tls_smoke_debug_trace(const char *event, uint32_t value);
++#define GXOS_TLS_SMOKE_DEBUG_TRACE(event, value) \
++    gxos_tls_smoke_debug_trace((event), (uint32_t) (value))
++#else
++#define GXOS_TLS_SMOKE_DEBUG_TRACE(event, value) \
++    do { ((void) (event)); ((void) (value)); } while (0)
++#endif
++
+ #include <mbedtls/private/ecdsa.h>
+ #include <mbedtls/private/ecp.h>
+ #include <mbedtls/private/error_common.h>
+@@ -139,6 +149,7 @@ psa_status_t mbedtls_psa_ecp_load_representation(
+     }
+     mbedtls_ecp_keypair_init(ecp);
+ 
++    GXOS_TLS_SMOKE_DEBUG_TRACE("ecp_load_repr.check_params", (uint32_t) curve_bits);
+     status = check_ecc_parameters(PSA_KEY_TYPE_ECC_GET_FAMILY(type), &curve_bits);
+     if (status != PSA_SUCCESS) {
+         goto exit;
+@@ -152,8 +163,10 @@ psa_status_t mbedtls_psa_ecp_load_representation(
+         goto exit;
+     }
+ 
++    GXOS_TLS_SMOKE_DEBUG_TRACE("ecp_load_repr.group_begin", (uint32_t) grp_id);
+     status = mbedtls_to_psa_error(
+         mbedtls_ecp_group_load(&ecp->grp, grp_id));
++    GXOS_TLS_SMOKE_DEBUG_TRACE("ecp_load_repr.group_done", (uint32_t) status);
+     if (status != PSA_SUCCESS) {
+         goto exit;
+     }
+@@ -161,27 +174,33 @@ psa_status_t mbedtls_psa_ecp_load_representation(
+     /* Load the key material. */
+     if (PSA_KEY_TYPE_IS_PUBLIC_KEY(type)) {
+         /* Load the public value. */
++        GXOS_TLS_SMOKE_DEBUG_TRACE("ecp_load_repr.pubkey_read_begin", (uint32_t) curve_bits);
+         status = mbedtls_to_psa_error(
+             mbedtls_ecp_point_read_binary(&ecp->grp, &ecp->Q,
+                                           data,
+                                           data_length));
++        GXOS_TLS_SMOKE_DEBUG_TRACE("ecp_load_repr.pubkey_read_done", (uint32_t) status);
+         if (status != PSA_SUCCESS) {
+             goto exit;
+         }
+ 
+         /* Check that the point is on the curve. */
++        GXOS_TLS_SMOKE_DEBUG_TRACE("ecp_load_repr.pubkey_check_begin", (uint32_t) curve_bits);
+         status = mbedtls_to_psa_error(
+             mbedtls_ecp_check_pubkey(&ecp->grp, &ecp->Q));
++        GXOS_TLS_SMOKE_DEBUG_TRACE("ecp_load_repr.pubkey_check_done", (uint32_t) status);
+         if (status != PSA_SUCCESS) {
+             goto exit;
+         }
+     } else {
+         /* Load and validate the secret value. */
++        GXOS_TLS_SMOKE_DEBUG_TRACE("ecp_load_repr.read_key_begin", (uint32_t) curve_bits);
+         status = mbedtls_to_psa_error(
+             mbedtls_ecp_read_key(ecp->grp.id,
+                                  ecp,
+                                  data,
+                                  data_length));
++        GXOS_TLS_SMOKE_DEBUG_TRACE("ecp_load_repr.read_key_done", (uint32_t) status);
+         if (status != PSA_SUCCESS) {
+             goto exit;
+         }
+@@ -262,21 +281,25 @@ psa_status_t mbedtls_psa_ecp_export_key(psa_key_type_t type,
+         /* Check whether the public part is loaded */
+         if (mbedtls_ecp_is_zero(&ecp->Q)) {
+             /* Calculate the public key */
++            GXOS_TLS_SMOKE_DEBUG_TRACE("ecp_export_key.mul_begin", (uint32_t) ecp->grp.id);
+             status = mbedtls_to_psa_error(
+                 mbedtls_ecp_mul(&ecp->grp, &ecp->Q, &ecp->d, &ecp->grp.G,
+                                 mbedtls_psa_get_random,
+                                 MBEDTLS_PSA_RANDOM_STATE));
++            GXOS_TLS_SMOKE_DEBUG_TRACE("ecp_export_key.mul_done", (uint32_t) status);
+             if (status != PSA_SUCCESS) {
+                 return status;
+             }
+         }
+ 
++        GXOS_TLS_SMOKE_DEBUG_TRACE("ecp_export_key.write_begin", (uint32_t) data_size);
+         status = mbedtls_to_psa_error(
+             mbedtls_ecp_point_write_binary(&ecp->grp, &ecp->Q,
+                                            MBEDTLS_ECP_PF_UNCOMPRESSED,
+                                            data_length,
+                                            data,
+                                            data_size));
++        GXOS_TLS_SMOKE_DEBUG_TRACE("ecp_export_key.write_done", (uint32_t) status);
+         if (status != PSA_SUCCESS) {
+             memset(data, 0, data_size);
+         }
+@@ -297,17 +320,21 @@ psa_status_t mbedtls_psa_ecp_export_public_key(
+     psa_status_t status = PSA_ERROR_CORRUPTION_DETECTED;
+     mbedtls_ecp_keypair *ecp = NULL;
+ 
++    GXOS_TLS_SMOKE_DEBUG_TRACE("ecp_export_pub.load_begin", (uint32_t) attributes->bits);
+     status = mbedtls_psa_ecp_load_representation(
+         attributes->type, attributes->bits,
+         key_buffer, key_buffer_size, &ecp);
++    GXOS_TLS_SMOKE_DEBUG_TRACE("ecp_export_pub.load_done", (uint32_t) status);
+     if (status != PSA_SUCCESS) {
+         return status;
+     }
+ 
++    GXOS_TLS_SMOKE_DEBUG_TRACE("ecp_export_pub.export_begin", (uint32_t) data_size);
+     status = mbedtls_psa_ecp_export_key(
+         PSA_KEY_TYPE_ECC_PUBLIC_KEY(
+             PSA_KEY_TYPE_ECC_GET_FAMILY(attributes->type)),
+         ecp, data, data_size, data_length);
++    GXOS_TLS_SMOKE_DEBUG_TRACE("ecp_export_pub.export_done", (uint32_t) status);
+ 
+     mbedtls_ecp_keypair_free(ecp);
+     mbedtls_free(ecp);
+diff --git a/tf-psa-crypto/drivers/builtin/src/psa_crypto_rsa.c b/tf-psa-crypto/drivers/builtin/src/psa_crypto_rsa.c
+index 9f369a7..6c7a9f8 100644
+--- a/tf-psa-crypto/drivers/builtin/src/psa_crypto_rsa.c
++++ b/tf-psa-crypto/drivers/builtin/src/psa_crypto_rsa.c
+@@ -23,6 +23,13 @@
+ #include <string.h>
+ #include "mbedtls/platform.h"
+ 
++#if defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE)
++extern void gxos_tls_smoke_debug_trace(const char *event, uint32_t value);
++#define GXOS_TLS_SMOKE_TRACE(event, value) gxos_tls_smoke_debug_trace((event), (uint32_t) (value))
++#else
++#define GXOS_TLS_SMOKE_TRACE(event, value) ((void) (event), (void) (value))
++#endif
++
+ #include <mbedtls/private/rsa.h>
+ #include <mbedtls/private/error_common.h>
+ #include "rsa_internal.h"
+@@ -417,34 +424,52 @@ psa_status_t mbedtls_psa_rsa_verify_hash(
+     int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;
+     mbedtls_md_type_t md_alg;
+ 
++    GXOS_TLS_SMOKE_TRACE("psa_rsa_verify.key_type",
++                         (uint32_t) psa_get_key_type(attributes));
++    GXOS_TLS_SMOKE_TRACE("psa_rsa_verify.key_bits",
++                         (uint32_t) psa_get_key_bits(attributes));
++    GXOS_TLS_SMOKE_TRACE("psa_rsa_verify.alg", (uint32_t) alg);
++    GXOS_TLS_SMOKE_TRACE("psa_rsa_verify.hash_len", (uint32_t) hash_length);
++    GXOS_TLS_SMOKE_TRACE("psa_rsa_verify.sig_len", (uint32_t) signature_length);
++    GXOS_TLS_SMOKE_TRACE("psa_rsa_verify.load_begin", (uint32_t) key_buffer_size);
+     status = mbedtls_psa_rsa_load_representation(attributes->type,
+                                                  key_buffer,
+                                                  key_buffer_size,
+                                                  &rsa);
+     if (status != PSA_SUCCESS) {
++        GXOS_TLS_SMOKE_TRACE("psa_rsa_verify.load_fail", (uint32_t) status);
+         goto exit;
+     }
++    GXOS_TLS_SMOKE_TRACE("psa_rsa_verify.load_done", (uint32_t) mbedtls_rsa_get_len(rsa));
+ 
++    GXOS_TLS_SMOKE_TRACE("psa_rsa_verify.decode_begin", (uint32_t) alg);
+     status = psa_rsa_decode_md_type(alg, hash_length, &md_alg);
+     if (status != PSA_SUCCESS) {
++        GXOS_TLS_SMOKE_TRACE("psa_rsa_verify.decode_fail", (uint32_t) status);
+         goto exit;
+     }
++    GXOS_TLS_SMOKE_TRACE("psa_rsa_verify.decode_done", (uint32_t) md_alg);
+ 
+     if (signature_length != mbedtls_rsa_get_len(rsa)) {
++        GXOS_TLS_SMOKE_TRACE("psa_rsa_verify.sig_len_mismatch", (uint32_t) signature_length);
+         status = PSA_ERROR_INVALID_SIGNATURE;
+         goto exit;
+     }
+ 
+ #if defined(MBEDTLS_PSA_BUILTIN_ALG_RSA_PKCS1V15_SIGN)
+     if (PSA_ALG_IS_RSA_PKCS1V15_SIGN(alg)) {
++        GXOS_TLS_SMOKE_TRACE("psa_rsa_verify.padding_begin", MBEDTLS_RSA_PKCS_V15);
+         ret = mbedtls_rsa_set_padding(rsa, MBEDTLS_RSA_PKCS_V15,
+                                       MBEDTLS_MD_NONE);
++        GXOS_TLS_SMOKE_TRACE("psa_rsa_verify.padding_done", (uint32_t) ret);
+         if (ret == 0) {
++            GXOS_TLS_SMOKE_TRACE("psa_rsa_verify.pkcs1_begin", (uint32_t) hash_length);
+             ret = mbedtls_rsa_pkcs1_verify(rsa,
+                                            md_alg,
+                                            (unsigned int) hash_length,
+                                            hash,
+                                            signature);
++            GXOS_TLS_SMOKE_TRACE("psa_rsa_verify.pkcs1_done", (uint32_t) ret);
+         }
+     } else
+ #endif /* MBEDTLS_PSA_BUILTIN_ALG_RSA_PKCS1V15_SIGN */
+@@ -476,6 +501,7 @@ psa_status_t mbedtls_psa_rsa_verify_hash(
+              mbedtls_to_psa_error(ret);
+ 
+ exit:
++    GXOS_TLS_SMOKE_TRACE("psa_rsa_verify.exit", (uint32_t) status);
+     mbedtls_rsa_free(rsa);
+     mbedtls_free(rsa);
+ 
+diff --git a/tf-psa-crypto/drivers/builtin/src/rsa.c b/tf-psa-crypto/drivers/builtin/src/rsa.c
+index c3b1b67..5786210 100644
+--- a/tf-psa-crypto/drivers/builtin/src/rsa.c
++++ b/tf-psa-crypto/drivers/builtin/src/rsa.c
+@@ -42,6 +42,13 @@
+ 
+ #include <string.h>
+ 
++#if defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE)
++extern void gxos_tls_smoke_debug_trace(const char *event, uint32_t value);
++#define GXOS_TLS_SMOKE_TRACE(event, value) gxos_tls_smoke_debug_trace((event), (uint32_t) (value))
++#else
++#define GXOS_TLS_SMOKE_TRACE(event, value) ((void) (event), (void) (value))
++#endif
++
+ #if defined(MBEDTLS_PKCS1_V15) && !defined(__OpenBSD__) && !defined(__NetBSD__)
+ #include <stdlib.h>
+ #endif
+@@ -237,31 +244,23 @@ int mbedtls_rsa_parse_pubkey(mbedtls_rsa_context *rsa, const unsigned char *key,
+     }
+ 
+     /* Import N */
+-    if ((ret = mbedtls_asn1_get_tag(&p, end, &len, MBEDTLS_ASN1_INTEGER)) != 0) {
++    if ((ret = asn1_get_nonzero_mpi(&p, end, &rsa->N)) != 0) {
+         goto exit;
+     }
+-
+-    if ((ret = mbedtls_mpi_read_binary(&rsa->N, p, len)) != 0) {
+-        ret = MBEDTLS_ERR_RSA_BAD_INPUT_DATA;
++    if ((ret = mbedtls_mpi_shrink(&rsa->N, 1)) != 0) {
+         goto exit;
+     }
+ 
+     rsa->len = mbedtls_mpi_size(&rsa->N);
+ 
+-    p += len;
+-
+     /* Import E */
+-    if ((ret = mbedtls_asn1_get_tag(&p, end, &len, MBEDTLS_ASN1_INTEGER)) != 0) {
++    if ((ret = asn1_get_nonzero_mpi(&p, end, &rsa->E)) != 0) {
+         goto exit;
+     }
+-
+-    if ((ret = mbedtls_mpi_read_binary(&rsa->E, p, len)) != 0) {
+-        ret = MBEDTLS_ERR_RSA_BAD_INPUT_DATA;
++    if ((ret = mbedtls_mpi_shrink(&rsa->E, 1)) != 0) {
+         goto exit;
+     }
+ 
+-    p += len;
+-
+     if (mbedtls_rsa_check_pubkey(rsa) != 0) {
+         ret = MBEDTLS_ERR_RSA_BAD_INPUT_DATA;
+         goto exit;
+@@ -895,8 +894,10 @@ int mbedtls_rsa_public(mbedtls_rsa_context *ctx,
+     }
+ 
+     mbedtls_mpi_init(&T);
++    GXOS_TLS_SMOKE_TRACE("rsa_public.read_begin", (uint32_t) ctx->len);
+ 
+     MBEDTLS_MPI_CHK(mbedtls_mpi_read_binary(&T, input, ctx->len));
++    GXOS_TLS_SMOKE_TRACE("rsa_public.read_done", (uint32_t) T.n);
+ 
+     if (mbedtls_mpi_cmp_mpi(&T, &ctx->N) >= 0) {
+         ret = MBEDTLS_ERR_MPI_BAD_INPUT_DATA;
+@@ -904,8 +905,11 @@ int mbedtls_rsa_public(mbedtls_rsa_context *ctx,
+     }
+ 
+     olen = ctx->len;
++    GXOS_TLS_SMOKE_TRACE("rsa_public.exp_begin", (uint32_t) ctx->E.n);
+     MBEDTLS_MPI_CHK(mbedtls_mpi_exp_mod_unsafe(&T, &T, &ctx->E, &ctx->N, &ctx->RN));
++    GXOS_TLS_SMOKE_TRACE("rsa_public.exp_done", (uint32_t) T.n);
+     MBEDTLS_MPI_CHK(mbedtls_mpi_write_binary(&T, output, olen));
++    GXOS_TLS_SMOKE_TRACE("rsa_public.write_done", (uint32_t) olen);
+ 
+ cleanup:
+ 

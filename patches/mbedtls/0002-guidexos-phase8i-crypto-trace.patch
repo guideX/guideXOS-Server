@@ -1,0 +1,293 @@
+diff --git a/tf-psa-crypto/core/psa_crypto.c b/tf-psa-crypto/core/psa_crypto.c
+index a90712d..4479d38 100644
+--- a/tf-psa-crypto/core/psa_crypto.c
++++ b/tf-psa-crypto/core/psa_crypto.c
+@@ -48,6 +48,15 @@ extern void gxos_tls_smoke_debug_trace(const char *event, uint32_t value);
+     do { ((void) (event)); ((void) (value)); } while (0)
+ #endif
+ 
++#if defined(GXOS_BARE_METAL) && defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE)
++extern void gxos_tls_smoke_debug_trace(const char *event, uint32_t value);
++#define GXOS_TLS_CRYPTO_STAGE_TRACE(event, value) \
++    gxos_tls_smoke_debug_trace((event), (uint32_t) (value))
++#else
++#define GXOS_TLS_CRYPTO_STAGE_TRACE(event, value) \
++    do { ((void) (event)); ((void) (value)); } while (0)
++#endif
++
+ #include "mbedtls/private/aes.h"
+ #include "mbedtls/asn1.h"
+ #include "mbedtls/asn1write.h"
+@@ -3195,6 +3204,9 @@ static psa_status_t psa_verify_internal(mbedtls_svc_key_id_t key,
+     psa_status_t unlock_status = PSA_ERROR_CORRUPTION_DETECTED;
+     psa_key_slot_t *slot;
+ 
++    GXOS_TLS_CRYPTO_STAGE_TRACE("psa_verify_internal.enter",
++                                (uint32_t) input_length);
++
+     status = psa_sign_verify_check_alg(input_is_message, alg);
+     if (status != PSA_SUCCESS) {
+         return status;
+@@ -3210,16 +3222,23 @@ static psa_status_t psa_verify_internal(mbedtls_svc_key_id_t key,
+         return status;
+     }
+ 
++    GXOS_TLS_CRYPTO_STAGE_TRACE("psa_verify_internal.slot_ready",
++                                (uint32_t) slot->attr.bits);
++
+     if (input_is_message) {
+         status = psa_driver_wrapper_verify_message(
+             &slot->attr, slot->key.data, slot->key.bytes,
+             alg, input, input_length,
+             signature, signature_length);
+     } else {
++        GXOS_TLS_CRYPTO_STAGE_TRACE("psa_verify_internal.wrapper_begin",
++                                    (uint32_t) slot->attr.bits);
+         status = psa_driver_wrapper_verify_hash(
+             &slot->attr, slot->key.data, slot->key.bytes,
+             alg, input, input_length,
+             signature, signature_length);
++        GXOS_TLS_CRYPTO_STAGE_TRACE("psa_verify_internal.wrapper_done",
++                                    (uint32_t) status);
+     }
+ 
+     unlock_status = psa_unregister_read_under_mutex(slot);
+@@ -3479,10 +3498,13 @@ psa_status_t psa_verify_hash(mbedtls_svc_key_id_t key,
+     LOCAL_INPUT_DECLARE(hash_external, hash);
+     LOCAL_INPUT_DECLARE(signature_external, signature);
+ 
++    GXOS_TLS_CRYPTO_STAGE_TRACE("psa_verify_hash.enter", (uint32_t) hash_length);
++
+     LOCAL_INPUT_ALLOC(hash_external, hash_length, hash);
+     LOCAL_INPUT_ALLOC(signature_external, signature_length, signature);
+     status = psa_verify_internal(key, 0, alg, hash, hash_length, signature,
+                                  signature_length);
++    GXOS_TLS_CRYPTO_STAGE_TRACE("psa_verify_hash.done", (uint32_t) status);
+ 
+ #if !defined(MBEDTLS_PSA_ASSUME_EXCLUSIVE_BUFFERS)
+ exit:
+diff --git a/tf-psa-crypto/extras/pk_wrap.c b/tf-psa-crypto/extras/pk_wrap.c
+index 9c86cc0..08561f0 100644
+--- a/tf-psa-crypto/extras/pk_wrap.c
++++ b/tf-psa-crypto/extras/pk_wrap.c
+@@ -184,6 +184,8 @@ static int ecdsa_verify_psa(unsigned char *key, size_t key_len,
+     unsigned char *p;
+     psa_status_t status;
+ 
++    GXOS_TLS_SMOKE_TRACE("ecdsa_verify_psa.enter", (uint32_t) curve_bits);
++
+     if (curve == 0) {
+         return MBEDTLS_ERR_PK_BAD_INPUT_DATA;
+     }
+@@ -193,6 +195,7 @@ static int ecdsa_verify_psa(unsigned char *key, size_t key_len,
+     psa_set_key_algorithm(&attributes, psa_sig_md);
+ 
+     status = psa_import_key(&attributes, key, key_len, &key_id);
++    GXOS_TLS_SMOKE_TRACE("ecdsa_verify_psa.import_done", (uint32_t) status);
+     if (status != PSA_SUCCESS) {
+         ret = PSA_PK_TO_MBEDTLS_ERR(status);
+         goto cleanup;
+@@ -215,8 +218,10 @@ static int ecdsa_verify_psa(unsigned char *key, size_t key_len,
+         goto cleanup;
+     }
+ 
++    GXOS_TLS_SMOKE_TRACE("ecdsa_verify_psa.verify_begin", (uint32_t) curve_bits);
+     status = psa_verify_hash(key_id, psa_sig_md, hash, hash_len,
+                              extracted_sig, signature_len);
++    GXOS_TLS_SMOKE_TRACE("ecdsa_verify_psa.verify_done", (uint32_t) status);
+     if (status != PSA_SUCCESS) {
+         ret = PSA_PK_ECDSA_TO_MBEDTLS_ERR(status);
+         goto cleanup;
+@@ -272,6 +277,8 @@ static int ecdsa_verify_wrap(mbedtls_pk_context *pk,
+     psa_ecc_family_t curve = pk->ec_family;
+     size_t curve_bits = pk->bits;
+ 
++    GXOS_TLS_SMOKE_TRACE("ecdsa_verify_wrap.enter", (uint32_t) curve_bits);
++
+     return ecdsa_verify_psa(pk->pub_raw, pk->pub_raw_len, curve, curve_bits,
+                             hash, hash_len, sig, sig_len);
+ }
+diff --git a/tf-psa-crypto/drivers/builtin/src/psa_crypto_ecp.c b/tf-psa-crypto/drivers/builtin/src/psa_crypto_ecp.c
+index 448e297..9e00238 100644
+--- a/tf-psa-crypto/drivers/builtin/src/psa_crypto_ecp.c
++++ b/tf-psa-crypto/drivers/builtin/src/psa_crypto_ecp.c
+@@ -30,6 +30,15 @@ extern void gxos_tls_smoke_debug_trace(const char *event, uint32_t value);
+     do { ((void) (event)); ((void) (value)); } while (0)
+ #endif
+ 
++#if defined(GXOS_BARE_METAL) && defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE)
++extern void gxos_tls_smoke_debug_trace(const char *event, uint32_t value);
++#define GXOS_TLS_CRYPTO_STAGE_TRACE(event, value) \
++    gxos_tls_smoke_debug_trace((event), (uint32_t) (value))
++#else
++#define GXOS_TLS_CRYPTO_STAGE_TRACE(event, value) \
++    do { ((void) (event)); ((void) (value)); } while (0)
++#endif
++
+ #include <mbedtls/private/ecdsa.h>
+ #include <mbedtls/private/ecp.h>
+ #include <mbedtls/private/error_common.h>
+@@ -488,11 +497,15 @@ psa_status_t mbedtls_psa_ecdsa_verify_hash(
+ 
+     (void) alg;
+ 
++    GXOS_TLS_CRYPTO_STAGE_TRACE("psa_ecdsa_verify.enter",
++                                (uint32_t) attributes->bits);
++
+     status = mbedtls_psa_ecp_load_representation(attributes->type,
+                                                  attributes->bits,
+                                                  key_buffer,
+                                                  key_buffer_size,
+                                                  &ecp);
++    GXOS_TLS_CRYPTO_STAGE_TRACE("psa_ecdsa_verify.load_done", (uint32_t) status);
+     if (status != PSA_SUCCESS) {
+         return status;
+     }
+@@ -509,6 +522,7 @@ psa_status_t mbedtls_psa_ecdsa_verify_hash(
+     status = mbedtls_to_psa_error(mbedtls_mpi_read_binary(&r,
+                                                           signature,
+                                                           curve_bytes));
++    GXOS_TLS_CRYPTO_STAGE_TRACE("psa_ecdsa_verify.r_read_done", (uint32_t) status);
+     if (status != PSA_SUCCESS) {
+         goto cleanup;
+     }
+@@ -516,18 +530,23 @@ psa_status_t mbedtls_psa_ecdsa_verify_hash(
+     status = mbedtls_to_psa_error(mbedtls_mpi_read_binary(&s,
+                                                           signature + curve_bytes,
+                                                           curve_bytes));
++    GXOS_TLS_CRYPTO_STAGE_TRACE("psa_ecdsa_verify.s_read_done", (uint32_t) status);
+     if (status != PSA_SUCCESS) {
+         goto cleanup;
+     }
+ 
+     status = mbedtls_psa_ecp_load_public_part(ecp);
++    GXOS_TLS_CRYPTO_STAGE_TRACE("psa_ecdsa_verify.public_load_done", (uint32_t) status);
+     if (status != PSA_SUCCESS) {
+         goto cleanup;
+     }
+ 
++    GXOS_TLS_CRYPTO_STAGE_TRACE("psa_ecdsa_verify.ecdsa_begin",
++                                (uint32_t) attributes->bits);
+     status = mbedtls_to_psa_error(mbedtls_ecdsa_verify(&ecp->grp, hash,
+                                                        hash_length, &ecp->Q,
+                                                        &r, &s));
++    GXOS_TLS_CRYPTO_STAGE_TRACE("psa_ecdsa_verify.done", (uint32_t) status);
+ cleanup:
+     mbedtls_mpi_free(&r);
+     mbedtls_mpi_free(&s);
+diff --git a/tf-psa-crypto/drivers/builtin/src/ecdsa.c b/tf-psa-crypto/drivers/builtin/src/ecdsa.c
+index 90a5fe1..0e47dd6 100644
+--- a/tf-psa-crypto/drivers/builtin/src/ecdsa.c
++++ b/tf-psa-crypto/drivers/builtin/src/ecdsa.c
+@@ -21,6 +21,15 @@
+ 
+ #include <string.h>
+ 
++#if defined(GXOS_BARE_METAL) && defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE)
++extern void gxos_tls_smoke_debug_trace(const char *event, uint32_t value);
++#define GXOS_TLS_CRYPTO_STAGE_TRACE(event, value) \
++    gxos_tls_smoke_debug_trace((event), (uint32_t) (value))
++#else
++#define GXOS_TLS_CRYPTO_STAGE_TRACE(event, value) \
++    do { ((void) (event)); ((void) (value)); } while (0)
++#endif
++
+ #if defined(MBEDTLS_ECDSA_DETERMINISTIC)
+ #include "mbedtls/private/hmac_drbg.h"
+ #endif
+@@ -474,12 +483,16 @@ int mbedtls_ecdsa_verify_restartable(mbedtls_ecp_group *grp,
+     mbedtls_ecp_point R;
+     mbedtls_mpi *pu1 = &u1, *pu2 = &u2;
+ 
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.enter", (uint32_t) grp->pbits);
++
+     mbedtls_ecp_point_init(&R);
+     mbedtls_mpi_init(&e); mbedtls_mpi_init(&s_inv);
+     mbedtls_mpi_init(&u1); mbedtls_mpi_init(&u2);
+ 
+     /* Fail cleanly on curves such as Curve25519 that can't be used for ECDSA */
+     if (!mbedtls_ecdsa_can_do(grp->id) || grp->N.p == NULL) {
++        GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.exit",
++                                    (uint32_t) MBEDTLS_ERR_ECP_BAD_INPUT_DATA);
+         return MBEDTLS_ERR_ECP_BAD_INPUT_DATA;
+     }
+ 
+@@ -518,12 +531,17 @@ int mbedtls_ecdsa_verify_restartable(mbedtls_ecp_group *grp,
+     ECDSA_BUDGET(MBEDTLS_ECP_OPS_CHK + MBEDTLS_ECP_OPS_INV + 2);
+ 
+     MBEDTLS_MPI_CHK(mbedtls_mpi_gcd_modinv_odd(NULL, &s_inv, s, &grp->N));
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.inv_done", (uint32_t) grp->pbits);
+ 
+     MBEDTLS_MPI_CHK(mbedtls_mpi_mul_mpi(pu1, &e, &s_inv));
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.u1_mul_done", (uint32_t) grp->pbits);
+     MBEDTLS_MPI_CHK(mbedtls_mpi_mod_mpi(pu1, pu1, &grp->N));
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.u1_mod_done", (uint32_t) grp->pbits);
+ 
+     MBEDTLS_MPI_CHK(mbedtls_mpi_mul_mpi(pu2, r, &s_inv));
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.u2_mul_done", (uint32_t) grp->pbits);
+     MBEDTLS_MPI_CHK(mbedtls_mpi_mod_mpi(pu2, pu2, &grp->N));
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.u2_mod_done", (uint32_t) grp->pbits);
+ 
+ #if defined(MBEDTLS_ECP_RESTARTABLE)
+     if (rs_ctx != NULL && rs_ctx->ver != NULL) {
+@@ -535,8 +553,11 @@ muladd:
+     /*
+      * Step 5: R = u1 G + u2 Q
+      */
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.muladd_begin",
++                                (uint32_t) grp->pbits);
+     MBEDTLS_MPI_CHK(mbedtls_ecp_muladd_restartable(grp,
+                                                    &R, pu1, &grp->G, pu2, Q, ECDSA_RS_ECP));
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.muladd_done", (uint32_t) ret);
+ 
+     if (mbedtls_ecp_is_zero(&R)) {
+         ret = MBEDTLS_ERR_ECP_VERIFY_FAILED;
+@@ -564,6 +585,8 @@ cleanup:
+ 
+     ECDSA_RS_LEAVE(ver);
+ 
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.exit", (uint32_t) ret);
++
+     return ret;
+ }
+ 
+diff --git a/tf-psa-crypto/drivers/builtin/src/ecp.c b/tf-psa-crypto/drivers/builtin/src/ecp.c
+index 89c851e..4ab90be 100644
+--- a/tf-psa-crypto/drivers/builtin/src/ecp.c
++++ b/tf-psa-crypto/drivers/builtin/src/ecp.c
+@@ -56,6 +56,15 @@ extern void gxos_tls_smoke_debug_trace(const char *event, uint32_t value);
+     do { ((void) (event)); ((void) (value)); } while (0)
+ #endif
+ 
++#if defined(GXOS_BARE_METAL) && defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE)
++extern void gxos_tls_smoke_debug_trace(const char *event, uint32_t value);
++#define GXOS_TLS_CRYPTO_STAGE_TRACE(event, value) \
++    gxos_tls_smoke_debug_trace((event), (uint32_t) (value))
++#else
++#define GXOS_TLS_CRYPTO_STAGE_TRACE(event, value) \
++    do { ((void) (event)); ((void) (value)); } while (0)
++#endif
++
+ #if defined(MBEDTLS_SELF_TEST)
+ /*
+  * Counts of point addition and doubling, and field multiplications.
+@@ -2667,7 +2676,10 @@ int mbedtls_ecp_muladd_restartable(
+     mbedtls_ecp_point *pmP = &mP;
+     mbedtls_ecp_point *pR = R;
+     mbedtls_mpi tmp[4];
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp_muladd.enter", (uint32_t) grp->pbits);
+     if (mbedtls_ecp_get_type(grp) != MBEDTLS_ECP_TYPE_SHORT_WEIERSTRASS) {
++        GXOS_TLS_CRYPTO_STAGE_TRACE("ecp_muladd.exit",
++                                    (uint32_t) MBEDTLS_ERR_ECP_FEATURE_UNAVAILABLE);
+         return MBEDTLS_ERR_ECP_FEATURE_UNAVAILABLE;
+     }
+ 
+@@ -2738,6 +2750,8 @@ cleanup:
+ 
+     ECP_RS_LEAVE(ma);
+ 
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp_muladd.exit", (uint32_t) ret);
++
+     return ret;
+ }
+ 

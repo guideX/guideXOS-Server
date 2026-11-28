@@ -312,5 +312,93 @@ The R33/R36 candidate used the R23 Settings-candidate profile (proof controls, C
 ### Remaining
 
 - The Mbed TLS decision from §C (recover the original tree, or adopt Main's variant on purpose and commit the glue) is still open.
-- `dotnet-recovery2` is still unpushed until GitHub SSH or HTTPS credentials work on this machine.
+- Push status: superseded; see the Mbed TLS re-baseline closeout below.
 - The next step is RECOVERY2b items 1 and 4 (§I) and then RECOVERY3. Steps 2 and 3 of the §I prompt are now done.
+
+## Mbed TLS re-baseline (owner decision, November 27, 2026 Pacific)
+
+Leon decided to adopt Main Integration's Mbed TLS 4.1.0 / TF-PSA-Crypto 1.1.0 implementation for .NET Support. **This is a deliberate compatibility re-baseline, not a qualified replacement for the R23 TLS objects.** Guest qualification and the remaining TLS security checks listed below are still required before release acceptance. No search for the original .NET tree was made beyond the earlier one, and no exact backup was found.
+
+### What is now version-controlled
+
+All files below are copied byte-for-byte from `origin/main` (`d1b2b2ce`). Their blob IDs match Main's tracked files and Main's live checkout.
+
+| Path | Purpose |
+| --- | --- |
+| `guidexos/mbedtls.lock` | Upstream identity: Mbed TLS `0fe989b6…` (tag `v4.1.0`), TF-PSA-Crypto `29160dd8…` (tag `v1.1.0`) |
+| `guidexos/mbedtls_profile.json` | Patch series, plus normalized SHA-256 of 17 patched sources and the three overlay files |
+| `guidexos/mbedtls_config.h`, `guidexos/crypto_config.h` | guideXOS freestanding configuration pair |
+| `guidexos/mbedtls_sources.mk` | The 57-source subset; the list is identical to R23's |
+| `patches/mbedtls/0001-guidexos-phase8f.patch`, `0002-…-crypto-trace.patch`, `0003-…-crypto-diagnostics.patch` | Local patches (1,268 / 293 / 455 lines) |
+| `scripts/bootstrap-mbedtls.ps1`, `scripts/verify-mbedtls-profile.ps1` | Reconstruct `third_party/mbedtls` from the lock and patches, and verify it |
+| `third_party/stb/stb_image.h` | Force-added at blob `9eedabed…`, the same blob Main tracks |
+| `tests/phase8j_ecdsa_vectors.h` | Main's P-256 / P-384 ECDSA vectors |
+
+The upstream tree itself (`third_party/mbedtls`, about 50 MB) stays git-ignored. It is reconstructed by `bootstrap-mbedtls.ps1 -Install`, and the kernel Makefile refuses to build if the profile or layout is missing.
+
+.NET-side edits:
+
+- **`kernel/Makefile`** includes `../guidexos/mbedtls_sources.mk` with `MBEDTLS_GUIDEXOS_REPO_ROOT := ..`. It hard-fails on a missing profile or incomplete layout, and it tracks the `guidexos` files as rebuild dependencies.
+- **`gxos_tls_foundation.cpp`** now uses `guidexos/…` for its three config and plan path strings, matching Main.
+
+### Source verification
+
+1. `scripts/verify-mbedtls-profile.ps1` **passes** against the tree used for these builds (`MBEDTLS_PROFILE_VERIFY=PASS`, 3 patches, normalized-LF SHA mode).
+2. An independent, offline reconstruction also matched. I took `git archive` of the pinned commits (Mbed TLS, TF-PSA-Crypto, both `framework` submodules at `dff9da04`, `mldsa-native` at `5772b4f4`), applied the three tracked patches with `git apply --check --recount`, and ran the three upstream generators. The result is **content-identical** (CRLF-insensitive) to the build tree. The only exceptions are Git-symlink placeholders under `mldsa-native/examples`, which are not compiled.
+3. A networked `bootstrap-mbedtls.ps1 -Install` from GitHub was not run, because the offline reconstruction covers the same inputs.
+
+### R23 evidence preserved; no binary-equivalence claim
+
+The R23 kernel and its `obj/` tree remain untouched at `E:\CodexArtifacts\guideXOSServerV1.1_DOTNET_SUPPORT\r23-kernel-74770308256b49fd84a565a48a7fb8d3`.
+
+The re-baselined kernel's 57 Mbed TLS objects are byte-identical to the RECOVERY2 overlay build. Against R23, **42 are identical and the same 15 differ:** `ssl_msg`, `ssl_tls`, `ssl_tls12_client`, `psa_crypto`, `psa_util`, `bignum`, `ecdsa`, `ecp`, `ecp_curves`, `psa_crypto_ecp`, `psa_crypto_rsa`, `psa_util_internal`, `pk_ecc`, `pk_wrap`, `oid`.
+
+The only kernel C++ object that changed from the RECOVERY2 build is `gxos_tls_foundation.o` (the path strings).
+
+### Security review of the local patch series
+
+Patch hunks outside tracing were read line by line.
+
+| Area | Change | Assessment |
+| --- | --- | --- |
+| Trace hooks (all three patches) | `GXOS_TLS_SMOKE_DEBUG_TRACE` / `GXOS_TLS_CRYPTO_STAGE_TRACE` calls | No-ops unless `GXOS_BARE_METAL && GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE`. When active they log hash, signature and public-key *prefixes* and bignum limb fragments, never private keys. **Keep smoke tracing out of release profiles.** |
+| `x509_crt.c` | Return value of `pk_verify*` is captured in a local before returning | No semantic change |
+| `ssl_tls12_client.c` | A TLS 1.2 ServerKeyExchange may carry the TLS 1.3 `rsa_pss_rsae_*` code points (a "compatibility exception"); log text changed | The later "was not offered" check is unchanged. The client's TLS 1.2 `signature_algorithms` list does not offer PSS, so the exception cannot be reached against a conforming server. The hosted test confirms that a PSS-only server is refused. Still a deviation from upstream. |
+| `ecdsa.c` (0003) | Verify-path `mod N` reductions use a new bit-serial `ecdsa_mod_fixed` instead of `mbedtls_mpi_mod_mpi` | Applies to public values only, and handles aliasing correctly. It is custom bignum arithmetic in signature verification, so it is covered by the ECDSA regressions below, and it is a candidate for upstream-equivalence fuzzing before release. |
+| PSA driver wrapper template (0003) | When the p256-m driver returns `INVALID_SIGNATURE`, the built-in verifier decides | Accepting requires the built-in verifier to succeed, so this cannot accept anything the built-in rejects. It does widen the trusted surface to the built-in path. Covered by the negative tests. |
+| `mbedtls_check_config.h`, `tf_psa_crypto_check_config.h` (0003) | Config-consistency checks are skipped when `GUIDEXOS_MBEDTLS_ALLOW_PARTIAL_ECC_TLS` (set in `crypto_config.h`) | Allows TLS with only P-256/P-384. This disables upstream consistency checks, so an incomplete config would not be caught at compile time. |
+| `memory_buffer_alloc.c`, `pk*.c`, `rsa.c`, `bignum*.c` (0001) | Tracing plus bounded-allocator diagnostics | No verification logic changed |
+
+### Regressions run
+
+**`pwsh -NoProfile -File scripts/test-mbedtls-profile-hosted.ps1`** (new). It compiles the exact 57-source manifest and guideXOS config pair for the host, builds a disposable OpenSSL 3.5.9 PKI, and runs `tests/tls/mbedtls_profile_hosted_test.c`.
+
+**`MBEDTLS_PROFILE_HOSTED_RESULT=PASS`**: 47/47 crypto and X.509 checks and 7/7 TLS cases. Output is in `out\mbedtls-hosted\20261128T012550Z`.
+
+- **ECDSA:**
+  - Main's P-256 and P-384 vectors are accepted. Corrupted r, corrupted s, a modified hash and a zero signature are all rejected; for P-256 these go through p256-m and then the built-in fallback.
+  - 8 generated keys per curve with 64 signatures each: all 512 valid signatures accepted and all 512 mutated signatures rejected, on both curves.
+- **Independent signer:** 24 OpenSSL signatures each for P-256, P-384 and RSA PKCS#1 v1.5 are verified through `mbedtls_pk_verify`, and wrong-hash variants are rejected. An OpenSSL RSA-PSS signature verifies, and a corrupted one is rejected.
+- **X.509:**
+  - Valid EC leaf → EC intermediate → RSA root, and a valid RSA leaf, both pass.
+  - Hostname mismatch gives `CN_MISMATCH`, an untrusted root gives `NOT_TRUSTED`, and an expired leaf gives `EXPIRED`.
+  - A tampered leaf signature, a missing intermediate, and an intermediate without the CA bit are each refused with `NOT_TRUSTED`.
+- **TLS 1.2 against local `openssl s_server`:**
+  - These succeed: ECDHE-ECDSA-AES128-GCM, ECDHE-RSA-AES256-GCM with PKCS#1 sigalgs, and ECDHE-RSA with OpenSSL's default (PSS-preferring) sigalgs, which falls back correctly.
+  - These are refused: a PSS-only server (no shared sigalg), a wrong hostname (`0x4`), an untrusted root (`0x8`), and an expired leaf (`0x1`).
+
+**Not run:** the in-guest kernel TLS smoke (`scripts/smoke-navigator-kernel.ps1`) and the public-HTTPS smokes. They need QEMU or the network, and neither was authorized. Also outstanding before release:
+
+- In-guest TLS qualification of this kernel
+- Upstream Mbed TLS test suites for the patched files
+- Equivalence fuzzing of `ecdsa_mod_fixed` against `mbedtls_mpi_mod_mpi`
+- An owner decision on the TLS 1.2 RSA-PSS exception and on `GUIDEXOS_MBEDTLS_ALLOW_PARTIAL_ECC_TLS`
+
+### Production rebuilds (twice each, fresh directories)
+
+| Component | Run 1 | Run 2 | Reproducible? |
+| --- | --- | --- | --- |
+| Kernel (`build-c188-production-kernel.ps1`) | `9C50B233BFBAE80CA91D6106375EFC4A3FE93E8EFAA429F15F11200951322ACC` | same | **Byte-identical.** All script checks passed; 57 Mbed TLS sources. |
+| Managed NativeAOT (`build-c188-production-nativeaot.ps1`) | `AD7027D165C08EC2D55351D4668CD255C2BB052BE21B87B2DA84DB2F04C3B311` | `F0120D66D4A85CE14868E072D07E17C7C414DF40A849936C8A6710DC77A490BE` | **Not byte-identical.** Both PASS with the same size (2,183,168 bytes). The 39 differing bytes are the PE header timestamp, debug-directory timestamps and the PDB GUID. The link map differs only in its timestamp line, `lnk{GUID}.tmp` names and one MSVC anonymous-namespace hash; every address is identical. The earlier `714CBDF6…` build differs the same way. Cause: `link.exe /DEBUG` without `/Brepro`, plus `cl.exe` calls for `runtime_support.c` and `c102_startup.c` without `/Brepro`. |
+
+Out of scope for this step: adding `/Brepro` to the link command and those two `cl.exe` calls in `build-managed-hostlog-proof.ps1`. Then compare hashes across two fresh roots.

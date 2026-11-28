@@ -51,8 +51,18 @@ CC ?= $(subst g++,gcc,$(CXX))
 MBEDTLS_GUIDEXOS_ENABLED := 0
 MBEDTLS_GUIDEXOS_COMPILE_PROBE_ENABLED := 0
 MBEDTLS_GUIDEXOS_LINK_ENABLED := 0
-MBEDTLS_GUIDEXOS_MANIFEST := ../third_party/mbedtls/guidexos/mbedtls_sources.mk
+# The guideXOS Mbed TLS profile (lock, config pair, source manifest, patch
+# series) is tracked under ../guidexos and ../patches/mbedtls, adopted from Main
+# Integration. ../third_party/mbedtls is reconstructed from that lock by
+# ../scripts/bootstrap-mbedtls.ps1 -Install and checked by
+# ../scripts/verify-mbedtls-profile.ps1. The kernel is built with make -C
+# kernel, so the repository root is the kernel-relative "..".
+MBEDTLS_GUIDEXOS_REPO_ROOT := ..
+MBEDTLS_GUIDEXOS_MANIFEST := ../guidexos/mbedtls_sources.mk
 MBEDTLS_GUIDEXOS_VERSION_HEADER := ../third_party/mbedtls/include/mbedtls/version.h
+ifeq ($(wildcard $(MBEDTLS_GUIDEXOS_MANIFEST)),)
+$(error guideXOS Mbed TLS profile is missing: $(MBEDTLS_GUIDEXOS_MANIFEST))
+endif
 ifneq ($(wildcard $(MBEDTLS_GUIDEXOS_MANIFEST)),)
 include $(MBEDTLS_GUIDEXOS_MANIFEST)
 ifeq ($(MBEDTLS_GUIDEXOS_COMPILE_READY),1)
@@ -63,14 +73,20 @@ ifeq ($(MBEDTLS_GUIDEXOS_LINK_READY),1)
 MBEDTLS_GUIDEXOS_LINK_ENABLED := 1
 endif
 endif
+ifeq ($(MBEDTLS_GUIDEXOS_LAYOUT_READY),0)
+$(error guideXOS Mbed TLS dependency is incomplete; run ../scripts/bootstrap-mbedtls.ps1 -Install)
+endif
 
 MBEDTLS_GUIDEXOS_IMPORT_STATE_DEPS := \
 	../third_party/mbedtls \
-	../third_party/mbedtls/guidexos \
+	../guidexos \
 	../third_party/mbedtls/include \
 	../third_party/mbedtls/include/mbedtls \
 	../third_party/mbedtls/library \
-	../third_party/mbedtls/tf-psa-crypto
+	../third_party/mbedtls/tf-psa-crypto \
+	../guidexos/mbedtls_sources.mk \
+	../guidexos/mbedtls_config.h \
+	../guidexos/crypto_config.h
 
 # Common compiler flags
 CFLAGS := -std=c++14 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-rtti

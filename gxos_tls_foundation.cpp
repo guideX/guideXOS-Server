@@ -45,10 +45,10 @@
 #if __has_include("third_party/mbedtls/tf-psa-crypto/core/tf_psa_crypto_config_check_before.h")
 #define GXOS_TLS_MBEDTLS_TF_PSA_CONFIG_CHECKS_PRESENT 1
 #endif
-#if __has_include("third_party/mbedtls/guidexos/mbedtls_config.h")
+#if __has_include("guidexos/mbedtls_config.h")
 #define GXOS_TLS_MBEDTLS_CONFIG_PRESENT 1
 #endif
-#if __has_include("third_party/mbedtls/guidexos/crypto_config.h")
+#if __has_include("guidexos/crypto_config.h")
 #define GXOS_TLS_MBEDTLS_CRYPTO_CONFIG_PRESENT 1
 #endif
 #if defined(GXOS_TLS_MBEDTLS_SOURCE_PRESENT) && defined(GXOS_TLS_MBEDTLS_TF_PSA_BUILD_INFO_PRESENT) && __has_include("third_party/mbedtls/include/mbedtls/build_info.h")
@@ -369,10 +369,10 @@ constexpr const char* kHostedHttpsPolicySource = "hosted Schannel default";
 constexpr const char* kBareMetalMbedTlsImportPath = "third_party/mbedtls";
 constexpr const char* kBareMetalMbedTlsExpectedVersion =
     "official Mbed TLS 4.1.0 source tree with populated TF-PSA-Crypto dependency";
-constexpr const char* kBareMetalConfigPath = "third_party/mbedtls/guidexos/mbedtls_config.h";
-constexpr const char* kBareMetalCryptoConfigPath = "third_party/mbedtls/guidexos/crypto_config.h";
+constexpr const char* kBareMetalConfigPath = "guidexos/mbedtls_config.h";
+constexpr const char* kBareMetalCryptoConfigPath = "guidexos/crypto_config.h";
 constexpr const char* kBareMetalTfPsaPath = "third_party/mbedtls/tf-psa-crypto";
-constexpr const char* kBareMetalBuildPlanPath = "third_party/mbedtls/guidexos/mbedtls_sources.mk";
+constexpr const char* kBareMetalBuildPlanPath = "guidexos/mbedtls_sources.mk";
 constexpr const char* kBareMetalPlannedSubset =
     "runtime-linked Mbed TLS 4.1.0 TLS/X.509 subset with bounded allocator hooks, PSA external RNG, wall-clock callbacks, one-shot CA parsing, smoke-only local handshake coverage, and explicit-policy validated HTTPS enablement.";
 constexpr size_t kBareMetalPlannedSourceCount = 55;
