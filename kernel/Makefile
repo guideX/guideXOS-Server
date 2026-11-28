@@ -123,6 +123,11 @@ endif
 ifneq ($(filter 1,$(BSP_XAPIC_ADMISSION_DIAGNOSTIC) $(BSP_APIC_BASE_PROBE_DIAGNOSTIC)),)
 CFLAGS += -DGXOS_ENABLE_BSP_XAPIC_ADMISSION_DIAGNOSTIC
 endif
+# CPU7C1 opt-in cold-boot #BP/#GP self-test of the production exception entry.
+EXCEPTION_ENTRY_DIAGNOSTIC ?= 0
+ifeq ($(EXCEPTION_ENTRY_DIAGNOSTIC),1)
+CFLAGS += -DGXOS_ENABLE_EXCEPTION_ENTRY_DIAGNOSTIC
+endif
 endif
 CFLAGS += -I. -I.. -Icore/include -Iarch/$(ARCH)/include
 CFLAGS += $(EXTRA_CFLAGS)
@@ -157,6 +162,9 @@ ASM_SOURCES := $(wildcard arch/$(ARCH)/*.asm) $(wildcard arch/$(ARCH)/*.s)
 ifneq ($(BSP_APIC_BASE_PROBE_DIAGNOSTIC),1)
 ARCH_SOURCES := $(filter-out arch/amd64/bsp_apic_base_probe.cpp,$(ARCH_SOURCES))
 ASM_SOURCES := $(filter-out arch/amd64/bsp_apic_base_fixup.asm,$(ASM_SOURCES))
+endif
+ifneq ($(EXCEPTION_ENTRY_DIAGNOSTIC),1)
+ASM_SOURCES := $(filter-out arch/amd64/exception_entry_selftest.asm,$(ASM_SOURCES))
 endif
 MBEDTLS_C_SOURCES := $(if $(filter 1,$(MBEDTLS_GUIDEXOS_LINK_ENABLED)),$(MBEDTLS_GUIDEXOS_C_SOURCES))
 MBEDTLS_COMPILE_PROBE_C_SOURCES := $(if $(filter 1,$(MBEDTLS_GUIDEXOS_COMPILE_PROBE_ENABLED)),$(MBEDTLS_GUIDEXOS_COMPILE_PROBE_C_SOURCES))
@@ -258,7 +266,8 @@ $(OBJ_DIR)/arch/%.o: arch/$(ARCH)/%.cpp
 
 ifeq ($(ARCH),amd64)
 # Recompile the affected entry points and relink when switching APIC profiles.
-BSP_APIC_STAMP := $(OBJ_DIR)/arch/.bsp-apic-config-$(if $(filter 1,$(BSP_APIC_DIAGNOSTIC)),1,0)$(if $(filter 1,$(BSP_XAPIC_ADMISSION_DIAGNOSTIC)),1,0)$(if $(filter 1,$(BSP_APIC_BASE_PROBE_DIAGNOSTIC)),1,0)$(if $(filter 1,$(BSP_APIC_BASE_GP_QUALIFICATION_DIAGNOSTIC)),1,0)
+BSP_APIC_STAMP := $(OBJ_DIR)/arch/.bsp-apic-config-$(if $(filter 1,$(BSP_APIC_DIAGNOSTIC)),1,0)$(if $(filter 1,$(BSP_XAPIC_ADMISSION_DIAGNOSTIC)),1,0)$(if $(filter 1,$(BSP_APIC_BASE_PROBE_DIAGNOSTIC)),1,0)$(if $(filter 1,$(BSP_APIC_BASE_GP_QUALIFICATION_DIAGNOSTIC)),1,0)$(if $(filter 1,$(EXCEPTION_ENTRY_DIAGNOSTIC)),1,0)
+$(OBJ_DIR)/core/native_elf_baremetal.o: $(BSP_APIC_STAMP)
 $(OBJ_DIR)/arch/per_cpu.o $(OBJ_DIR)/arch/bsp_apic.o: $(BSP_APIC_STAMP)
 $(OBJ_DIR)/core/main.o $(OBJ_DIR)/core/interrupts.o: $(BSP_APIC_STAMP)
 $(BSP_APIC_STAMP):
@@ -268,7 +277,7 @@ ifeq ($(OS),Windows_NT)
 else
 	@rm -f "$(OBJ_DIR)/arch"/.bsp-apic-config-*
 endif
-	@echo BSP_APIC_DIAGNOSTIC=$(BSP_APIC_DIAGNOSTIC) BSP_XAPIC_ADMISSION_DIAGNOSTIC=$(BSP_XAPIC_ADMISSION_DIAGNOSTIC) BSP_APIC_BASE_PROBE_DIAGNOSTIC=$(BSP_APIC_BASE_PROBE_DIAGNOSTIC) BSP_APIC_BASE_GP_QUALIFICATION_DIAGNOSTIC=$(BSP_APIC_BASE_GP_QUALIFICATION_DIAGNOSTIC) > "$@"
+	@echo BSP_APIC_DIAGNOSTIC=$(BSP_APIC_DIAGNOSTIC) BSP_XAPIC_ADMISSION_DIAGNOSTIC=$(BSP_XAPIC_ADMISSION_DIAGNOSTIC) BSP_APIC_BASE_PROBE_DIAGNOSTIC=$(BSP_APIC_BASE_PROBE_DIAGNOSTIC) BSP_APIC_BASE_GP_QUALIFICATION_DIAGNOSTIC=$(BSP_APIC_BASE_GP_QUALIFICATION_DIAGNOSTIC) EXCEPTION_ENTRY_DIAGNOSTIC=$(EXCEPTION_ENTRY_DIAGNOSTIC) > "$@"
 endif
 
 $(OBJ_DIR)/arch/%.d: arch/$(ARCH)/%.cpp

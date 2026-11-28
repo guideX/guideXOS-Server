@@ -29,6 +29,10 @@
 
 extern "C" uint32_t gxos_amd64_record_user_fault(
     uint64_t vector, uint64_t errorCode, uint64_t rip, uint64_t cs, uint64_t cr2);
+#if defined(GXOS_ENABLE_EXCEPTION_ENTRY_DIAGNOSTIC)
+extern "C" bool gxos_exception_entry_selftest_intercept(
+    kernel::native_elf::NativeExceptionFrame* frame);
+#endif
 
 namespace kernel {
 namespace native_elf {
@@ -2514,6 +2518,15 @@ extern "C" uint64_t gxos_native_exception_dispatch(const NativeExceptionFrame* f
         serial::puts(" policy=halt-no-recovery\n");
         for (;;) arch::halt();
     }
+
+#if defined(GXOS_ENABLE_EXCEPTION_ENTRY_DIAGNOSTIC)
+    // CPU7C1 opt-in self-test: only the one armed probe exception at its own
+    // RIP and RSP resumes. The frame lives on the interrupted stack and is
+    // writable; the intercept may move the saved RIP past the probe RDMSR.
+    if (gxos_exception_entry_selftest_intercept(const_cast<NativeExceptionFrame*>(frame))) {
+        return kExceptionDispositionResume;
+    }
+#endif
 
     // A CPL3 fault must never enter the ring-0 Native ELF recovery trampoline.
     // The current protected diagnostic is deliberately non-faulting; until a

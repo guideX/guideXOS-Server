@@ -662,6 +662,142 @@ static exception_stub_fn s_exception_stubs[32] = {
     exception_stub_28, exception_stub_29, exception_stub_30, exception_stub_31
 };
 
+#if defined(GXOS_ENABLE_EXCEPTION_ENTRY_DIAGNOSTIC)
+// CPU7C1 opt-in guest self-test of the production exception entry. See
+// kernel/arch/amd64/exception_entry_selftest.asm. Disabled in the stock build.
+struct ExceptionEntrySelftestRecord {
+    uint64_t gprs[15];
+    uint64_t rflags;
+    uint64_t rsp;
+    uint64_t armed_rsp;
+    uint64_t reached;
+};
+static_assert(sizeof(ExceptionEntrySelftestRecord) == 152, "selftest record layout");
+extern "C" void gxos_amd64_selftest_bp(ExceptionEntrySelftestRecord* record);
+extern "C" void gxos_amd64_selftest_gp(ExceptionEntrySelftestRecord* record);
+extern "C" void gxos_amd64_selftest_bp_resume();
+extern "C" void gxos_amd64_selftest_gp_rdmsr();
+extern "C" void gxos_amd64_selftest_gp_continuation();
+extern "C" volatile uint64_t gxos_amd64_selftest_armed_rsp;
+
+namespace {
+enum class SelftestArm : uint32_t { None = 0, Breakpoint = 3, GeneralProtection = 13 };
+volatile SelftestArm s_selftest_arm = SelftestArm::None;
+kernel::native_elf::NativeExceptionFrame s_selftest_frame{};
+uint64_t s_selftest_dispatcher_rflags = 0;
+uint32_t s_selftest_intercepts = 0;
+}
+
+// Called by gxos_native_exception_dispatch for a classified-valid frame. It
+// accepts exactly one armed exception at the probe's own RIP and RSP and
+// nothing else; every other exception keeps its normal fail-stop path.
+extern "C" bool gxos_exception_entry_selftest_intercept(
+    kernel::native_elf::NativeExceptionFrame* frame)
+{
+    const SelftestArm arm = s_selftest_arm;
+    if (arm == SelftestArm::None || frame->vector != static_cast<uint64_t>(arm) ||
+        frame->errorCode != 0 || frame->cs != amd64_protected_task::kKernelCodeSelector ||
+        gxos_amd64_selftest_armed_rsp == 0 || frame->rsp != gxos_amd64_selftest_armed_rsp) {
+        return false;
+    }
+    const uint64_t expected_rip = arm == SelftestArm::Breakpoint
+        ? reinterpret_cast<uint64_t>(gxos_amd64_selftest_bp_resume)
+        : reinterpret_cast<uint64_t>(gxos_amd64_selftest_gp_rdmsr);
+    if (frame->rip != expected_rip) return false;
+    uint64_t flags = 0;
+    asm volatile("pushfq\n\tpop %0" : "=r"(flags));
+    s_selftest_dispatcher_rflags = flags;
+    s_selftest_frame = *frame;
+    ++s_selftest_intercepts;
+    s_selftest_arm = SelftestArm::None;
+    if (arm == SelftestArm::GeneralProtection) {
+        frame->rip = reinterpret_cast<uint64_t>(gxos_amd64_selftest_gp_continuation);
+    }
+    return true;
+}
+
+[[noreturn]] static void exception_entry_selftest_fail(const char* what)
+{
+    serial::puts("[CPU7C1] exception-entry-selftest=FAILED check=");
+    serial::puts(what);
+    serial::puts(" fail-stop=1\n");
+    asm volatile("cli");
+    for (;;) arch::halt();
+}
+
+static void exception_entry_selftest_print(const char* label, const ExceptionEntrySelftestRecord& r,
+                                           uint32_t gprs_ok)
+{
+    const auto& f = s_selftest_frame;
+    serial::puts(label);
+    serial::puts(" vector="); serial::put_hex64(f.vector);
+    serial::puts(" error=0x"); serial::put_hex64(f.errorCode);
+    serial::puts(" rip=0x"); serial::put_hex64(f.rip);
+    serial::puts(" cs=0x"); serial::put_hex64(f.cs);
+    serial::puts(" rflags=0x"); serial::put_hex64(f.rflags);
+    serial::puts(" rsp=0x"); serial::put_hex64(f.rsp);
+    serial::puts(" ss=0x"); serial::put_hex64(f.ss);
+    serial::puts(" frame-df="); serial::puts((f.rflags & (1ull << 10)) ? "1" : "0");
+    serial::puts(" dispatcher-df="); serial::puts((s_selftest_dispatcher_rflags & (1ull << 10)) ? "1" : "0");
+    serial::puts(" resumed-df="); serial::puts((r.rflags & (1ull << 10)) ? "1" : "0");
+    serial::puts(" rsp-restored="); serial::puts(r.rsp == r.armed_rsp ? "1" : "0");
+    serial::puts(" gprs=0x"); serial::put_hex32(gprs_ok);
+    serial::putc('\n');
+}
+
+static uint32_t exception_entry_selftest_gprs(const ExceptionEntrySelftestRecord& r, uint64_t rcx)
+{
+    uint32_t ok = 0;
+    for (uint32_t i = 0; i < 15; ++i) {
+        uint64_t expected = 0x7C1A000000000000ull + i;
+        if (i == 1) expected = rcx;
+        if (i == 14) expected = reinterpret_cast<uint64_t>(&r);
+        if (r.gprs[i] == expected) ok |= 1u << i;
+    }
+    return ok;
+}
+
+static void run_exception_entry_selftest()
+{
+    constexpr uint64_t kDF = 1ull << 10;
+    constexpr uint32_t kAllGprs = 0x7FFFu;
+    ExceptionEntrySelftestRecord bp{};
+    s_selftest_arm = SelftestArm::Breakpoint;
+    gxos_amd64_selftest_bp(&bp);
+    const uint32_t bp_gprs = exception_entry_selftest_gprs(bp, 0x7C1A000000000001ull);
+    if (s_selftest_intercepts != 1 || bp.reached != 1) exception_entry_selftest_fail("bp-not-resumed");
+    exception_entry_selftest_print("[CPU7C1] bp-entry=resumed", bp, bp_gprs);
+    if (s_selftest_frame.vector != 3 || s_selftest_frame.errorCode != 0 ||
+        s_selftest_frame.ss != amd64_protected_task::kKernelDataSelector ||
+        (s_selftest_frame.rflags & kDF) == 0 || (s_selftest_dispatcher_rflags & kDF) != 0 ||
+        (bp.rflags & kDF) == 0 || bp.rsp != bp.armed_rsp || bp_gprs != kAllGprs) {
+        exception_entry_selftest_fail("bp-frame");
+    }
+
+    ExceptionEntrySelftestRecord gp{};
+    s_selftest_arm = SelftestArm::GeneralProtection;
+    gxos_amd64_selftest_gp(&gp);
+    s_selftest_arm = SelftestArm::None;
+    if (gp.reached == 2) {
+        // The accelerator returned from RDMSR (QEMU 11.0.0 WHPX). Nothing was
+        // delivered; only RAX/RDX may differ from the pattern.
+        if (s_selftest_intercepts != 1 || (gp.rflags & kDF) == 0) exception_entry_selftest_fail("gp-returned");
+        serial::puts("[CPU7C1] gp-entry=not-delivered rdmsr-returned=1 cleanup=clean\n");
+    } else {
+        const uint32_t gp_gprs = exception_entry_selftest_gprs(gp, 0x800u);
+        if (s_selftest_intercepts != 2 || gp.reached != 1) exception_entry_selftest_fail("gp-not-resumed");
+        exception_entry_selftest_print("[CPU7C1] gp-entry=delivered", gp, gp_gprs);
+        if (s_selftest_frame.vector != 13 || s_selftest_frame.errorCode != 0 ||
+            s_selftest_frame.ss != amd64_protected_task::kKernelDataSelector ||
+            (s_selftest_frame.rflags & kDF) == 0 || (s_selftest_dispatcher_rflags & kDF) != 0 ||
+            (gp.rflags & kDF) == 0 || gp.rsp != gp.armed_rsp || gp_gprs != kAllGprs) {
+            exception_entry_selftest_fail("gp-frame");
+        }
+    }
+    serial::puts("[CPU7C1] exception-entry-selftest=passed\n");
+}
+#endif // GXOS_ENABLE_EXCEPTION_ENTRY_DIAGNOSTIC
+
 #endif // defined(__x86_64__)
 
 static void load_idt()
@@ -895,6 +1031,10 @@ void init()
 #endif
 
     load_idt();
+#if defined(__x86_64__) && defined(GXOS_ENABLE_EXCEPTION_ENTRY_DIAGNOSTIC)
+    // Cold BSP, live IDT loaded, interrupts still disabled.
+    run_exception_entry_selftest();
+#endif
 #if defined(GXOS_ENABLE_BSP_APIC_BASE_PROBE_DIAGNOSTIC)
     if (probe_boot) {
         const auto& roster = arch::amd64::boot_per_cpu_state();
