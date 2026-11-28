@@ -4,9 +4,9 @@
 
 ## Result
 
-**Guest qualification pending.** No S22R29 guest fault experiment has been started. At the last QAC check, another verified owner held the `guideXOSServer` acceptance reservation `41bdd9d6effd409893e43190f46b654c` with QEMU child PID 20428. S22R29 did not attach to, signal, cancel, terminate, or otherwise interfere with that guest. No unmanaged QEMU was launched.
+**Outcome D — `QAC_UNAVAILABLE`.** No S22R29 guest fault experiment was started. At the final QAC check on 2026-11-28 00:38 UTC, another verified owner held the `guideXOSServer` acceptance reservation `41bdd9d6effd409893e43190f46b654c` with QEMU child PID 20428. S22R29 did not attach to, signal, cancel, terminate, or otherwise interfere with that guest. No unmanaged QEMU was launched.
 
-This document must be updated from the admitted QAC run record before any guest recovery outcome is claimed. If a reservation is still unavailable, report `CPL3_FAULT_RECOVERY_FOUNDATION_PARTIAL` together with `QAC_UNAVAILABLE`; do not claim `CPL3_FAULT_RECOVERY_GUEST_ACCEPTED`.
+The offline implementation, tests, stack/symbol audits, and diagnostic ISO are preserved. The processor-generated guest exception classes remain unqualified; no `CPL3_FAULT_RECOVERY_GUEST_ACCEPTED` claim is made.
 
 ## Offline gate evidence
 
@@ -16,6 +16,8 @@ This document must be updated from the admitted QAC run record before any guest 
 - Default-off and opt-in diagnostic AMD64 freestanding kernels linked successfully and passed ELF/PE symbol audits.
 - The 16 KiB stack guard passed, including a separate TSS privilege-entry stack model, a separate exception-dispatch stack, and off-stack lifecycle teardown.
 - The implementation uses a bounded diagnostic with #PF, #UD, #GP, a repeated #PF, and a normal task following each fault. This is the expected sequence only; it is not evidence that the guest executed it.
+
+The diagnostic image is `E:\CodexArtifacts\S22R29\candidate-diagnostic-ce4d4a987c64\artifacts\guideXOS-S22R29-CPL3-FAULT-RECOVERY-DIAGNOSTIC-NOT-PUBLIC-RELEASE.iso`, SHA-256 `329d2f59ed44eb1c8f98e0fc1226803ca0d9b518e014e771203fee7bce122a31`. Its embedded FAT32 ESP is SHA-256 `f430b888fd3171246a66a4bded3ba39e9bb9dcf61001c8cc70ef2564d4ab8cc4`; the ISO verifier confirmed a UEFI El Torito no-emulation boot image. The full hashes and flags are in `E:\CodexArtifacts\S22R29\candidate-diagnostic-ce4d4a987c64\artifact-manifest.json`.
 
 ## QAC reservation protocol
 

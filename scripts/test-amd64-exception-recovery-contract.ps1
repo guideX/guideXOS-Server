@@ -24,5 +24,6 @@ if ($LASTEXITCODE -ne 0) {
     throw "AMD64 exception-recovery contract regression failed with exit code $LASTEXITCODE"
 }
 
+Write-Output 'PASS: normalized exception frames, error-code classes, CPL origin, task identity, CR3, continuation, fault preservation, and unsafe-recovery rejection'
 Write-Output "TEST_EXE=$testExecutable"
 Write-Output "TEST_EXE_SHA256=$((Get-FileHash -LiteralPath $testExecutable -Algorithm SHA256).Hash.ToLowerInvariant())"
